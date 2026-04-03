@@ -382,15 +382,15 @@ export default function Home() {
         </div>
       )}
 
-      {/* --- PREMIUM COMPANY/NETWORK SELECTION MODAL --- */}
+      {/* --- PREMIUM COMPANY/NETWORK SELECTION MODAL (NOW CENTERED) --- */}
       {isSelectionModalOpen && (
-        <div className="fixed inset-0 z-50 bg-slate-900/40 backdrop-blur-sm flex justify-center items-end sm:items-center animate-in fade-in" onClick={() => setIsSelectionModalOpen(false)}>
-           <div className="bg-white w-full max-w-sm rounded-t-3xl sm:rounded-3xl shadow-2xl p-6 animate-in slide-in-from-bottom-10" onClick={(e) => e.stopPropagation()}>
+        <div className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-sm flex justify-center items-center p-4 animate-in fade-in" onClick={() => setIsSelectionModalOpen(false)}>
+           <div className="bg-white w-full max-w-sm rounded-[2rem] shadow-2xl p-6 animate-in zoom-in-95 duration-200" onClick={(e) => e.stopPropagation()}>
               <div className="flex justify-between items-center mb-6">
                 <h2 className="text-lg font-bold text-slate-800">{modalTitle}</h2>
                 <button onClick={() => setIsSelectionModalOpen(false)} className="p-2 bg-slate-100 rounded-full hover:bg-slate-200 transition-colors"><XCircle size={20} className="text-slate-500" /></button>
               </div>
-              <div className="space-y-2 max-h-[40vh] overflow-y-auto">
+              <div className="space-y-2 max-h-[50vh] overflow-y-auto">
                  {modalOptions.map(option => (
                    <button 
                      key={option} 
@@ -399,7 +399,7 @@ export default function Home() {
                    >
                      {option}
                      {/* Dynamic checkmark if selected */}
-                     {(telecomProvider === option || elecProvider === option || cableProvider === option) && <CheckCircle2 size={16} className="text-emerald-500"/>}
+                     {(telecomProvider === option || elecProvider === option || cableProvider === option || selectedToken.symbol === option) && <CheckCircle2 size={16} className="text-emerald-500"/>}
                    </button>
                  ))}
               </div>
@@ -407,10 +407,10 @@ export default function Home() {
         </div>
       )}
 
-      {/* --- SUPPORT MODAL --- */}
+      {/* --- SUPPORT MODAL (NOW CENTERED) --- */}
       {isSupportOpen && (
-        <div className="fixed inset-0 z-50 bg-slate-900/40 backdrop-blur-sm flex justify-center items-end sm:items-center animate-in fade-in">
-          <div className="bg-white w-full max-w-md rounded-t-3xl sm:rounded-3xl shadow-2xl p-6 animate-in slide-in-from-bottom-10">
+        <div className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-sm flex justify-center items-center p-4 animate-in fade-in">
+          <div className="bg-white w-full max-w-md rounded-[2rem] shadow-2xl p-6 animate-in zoom-in-95 duration-200">
             <div className="flex justify-between items-center mb-4">
               <h2 className="text-xl font-bold flex items-center gap-2"><HelpCircle className="text-emerald-500"/> Customer Support</h2>
               <button onClick={() => setIsSupportOpen(false)} className="p-2 bg-slate-100 rounded-full hover:bg-slate-200"><XCircle size={20} className="text-slate-500" /></button>
@@ -474,7 +474,7 @@ export default function Home() {
                         onClick={() => { setActiveService(s); setStatus(""); setAccountNumber(""); setCustomerName(null); setNairaAmount(""); setSelectedDataPlan(null); }}
                         className={`p-4 rounded-2xl border-2 transition-all flex flex-col items-center gap-2 ${activeService.id === s.id ? 'border-emerald-500 bg-emerald-50/50 scale-105' : 'border-slate-50 bg-slate-50/50 hover:bg-slate-100'}`}
                     >
-                        <s.icon size={20} className={s.color} /> {/* colourful icon */}
+                        <s.icon size={20} className={s.color} />
                         <span className="text-[8px] font-black uppercase tracking-widest">{s.id.slice(0,4)}</span>
                     </button>
                 ))}
@@ -485,7 +485,10 @@ export default function Home() {
                 
                 {/* TOKEN SELECTOR & BALANCE DASHBOARD */}
                 <div className="bg-slate-50 border border-slate-100 p-4 rounded-2xl flex justify-between items-center animate-in fade-in">
-                  <div className="flex items-center gap-2 cursor-pointer" onClick={() => openPremiumSelection("Select Token", SUPPORTED_TOKENS.map(t => t.symbol), (symbol) => setSelectedToken(SUPPORTED_TOKENS.find(t => t.symbol === symbol)!))}>
+                  <div 
+                    className="flex items-center gap-2 cursor-pointer hover:bg-slate-100 p-2 -ml-2 rounded-xl transition-colors" 
+                    onClick={() => openPremiumSelection("Select Token", SUPPORTED_TOKENS.map(t => t.symbol), (symbol) => setSelectedToken(SUPPORTED_TOKENS.find(t => t.symbol === symbol)!))}
+                  >
                      <span className="text-xl">{selectedToken.icon}</span>
                      <span className="font-black text-slate-800 uppercase text-sm tracking-tight">{selectedToken.symbol}</span>
                      <ChevronDown size={14} className="text-slate-400"/>
@@ -531,7 +534,7 @@ export default function Home() {
                     )}
                 </div>
 
-                {/* ACCOUNT NUMBER / PHONE INPUT (strictly 11 digits for telecom) */}
+                {/* ACCOUNT NUMBER / PHONE INPUT */}
                 <div>
                     <label className="text-[10px] font-black text-slate-400 uppercase mb-2 flex justify-between">
                       <span>{activeService.id === "AIRTIME" || activeService.id === "DATA" ? "Phone Number (11 Digits)" : "Account / Meter No"}</span>
@@ -679,7 +682,6 @@ export default function Home() {
           </div>
         )}
 
-        {/* BOTTOM SUPPORT LINK */}
         <div className="mt-8 flex flex-col items-center gap-4">
             <button 
                 onClick={() => setIsSupportOpen(true)}
