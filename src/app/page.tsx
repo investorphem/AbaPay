@@ -4,40 +4,64 @@ import { useState, useEffect, useMemo, useRef } from "react";
 import { createWalletClient, createPublicClient, custom, http, parseUnits, formatUnits, defineChain } from "viem";
 import { celo, celoSepolia } from "viem/chains";
 import { 
-  Wallet, History, Receipt, ShieldCheck, Zap, ArrowRightLeft, 
-  AlertTriangle, Download, CheckCircle2, ExternalLink, Lightbulb, 
-  Phone, Wifi, Tv, ChevronDown, Loader2, HelpCircle, XCircle, 
-  Mail, Paperclip, Send, Coins
+  Wallet, Receipt, ShieldCheck, Zap, AlertTriangle, 
+  CheckCircle2, ExternalLink, Lightbulb, Phone, Wifi, Tv, 
+  ChevronDown, Loader2, HelpCircle, XCircle, Mail, 
+  Paperclip, Send, Coins, Briefcase
 } from "lucide-react";
 import { supabase } from "@/utils/supabase";
 
 // --- WEB3 CONFIG ---
 const ABAPAY_ABI = [{"inputs":[{"internalType":"string","name":"serviceType","type":"string"},{"internalType":"string","name":"accountNumber","type":"string"},{"internalType":"uint256","name":"amount","type":"uint256"}],"name":"payBill","outputs":[],"stateMutability":"nonpayable","type":"function"}];
-// Upgraded ABI to include balanceOf so we can fetch token balances
 const ERC20_ABI = [
   {"inputs":[{"internalType":"address","name":"spender","type":"address"},{"internalType":"uint256","name":"amount","type":"uint256"}],"name":"approve","outputs":[{"internalType":"bool","name":"","type":"bool"}],"stateMutability":"nonpayable","type":"function"},
   {"inputs":[{"internalType":"address","name":"account","type":"address"}],"name":"balanceOf","outputs":[{"internalType":"uint256","name":"","type":"uint256"}],"stateMutability":"view","type":"function"}
 ];
 
+// 1. PREMIUM COLOURFUL ICONS
 const SERVICES = [
-  { id: "AIRTIME", name: "Buy Airtime", icon: Phone, color: "text-blue-500", bg: "bg-blue-50" },
-  { id: "DATA", name: "Buy Data", icon: Wifi, color: "text-purple-500", bg: "bg-purple-50" },
-  { id: "ELECTRICITY", name: "Electricity", icon: Lightbulb, color: "text-orange-500", bg: "bg-orange-50" },
-  { id: "CABLE", name: "Cable TV", icon: Tv, color: "text-pink-500", bg: "bg-pink-50" },
+  { id: "AIRTIME", name: "Buy Airtime", icon: Phone, color: "text-[#34d399]" /* Emerald */, bg: "bg-emerald-500/10" },
+  { id: "DATA", name: "Buy Data", icon: Wifi, color: "text-[#a855f7]" /* Purple */, bg: "bg-purple-500/10" },
+  { id: "ELECTRICITY", name: "Electricity", icon: Lightbulb, color: "text-[#f97316]" /* Orange */, bg: "bg-orange-500/10" },
+  { id: "CABLE", name: "Cable TV", icon: Tv, color: "text-[#ec4899]" /* Pink */, bg: "bg-pink-500/10" },
 ];
 
 const ELECTRICITY_PROVIDERS = ["aba-electric", "ikedc", "ekedc", "ibedc", "aedc", "kedco", "phed"];
 const CABLE_PROVIDERS = ["dstv", "gotv", "startimes", "showmax"];
 const TELECOM_PROVIDERS = ["mtn", "airtel", "glo", "9mobile"];
 
-// --- SUPPORTED TOKENS DICTIONARY ---
 const SUPPORTED_TOKENS = [
   { symbol: "USDT", decimals: 6, mainnet: "0x48065fbbe25f71c9282ddf5e1cd6d6a887483d5e", sepolia: "0xd077A400968890Eacc75cdc901F0356c943e4fDb", icon: "💵" },
   { symbol: "USDC", decimals: 18, mainnet: "0xcebA9300f2b948710d2653dD7B07f33A8B32118C", sepolia: "0x874069Fa1Eb16D44d622F2e0Ca25eeA172369bC1", icon: "🪙" },
   { symbol: "CELO", decimals: 18, mainnet: "native", sepolia: "native", icon: "🟡" },
 ];
 
+// PRE-SELECT AMOUNT BUTTONS (Airtime)
+const PRE_SELECT_AMOUNTS = ["100", "200", "500", "1000", "2000"];
+
+// 2. DATA PLANS DATA STRUCTURE
+const MOCK_DATA_PLANS = [
+  // DAILY PLANS
+  { id: "D1", category: "Daily", name: "100MB", validity: "24 Hrs", cost_naira: 100 },
+  { id: "D2", category: "Daily", name: "350MB", validity: "24 Hrs", cost_naira: 200 },
+  { id: "D3", category: "Daily", name: "1GB", validity: "24 Hrs", cost_naira: 350 },
+  // WEEKLY PLANS
+  { id: "W1", category: "Weekly", name: "1GB", validity: "7 Days", cost_naira: 600 },
+  { id: "W2", category: "Weekly", name: "2.5GB", validity: "7 Days", cost_naira: 1200 },
+  { id: "W3", category: "Weekly", name: "Broadband Extra", validity: "7 Days", cost_naira: 3500, isBroadband: true },
+  // MONTHLY PLANS
+  { id: "M1", category: "Monthly", name: "1.5GB", validity: "30 Days", cost_naira: 1100 },
+  { id: "M2", category: "Monthly", name: "4.5GB", validity: "30 Days", cost_naira: 2200 },
+  { id: "M3", category: "Monthly", name: "Broadband Unlimited", validity: "30 Days", cost_naira: 18000, isBroadband: true },
+];
+
+const DATA_CATEGORIES = ["Daily", "Weekly", "Monthly"];
+
 export default function Home() {
+  // 3. INITIAL LOADING STATE (SPLASH SCREEN)
+  const [isInitiallyLoading, setIsInitiallyLoading] = useState(true);
+
+  // --- SYSTEM STATES ---
   const [address, setAddress] = useState<string | null>(null);
   const [client, setClient] = useState<any>(null);
   const [nairaAmount, setNairaAmount] = useState(""); 
@@ -67,7 +91,17 @@ export default function Home() {
   const [elecProvider, setElecProvider] = useState(ELECTRICITY_PROVIDERS[0]);
   const [cableProvider, setCableProvider] = useState(CABLE_PROVIDERS[0]);
   const [telecomProvider, setTelecomProvider] = useState(TELECOM_PROVIDERS[0]);
-  const [meterType, setMeterType] = useState<"prepaid" | "postpaid">("prepaid"); // NEW: Meter Type State
+  const [meterType, setMeterType] = useState<"prepaid" | "postpaid">("prepaid");
+  
+  // New Service Sub-tabs (Data)
+  const [activeDataCategory, setActiveDataCategory] = useState(DATA_CATEGORIES[0]);
+  const [selectedDataPlan, setSelectedDataPlan] = useState<any>(null);
+
+  // 4. NEW PREMIUM MODAL STATE
+  const [isSelectionModalOpen, setIsSelectionModalOpen] = useState(false);
+  const [modalTitle, setModalTitle] = useState("");
+  const [modalOptions, setModalOptions] = useState<string[]>([]);
+  const [modalCallback, setModalCallback] = useState<((value: string) => void) | null>(null);
   
   // Token & Balance States
   const [selectedToken, setSelectedToken] = useState(SUPPORTED_TOKENS[0]);
@@ -84,23 +118,30 @@ export default function Home() {
 
   // --- INITIALIZATION ---
   useEffect(() => {
-    const saved = localStorage.getItem("abapay_history");
-    if (saved) setTransactions(JSON.parse(saved));
-    
-    fetch('/api/rate')
-      .then(res => res.json())
-      .then(data => {
-        if (data.success && data.abaPayRate) setExchangeRate(Number(data.abaPayRate));
-      })
-      .catch(console.error);
+    async function initSystem() {
+      // 5. Initialize dApp state
+      const savedHistory = localStorage.getItem("abapay_history");
+      if (savedHistory) setTransactions(JSON.parse(savedHistory));
+      
+      try {
+        const rateRes = await fetch('/api/rate');
+        const rateData = await rateRes.json();
+        if (rateData.success && rateData.abaPayRate) setExchangeRate(Number(rateData.abaPayRate));
+      } catch (consoleError) {}
 
-    if (typeof window !== "undefined" && (window as any).ethereum) {
-      const walletClient = createWalletClient({ chain: activeChain, transport: custom((window as any).ethereum) });
-      walletClient.requestAddresses().then(([acc]) => {
-        setAddress(acc);
-        setClient(walletClient);
-      });
+      // Check wallet injection
+      if (typeof window !== "undefined" && (window as any).ethereum) {
+        const walletClient = createWalletClient({ chain: activeChain, transport: custom((window as any).ethereum) });
+        walletClient.requestAddresses().then(([acc]) => {
+          setAddress(acc);
+          setClient(walletClient);
+        });
+      }
+
+      // Hide Splash Screen when basic dApp state is ready
+      setTimeout(() => setIsInitiallyLoading(false), 2000);
     }
+    initSystem();
   }, [activeChain]);
 
   // --- FETCH LIVE WALLET BALANCE ---
@@ -111,7 +152,6 @@ export default function Home() {
       try {
         const publicClient = createPublicClient({ chain: activeChain, transport: http() });
         let balanceWei;
-
         if (selectedToken.symbol === "CELO") {
           balanceWei = await publicClient.getBalance({ address: address as `0x${string}` });
         } else {
@@ -164,7 +204,7 @@ export default function Home() {
                 'public-key': process.env.NEXT_PUBLIC_VTPASS_PUBLIC_KEY || '',
                 'Content-Type': 'application/json' 
             },
-            body: JSON.stringify({ billersCode: accountNumber, serviceID: serviceID, type: activeService.id === "ELECTRICITY" ? meterType : 'prepaid' }) // Now uses dynamic meterType
+            body: JSON.stringify({ billersCode: accountNumber, serviceID: serviceID, type: activeService.id === "ELECTRICITY" ? meterType : 'prepaid' }) 
         });
         const data = await res.json();
         if (data.code === '000') setCustomerName(data.content.Customer_Name);
@@ -179,7 +219,7 @@ export default function Home() {
     return { cryptoToCharge: crypto.toFixed(4), currentFee: fee };
   }, [nairaAmount, exchangeRate, activeService]);
 
-  // --- STRICT VALIDATION LOGIC ---
+  // Strict Validation Logic
   const isFormValid = useMemo(() => {
     if (!nairaAmount || parseFloat(nairaAmount) <= 0) return false;
     
@@ -200,7 +240,7 @@ export default function Home() {
   const handlePayment = async () => {
     if (!address || !client) return setStatus("Connect Wallet First");
     
-    // SAFETY CHECK: Smart Contract currently only supports USDT.
+    // Smart Contract currently only supports USDT.
     if (selectedToken.symbol !== "USDT") {
       return showToast("Unsupported Asset", `AbaPay Smart Contract upgrade required to pay with ${selectedToken.symbol}. Please select USDT.`, "error");
     }
@@ -245,7 +285,7 @@ export default function Home() {
           billersCode: accountNumber,
           amount: cryptoToCharge,
           txHash: hash,
-          variation_code: activeService.id === "ELECTRICITY" ? meterType : 'prepaid', // Passes the dynamic type
+          variation_code: activeService.id === "ELECTRICITY" ? meterType : 'prepaid',
           phone: customerPhone || accountNumber
         })
       });
@@ -257,7 +297,10 @@ export default function Home() {
         const newTx = { id: hash.slice(0,8), date: new Date().toLocaleString(), status: "SUCCESS", amountNaira: nairaAmount, service: activeService.name, network: activeServiceID.toUpperCase(), txHash: hash };
         setTransactions([newTx, ...transactions]);
         localStorage.setItem("abapay_history", JSON.stringify([newTx, ...transactions]));
-        fetchBalance(); // Refresh balance after payment
+        // Refresh balance
+        const publicClient = createPublicClient({ chain: activeChain, transport: http() });
+        const balanceWei = await publicClient.readContract({ address: tokenAddress as `0x${string}`, abi: ERC20_ABI, functionName: 'balanceOf', args: [address] });
+        setWalletBalance(parseFloat(formatUnits(balanceWei as bigint, selectedToken.decimals)).toFixed(4));
       } else {
         setStatus("Utility Vending Delayed. Admin Notified.");
       }
@@ -286,31 +329,42 @@ export default function Home() {
     }
   };
 
-  // Necessary to access fetchBalance within component scope for refresh
-  const fetchBalance = async () => {
-      if (!address) return;
-      try {
-        const publicClient = createPublicClient({ chain: activeChain, transport: http() });
-        let balanceWei;
-        if (selectedToken.symbol === "CELO") {
-          balanceWei = await publicClient.getBalance({ address: address as `0x${string}` });
-        } else {
-          const tokenAddress = isMainnet ? selectedToken.mainnet : selectedToken.sepolia;
-          balanceWei = await publicClient.readContract({
-            address: tokenAddress as `0x${string}`,
-            abi: ERC20_ABI,
-            functionName: 'balanceOf',
-            args: [address],
-          });
-        }
-        setWalletBalance(parseFloat(formatUnits(balanceWei as bigint, selectedToken.decimals)).toFixed(4));
-      } catch (error) {
-        setWalletBalance("0.00");
-      }
+  // 6. HELPER TO OPEN SELECTION MODAL
+  const openPremiumSelection = (title: string, options: string[], callback: (value: string) => void) => {
+    setModalTitle(title);
+    setModalOptions(options);
+    setModalCallback(() => callback);
+    setIsSelectionModalOpen(true);
   };
 
+  // 7. Dynamic Data Plan Filtering & USDT Calculation
+  const filteredDataPlans = useMemo(() => {
+    return MOCK_DATA_PLANS.filter(plan => plan.category === activeDataCategory);
+  }, [activeDataCategory]);
+
+  // --- PREMIUM UI BUILD ---
   return (
     <main className="min-h-screen bg-slate-50 text-slate-900 font-sans p-4 flex flex-col items-center pb-20 relative">
+
+      {/* --- ADD CUSTOM LOGO SCALING ANIMATION --- */}
+      <style>{`
+        @keyframes logoScale {
+          0%, 100% { transform: scale(1); opacity: 0.9; }
+          50% { transform: scale(1.1); opacity: 1; }
+        }
+        .animate-logo-scale { animation: logoScale 1.5s ease-in-out infinite; }
+      `}</style>
+
+      {/* --- PREMIUM INTRO SPLASH SCREEN --- */}
+      {isInitiallyLoading && (
+        <div className="fixed inset-0 z-[100] bg-white flex flex-col items-center justify-center animate-in fade-out duration-500 fill-mode-forwards" style={{ animationDelay: '1.5s' }}>
+          <img src="/logo.png" alt="AbaPay" className="h-28 w-auto object-contain animate-logo-scale mb-10" />
+          <div className="flex flex-col items-center gap-2">
+             <div className="w-12 h-0.5 bg-emerald-500 rounded-full animate-pulse" />
+             <p className="text-[10px] font-black uppercase tracking-widest text-slate-400">Loading AbaPay Protocol...</p>
+          </div>
+        </div>
+      )}
       
       {/* --- TOAST NOTIFICATION --- */}
       {toast && (
@@ -325,6 +379,31 @@ export default function Home() {
             </div>
             <button onClick={() => setToast(null)} className="shrink-0 text-slate-500 hover:text-slate-300"><XCircle size={16} /></button>
           </div>
+        </div>
+      )}
+
+      {/* --- PREMIUM COMPANY/NETWORK SELECTION MODAL --- */}
+      {isSelectionModalOpen && (
+        <div className="fixed inset-0 z-50 bg-slate-900/40 backdrop-blur-sm flex justify-center items-end sm:items-center animate-in fade-in" onClick={() => setIsSelectionModalOpen(false)}>
+           <div className="bg-white w-full max-w-sm rounded-t-3xl sm:rounded-3xl shadow-2xl p-6 animate-in slide-in-from-bottom-10" onClick={(e) => e.stopPropagation()}>
+              <div className="flex justify-between items-center mb-6">
+                <h2 className="text-lg font-bold text-slate-800">{modalTitle}</h2>
+                <button onClick={() => setIsSelectionModalOpen(false)} className="p-2 bg-slate-100 rounded-full hover:bg-slate-200 transition-colors"><XCircle size={20} className="text-slate-500" /></button>
+              </div>
+              <div className="space-y-2 max-h-[40vh] overflow-y-auto">
+                 {modalOptions.map(option => (
+                   <button 
+                     key={option} 
+                     onClick={() => { modalCallback?.(option); setIsSelectionModalOpen(false); }}
+                     className="w-full text-left p-4 rounded-xl font-bold text-slate-700 bg-slate-50 border border-slate-100 uppercase text-xs hover:border-emerald-300 hover:bg-emerald-50/50 transition-all flex justify-between items-center"
+                   >
+                     {option}
+                     {/* Dynamic checkmark if selected */}
+                     {(telecomProvider === option || elecProvider === option || cableProvider === option) && <CheckCircle2 size={16} className="text-emerald-500"/>}
+                   </button>
+                 ))}
+              </div>
+           </div>
         </div>
       )}
 
@@ -347,7 +426,7 @@ export default function Home() {
                 <Paperclip size={16} /> {supportFile ? "File Attached" : "Attach Receipt"}
               </button>
             </div>
-            <button onClick={submitSupportTicket} disabled={isSendingSupport} className="w-full bg-emerald-600 hover:bg-emerald-500 text-white font-bold py-4 rounded-xl flex items-center justify-center gap-2">
+            <button onClick={submitSupportTicket} disabled={isSendingSupport} className="w-full bg-emerald-600 hover:bg-emerald-500 text-white font-bold py-4 rounded-xl flex items-center justify-center gap-2 transition-colors active:scale-95 disabled:opacity-50">
               {isSendingSupport ? <Loader2 className="animate-spin" /> : <><Send size={18}/> Send Ticket</>}
             </button>
           </div>
@@ -355,7 +434,7 @@ export default function Home() {
       )}
 
       <div className="w-full max-w-md">
-        {/* --- HEADER --- */}
+        {/* --- MAIN HEADER & PROFILE --- */}
         <div className="flex justify-between items-center bg-white p-4 rounded-3xl shadow-sm border border-slate-100 mb-6">
           <div className="flex items-center gap-3">
             <img src="/logo.png" alt="AbaPay" className="h-10 w-auto object-contain" />
@@ -373,29 +452,29 @@ export default function Home() {
                 </span>
               </div>
             ) : (
-              <button className="bg-slate-900 text-white text-[10px] font-black uppercase px-4 py-2 rounded-xl">Connect</button>
+              <button className="bg-slate-900 text-white text-[10px] font-black uppercase px-4 py-2 rounded-xl active:scale-95 hover:bg-slate-800 transition-all">Connect</button>
             )}
           </div>
         </div>
 
         {/* --- TABS --- */}
-        <div className="flex gap-2 bg-slate-200/50 p-1.5 rounded-2xl mb-6">
-            <button onClick={() => setActiveTab("pay")} className={`flex-1 py-3 rounded-xl text-xs font-black transition-all ${activeTab === 'pay' ? 'bg-white text-emerald-600 shadow-xl' : 'text-slate-500'}`}>PAY BILLS</button>
-            <button onClick={() => setActiveTab("history")} className={`flex-1 py-3 rounded-xl text-xs font-black transition-all ${activeTab === 'history' ? 'bg-white text-emerald-600 shadow-xl' : 'text-slate-500'}`}>HISTORY</button>
+        <div className="flex gap-2 bg-slate-200/50 p-1.5 rounded-2xl mb-6 shadow-inner">
+            <button onClick={() => setActiveTab("pay")} className={`flex-1 py-3 rounded-xl text-xs font-black transition-all ${activeTab === 'pay' ? 'bg-white text-emerald-600 shadow-xl' : 'text-slate-500 hover:text-slate-700'}`}>PAY BILLS</button>
+            <button onClick={() => setActiveTab("history")} className={`flex-1 py-3 rounded-xl text-xs font-black transition-all ${activeTab === 'history' ? 'bg-white text-emerald-600 shadow-xl' : 'text-slate-500 hover:text-slate-700'}`}>HISTORY</button>
         </div>
 
         {activeTab === 'pay' ? (
           <div className="bg-white border border-slate-100 rounded-[2.5rem] p-8 shadow-2xl shadow-emerald-900/10 animate-in fade-in zoom-in-95">
             
-            {/* SERVICE SELECTOR */}
+            {/* SERVICE SELECTOR (colorful icons) */}
             <div className="grid grid-cols-4 gap-3 mb-6">
                 {SERVICES.map(s => (
                     <button 
                         key={s.id} 
-                        onClick={() => { setActiveService(s); setStatus(""); setAccountNumber(""); setCustomerName(null); }}
+                        onClick={() => { setActiveService(s); setStatus(""); setAccountNumber(""); setCustomerName(null); setNairaAmount(""); setSelectedDataPlan(null); }}
                         className={`p-4 rounded-2xl border-2 transition-all flex flex-col items-center gap-2 ${activeService.id === s.id ? 'border-emerald-500 bg-emerald-50/50 scale-105' : 'border-slate-50 bg-slate-50/50 hover:bg-slate-100'}`}
                     >
-                        <s.icon size={20} className={activeService.id === s.id ? 'text-emerald-600' : 'text-slate-400'} />
+                        <s.icon size={20} className={s.color} /> {/* colourful icon */}
                         <span className="text-[8px] font-black uppercase tracking-widest">{s.id.slice(0,4)}</span>
                     </button>
                 ))}
@@ -406,14 +485,10 @@ export default function Home() {
                 
                 {/* TOKEN SELECTOR & BALANCE DASHBOARD */}
                 <div className="bg-slate-50 border border-slate-100 p-4 rounded-2xl flex justify-between items-center animate-in fade-in">
-                  <div className="flex items-center gap-2">
-                     <select 
-                        className="bg-transparent font-black text-slate-800 outline-none uppercase text-sm cursor-pointer"
-                        value={selectedToken.symbol}
-                        onChange={(e) => setSelectedToken(SUPPORTED_TOKENS.find(t => t.symbol === e.target.value) || SUPPORTED_TOKENS[0])}
-                     >
-                       {SUPPORTED_TOKENS.map(t => <option key={t.symbol} value={t.symbol}>{t.icon} {t.symbol}</option>)}
-                     </select>
+                  <div className="flex items-center gap-2 cursor-pointer" onClick={() => openPremiumSelection("Select Token", SUPPORTED_TOKENS.map(t => t.symbol), (symbol) => setSelectedToken(SUPPORTED_TOKENS.find(t => t.symbol === symbol)!))}>
+                     <span className="text-xl">{selectedToken.icon}</span>
+                     <span className="font-black text-slate-800 uppercase text-sm tracking-tight">{selectedToken.symbol}</span>
+                     <ChevronDown size={14} className="text-slate-400"/>
                   </div>
                   <div className="text-right">
                     <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Available Balance</p>
@@ -424,47 +499,39 @@ export default function Home() {
                   </div>
                 </div>
 
-                {/* DYNAMIC NETWORK / PROVIDER SELECTOR */}
+                {/* PREMIUM SELECTION TRIGGERS (Network/Provider) */}
                 <div className="animate-in slide-in-from-left-2">
                     <label className="text-[10px] font-black text-slate-400 uppercase mb-2 block">
                         {activeService.id === "AIRTIME" || activeService.id === "DATA" ? "Network Selection" : "Choose Provider"}
                     </label>
-                    <select 
-                        className="w-full bg-slate-50 border border-slate-100 p-4 rounded-2xl font-bold text-slate-800 outline-none focus:border-emerald-500 uppercase"
-                        value={
-                          activeService.id === "ELECTRICITY" ? elecProvider : 
-                          activeService.id === "CABLE" ? cableProvider : 
-                          telecomProvider
-                        }
-                        onChange={(e) => {
-                          if (activeService.id === "ELECTRICITY") setElecProvider(e.target.value);
-                          else if (activeService.id === "CABLE") setCableProvider(e.target.value);
-                          else setTelecomProvider(e.target.value);
-                        }}
+                    
+                    <button 
+                      onClick={() => {
+                        const title = activeService.id === "AIRTIME" || activeService.id === "DATA" ? "Select Network" : "Select Provider";
+                        const options = activeService.id === "ELECTRICITY" ? ELECTRICITY_PROVIDERS : activeService.id === "CABLE" ? CABLE_PROVIDERS : TELECOM_PROVIDERS;
+                        const callback = activeService.id === "ELECTRICITY" ? setElecProvider : activeService.id === "CABLE" ? setCableProvider : setTelecomProvider;
+                        openPremiumSelection(title, options, callback);
+                      }}
+                      className="w-full bg-slate-50 border border-slate-100 p-4 rounded-2xl font-bold text-slate-800 outline-none uppercase text-xs hover:border-emerald-300 transition-all text-left flex justify-between items-center"
                     >
-                        {(
-                          activeService.id === "ELECTRICITY" ? ELECTRICITY_PROVIDERS : 
-                          activeService.id === "CABLE" ? CABLE_PROVIDERS : 
-                          TELECOM_PROVIDERS
-                        ).map(p => <option key={p} value={p}>{p.toUpperCase()}</option>)}
-                    </select>
+                      <span>
+                        {activeService.id === "ELECTRICITY" ? elecProvider.toUpperCase() : 
+                         activeService.id === "CABLE" ? cableProvider.toUpperCase() : 
+                         telecomProvider.toUpperCase()}
+                      </span>
+                      <ChevronDown size={14} className="text-slate-400"/>
+                    </button>
 
-                    {/* PREPAID / POSTPAID TOGGLE (Only for Electricity) */}
+                    {/* PREPAID / POSTPAID TOGGLE (Electricity Only) */}
                     {activeService.id === "ELECTRICITY" && (
-                       <div className="flex gap-2 mt-3 p-1 bg-slate-100 rounded-xl">
-                          <button 
-                            onClick={() => setMeterType("prepaid")} 
-                            className={`flex-1 py-2 text-[10px] font-black uppercase rounded-lg transition-colors ${meterType === "prepaid" ? "bg-white shadow-sm text-emerald-600" : "text-slate-500"}`}
-                          >Prepaid Meter</button>
-                          <button 
-                            onClick={() => setMeterType("postpaid")} 
-                            className={`flex-1 py-2 text-[10px] font-black uppercase rounded-lg transition-colors ${meterType === "postpaid" ? "bg-white shadow-sm text-emerald-600" : "text-slate-500"}`}
-                          >Postpaid Meter</button>
+                       <div className="flex gap-2 mt-3 p-1 bg-slate-100 rounded-xl border border-slate-200 shadow-inner">
+                          <button onClick={() => setMeterType("prepaid")} className={`flex-1 py-2.5 text-[10px] font-black uppercase rounded-lg transition-colors ${meterType === "prepaid" ? "bg-white shadow-sm text-emerald-600" : "text-slate-500"}`}>Prepaid</button>
+                          <button onClick={() => setMeterType("postpaid")} className={`flex-1 py-2.5 text-[10px] font-black uppercase rounded-lg transition-colors ${meterType === "postpaid" ? "bg-white shadow-sm text-emerald-600" : "text-slate-500"}`}>Postpaid</button>
                        </div>
                     )}
                 </div>
 
-                {/* ACCOUNT NUMBER / PHONE INPUT */}
+                {/* ACCOUNT NUMBER / PHONE INPUT (strictly 11 digits for telecom) */}
                 <div>
                     <label className="text-[10px] font-black text-slate-400 uppercase mb-2 flex justify-between">
                       <span>{activeService.id === "AIRTIME" || activeService.id === "DATA" ? "Phone Number (11 Digits)" : "Account / Meter No"}</span>
@@ -474,14 +541,14 @@ export default function Home() {
                     </label>
                     <input 
                         type="tel" placeholder={activeService.id === "AIRTIME" || activeService.id === "DATA" ? "08000000000" : "Enter Meter Number"}
-                        maxLength={activeService.id === "AIRTIME" || activeService.id === "DATA" ? 11 : 20} // Enforces 11 digits for airtime
+                        maxLength={activeService.id === "AIRTIME" || activeService.id === "DATA" ? 11 : 20}
                         className={`w-full bg-slate-50 border p-5 rounded-2xl font-black text-xl text-slate-800 outline-none transition-all ${
                           (activeService.id === "AIRTIME" || activeService.id === "DATA") && accountNumber.length > 0 && accountNumber.length < 11 
                           ? "border-red-300 focus:border-red-500" 
                           : "border-slate-100 focus:border-emerald-500"
                         }`}
                         value={accountNumber}
-                        onChange={(e) => setAccountNumber(e.target.value.replace(/[^0-9]/g, ''))} // Strips non-numbers
+                        onChange={(e) => setAccountNumber(e.target.value.replace(/[^0-9]/g, ''))}
                     />
                     {isVerifying && <p className="text-[10px] text-blue-500 font-bold mt-2 animate-pulse">Verifying Account Details...</p>}
                     {customerName && (activeService.id === "ELECTRICITY" || activeService.id === "CABLE") && (
@@ -492,10 +559,41 @@ export default function Home() {
                     )}
                 </div>
 
-                {/* NAIRA VALUE INPUT */}
-                <div>
+                {/* --- DATA SPECIFIC UI UPGRADE: PLANS GRID --- */}
+                {activeService.id === "DATA" && (
+                   <div className="bg-slate-50 border border-slate-100 p-4 rounded-2xl animate-in fade-in slide-in-from-top-4">
+                      {/* Category Tabs */}
+                      <div className="flex gap-1.5 mb-4 border-b border-slate-200 pb-3 overflow-x-auto">
+                        {DATA_CATEGORIES.map(cat => (
+                          <button key={cat} onClick={() => { setActiveDataCategory(cat); setSelectedDataPlan(null); }} className={`px-4 py-1.5 rounded-lg text-[10px] font-black uppercase transition-colors whitespace-nowrap ${activeDataCategory === cat ? 'bg-purple-500/10 text-purple-600' : 'text-slate-500 hover:bg-slate-100'}`}>{cat}</button>
+                        ))}
+                        {/* Broadband Shortcut tab */}
+                        <button onClick={() => setActiveDataCategory("Broadband")} className={`px-4 py-1.5 flex items-center gap-1.5 rounded-lg text-[10px] font-black uppercase transition-colors ${activeDataCategory === "Broadband" ? 'bg-orange-500/10 text-orange-600' : 'text-slate-500 hover:bg-slate-100'}`}><Briefcase size={12}/> Broadband</button>
+                      </div>
+
+                      {/* Plans Grid */}
+                      <div className="grid grid-cols-2 gap-3 max-h-[30vh] overflow-y-auto pr-1">
+                          {(activeDataCategory === "Broadband" ? MOCK_DATA_PLANS.filter(p => p.isBroadband) : filteredDataPlans).map(plan => {
+                            const cryptoPlanCost = (plan.cost_naira / exchangeRate).toFixed(4);
+                            return (
+                              <button key={plan.id} onClick={() => { setSelectedDataPlan(plan); setNairaAmount(plan.cost_naira.toString()); }} className={`p-4 rounded-xl border-2 transition-all flex flex-col gap-1 text-left ${selectedDataPlan?.id === plan.id ? 'border-purple-500 bg-purple-50/50 scale-105 shadow-md' : 'border-slate-100 bg-white hover:border-slate-200'}`}>
+                                <p className="font-black text-slate-900 text-sm tracking-tight">{plan.name}</p>
+                                <p className="text-[10px] text-slate-500 font-bold uppercase tracking-wider">{plan.validity}</p>
+                                <div className="mt-2 pt-2 border-t border-slate-100 flex flex-col gap-0.5">
+                                    <p className="font-black text-purple-600 text-xs">₦{plan.cost_naira.toLocaleString()}</p>
+                                    <p className="text-[9px] text-slate-400 font-bold">{cryptoPlanCost} {selectedToken.symbol}</p>
+                                </div>
+                              </button>
+                            );
+                          })}
+                      </div>
+                   </div>
+                )}
+
+                {/* NAIRA VALUE INPUT & AIRTIME PRE-SELECT */}
+                <div className={activeService.id === "DATA" ? "hidden" : ""}>
                     <label className="text-[10px] font-black text-slate-400 uppercase mb-2 block">Naira Value</label>
-                    <div className="relative">
+                    <div className="relative mb-3">
                         <input 
                             type="number" placeholder="500"
                             className="w-full bg-slate-50 border border-slate-100 p-5 rounded-2xl font-black text-xl text-slate-800 outline-none focus:border-emerald-500 transition-all"
@@ -507,6 +605,21 @@ export default function Home() {
                             {currentFee > 0 && <p className="text-[8px] font-bold text-orange-500">+₦{currentFee} FEE</p>}
                         </div>
                     </div>
+
+                    {/* Airtime Pre-Select Buttons */}
+                    {activeService.id === "AIRTIME" && (
+                       <div className="flex gap-2.5 overflow-x-auto py-1">
+                          {PRE_SELECT_AMOUNTS.map(amount => {
+                            const cryptoAmtCost = (parseInt(amount) / exchangeRate).toFixed(4);
+                            return (
+                              <button key={amount} onClick={() => setNairaAmount(amount)} className={`flex-1 min-w-[70px] py-3.5 rounded-xl border-2 font-black text-xs transition-all whitespace-nowrap ${nairaAmount === amount ? 'border-emerald-500 bg-emerald-50 text-emerald-700' : 'border-slate-100 bg-slate-100 hover:bg-slate-200 text-slate-700'}`}>
+                                 ₦{amount.toLocaleString()}
+                                 <p className="text-[8px] mt-0.5 text-slate-400 font-normal">{cryptoAmtCost} {selectedToken.symbol}</p>
+                              </button>
+                            );
+                          })}
+                       </div>
+                    )}
                 </div>
 
                 {/* OPTIONAL PHONE FOR ELECTRICITY NOTIFICATIONS */}
@@ -566,6 +679,7 @@ export default function Home() {
           </div>
         )}
 
+        {/* BOTTOM SUPPORT LINK */}
         <div className="mt-8 flex flex-col items-center gap-4">
             <button 
                 onClick={() => setIsSupportOpen(true)}
