@@ -1,6 +1,8 @@
 // lib/vtpass.js
 const MODE = process.env.NEXT_PUBLIC_APP_MODE;
-const BASE_URL = MODE === 'live' ? 'https://vtpass.com/api' : 'https://sandbox.vtpass.com/api';
+
+// Added 'export' here to fix the Vercel Turbopack build error
+export const BASE_URL = MODE === 'live' ? 'https://vtpass.com/api' : 'https://sandbox.vtpass.com/api';
 
 /**
  * 1. Generate Compliant Request ID (Rule: 12 numeric chars, GMT+1)
