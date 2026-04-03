@@ -1,36 +1,93 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+cat << 'EOF' > README.md
+# ⚡ AbaPay Protocol
 
-## Getting Started
+AbaPay is a decentralized, Web3-native utility payment platform built on the **Celo Blockchain**. It allows users to seamlessly pay for real-world utilities (Electricity, Cable TV, Airtime, and Data) using **USDT**, with instant fiat settlement via the VTpass API. 
 
-First, run the development server:
+Designed for low fees, instant cross-border utility vending, and mobile-first accessibility (optimized for Celo MiniPay and MetaMask).
 
-```bash
-npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
-```
+---
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+## 🌟 Key Features
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+* **Web3 Payments:** Pay bills directly with USDT on Celo Mainnet or Celo Sepolia.
+* **Instant Vending:** Automated API integration with VTpass for instant token generation and airtime top-ups.
+* **Smart Merchant Verification:** Validates electricity meters and smartcard IUC numbers *before* accepting crypto payments, eliminating user errors.
+* **DND-Fallback SMS:** Automated SMS delivery of electricity tokens bypassing the Nigerian Do-Not-Disturb (DND) registry.
+* **Dynamic Exchange Engine:** Live market rate conversions with automated profit spread calculation.
+* **Executive Admin Dashboard:** Real-time monitoring of VTpass fiat balances, blockchain USDT vaults, and cloud transaction ledgers.
+* **Telegram Integration:** Instant admin notifications for successful sales and multimodal customer support tickets.
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+---
 
-## Learn More
+## 🛠️ Tech Stack
 
-To learn more about Next.js, take a look at the following resources:
+* **Frontend:** Next.js (React), Tailwind CSS, Lucide Icons
+* **Web3 / Blockchain:** Viem, Solidity Smart Contracts, Celo Network
+* **Backend API Routes:** Next.js Serverless Functions
+* **Utility Provider:** VTpass API
+* **Database / Ledger:** Supabase (PostgreSQL)
+* **Notifications:** Telegram Bot API, VTpass Messaging API
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+---
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+## ⚙️ Environment Variables
 
-## Deploy on Vercel
+To run AbaPay locally, create a `.env.local` file in the root directory. **Never commit this file to GitHub.**
 
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
+NEXT_PUBLIC_APP_MODE=sandbox
+NEXT_PUBLIC_NETWORK=celo-sepolia
+NEXT_PUBLIC_ABAPAY_ADDRESS=0xYourSmartContractAddressHere
+NEXT_PUBLIC_FIXED_RATE=1550.00
+VTPASS_API_KEY=your_api_key
+VTPASS_PUBLIC_KEY=PK_your_public_key
+VTPASS_SECRET_KEY=SK_your_secret_key
+VTPASS_MSG_TOKEN=VT_PK_your_token
+VTPASS_MSG_SECRET=VT_SK_your_secret
+NEXT_PUBLIC_SUPABASE_URL=https://your-project.supabase.co
+NEXT_PUBLIC_SUPABASE_ANON_KEY=your_anon_key
+TELEGRAM_BOT_TOKEN=your_bot_token
+TELEGRAM_ADMIN_CHAT_ID=your_chat_id
 
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+---
+
+## 🚀 Installation & Setup
+
+1. Clone the repository:
+   git clone https://github.com/investorphem/abapay.git
+   cd abapay
+
+2. Install dependencies:
+   npm install
+
+3. Run the development server:
+   npm run dev
+
+4. Access the application:
+   * User Storefront: http://localhost:3000
+   * Admin Ops Center: http://localhost:3000/admin
+
+---
+
+## 📱 Testing with MiniPay
+
+AbaPay is highly optimized for mobile Web3 experiences. To test the dApp within the Celo MiniPay environment:
+1. Deploy the project to Vercel.
+2. Ensure environment variables are set to `celo-sepolia` and `sandbox`.
+3. Open the Opera Mini browser on Android, navigate to the MiniPay tab, and enter your Vercel URL.
+
+---
+
+## 🛡️ Security Architecture
+
+* **No-Log Keys:** VTpass secret keys and Telegram tokens are strictly contained within server-side API routes using the `server-only` directive.
+* **Replay Protection:** In-memory tracking prevents duplicate blockchain transaction hashes from triggering multiple utility vends.
+* **Smart Contract Vault:** User USDT goes directly to the immutable smart contract, requiring the Admin's cryptographically signed transaction to withdraw profits.
+
+---
+
+## 👨‍💻 Maintainer
+
+Built and maintained by **Oluwafemi Olagoke** (@investorphem).
+
+*Focusing on Web3, Decentralized AI, and scalable blockchain applications.*
+EOF

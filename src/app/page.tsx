@@ -1,65 +1,423 @@
-import Image from "next/image";
+"use client";
+
+import { useState, useEffect, useMemo, useRef } from "react";
+import { createWalletClient, custom, parseUnits, defineChain } from "viem";
+import { celo, celoSepolia } from "viem/chains";
+import { 
+  Wallet, History, Receipt, ShieldCheck, Zap, ArrowRightLeft, 
+  AlertTriangle, Download, CheckCircle2, ExternalLink, Lightbulb, 
+  Phone, Wifi, Tv, ChevronDown, Loader2, HelpCircle, XCircle, 
+  Mail, Paperclip, Send 
+} from "lucide-react";
+import { jsPDF } from "jspdf";
+import { supabase } from "@/utils/supabase"; // Fixed Import Path
+
+// --- WEB3 CONFIG ---
+const ABAPAY_ABI = [{"inputs":[{"internalType":"string","name":"serviceType","type":"string"},{"internalType":"string","name":"accountNumber","type":"string"},{"internalType":"uint256","name":"amount","type":"uint256"}],"name":"payBill","outputs":[],"stateMutability":"nonpayable","type":"function"}];
+const ERC20_ABI = [{"inputs":[{"internalType":"address","name":"spender","type":"address"},{"internalType":"uint256","name":"amount","type":"uint256"}],"name":"approve","outputs":[{"internalType":"bool","name":"","type":"bool"}],"stateMutability":"nonpayable","type":"function"}];
+
+const SERVICES = [
+  { id: "AIRTIME", name: "Buy Airtime", icon: Phone, color: "text-blue-500", bg: "bg-blue-50" },
+  { id: "DATA", name: "Buy Data", icon: Wifi, color: "text-purple-500", bg: "bg-purple-50" },
+  { id: "ELECTRICITY", name: "Electricity", icon: Lightbulb, color: "text-orange-500", bg: "bg-orange-50" },
+  { id: "CABLE", name: "Cable TV", icon: Tv, color: "text-pink-500", bg: "bg-pink-50" },
+];
+
+const ELECTRICITY_PROVIDERS = ["aba-electric", "ikedc", "ekedc", "ibedc", "aedc", "kedco", "phed"];
+const CABLE_PROVIDERS = ["dstv", "gotv", "startimes", "showmax"];
+const TELECOM_PROVIDERS = ["mtn", "airtel", "glo", "9mobile"];
 
 export default function Home() {
+  const [address, setAddress] = useState<string | null>(null);
+  const [client, setClient] = useState<any>(null);
+  const [nairaAmount, setNairaAmount] = useState(""); 
+  const [accountNumber, setAccountNumber] = useState("");
+  const [customerEmail, setCustomerEmail] = useState("");
+  const [customerPhone, setCustomerPhone] = useState("");
+  const [status, setStatus] = useState("");
+  const [activeTab, setActiveTab] = useState("pay");
+  
+  // Validation & Support States
+  const [customerName, setCustomerName] = useState<string | null>(null);
+  const [isVerifying, setIsVerifying] = useState(false);
+  const [isSupportOpen, setIsSupportOpen] = useState(false);
+  const [supportMessage, setSupportMessage] = useState("");
+  const [supportFile, setSupportFile] = useState<File | null>(null);
+  const [isSendingSupport, setIsSendingSupport] = useState(false);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+
+  // Service States
+  const [activeService, setActiveService] = useState(SERVICES[0]);
+  const [elecProvider, setElecProvider] = useState(ELECTRICITY_PROVIDERS[0]);
+  const [cableProvider, setCableProvider] = useState(CABLE_PROVIDERS[0]);
+  const [telecomProvider, setTelecomProvider] = useState(TELECOM_PROVIDERS[0]);
+  
+  const [exchangeRate, setExchangeRate] = useState<number>(1550); // Fallback
+  const [isFetchingRate, setIsFetchingRate] = useState(true);
+  const [transactions, setTransactions] = useState<any[]>([]);
+
+  // Env Config
+  const isMainnet = process.env.NEXT_PUBLIC_NETWORK === "celo";
+  const activeChain = isMainnet ? celo : celoSepolia;
+  const USDT_ADDRESS = isMainnet ? "0x48065fbbe25f71c9282ddf5e1cd6d6a887483d5e" : "0xd077A400968890Eacc75cdc901F0356c943e4fDb";
+  const ABAPAY_CONTRACT = process.env.NEXT_PUBLIC_ABAPAY_ADDRESS as `0x${string}`;
+
+  // --- INITIALIZATION ---
+  useEffect(() => {
+    const saved = localStorage.getItem("abapay_history");
+    if (saved) setTransactions(JSON.parse(saved));
+    
+    fetch('/api/rate')
+      .then(res => res.json())
+      .then(data => {
+        if (data.success && data.abaPayRate) setExchangeRate(Number(data.abaPayRate));
+        setIsFetchingRate(false);
+      })
+      .catch(() => setIsFetchingRate(false));
+
+    if (window.ethereum) {
+      const walletClient = createWalletClient({ chain: activeChain, transport: custom(window.ethereum) });
+      walletClient.requestAddresses().then(([acc]) => {
+        setAddress(acc);
+        setClient(walletClient);
+      });
+    }
+  }, [activeChain]);
+
+  // --- TELECOM AUTO-DETECT LOGIC ---
+  useEffect(() => {
+    if ((activeService.id === "AIRTIME" || activeService.id === "DATA") && accountNumber.length >= 4) {
+      const prefix = accountNumber.substring(0, 4);
+      if (["0803","0806","0810","0813","0814","0816","0903","0906","0913","0916","0703","0706"].includes(prefix)) setTelecomProvider("mtn");
+      else if (["0802","0808","0812","0902","0907","0912","0701","0708"].includes(prefix)) setTelecomProvider("airtel");
+      else if (["0805","0807","0811","0905","0705","0915"].includes(prefix)) setTelecomProvider("glo");
+      else if (["0809","0817","0818","0908","0909"].includes(prefix)) setTelecomProvider("9mobile");
+    }
+  }, [accountNumber, activeService]);
+
+  // --- VTPASS MERCHANT VERIFICATION ---
+  useEffect(() => {
+    if ((activeService.id === "ELECTRICITY" || activeService.id === "CABLE") && accountNumber.length >= 10) {
+      verifyMerchant();
+    } else {
+      setCustomerName(null);
+    }
+  }, [accountNumber, elecProvider, cableProvider, activeService]);
+
+  const verifyMerchant = async () => {
+    setIsVerifying(true);
+    setCustomerName(null);
+    try {
+        const serviceID = activeService.id === "ELECTRICITY" ? elecProvider : cableProvider;
+        const res = await fetch(`${process.env.NEXT_PUBLIC_APP_MODE === 'live' ? 'https://vtpass.com/api' : 'https://sandbox.vtpass.com/api'}/merchant-verify`, {
+            method: 'POST',
+            headers: { 
+                'api-key': process.env.NEXT_PUBLIC_VTPASS_API_KEY || '', 
+                'public-key': process.env.NEXT_PUBLIC_VTPASS_PUBLIC_KEY || '',
+                'Content-Type': 'application/json' 
+            },
+            body: JSON.stringify({ billersCode: accountNumber, serviceID: serviceID, type: 'prepaid' })
+        });
+        const data = await res.json();
+        if (data.code === '000') setCustomerName(data.content.Customer_Name);
+    } catch (e) { console.error("Verify Error", e); }
+    setIsVerifying(false);
+  };
+
+  const { usdtToCharge, currentFee } = useMemo(() => {
+    const bill = parseFloat(nairaAmount) || 0;
+    const fee = (activeService.id === "ELECTRICITY" || activeService.id === "CABLE") ? 100 : 0;
+    const crypto = (bill + fee) / exchangeRate;
+    return { usdtToCharge: crypto.toFixed(4), currentFee: fee };
+  }, [nairaAmount, exchangeRate, activeService]);
+
+  // --- EXECUTE PAYMENT ---
+  const handlePayment = async () => {
+    if (!address || !client) return setStatus("Connect Wallet First");
+    setStatus("Initiating Blockchain Escrow...");
+
+    try {
+      const valueInWei = parseUnits(usdtToCharge, 6);
+      
+      await client.writeContract({
+        address: USDT_ADDRESS,
+        abi: ERC20_ABI,
+        functionName: 'approve',
+        args: [ABAPAY_CONTRACT, valueInWei],
+        account: address,
+      });
+
+      const activeServiceID = activeService.id === "ELECTRICITY" ? elecProvider : 
+                              activeService.id === "CABLE" ? cableProvider : 
+                              telecomProvider; // Uses auto-detected network
+
+      const hash = await client.writeContract({
+        address: ABAPAY_CONTRACT,
+        abi: ABAPAY_ABI,
+        functionName: 'payBill',
+        args: [activeServiceID, accountNumber, valueInWei],
+        account: address,
+      });
+
+      setStatus("USDT Secured. Vending Utility...");
+
+      const res = await fetch('/api/pay', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          serviceID: activeServiceID,
+          billersCode: accountNumber,
+          amount: usdtToCharge,
+          txHash: hash,
+          variation_code: 'prepaid',
+          phone: customerPhone || accountNumber
+        })
+      });
+
+      const result = await res.json();
+
+      if (result.success) {
+        setStatus("Success! Token/Ref Dispatched.");
+        const newTx = { id: hash.slice(0,8), date: new Date().toLocaleString(), status: "SUCCESS", amountNaira: nairaAmount, service: activeService.name, network: activeServiceID.toUpperCase(), txHash: hash };
+        setTransactions([newTx, ...transactions]);
+        localStorage.setItem("abapay_history", JSON.stringify([newTx, ...transactions]));
+      } else {
+        setStatus("Utility Vending Delayed. Admin Notified.");
+      }
+    } catch (e) { setStatus("Transaction Cancelled."); }
+  };
+
+  // --- SUPPORT TICKET ---
+  const submitSupportTicket = async () => {
+    if (!supportMessage.trim()) return;
+    setIsSendingSupport(true);
+    try {
+      const formData = new FormData();
+      formData.append("message", supportMessage);
+      if (address) formData.append("userAddress", address);
+      if (supportFile) formData.append("file", supportFile);
+
+      await fetch('/api/support', { method: 'POST', body: formData });
+      
+      setIsSupportOpen(false);
+      setSupportMessage("");
+      setSupportFile(null);
+      alert("Ticket sent to AbaPay Support!");
+    } catch (error) {
+      alert("Network error. Please try again.");
+    } finally {
+      setIsSendingSupport(false);
+    }
+  };
+
   return (
-    <div className="flex flex-col flex-1 items-center justify-center bg-zinc-50 font-sans dark:bg-black">
-      <main className="flex flex-1 w-full max-w-3xl flex-col items-center justify-between py-32 px-16 bg-white dark:bg-black sm:items-start">
-        <Image
-          className="dark:invert"
-          src="/next.svg"
-          alt="Next.js logo"
-          width={100}
-          height={20}
-          priority
-        />
-        <div className="flex flex-col items-center gap-6 text-center sm:items-start sm:text-left">
-          <h1 className="max-w-xs text-3xl font-semibold leading-10 tracking-tight text-black dark:text-zinc-50">
-            To get started, edit the page.tsx file.
-          </h1>
-          <p className="max-w-md text-lg leading-8 text-zinc-600 dark:text-zinc-400">
-            Looking for a starting point or more instructions? Head over to{" "}
-            <a
-              href="https://vercel.com/templates?framework=next.js&utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-              className="font-medium text-zinc-950 dark:text-zinc-50"
-            >
-              Templates
-            </a>{" "}
-            or the{" "}
-            <a
-              href="https://nextjs.org/learn?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-              className="font-medium text-zinc-950 dark:text-zinc-50"
-            >
-              Learning
-            </a>{" "}
-            center.
-          </p>
-        </div>
-        <div className="flex flex-col gap-4 text-base font-medium sm:flex-row">
-          <a
-            className="flex h-12 w-full items-center justify-center gap-2 rounded-full bg-foreground px-5 text-background transition-colors hover:bg-[#383838] dark:hover:bg-[#ccc] md:w-[158px]"
-            href="https://vercel.com/new?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            <Image
-              className="dark:invert"
-              src="/vercel.svg"
-              alt="Vercel logomark"
-              width={16}
-              height={16}
+    <main className="min-h-screen bg-slate-50 text-slate-900 font-sans p-4 flex flex-col items-center pb-20">
+      
+      {/* SUPPORT MODAL (z-50 Ensure it stays on top) */}
+      {isSupportOpen && (
+        <div className="fixed inset-0 z-50 bg-slate-900/40 backdrop-blur-sm flex justify-center items-end sm:items-center animate-in fade-in">
+          <div className="bg-white w-full max-w-md rounded-t-3xl sm:rounded-3xl shadow-2xl p-6 animate-in slide-in-from-bottom-10">
+            <div className="flex justify-between items-center mb-4">
+              <h2 className="text-xl font-bold flex items-center gap-2"><HelpCircle className="text-emerald-500"/> Customer Support</h2>
+              <button onClick={() => setIsSupportOpen(false)} className="p-2 bg-slate-100 rounded-full"><XCircle size={20} className="text-slate-500" /></button>
+            </div>
+            <textarea 
+              className="w-full bg-slate-50 border border-slate-200 rounded-xl p-4 mb-4 text-sm outline-none focus:border-emerald-500"
+              rows={4} placeholder="Describe your issue..."
+              value={supportMessage} onChange={(e) => setSupportMessage(e.target.value)}
             />
-            Deploy Now
-          </a>
-          <a
-            className="flex h-12 w-full items-center justify-center rounded-full border border-solid border-black/[.08] px-5 transition-colors hover:border-transparent hover:bg-black/[.04] dark:border-white/[.145] dark:hover:bg-[#1a1a1a] md:w-[158px]"
-            href="https://nextjs.org/docs?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            Documentation
-          </a>
+            <div className="flex gap-2 mb-6">
+              <input type="file" ref={fileInputRef} className="hidden" onChange={(e) => setSupportFile(e.target.files?.[0] || null)} />
+              <button onClick={() => fileInputRef.current?.click()} className="flex-1 py-3 bg-slate-100 rounded-xl text-sm font-bold flex items-center justify-center gap-2">
+                <Paperclip size={16} /> {supportFile ? "File Attached" : "Attach Receipt"}
+              </button>
+            </div>
+            <button onClick={submitSupportTicket} disabled={isSendingSupport} className="w-full bg-emerald-600 text-white font-bold py-4 rounded-xl flex items-center justify-center gap-2">
+              {isSendingSupport ? <Loader2 className="animate-spin" /> : <><Send size={18}/> Send Ticket</>}
+            </button>
+          </div>
         </div>
-      </main>
-    </div>
+      )}
+
+      <div className="w-full max-w-md">
+        {/* --- BRANDING HEADER & WALLET PROFILE --- */}
+        <div className="flex justify-between items-center bg-white p-4 rounded-3xl shadow-sm border border-slate-100 mb-6">
+          <div className="flex items-center gap-3">
+            <img src="/logo.png" alt="AbaPay" className="h-10 w-auto object-contain" />
+            <div className="flex flex-col">
+              <span className="text-xl font-black text-slate-900 leading-none tracking-tight">AbaPay<span className="text-emerald-500">.</span></span>
+              <span className="text-[8px] font-black uppercase text-slate-400 tracking-widest mt-1">Seamless Payments.</span>
+            </div>
+          </div>
+          <div>
+            {address ? (
+              <div className="bg-emerald-50 border border-emerald-100 px-3 py-1.5 rounded-xl flex items-center gap-2">
+                <div className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
+                <span className="text-[10px] font-black text-emerald-700 font-mono tracking-tighter">
+                  {address.slice(0, 5)}...{address.slice(-4)}
+                </span>
+              </div>
+            ) : (
+              <button className="bg-slate-900 text-white text-[10px] font-black uppercase px-4 py-2 rounded-xl">Connect</button>
+            )}
+          </div>
+        </div>
+
+        {/* --- TABS --- */}
+        <div className="flex gap-2 bg-slate-200/50 p-1.5 rounded-2xl mb-6">
+            <button onClick={() => setActiveTab("pay")} className={`flex-1 py-3 rounded-xl text-xs font-black transition-all ${activeTab === 'pay' ? 'bg-white text-emerald-600 shadow-xl' : 'text-slate-500'}`}>PAY BILLS</button>
+            <button onClick={() => setActiveTab("history")} className={`flex-1 py-3 rounded-xl text-xs font-black transition-all ${activeTab === 'history' ? 'bg-white text-emerald-600 shadow-xl' : 'text-slate-500'}`}>HISTORY</button>
+        </div>
+
+        {activeTab === 'pay' ? (
+          <div className="bg-white border border-slate-100 rounded-[2.5rem] p-8 shadow-2xl shadow-emerald-900/10 animate-in fade-in zoom-in-95">
+            
+            {/* SERVICE SELECTOR */}
+            <div className="grid grid-cols-4 gap-3 mb-8">
+                {SERVICES.map(s => (
+                    <button 
+                        key={s.id} 
+                        onClick={() => { setActiveService(s); setStatus(""); }}
+                        className={`p-4 rounded-2xl border-2 transition-all flex flex-col items-center gap-2 ${activeService.id === s.id ? 'border-emerald-500 bg-emerald-50/50 scale-105' : 'border-slate-50 bg-slate-50/50'}`}
+                    >
+                        <s.icon size={20} className={activeService.id === s.id ? 'text-emerald-600' : 'text-slate-400'} />
+                        <span className="text-[8px] font-black uppercase tracking-widest">{s.id.slice(0,4)}</span>
+                    </button>
+                ))}
+            </div>
+
+            {/* FORM INPUTS */}
+            <div className="space-y-5">
+                
+                {/* DYNAMIC NETWORK / PROVIDER SELECTOR */}
+                <div className="animate-in slide-in-from-left-2">
+                    <label className="text-[10px] font-black text-slate-400 uppercase mb-2 block">
+                        {activeService.id === "AIRTIME" || activeService.id === "DATA" ? "Network Selection" : "Choose Provider"}
+                    </label>
+                    <select 
+                        className="w-full bg-slate-50 border border-slate-100 p-4 rounded-2xl font-bold text-slate-800 outline-none focus:border-emerald-500 uppercase"
+                        value={
+                          activeService.id === "ELECTRICITY" ? elecProvider : 
+                          activeService.id === "CABLE" ? cableProvider : 
+                          telecomProvider
+                        }
+                        onChange={(e) => {
+                          if (activeService.id === "ELECTRICITY") setElecProvider(e.target.value);
+                          else if (activeService.id === "CABLE") setCableProvider(e.target.value);
+                          else setTelecomProvider(e.target.value);
+                        }}
+                    >
+                        {(
+                          activeService.id === "ELECTRICITY" ? ELECTRICITY_PROVIDERS : 
+                          activeService.id === "CABLE" ? CABLE_PROVIDERS : 
+                          TELECOM_PROVIDERS
+                        ).map(p => <option key={p} value={p}>{p.toUpperCase()}</option>)}
+                    </select>
+                </div>
+
+                {/* ACCOUNT NUMBER INPUT */}
+                <div>
+                    <label className="text-[10px] font-black text-slate-400 uppercase mb-2 block">
+                      {activeService.id === "AIRTIME" || activeService.id === "DATA" ? "Phone Number" : "Account / Meter No"}
+                    </label>
+                    <input 
+                        type="tel" placeholder="00000000000"
+                        className="w-full bg-slate-50 border border-slate-100 p-5 rounded-2xl font-black text-xl text-slate-800 outline-none focus:border-emerald-500 transition-all"
+                        value={accountNumber}
+                        onChange={(e) => setAccountNumber(e.target.value)}
+                    />
+                    {isVerifying && <p className="text-[10px] text-blue-500 font-bold mt-2 animate-pulse">Verifying Account Details...</p>}
+                    {customerName && (
+                        <div className="mt-2 bg-emerald-500/10 p-3 rounded-xl border border-emerald-500/20 flex items-center gap-2">
+                            <CheckCircle2 size={14} className="text-emerald-600" />
+                            <span className="text-[10px] font-black text-emerald-700 uppercase">{customerName}</span>
+                        </div>
+                    )}
+                </div>
+
+                {/* NAIRA VALUE INPUT */}
+                <div>
+                    <label className="text-[10px] font-black text-slate-400 uppercase mb-2 block">Naira Value</label>
+                    <div className="relative">
+                        <input 
+                            type="number" placeholder="500"
+                            className="w-full bg-slate-50 border border-slate-100 p-5 rounded-2xl font-black text-xl text-slate-800 outline-none focus:border-emerald-500 transition-all"
+                            value={nairaAmount}
+                            onChange={(e) => setNairaAmount(e.target.value)}
+                        />
+                        <div className="absolute right-4 top-1/2 -translate-y-1/2 text-right">
+                            <p className="text-[10px] font-black text-emerald-600">{usdtToCharge} USDT</p>
+                            {currentFee > 0 && <p className="text-[8px] font-bold text-orange-500">+₦{currentFee} FEE</p>}
+                        </div>
+                    </div>
+                </div>
+
+                {/* OPTIONAL PHONE FOR ELECTRICITY NOTIFICATIONS */}
+                {activeService.id === "ELECTRICITY" && (
+                    <div className="animate-in fade-in">
+                         <input 
+                            type="tel" placeholder="Phone for SMS Token"
+                            className="w-full bg-slate-50 border border-slate-100 p-4 rounded-2xl font-bold text-slate-700 outline-none focus:border-emerald-500"
+                            onChange={(e) => setCustomerPhone(e.target.value)}
+                        />
+                    </div>
+                )}
+
+                {/* STATUS MESSAGE */}
+                {status && (
+                    <div className={`p-4 rounded-2xl text-[10px] font-bold border flex items-center gap-3 ${status.includes('Success') ? 'bg-emerald-50 border-emerald-100 text-emerald-700' : 'bg-red-50 border-red-100 text-red-700'}`}>
+                        {status.includes('Success') ? <CheckCircle2 size={16}/> : <AlertTriangle size={16}/>}
+                        {status}
+                    </div>
+                )}
+
+                {/* SUBMIT BUTTON */}
+                <button 
+                    onClick={handlePayment}
+                    disabled={isVerifying || !nairaAmount || ((activeService.id === 'ELECTRICITY' || activeService.id === 'CABLE') && !customerName)}
+                    className="w-full bg-slate-900 hover:bg-black text-white font-black py-5 rounded-[1.5rem] flex items-center justify-center gap-3 transition-all active:scale-95 disabled:opacity-30 shadow-xl shadow-slate-900/20"
+                >
+                    <ShieldCheck size={20} className="text-emerald-400" /> 
+                    CONFIRM & PAY WITH USDT
+                </button>
+            </div>
+          </div>
+        ) : (
+          <div className="bg-white border border-slate-100 rounded-[2.5rem] p-6 shadow-2xl animate-in slide-in-from-bottom-4">
+             {transactions.length === 0 ? (
+                <div className="py-20 text-center">
+                    <Receipt size={40} className="mx-auto text-slate-200 mb-4" />
+                    <p className="text-slate-400 text-xs font-bold uppercase tracking-widest">No activity found</p>
+                </div>
+             ) : (
+                <div className="space-y-4">
+                    {transactions.map(tx => (
+                        <div key={tx.id} className="p-4 bg-slate-50 rounded-2xl border border-slate-100 flex justify-between items-center">
+                            <div>
+                                <p className="text-xs font-black text-slate-800 uppercase">{tx.network} {tx.service}</p>
+                                <p className="text-[10px] text-slate-500">{tx.date}</p>
+                            </div>
+                            <div className="text-right">
+                                <p className="text-xs font-black text-emerald-600">₦{tx.amountNaira}</p>
+                                <a href={`https://${isMainnet ? '' : 'sepolia.'}celoscan.io/tx/${tx.txHash}`} target="_blank" className="text-[8px] font-bold text-slate-400 flex items-center justify-end gap-1">VIEW HASH <ExternalLink size={8}/></a>
+                            </div>
+                        </div>
+                    ))}
+                </div>
+             )}
+          </div>
+        )}
+
+        {/* BOTTOM SUPPORT LINK */}
+        <div className="mt-8 flex flex-col items-center gap-4">
+            <button 
+                onClick={() => setIsSupportOpen(true)}
+                className="text-[10px] font-black text-slate-400 hover:text-emerald-500 transition-colors uppercase tracking-widest flex items-center gap-2"
+            >
+                <HelpCircle size={14} /> Failed Transaction? Open Support
+            </button>
+        </div>
+      </div>
+    </main>
   );
 }
