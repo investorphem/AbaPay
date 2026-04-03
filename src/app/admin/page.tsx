@@ -66,9 +66,10 @@ export default function AdminDashboard() {
   // --- INITIALIZATION ---
   useEffect(() => {
     async function initAdmin() {
-      if (typeof window !== "undefined" && window.ethereum) {
+      // FIXED: (window as any).ethereum bypasses TypeScript strict checking
+      if (typeof window !== "undefined" && (window as any).ethereum) {
         try {
-          const walletClient = createWalletClient({ chain: activeChain, transport: custom(window.ethereum) });
+          const walletClient = createWalletClient({ chain: activeChain, transport: custom((window as any).ethereum) });
           const [account] = await walletClient.requestAddresses();
           setAddress(account);
           setClient(walletClient);

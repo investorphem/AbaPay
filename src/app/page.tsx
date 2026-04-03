@@ -75,8 +75,9 @@ export default function Home() {
       })
       .catch(() => setIsFetchingRate(false));
 
-    if (window.ethereum) {
-      const walletClient = createWalletClient({ chain: activeChain, transport: custom(window.ethereum) });
+    // FIXED: (window as any).ethereum bypasses TypeScript strict checking
+    if (typeof window !== "undefined" && (window as any).ethereum) {
+      const walletClient = createWalletClient({ chain: activeChain, transport: custom((window as any).ethereum) });
       walletClient.requestAddresses().then(([acc]) => {
         setAddress(acc);
         setClient(walletClient);
