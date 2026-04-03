@@ -26,15 +26,16 @@ export const generateRequestId = () => {
 /**
  * 3. DYNAMIC AUTH HEADERS
  * Rule: GET requests use Public Key, POST requests use Secret Key
+ * FIXED: Added || '' so TypeScript guarantees these are strings, not undefined.
  */
 export const getHeaders = (method = 'POST') => {
   const isGet = method.toUpperCase() === 'GET';
   
   return {
-    'api-key': process.env.VTPASS_API_KEY,
-    [isGet ? 'public-key' : 'secret-key']: isGet 
+    'api-key': process.env.VTPASS_API_KEY || '',
+    [isGet ? 'public-key' : 'secret-key']: (isGet 
       ? process.env.VTPASS_PUBLIC_KEY 
-      : process.env.VTPASS_SECRET_KEY,
+      : process.env.VTPASS_SECRET_KEY) || '',
     'Content-Type': 'application/json'
   };
 };
