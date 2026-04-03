@@ -10,7 +10,7 @@ import {
   Mail, Paperclip, Send 
 } from "lucide-react";
 import { jsPDF } from "jspdf";
-import { supabase } from "@/utils/supabase"; // Fixed Import Path
+import { supabase } from "@/utils/supabase";
 
 // --- WEB3 CONFIG ---
 const ABAPAY_ABI = [{"inputs":[{"internalType":"string","name":"serviceType","type":"string"},{"internalType":"string","name":"accountNumber","type":"string"},{"internalType":"uint256","name":"amount","type":"uint256"}],"name":"payBill","outputs":[],"stateMutability":"nonpayable","type":"function"}];
@@ -45,6 +45,15 @@ export default function Home() {
   const [supportFile, setSupportFile] = useState<File | null>(null);
   const [isSendingSupport, setIsSendingSupport] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
+
+  // --- NEW PREMIUM TOAST ENGINE ---
+  const [toast, setToast] = useState<{title: string, message: string, type: 'success' | 'error'} | null>(null);
+
+  const showToast = (title: string, message: string, type: 'success' | 'error' = 'success') => {
+    setToast({ title, message, type });
+    // Auto-dismiss after 5 seconds
+    setTimeout(() => setToast(null), 5000);
+  };
 
   // Service States
   const [activeService, setActiveService] = useState(SERVICES[0]);
@@ -150,7 +159,7 @@ export default function Home() {
 
       const activeServiceID = activeService.id === "ELECTRICITY" ? elecProvider : 
                               activeService.id === "CABLE" ? cableProvider : 
-                              telecomProvider; // Uses auto-detected network
+                              telecomProvider; 
 
       const hash = await client.writeContract({
         address: ABAPAY_CONTRACT,
@@ -203,24 +212,56 @@ export default function Home() {
       setIsSupportOpen(false);
       setSupportMessage("");
       setSupportFile(null);
-      alert("Ticket sent to AbaPay Support!");
+      
+      // TRIGGER THE NEW PREMIUM TOAST
+      showToast(
+        "Ticket Submitted", 
+        "AbaPay Support has received your request. We'll update you via Telegram.", 
+        "success"
+      );
     } catch (error) {
-      alert("Network error. Please try again.");
+      showToast(
+        "Connection Error", 
+        "Failed to send the ticket. Please check your network and try again.", 
+        "error"
+      );
     } finally {
       setIsSendingSupport(false);
     }
   };
 
   return (
-    <main className="min-h-screen bg-slate-50 text-slate-900 font-sans p-4 flex flex-col items-center pb-20">
+    <main className="min-h-screen bg-slate-50 text-slate-900 font-sans p-4 flex flex-col items-center pb-20 relative">
       
-      {/* SUPPORT MODAL (z-50 Ensure it stays on top) */}
+      {/* --- PREMIUM TOAST NOTIFICATION --- */}
+      {toast && (
+        <div className="fixed top-4 right-4 sm:top-6 sm:right-6 z-[100] animate-in slide-in-from-top-8 fade-in duration-300">
+          <div className="bg-[#111114] border border-slate-800 shadow-2xl rounded-2xl p-4 flex items-start gap-3 w-[300px]">
+            <div className={`p-2 rounded-full shrink-0 ${toast.type === 'success' ? 'bg-emerald-500/10' : 'bg-red-500/10'}`}>
+              {toast.type === 'success' ? (
+                <CheckCircle2 className="text-emerald-500" size={20} />
+              ) : (
+                <AlertTriangle className="text-red-500" size={20} />
+              )}
+            </div>
+            <div className="flex-1">
+              <h4 className="text-white font-black text-sm tracking-tight">{toast.title}</h4>
+              <p className="text-slate-400 text-xs mt-0.5 leading-snug">{toast.message}</p>
+            </div>
+            <button onClick={() => setToast(null)} className="shrink-0 text-slate-500 hover:text-slate-300 transition-colors">
+               <XCircle size={16} />
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* SUPPORT MODAL */}
       {isSupportOpen && (
         <div className="fixed inset-0 z-50 bg-slate-900/40 backdrop-blur-sm flex justify-center items-end sm:items-center animate-in fade-in">
           <div className="bg-white w-full max-w-md rounded-t-3xl sm:rounded-3xl shadow-2xl p-6 animate-in slide-in-from-bottom-10">
             <div className="flex justify-between items-center mb-4">
               <h2 className="text-xl font-bold flex items-center gap-2"><HelpCircle className="text-emerald-500"/> Customer Support</h2>
-              <button onClick={() => setIsSupportOpen(false)} className="p-2 bg-slate-100 rounded-full"><XCircle size={20} className="text-slate-500" /></button>
+              <button onClick={() => setIsSupportOpen(false)} className="p-2 bg-slate-100 rounded-full hover:bg-slate-200 transition-colors"><XCircle size={20} className="text-slate-500" /></button>
             </div>
             <textarea 
               className="w-full bg-slate-50 border border-slate-200 rounded-xl p-4 mb-4 text-sm outline-none focus:border-emerald-500"
@@ -229,11 +270,11 @@ export default function Home() {
             />
             <div className="flex gap-2 mb-6">
               <input type="file" ref={fileInputRef} className="hidden" onChange={(e) => setSupportFile(e.target.files?.[0] || null)} />
-              <button onClick={() => fileInputRef.current?.click()} className="flex-1 py-3 bg-slate-100 rounded-xl text-sm font-bold flex items-center justify-center gap-2">
+              <button onClick={() => fileInputRef.current?.click()} className="flex-1 py-3 bg-slate-100 hover:bg-slate-200 transition-colors rounded-xl text-sm font-bold flex items-center justify-center gap-2">
                 <Paperclip size={16} /> {supportFile ? "File Attached" : "Attach Receipt"}
               </button>
             </div>
-            <button onClick={submitSupportTicket} disabled={isSendingSupport} className="w-full bg-emerald-600 text-white font-bold py-4 rounded-xl flex items-center justify-center gap-2">
+            <button onClick={submitSupportTicket} disabled={isSendingSupport} className="w-full bg-emerald-600 hover:bg-emerald-500 text-white font-bold py-4 rounded-xl flex items-center justify-center gap-2 transition-colors">
               {isSendingSupport ? <Loader2 className="animate-spin" /> : <><Send size={18}/> Send Ticket</>}
             </button>
           </div>
@@ -259,15 +300,15 @@ export default function Home() {
                 </span>
               </div>
             ) : (
-              <button className="bg-slate-900 text-white text-[10px] font-black uppercase px-4 py-2 rounded-xl">Connect</button>
+              <button className="bg-slate-900 text-white text-[10px] font-black uppercase px-4 py-2 rounded-xl hover:bg-slate-800 transition-colors">Connect</button>
             )}
           </div>
         </div>
 
         {/* --- TABS --- */}
         <div className="flex gap-2 bg-slate-200/50 p-1.5 rounded-2xl mb-6">
-            <button onClick={() => setActiveTab("pay")} className={`flex-1 py-3 rounded-xl text-xs font-black transition-all ${activeTab === 'pay' ? 'bg-white text-emerald-600 shadow-xl' : 'text-slate-500'}`}>PAY BILLS</button>
-            <button onClick={() => setActiveTab("history")} className={`flex-1 py-3 rounded-xl text-xs font-black transition-all ${activeTab === 'history' ? 'bg-white text-emerald-600 shadow-xl' : 'text-slate-500'}`}>HISTORY</button>
+            <button onClick={() => setActiveTab("pay")} className={`flex-1 py-3 rounded-xl text-xs font-black transition-all ${activeTab === 'pay' ? 'bg-white text-emerald-600 shadow-xl' : 'text-slate-500 hover:text-slate-700'}`}>PAY BILLS</button>
+            <button onClick={() => setActiveTab("history")} className={`flex-1 py-3 rounded-xl text-xs font-black transition-all ${activeTab === 'history' ? 'bg-white text-emerald-600 shadow-xl' : 'text-slate-500 hover:text-slate-700'}`}>HISTORY</button>
         </div>
 
         {activeTab === 'pay' ? (
@@ -279,7 +320,7 @@ export default function Home() {
                     <button 
                         key={s.id} 
                         onClick={() => { setActiveService(s); setStatus(""); }}
-                        className={`p-4 rounded-2xl border-2 transition-all flex flex-col items-center gap-2 ${activeService.id === s.id ? 'border-emerald-500 bg-emerald-50/50 scale-105' : 'border-slate-50 bg-slate-50/50'}`}
+                        className={`p-4 rounded-2xl border-2 transition-all flex flex-col items-center gap-2 ${activeService.id === s.id ? 'border-emerald-500 bg-emerald-50/50 scale-105' : 'border-slate-50 bg-slate-50/50 hover:bg-slate-100'}`}
                     >
                         <s.icon size={20} className={activeService.id === s.id ? 'text-emerald-600' : 'text-slate-400'} />
                         <span className="text-[8px] font-black uppercase tracking-widest">{s.id.slice(0,4)}</span>
@@ -329,7 +370,7 @@ export default function Home() {
                     />
                     {isVerifying && <p className="text-[10px] text-blue-500 font-bold mt-2 animate-pulse">Verifying Account Details...</p>}
                     {customerName && (
-                        <div className="mt-2 bg-emerald-500/10 p-3 rounded-xl border border-emerald-500/20 flex items-center gap-2">
+                        <div className="mt-2 bg-emerald-500/10 p-3 rounded-xl border border-emerald-500/20 flex items-center gap-2 animate-in fade-in">
                             <CheckCircle2 size={14} className="text-emerald-600" />
                             <span className="text-[10px] font-black text-emerald-700 uppercase">{customerName}</span>
                         </div>
@@ -366,7 +407,7 @@ export default function Home() {
 
                 {/* STATUS MESSAGE */}
                 {status && (
-                    <div className={`p-4 rounded-2xl text-[10px] font-bold border flex items-center gap-3 ${status.includes('Success') ? 'bg-emerald-50 border-emerald-100 text-emerald-700' : 'bg-red-50 border-red-100 text-red-700'}`}>
+                    <div className={`p-4 rounded-2xl text-[10px] font-bold border flex items-center gap-3 animate-in fade-in slide-in-from-top-2 ${status.includes('Success') ? 'bg-emerald-50 border-emerald-100 text-emerald-700' : 'bg-red-50 border-red-100 text-red-700'}`}>
                         {status.includes('Success') ? <CheckCircle2 size={16}/> : <AlertTriangle size={16}/>}
                         {status}
                     </div>
@@ -393,14 +434,14 @@ export default function Home() {
              ) : (
                 <div className="space-y-4">
                     {transactions.map(tx => (
-                        <div key={tx.id} className="p-4 bg-slate-50 rounded-2xl border border-slate-100 flex justify-between items-center">
+                        <div key={tx.id} className="p-4 bg-slate-50 rounded-2xl border border-slate-100 flex justify-between items-center hover:bg-slate-100 transition-colors">
                             <div>
                                 <p className="text-xs font-black text-slate-800 uppercase">{tx.network} {tx.service}</p>
                                 <p className="text-[10px] text-slate-500">{tx.date}</p>
                             </div>
                             <div className="text-right">
                                 <p className="text-xs font-black text-emerald-600">₦{tx.amountNaira}</p>
-                                <a href={`https://${isMainnet ? '' : 'sepolia.'}celoscan.io/tx/${tx.txHash}`} target="_blank" className="text-[8px] font-bold text-slate-400 flex items-center justify-end gap-1">VIEW HASH <ExternalLink size={8}/></a>
+                                <a href={`https://${isMainnet ? '' : 'sepolia.'}celoscan.io/tx/${tx.txHash}`} target="_blank" className="text-[8px] font-bold text-slate-400 flex items-center justify-end gap-1 hover:text-emerald-500 transition-colors">VIEW HASH <ExternalLink size={8}/></a>
                             </div>
                         </div>
                     ))}
