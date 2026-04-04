@@ -25,33 +25,49 @@ import type {
 
 export interface AbaPayInterface extends Interface {
   getFunction(
-    nameOrSignature: "acceptedToken" | "owner" | "payBill" | "withdrawFunds"
+    nameOrSignature:
+      | "isSupportedToken"
+      | "owner"
+      | "payBill"
+      | "setTokenSupport"
+      | "withdrawFunds"
   ): FunctionFragment;
 
   getEvent(
-    nameOrSignatureOrTopic: "FundsWithdrawn" | "PaymentReceived"
+    nameOrSignatureOrTopic:
+      | "FundsWithdrawn"
+      | "PaymentReceived"
+      | "TokenSupportUpdated"
   ): EventFragment;
 
   encodeFunctionData(
-    functionFragment: "acceptedToken",
-    values?: undefined
+    functionFragment: "isSupportedToken",
+    values: [AddressLike]
   ): string;
   encodeFunctionData(functionFragment: "owner", values?: undefined): string;
   encodeFunctionData(
     functionFragment: "payBill",
-    values: [string, string, BigNumberish]
+    values: [AddressLike, string, string, BigNumberish]
+  ): string;
+  encodeFunctionData(
+    functionFragment: "setTokenSupport",
+    values: [AddressLike, boolean]
   ): string;
   encodeFunctionData(
     functionFragment: "withdrawFunds",
-    values?: undefined
+    values: [AddressLike]
   ): string;
 
   decodeFunctionResult(
-    functionFragment: "acceptedToken",
+    functionFragment: "isSupportedToken",
     data: BytesLike
   ): Result;
   decodeFunctionResult(functionFragment: "owner", data: BytesLike): Result;
   decodeFunctionResult(functionFragment: "payBill", data: BytesLike): Result;
+  decodeFunctionResult(
+    functionFragment: "setTokenSupport",
+    data: BytesLike
+  ): Result;
   decodeFunctionResult(
     functionFragment: "withdrawFunds",
     data: BytesLike
@@ -59,10 +75,15 @@ export interface AbaPayInterface extends Interface {
 }
 
 export namespace FundsWithdrawnEvent {
-  export type InputTuple = [boss: AddressLike, amount: BigNumberish];
-  export type OutputTuple = [boss: string, amount: bigint];
+  export type InputTuple = [
+    boss: AddressLike,
+    token: AddressLike,
+    amount: BigNumberish
+  ];
+  export type OutputTuple = [boss: string, token: string, amount: bigint];
   export interface OutputObject {
     boss: string;
+    token: string;
     amount: bigint;
   }
   export type Event = TypedContractEvent<InputTuple, OutputTuple, OutputObject>;
@@ -74,21 +95,37 @@ export namespace FundsWithdrawnEvent {
 export namespace PaymentReceivedEvent {
   export type InputTuple = [
     user: AddressLike,
+    token: AddressLike,
     serviceType: string,
     accountNumber: string,
     amount: BigNumberish
   ];
   export type OutputTuple = [
     user: string,
+    token: string,
     serviceType: string,
     accountNumber: string,
     amount: bigint
   ];
   export interface OutputObject {
     user: string;
+    token: string;
     serviceType: string;
     accountNumber: string;
     amount: bigint;
+  }
+  export type Event = TypedContractEvent<InputTuple, OutputTuple, OutputObject>;
+  export type Filter = TypedDeferredTopicFilter<Event>;
+  export type Log = TypedEventLog<Event>;
+  export type LogDescription = TypedLogDescription<Event>;
+}
+
+export namespace TokenSupportUpdatedEvent {
+  export type InputTuple = [token: AddressLike, isSupported: boolean];
+  export type OutputTuple = [token: string, isSupported: boolean];
+  export interface OutputObject {
+    token: string;
+    isSupported: boolean;
   }
   export type Event = TypedContractEvent<InputTuple, OutputTuple, OutputObject>;
   export type Filter = TypedDeferredTopicFilter<Event>;
@@ -139,38 +176,65 @@ export interface AbaPay extends BaseContract {
     event?: TCEvent
   ): Promise<this>;
 
-  acceptedToken: TypedContractMethod<[], [string], "view">;
+  isSupportedToken: TypedContractMethod<[arg0: AddressLike], [boolean], "view">;
 
   owner: TypedContractMethod<[], [string], "view">;
 
   payBill: TypedContractMethod<
-    [serviceType: string, accountNumber: string, amount: BigNumberish],
+    [
+      tokenAddress: AddressLike,
+      serviceType: string,
+      accountNumber: string,
+      amount: BigNumberish
+    ],
     [void],
     "nonpayable"
   >;
 
-  withdrawFunds: TypedContractMethod<[], [void], "nonpayable">;
+  setTokenSupport: TypedContractMethod<
+    [tokenAddress: AddressLike, status: boolean],
+    [void],
+    "nonpayable"
+  >;
+
+  withdrawFunds: TypedContractMethod<
+    [tokenAddress: AddressLike],
+    [void],
+    "nonpayable"
+  >;
 
   getFunction<T extends ContractMethod = ContractMethod>(
     key: string | FunctionFragment
   ): T;
 
   getFunction(
-    nameOrSignature: "acceptedToken"
-  ): TypedContractMethod<[], [string], "view">;
+    nameOrSignature: "isSupportedToken"
+  ): TypedContractMethod<[arg0: AddressLike], [boolean], "view">;
   getFunction(
     nameOrSignature: "owner"
   ): TypedContractMethod<[], [string], "view">;
   getFunction(
     nameOrSignature: "payBill"
   ): TypedContractMethod<
-    [serviceType: string, accountNumber: string, amount: BigNumberish],
+    [
+      tokenAddress: AddressLike,
+      serviceType: string,
+      accountNumber: string,
+      amount: BigNumberish
+    ],
+    [void],
+    "nonpayable"
+  >;
+  getFunction(
+    nameOrSignature: "setTokenSupport"
+  ): TypedContractMethod<
+    [tokenAddress: AddressLike, status: boolean],
     [void],
     "nonpayable"
   >;
   getFunction(
     nameOrSignature: "withdrawFunds"
-  ): TypedContractMethod<[], [void], "nonpayable">;
+  ): TypedContractMethod<[tokenAddress: AddressLike], [void], "nonpayable">;
 
   getEvent(
     key: "FundsWithdrawn"
@@ -186,9 +250,16 @@ export interface AbaPay extends BaseContract {
     PaymentReceivedEvent.OutputTuple,
     PaymentReceivedEvent.OutputObject
   >;
+  getEvent(
+    key: "TokenSupportUpdated"
+  ): TypedContractEvent<
+    TokenSupportUpdatedEvent.InputTuple,
+    TokenSupportUpdatedEvent.OutputTuple,
+    TokenSupportUpdatedEvent.OutputObject
+  >;
 
   filters: {
-    "FundsWithdrawn(address,uint256)": TypedContractEvent<
+    "FundsWithdrawn(address,address,uint256)": TypedContractEvent<
       FundsWithdrawnEvent.InputTuple,
       FundsWithdrawnEvent.OutputTuple,
       FundsWithdrawnEvent.OutputObject
@@ -199,7 +270,7 @@ export interface AbaPay extends BaseContract {
       FundsWithdrawnEvent.OutputObject
     >;
 
-    "PaymentReceived(address,string,string,uint256)": TypedContractEvent<
+    "PaymentReceived(address,address,string,string,uint256)": TypedContractEvent<
       PaymentReceivedEvent.InputTuple,
       PaymentReceivedEvent.OutputTuple,
       PaymentReceivedEvent.OutputObject
@@ -208,6 +279,17 @@ export interface AbaPay extends BaseContract {
       PaymentReceivedEvent.InputTuple,
       PaymentReceivedEvent.OutputTuple,
       PaymentReceivedEvent.OutputObject
+    >;
+
+    "TokenSupportUpdated(address,bool)": TypedContractEvent<
+      TokenSupportUpdatedEvent.InputTuple,
+      TokenSupportUpdatedEvent.OutputTuple,
+      TokenSupportUpdatedEvent.OutputObject
+    >;
+    TokenSupportUpdated: TypedContractEvent<
+      TokenSupportUpdatedEvent.InputTuple,
+      TokenSupportUpdatedEvent.OutputTuple,
+      TokenSupportUpdatedEvent.OutputObject
     >;
   };
 }

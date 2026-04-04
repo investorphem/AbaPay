@@ -1,5 +1,5 @@
 {
-  "name": "abapay",
+  "name": "my-project",
   "version": "0.1.0",
   "private": true,
   "scripts": {
@@ -19,14 +19,15 @@
     "viem": "^2.47.6"
   },
   "devDependencies": {
-    "@nomicfoundation/hardhat-toolbox": "^6.1.2",
+    "@nomicfoundation/hardhat-toolbox": "^5.0.0",
+    "@nomicfoundation/hardhat-verify": "^2.0.0",
     "@tailwindcss/postcss": "^4",
     "@types/node": "^20",
     "@types/react": "^19",
     "@types/react-dom": "^19",
     "eslint": "^9",
     "eslint-config-next": "16.2.2",
-    "hardhat": "^2.28.6",
+    "hardhat": "^2.28.0",
     "tailwindcss": "^4",
     "typescript": "^5"
   }
