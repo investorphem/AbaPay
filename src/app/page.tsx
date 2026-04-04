@@ -18,38 +18,34 @@ const ERC20_ABI = [
   {"inputs":[{"internalType":"address","name":"account","type":"address"}],"name":"balanceOf","outputs":[{"internalType":"uint256","name":"","type":"uint256"}],"stateMutability":"view","type":"function"}
 ];
 
-// 1. PREMIUM COLOURFUL ICONS
+// PREMIUM COLOURFUL ICONS
 const SERVICES = [
-  { id: "AIRTIME", name: "Buy Airtime", icon: Phone, color: "text-[#34d399]" /* Emerald */, bg: "bg-emerald-500/10" },
-  { id: "DATA", name: "Buy Data", icon: Wifi, color: "text-[#a855f7]" /* Purple */, bg: "bg-purple-500/10" },
-  { id: "ELECTRICITY", name: "Electricity", icon: Lightbulb, color: "text-[#f97316]" /* Orange */, bg: "bg-orange-500/10" },
-  { id: "CABLE", name: "Cable TV", icon: Tv, color: "text-[#ec4899]" /* Pink */, bg: "bg-pink-500/10" },
+  { id: "AIRTIME", name: "Buy Airtime", icon: Phone, color: "text-[#34d399]", bg: "bg-emerald-500/10" },
+  { id: "DATA", name: "Buy Data", icon: Wifi, color: "text-[#a855f7]", bg: "bg-purple-500/10" },
+  { id: "ELECTRICITY", name: "Electricity", icon: Lightbulb, color: "text-[#f97316]", bg: "bg-orange-500/10" },
+  { id: "CABLE", name: "Cable TV", icon: Tv, color: "text-[#ec4899]", bg: "bg-pink-500/10" },
 ];
 
 const ELECTRICITY_PROVIDERS = ["aba-electric", "ikedc", "ekedc", "ibedc", "aedc", "kedco", "phed"];
 const CABLE_PROVIDERS = ["dstv", "gotv", "startimes", "showmax"];
 const TELECOM_PROVIDERS = ["mtn", "airtel", "glo", "9mobile"];
 
+// UPGRADED: USDC Fully Supported
 const SUPPORTED_TOKENS = [
   { symbol: "USDT", decimals: 6, mainnet: "0x48065fbbe25f71c9282ddf5e1cd6d6a887483d5e", sepolia: "0xd077A400968890Eacc75cdc901F0356c943e4fDb", icon: "💵" },
   { symbol: "USDC", decimals: 18, mainnet: "0xcebA9300f2b948710d2653dD7B07f33A8B32118C", sepolia: "0x874069Fa1Eb16D44d622F2e0Ca25eeA172369bC1", icon: "🪙" },
   { symbol: "CELO", decimals: 18, mainnet: "native", sepolia: "native", icon: "🟡" },
 ];
 
-// PRE-SELECT AMOUNT BUTTONS (Airtime)
 const PRE_SELECT_AMOUNTS = ["100", "200", "500", "1000", "2000"];
 
-// 2. DATA PLANS DATA STRUCTURE
 const MOCK_DATA_PLANS = [
-  // DAILY PLANS
   { id: "D1", category: "Daily", name: "100MB", validity: "24 Hrs", cost_naira: 100 },
   { id: "D2", category: "Daily", name: "350MB", validity: "24 Hrs", cost_naira: 200 },
   { id: "D3", category: "Daily", name: "1GB", validity: "24 Hrs", cost_naira: 350 },
-  // WEEKLY PLANS
   { id: "W1", category: "Weekly", name: "1GB", validity: "7 Days", cost_naira: 600 },
   { id: "W2", category: "Weekly", name: "2.5GB", validity: "7 Days", cost_naira: 1200 },
   { id: "W3", category: "Weekly", name: "Broadband Extra", validity: "7 Days", cost_naira: 3500, isBroadband: true },
-  // MONTHLY PLANS
   { id: "M1", category: "Monthly", name: "1.5GB", validity: "30 Days", cost_naira: 1100 },
   { id: "M2", category: "Monthly", name: "4.5GB", validity: "30 Days", cost_naira: 2200 },
   { id: "M3", category: "Monthly", name: "Broadband Unlimited", validity: "30 Days", cost_naira: 18000, isBroadband: true },
@@ -58,7 +54,6 @@ const MOCK_DATA_PLANS = [
 const DATA_CATEGORIES = ["Daily", "Weekly", "Monthly"];
 
 export default function Home() {
-  // 3. INITIAL LOADING STATE (SPLASH SCREEN)
   const [isInitiallyLoading, setIsInitiallyLoading] = useState(true);
 
   // --- SYSTEM STATES ---
@@ -93,11 +88,9 @@ export default function Home() {
   const [telecomProvider, setTelecomProvider] = useState(TELECOM_PROVIDERS[0]);
   const [meterType, setMeterType] = useState<"prepaid" | "postpaid">("prepaid");
   
-  // New Service Sub-tabs (Data)
   const [activeDataCategory, setActiveDataCategory] = useState(DATA_CATEGORIES[0]);
   const [selectedDataPlan, setSelectedDataPlan] = useState<any>(null);
 
-  // 4. NEW PREMIUM MODAL STATE
   const [isSelectionModalOpen, setIsSelectionModalOpen] = useState(false);
   const [modalTitle, setModalTitle] = useState("");
   const [modalOptions, setModalOptions] = useState<string[]>([]);
@@ -119,7 +112,6 @@ export default function Home() {
   // --- INITIALIZATION ---
   useEffect(() => {
     async function initSystem() {
-      // 5. Initialize dApp state
       const savedHistory = localStorage.getItem("abapay_history");
       if (savedHistory) setTransactions(JSON.parse(savedHistory));
       
@@ -129,7 +121,6 @@ export default function Home() {
         if (rateData.success && rateData.abaPayRate) setExchangeRate(Number(rateData.abaPayRate));
       } catch (consoleError) {}
 
-      // Check wallet injection
       if (typeof window !== "undefined" && (window as any).ethereum) {
         const walletClient = createWalletClient({ chain: activeChain, transport: custom((window as any).ethereum) });
         walletClient.requestAddresses().then(([acc]) => {
@@ -138,7 +129,6 @@ export default function Home() {
         });
       }
 
-      // Hide Splash Screen when basic dApp state is ready
       setTimeout(() => setIsInitiallyLoading(false), 2000);
     }
     initSystem();
@@ -219,20 +209,14 @@ export default function Home() {
     return { cryptoToCharge: crypto.toFixed(4), currentFee: fee };
   }, [nairaAmount, exchangeRate, activeService]);
 
-  // Strict Validation Logic
   const isFormValid = useMemo(() => {
     if (!nairaAmount || parseFloat(nairaAmount) <= 0) return false;
-    
-    // Strict 11-digit Airtime/Data check
     if (activeService.id === "AIRTIME" || activeService.id === "DATA") {
       return accountNumber.length === 11 && accountNumber.startsWith("0");
     }
-    
-    // Meter/Cable requires verification success
     if (activeService.id === "ELECTRICITY" || activeService.id === "CABLE") {
       return accountNumber.length >= 10 && customerName !== null;
     }
-    
     return false;
   }, [accountNumber, nairaAmount, activeService, customerName]);
 
@@ -240,9 +224,9 @@ export default function Home() {
   const handlePayment = async () => {
     if (!address || !client) return setStatus("Connect Wallet First");
     
-    // Smart Contract currently only supports USDT.
-    if (selectedToken.symbol !== "USDT") {
-      return showToast("Unsupported Asset", `AbaPay Smart Contract upgrade required to pay with ${selectedToken.symbol}. Please select USDT.`, "error");
+    // UPGRADED: Allows both USDT and USDC to pass through. Celo Native blocked for now.
+    if (selectedToken.symbol === "CELO") {
+      return showToast("Unsupported Asset", `AbaPay Smart Contract upgrade required to pay natively with CELO. Please select USDT or USDC.`, "error");
     }
 
     if (parseFloat(cryptoToCharge) > parseFloat(walletBalance)) {
@@ -255,6 +239,7 @@ export default function Home() {
       const valueInWei = parseUnits(cryptoToCharge, selectedToken.decimals);
       const tokenAddress = isMainnet ? selectedToken.mainnet : selectedToken.sepolia;
       
+      // Approves whichever token the user selected
       await client.writeContract({
         address: tokenAddress as `0x${string}`,
         abi: ERC20_ABI,
@@ -284,6 +269,7 @@ export default function Home() {
           serviceID: activeServiceID,
           billersCode: accountNumber,
           amount: cryptoToCharge,
+          token: selectedToken.symbol, // Backend now knows which token was used
           txHash: hash,
           variation_code: activeService.id === "ELECTRICITY" ? meterType : 'prepaid',
           phone: customerPhone || accountNumber
@@ -297,7 +283,7 @@ export default function Home() {
         const newTx = { id: hash.slice(0,8), date: new Date().toLocaleString(), status: "SUCCESS", amountNaira: nairaAmount, service: activeService.name, network: activeServiceID.toUpperCase(), txHash: hash };
         setTransactions([newTx, ...transactions]);
         localStorage.setItem("abapay_history", JSON.stringify([newTx, ...transactions]));
-        // Refresh balance
+        
         const publicClient = createPublicClient({ chain: activeChain, transport: http() });
         const balanceWei = await publicClient.readContract({ address: tokenAddress as `0x${string}`, abi: ERC20_ABI, functionName: 'balanceOf', args: [address] });
         setWalletBalance(parseFloat(formatUnits(balanceWei as bigint, selectedToken.decimals)).toFixed(4));
@@ -329,7 +315,6 @@ export default function Home() {
     }
   };
 
-  // 6. HELPER TO OPEN SELECTION MODAL
   const openPremiumSelection = (title: string, options: string[], callback: (value: string) => void) => {
     setModalTitle(title);
     setModalOptions(options);
@@ -337,16 +322,13 @@ export default function Home() {
     setIsSelectionModalOpen(true);
   };
 
-  // 7. Dynamic Data Plan Filtering & USDT Calculation
   const filteredDataPlans = useMemo(() => {
     return MOCK_DATA_PLANS.filter(plan => plan.category === activeDataCategory);
   }, [activeDataCategory]);
 
-  // --- PREMIUM UI BUILD ---
   return (
     <main className="min-h-screen bg-slate-50 text-slate-900 font-sans p-4 flex flex-col items-center pb-20 relative">
 
-      {/* --- ADD CUSTOM LOGO SCALING ANIMATION --- */}
       <style>{`
         @keyframes logoScale {
           0%, 100% { transform: scale(1); opacity: 0.9; }
@@ -355,7 +337,6 @@ export default function Home() {
         .animate-logo-scale { animation: logoScale 1.5s ease-in-out infinite; }
       `}</style>
 
-      {/* --- PREMIUM INTRO SPLASH SCREEN --- */}
       {isInitiallyLoading && (
         <div className="fixed inset-0 z-[100] bg-white flex flex-col items-center justify-center animate-in fade-out duration-500 fill-mode-forwards" style={{ animationDelay: '1.5s' }}>
           <img src="/logo.png" alt="AbaPay" className="h-28 w-auto object-contain animate-logo-scale mb-10" />
@@ -366,7 +347,6 @@ export default function Home() {
         </div>
       )}
       
-      {/* --- TOAST NOTIFICATION --- */}
       {toast && (
         <div className="fixed top-4 right-4 sm:top-6 sm:right-6 z-[100] animate-in slide-in-from-top-8 fade-in duration-300">
           <div className="bg-[#111114] border border-slate-800 shadow-2xl rounded-2xl p-4 flex items-start gap-3 w-[300px]">
@@ -382,7 +362,6 @@ export default function Home() {
         </div>
       )}
 
-      {/* --- PREMIUM COMPANY/NETWORK SELECTION MODAL (NOW CENTERED) --- */}
       {isSelectionModalOpen && (
         <div className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-sm flex justify-center items-center p-4 animate-in fade-in" onClick={() => setIsSelectionModalOpen(false)}>
            <div className="bg-white w-full max-w-sm rounded-[2rem] shadow-2xl p-6 animate-in zoom-in-95 duration-200" onClick={(e) => e.stopPropagation()}>
@@ -398,7 +377,6 @@ export default function Home() {
                      className="w-full text-left p-4 rounded-xl font-bold text-slate-700 bg-slate-50 border border-slate-100 uppercase text-xs hover:border-emerald-300 hover:bg-emerald-50/50 transition-all flex justify-between items-center"
                    >
                      {option}
-                     {/* Dynamic checkmark if selected */}
                      {(telecomProvider === option || elecProvider === option || cableProvider === option || selectedToken.symbol === option) && <CheckCircle2 size={16} className="text-emerald-500"/>}
                    </button>
                  ))}
@@ -407,7 +385,6 @@ export default function Home() {
         </div>
       )}
 
-      {/* --- SUPPORT MODAL (NOW CENTERED) --- */}
       {isSupportOpen && (
         <div className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-sm flex justify-center items-center p-4 animate-in fade-in">
           <div className="bg-white w-full max-w-md rounded-[2rem] shadow-2xl p-6 animate-in zoom-in-95 duration-200">
@@ -434,7 +411,6 @@ export default function Home() {
       )}
 
       <div className="w-full max-w-md">
-        {/* --- MAIN HEADER & PROFILE --- */}
         <div className="flex justify-between items-center bg-white p-4 rounded-3xl shadow-sm border border-slate-100 mb-6">
           <div className="flex items-center gap-3">
             <img src="/logo.png" alt="AbaPay" className="h-10 w-auto object-contain" />
@@ -457,7 +433,6 @@ export default function Home() {
           </div>
         </div>
 
-        {/* --- TABS --- */}
         <div className="flex gap-2 bg-slate-200/50 p-1.5 rounded-2xl mb-6 shadow-inner">
             <button onClick={() => setActiveTab("pay")} className={`flex-1 py-3 rounded-xl text-xs font-black transition-all ${activeTab === 'pay' ? 'bg-white text-emerald-600 shadow-xl' : 'text-slate-500 hover:text-slate-700'}`}>PAY BILLS</button>
             <button onClick={() => setActiveTab("history")} className={`flex-1 py-3 rounded-xl text-xs font-black transition-all ${activeTab === 'history' ? 'bg-white text-emerald-600 shadow-xl' : 'text-slate-500 hover:text-slate-700'}`}>HISTORY</button>
@@ -466,7 +441,6 @@ export default function Home() {
         {activeTab === 'pay' ? (
           <div className="bg-white border border-slate-100 rounded-[2.5rem] p-8 shadow-2xl shadow-emerald-900/10 animate-in fade-in zoom-in-95">
             
-            {/* SERVICE SELECTOR (colorful icons) */}
             <div className="grid grid-cols-4 gap-3 mb-6">
                 {SERVICES.map(s => (
                     <button 
@@ -480,10 +454,8 @@ export default function Home() {
                 ))}
             </div>
 
-            {/* FORM INPUTS */}
             <div className="space-y-5">
                 
-                {/* TOKEN SELECTOR & BALANCE DASHBOARD */}
                 <div className="bg-slate-50 border border-slate-100 p-4 rounded-2xl flex justify-between items-center animate-in fade-in">
                   <div 
                     className="flex items-center gap-2 cursor-pointer hover:bg-slate-100 p-2 -ml-2 rounded-xl transition-colors" 
@@ -502,7 +474,6 @@ export default function Home() {
                   </div>
                 </div>
 
-                {/* PREMIUM SELECTION TRIGGERS (Network/Provider) */}
                 <div className="animate-in slide-in-from-left-2">
                     <label className="text-[10px] font-black text-slate-400 uppercase mb-2 block">
                         {activeService.id === "AIRTIME" || activeService.id === "DATA" ? "Network Selection" : "Choose Provider"}
@@ -525,7 +496,6 @@ export default function Home() {
                       <ChevronDown size={14} className="text-slate-400"/>
                     </button>
 
-                    {/* PREPAID / POSTPAID TOGGLE (Electricity Only) */}
                     {activeService.id === "ELECTRICITY" && (
                        <div className="flex gap-2 mt-3 p-1 bg-slate-100 rounded-xl border border-slate-200 shadow-inner">
                           <button onClick={() => setMeterType("prepaid")} className={`flex-1 py-2.5 text-[10px] font-black uppercase rounded-lg transition-colors ${meterType === "prepaid" ? "bg-white shadow-sm text-emerald-600" : "text-slate-500"}`}>Prepaid</button>
@@ -534,7 +504,6 @@ export default function Home() {
                     )}
                 </div>
 
-                {/* ACCOUNT NUMBER / PHONE INPUT */}
                 <div>
                     <label className="text-[10px] font-black text-slate-400 uppercase mb-2 flex justify-between">
                       <span>{activeService.id === "AIRTIME" || activeService.id === "DATA" ? "Phone Number (11 Digits)" : "Account / Meter No"}</span>
@@ -562,19 +531,15 @@ export default function Home() {
                     )}
                 </div>
 
-                {/* --- DATA SPECIFIC UI UPGRADE: PLANS GRID --- */}
                 {activeService.id === "DATA" && (
                    <div className="bg-slate-50 border border-slate-100 p-4 rounded-2xl animate-in fade-in slide-in-from-top-4">
-                      {/* Category Tabs */}
                       <div className="flex gap-1.5 mb-4 border-b border-slate-200 pb-3 overflow-x-auto">
                         {DATA_CATEGORIES.map(cat => (
                           <button key={cat} onClick={() => { setActiveDataCategory(cat); setSelectedDataPlan(null); }} className={`px-4 py-1.5 rounded-lg text-[10px] font-black uppercase transition-colors whitespace-nowrap ${activeDataCategory === cat ? 'bg-purple-500/10 text-purple-600' : 'text-slate-500 hover:bg-slate-100'}`}>{cat}</button>
                         ))}
-                        {/* Broadband Shortcut tab */}
                         <button onClick={() => setActiveDataCategory("Broadband")} className={`px-4 py-1.5 flex items-center gap-1.5 rounded-lg text-[10px] font-black uppercase transition-colors ${activeDataCategory === "Broadband" ? 'bg-orange-500/10 text-orange-600' : 'text-slate-500 hover:bg-slate-100'}`}><Briefcase size={12}/> Broadband</button>
                       </div>
 
-                      {/* Plans Grid */}
                       <div className="grid grid-cols-2 gap-3 max-h-[30vh] overflow-y-auto pr-1">
                           {(activeDataCategory === "Broadband" ? MOCK_DATA_PLANS.filter(p => p.isBroadband) : filteredDataPlans).map(plan => {
                             const cryptoPlanCost = (plan.cost_naira / exchangeRate).toFixed(4);
@@ -593,7 +558,6 @@ export default function Home() {
                    </div>
                 )}
 
-                {/* NAIRA VALUE INPUT & AIRTIME PRE-SELECT */}
                 <div className={activeService.id === "DATA" ? "hidden" : ""}>
                     <label className="text-[10px] font-black text-slate-400 uppercase mb-2 block">Naira Value</label>
                     <div className="relative mb-3">
@@ -609,7 +573,6 @@ export default function Home() {
                         </div>
                     </div>
 
-                    {/* Airtime Pre-Select Buttons */}
                     {activeService.id === "AIRTIME" && (
                        <div className="flex gap-2.5 overflow-x-auto py-1">
                           {PRE_SELECT_AMOUNTS.map(amount => {
@@ -625,7 +588,6 @@ export default function Home() {
                     )}
                 </div>
 
-                {/* OPTIONAL PHONE FOR ELECTRICITY NOTIFICATIONS */}
                 {activeService.id === "ELECTRICITY" && (
                     <div className="animate-in fade-in">
                          <input 
@@ -637,7 +599,6 @@ export default function Home() {
                     </div>
                 )}
 
-                {/* STATUS MESSAGE */}
                 {status && (
                     <div className={`p-4 rounded-2xl text-[10px] font-bold border flex items-center gap-3 animate-in fade-in slide-in-from-top-2 ${status.includes('Success') ? 'bg-emerald-50 border-emerald-100 text-emerald-700' : 'bg-red-50 border-red-100 text-red-700'}`}>
                         {status.includes('Success') ? <CheckCircle2 size={16}/> : <AlertTriangle size={16}/>}
@@ -645,7 +606,6 @@ export default function Home() {
                     </div>
                 )}
 
-                {/* SUBMIT BUTTON */}
                 <button 
                     onClick={handlePayment}
                     disabled={isVerifying || !isFormValid}
