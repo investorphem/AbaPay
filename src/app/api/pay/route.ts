@@ -19,23 +19,19 @@ export async function POST(req: Request) {
         phone 
     } = body;
 
-    // 1. REPLAY ATTACK PREVENTION
     if (processedTransactions.has(txHash)) {
       return NextResponse.json({ success: false, message: "Duplicate hash blocked." }, { status: 400 });
     }
 
-    // 2. DYNAMIC CURRENCY CONVERSION
     const baseRate = parseFloat(process.env.NEXT_PUBLIC_FIXED_RATE || "1550");
     const profitSpread = 1.03; 
     const exchangeRate = baseRate * profitSpread;
     const totalNairaValue = parseFloat(amount) * exchangeRate;
 
-    // 3. MINIMUM LIMIT CHECK
     if (totalNairaValue < 500) {
       return NextResponse.json({ success: false, message: "Minimum order value is ₦500." }, { status: 400 });
     }
 
-    // 4. MERCHANT VERIFICATION
     const needsVerification = serviceID.includes('electric') || serviceID.includes('tv');
     if (needsVerification) {
       const verifyRes = await fetch(`${BASE_URL}/merchant-verify`, {
@@ -54,11 +50,9 @@ export async function POST(req: Request) {
       }
     }
 
-    // 5. FEE & VEND CALCULATION
     const serviceFee = needsVerification ? 100 : 0;
     const vendAmount = Math.floor(totalNairaValue - serviceFee);
 
-    // 6. VTPASS PAYLOAD CONSTRUCTION
     const isAirtime = ['mtn', 'airtel', 'glo', '9mobile'].includes(serviceID);
     const vtpassPayload: any = {
       request_id: generateRequestId(),
@@ -72,21 +66,31 @@ export async function POST(req: Request) {
       vtpassPayload.variation_code = variation_code;
     }
 
-    // 7. VTPASS EXECUTION
-    const payRes = await fetch(`${BASE_URL}/pay`, {
-      method: 'POST',
-      headers: getHeaders('POST'),
-      body: JSON.stringify(vtpassPayload)
-    });
+    // --- GOD-MODE DEBUGGING: CATCHING THE EXACT VTPASS CRASH ---
+    let payRes;
+    try {
+      payRes = await fetch(`${BASE_URL}/pay`, {
+        method: 'POST',
+        headers: getHeaders('POST'),
+        body: JSON.stringify(vtpassPayload)
+      });
+    } catch (fetchError: any) {
+      return NextResponse.json({ success: false, code: "FETCH_CRASH", message: fetchError.message }, { status: 502 });
+    }
 
-    const payData = await payRes.json();
+    let payData;
+    try {
+      payData = await payRes.json();
+    } catch (jsonError: any) {
+      const errorText = await payRes.text();
+      return NextResponse.json({ success: false, code: "JSON_CRASH", message: errorText.slice(0,100) }, { status: 502 });
+    }
+    // -----------------------------------------------------------
 
-    // 8. HANDLING SUCCESS, LOGGING & ALERTS
     if (payData.code === '000') {
       processedTransactions.add(txHash);
       const vendedToken = payData.purchased_code || payData.token || "Vended Successfully";
 
-      // DATABASE SYNC
       const { error: dbError } = await supabase.from('transactions').insert([{
         tx_hash: txHash,
         service_category: serviceID,
@@ -98,11 +102,8 @@ export async function POST(req: Request) {
       }]);
       if (dbError) console.error("SUPABASE ERROR:", dbError.message);
 
-      // ALERTS (Wrapped to prevent crashing)
       try { await sendAbaPaySms(vtpassPayload.phone, `AbaPay: Purchase Successful! Token/Ref: ${vendedToken}. Amt: ₦${vendAmount}`); } catch (e) {}
-      try {
-        await sendTelegramAlert(`✅ *SALE SUCCESSFUL*\n🛒 *Product:* ${serviceID}\n💰 *Naira:* ₦${vendAmount}\n🪙 *Asset:* ${amount} ${tokenSymbol || 'USDT'}\n👤 *User:* ${billersCode}`);
-      } catch (e) {}
+      try { await sendTelegramAlert(`✅ *SALE SUCCESSFUL*\n🛒 *Product:* ${serviceID}\n💰 *Naira:* ₦${vendAmount}\n🪙 *Asset:* ${amount} ${tokenSymbol || 'USDT'}\n👤 *User:* ${billersCode}`); } catch (e) {}
 
       return NextResponse.json({
         success: true,
@@ -111,9 +112,6 @@ export async function POST(req: Request) {
       });
 
     } else {
-      // 9. HANDLE VENDING FAILURE SAFELY
-
-      // A. Save to Database FIRST before anything else can crash
       const { error: failDbError } = await supabase.from('transactions').insert([{
         tx_hash: txHash,
         service_category: serviceID,
@@ -125,12 +123,8 @@ export async function POST(req: Request) {
       }]);
       if (failDbError) console.error("SUPABASE FAILED LOG ERROR:", failDbError.message);
 
-      // B. Attempt Telegram Alert
-      try {
-        await sendTelegramAlert(`🚨 *CRITICAL VENDING ERROR*\nHash: \`${txHash}\`\nVTpass Code: ${payData.code}`);
-      } catch (e) {}
+      try { await sendTelegramAlert(`🚨 *CRITICAL VENDING ERROR*\nHash: \`${txHash}\`\nVTpass Code: ${payData.code}`); } catch (e) {}
 
-      // C. Return the exact VTpass code so you can see it on the frontend
       return NextResponse.json({ 
         success: false, 
         message: `Vending failed. VTpass Code: ${payData.code}`,
@@ -140,6 +134,6 @@ export async function POST(req: Request) {
 
   } catch (error: any) {
     console.error("Payment Engine Failure:", error.message);
-    return NextResponse.json({ success: false, message: "Internal Server Error" }, { status: 500 });
+    return NextResponse.json({ success: false, code: "SYSTEM_CRASH", message: error.message }, { status: 500 });
   }
 }
