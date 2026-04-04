@@ -1,8 +1,8 @@
 import { NextResponse } from 'next/server';
 import { BASE_URL, generateRequestId, getHeaders } from '@/lib/vtpass';
 import { sendAbaPaySms } from '@/lib/messaging';
-import { sendTelegramAlert } from '@/lib/telegram'; // Import your telegram utility
-import { supabase } from '@/utils/supabase'; // Import your supabase client
+import { sendTelegramAlert } from '@/lib/telegram'; 
+import { supabase } from '@/utils/supabase'; 
 
 // SECURITY: Replay Attack Prevention
 const processedTransactions = new Set();
@@ -13,11 +13,12 @@ export async function POST(req: Request) {
     const { 
         serviceID,      
         billersCode,    
-        amount,         // USDT amount from frontend
+        amount,         // Crypto amount from frontend
+        token: tokenSymbol, // NEW: USDT or USDC
         txHash,         
         variation_code, 
         phone,
-        email           // Optional email for records
+        email           
     } = body;
 
     // 1. REPLAY ATTACK PREVENTION
@@ -26,7 +27,6 @@ export async function POST(req: Request) {
     }
 
     // 2. DYNAMIC CURRENCY CONVERSION
-    // Uses your .env.local rate (e.g., 1550) + your 3% spread
     const baseRate = parseFloat(process.env.NEXT_PUBLIC_FIXED_RATE || "1550");
     const profitSpread = 1.03; 
     const exchangeRate = baseRate * profitSpread;
@@ -37,7 +37,7 @@ export async function POST(req: Request) {
       return NextResponse.json({ success: false, message: "Minimum order value is ₦500." }, { status: 400 });
     }
 
-    // 4. MERCHANT VERIFICATION (Documentation Rule)
+    // 4. MERCHANT VERIFICATION
     const verifyRes = await fetch(`${BASE_URL}/merchant-verify`, {
       method: 'POST',
       headers: getHeaders('POST'),
@@ -76,28 +76,29 @@ export async function POST(req: Request) {
     // 7. HANDLING SUCCESS, LOGGING & ALERTS
     if (payData.code === '000') {
       processedTransactions.add(txHash);
-      const token = payData.purchased_code || payData.token || "Vended Successfully";
+      const vendedToken = payData.purchased_code || payData.token || "Vended Successfully";
 
-      // A. DISPATCH SMS (DND Fallback V2)
-      await sendAbaPaySms(phone, `AbaPay: Purchase Successful! Token/Ref: ${token}. Amt: ₦${vendAmount}`);
+      // A. DISPATCH SMS
+      await sendAbaPaySms(phone, `AbaPay: Purchase Successful! Token/Ref: ${vendedToken}. Amt: ₦${vendAmount}`);
 
-      // B. DISPATCH TELEGRAM ALERT (For Admin)
+      // B. DISPATCH TELEGRAM ALERT (Updated to show which token was used)
       await sendTelegramAlert(
         `✅ *SALE SUCCESSFUL*\n` +
         `━━━━━━━━━━━━━━━\n` +
         `🛒 *Product:* ${serviceID}\n` +
-        `💰 *Naira:* ₦${vendAmount}\n` +
-        `💵 *USDT:* ${amount}\n` +
+        `💰 *Naira:* ₦${vendAmount.toLocaleString()}\n` +
+        `🪙 *Asset:* ${amount} ${tokenSymbol || 'USDT'}\n` + 
         `👤 *User:* ${billersCode}\n` +
         `⛽ *Fee:* ₦${serviceFee}`
       );
 
       // C. CLOUD LEDGER SYNC (Supabase)
+      // Note: We keep amount_usdt name for DB compatibility but store the value
       await supabase.from('transactions').insert([{
         tx_hash: txHash,
         service_category: serviceID,
         account_number: billersCode,
-        amount_usdt: amount,
+        amount_usdt: `${amount} ${tokenSymbol || 'USDT'}`, // Logs asset type in the amount column
         amount_naira: vendAmount,
         fee_naira: serviceFee,
         status: 'SUCCESS'
@@ -106,13 +107,13 @@ export async function POST(req: Request) {
       return NextResponse.json({
         success: true,
         message: "Transaction Successful!",
-        data: { token, vendAmount, requestId: payData.requestId }
+        data: { vendedToken, vendAmount, requestId: payData.requestId }
       });
 
     } else {
-      // D. HANDLE VENDING FAILURE (Alert Admin immediately)
-      await sendTelegramAlert(`🚨 *CRITICAL VENDING ERROR*\nHash: \`${txHash}\`\nVTpass Code: ${payData.code}`);
-      
+      // D. HANDLE VENDING FAILURE
+      await sendTelegramAlert(`🚨 *CRITICAL VENDING ERROR*\nHash: \`${txHash}\`\nAsset: ${tokenSymbol}\nVTpass Code: ${payData.code}`);
+
       return NextResponse.json({ 
         success: false, 
         message: "Vending failed. Admin alerted for manual refund.",
