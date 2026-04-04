@@ -6,8 +6,8 @@ import { celo, celoSepolia } from "viem/chains";
 import { 
   Wallet, Receipt, ShieldCheck, Zap, AlertTriangle, 
   CheckCircle2, ExternalLink, Lightbulb, Phone, Wifi, Tv, 
-  ChevronDown, Loader2, HelpCircle, XCircle, Mail, 
-  Paperclip, Send, Coins, Briefcase, Download
+  ChevronDown, Loader2, XCircle, Mail, 
+  Paperclip, Send, Coins, Briefcase, Share2, Copy
 } from "lucide-react";
 import { supabase } from "@/utils/supabase";
 
@@ -29,6 +29,7 @@ const ELECTRICITY_PROVIDERS = ["aba-electric", "ikedc", "ekedc", "ibedc", "aedc"
 const CABLE_PROVIDERS = ["dstv", "gotv", "startimes", "showmax"];
 const TELECOM_PROVIDERS = ["mtn", "airtel", "glo", "9mobile"];
 
+// UPGRADED: USDC DECIMALS FIXED TO 6
 const SUPPORTED_TOKENS = [
   { symbol: "USDT", decimals: 6, mainnet: "0x48065fbbe25f71c9282ddf5e1cd6d6a887483d5e", sepolia: "0xd077A400968890Eacc75cdc901F0356c943e4fDb", icon: "💵" },
   { symbol: "USDC", decimals: 6, mainnet: "0xcebA9300f2b948710d2653dD7B07f33A8B32118C", sepolia: "0x01C5C0122039549AD1493B8220cABEdD739BC44E", icon: "🪙" },
@@ -63,18 +64,21 @@ export default function Home() {
   const [status, setStatus] = useState("");
   const [activeTab, setActiveTab] = useState("pay");
   const [isMiniPay, setIsMiniPay] = useState(false);
+  
+  // NEW: Locks the UI while transaction is processing
+  const [isProcessing, setIsProcessing] = useState(false); 
 
-  // NEW: Receipt State
+  // Receipt State
   const [selectedReceipt, setSelectedReceipt] = useState<any>(null); 
 
-  // Validation & Support States
+  // Validation States
   const [customerName, setCustomerName] = useState<string | null>(null);
   const [isVerifying, setIsVerifying] = useState(false);
-  const [isSupportOpen, setIsSupportOpen] = useState(false);
-  const [supportMessage, setSupportMessage] = useState("");
-  const [supportFile, setSupportFile] = useState<File | null>(null);
-  const [isSendingSupport, setIsSendingSupport] = useState(false);
-  const fileInputRef = useRef<HTMLInputElement>(null);
+
+  const [isSelectionModalOpen, setIsSelectionModalOpen] = useState(false);
+  const [modalTitle, setModalTitle] = useState("");
+  const [modalOptions, setModalOptions] = useState<string[]>([]);
+  const [modalCallback, setModalCallback] = useState<((value: string) => void) | null>(null);
 
   const [toast, setToast] = useState<{title: string, message: string, type: 'success' | 'error'} | null>(null);
 
@@ -92,11 +96,6 @@ export default function Home() {
 
   const [activeDataCategory, setActiveDataCategory] = useState(DATA_CATEGORIES[0]);
   const [selectedDataPlan, setSelectedDataPlan] = useState<any>(null);
-
-  const [isSelectionModalOpen, setIsSelectionModalOpen] = useState(false);
-  const [modalTitle, setModalTitle] = useState("");
-  const [modalOptions, setModalOptions] = useState<string[]>([]);
-  const [modalCallback, setModalCallback] = useState<((value: string) => void) | null>(null);
 
   // Token & Balance States
   const [selectedToken, setSelectedToken] = useState(SUPPORTED_TOKENS[0]);
@@ -236,6 +235,8 @@ export default function Home() {
       return setStatus(`Insufficient ${selectedToken.symbol} Balance.`);
     }
 
+    // LOCK THE BUTTON
+    setIsProcessing(true);
     setStatus("Initiating Blockchain Escrow...");
 
     try {
@@ -264,7 +265,17 @@ export default function Home() {
 
       setStatus(`${selectedToken.symbol} Secured. Vending Utility...`);
 
-      // NEW: Added tokenUsed and amountCrypto for the Receipt
+      // PREPARE BACKEND PAYLOAD BEFORE CLEARING UI
+      const backendPayload = {
+        serviceID: activeServiceID,
+        billersCode: accountNumber,
+        amount: cryptoToCharge,
+        token: selectedToken.symbol,
+        txHash: hash,
+        variation_code: activeService.id === "ELECTRICITY" ? meterType : 'prepaid',
+        phone: customerPhone || accountNumber
+      };
+
       const newTx = { 
         id: hash.slice(0,8), 
         date: new Date().toLocaleString(), 
@@ -278,18 +289,18 @@ export default function Home() {
         account: accountNumber
       };
 
+      // CLEAR ALL INPUTS INSTANTLY
+      setAccountNumber("");
+      setNairaAmount("");
+      setCustomerPhone("");
+      setCustomerName(null);
+      setSelectedDataPlan(null);
+
+      // CALL BACKEND
       const res = await fetch('/api/pay', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          serviceID: activeServiceID,
-          billersCode: accountNumber,
-          amount: cryptoToCharge,
-          token: selectedToken.symbol,
-          txHash: hash,
-          variation_code: activeService.id === "ELECTRICITY" ? meterType : 'prepaid',
-          phone: customerPhone || accountNumber
-        })
+        body: JSON.stringify(backendPayload)
       });
 
       const result = await res.json();
@@ -297,6 +308,7 @@ export default function Home() {
       if (result.success) {
         setStatus("Success! Token/Ref Dispatched.");
         newTx.status = "SUCCESS";
+        showToast("Vending Successful", "Your utility has been successfully delivered.", "success");
       } else {
         setStatus("Utility Vending Delayed. Admin Notified.");
         newTx.status = "FAILED/DELAYED";
@@ -313,26 +325,9 @@ export default function Home() {
     } catch (e) { 
       console.error(e);
       setStatus("Transaction Cancelled."); 
-    }
-  };
-
-  const submitSupportTicket = async () => {
-    if (!supportMessage.trim()) return;
-    setIsSendingSupport(true);
-    try {
-      const formData = new FormData();
-      formData.append("message", supportMessage);
-      if (address) formData.append("userAddress", address);
-      if (supportFile) formData.append("file", supportFile);
-      await fetch('/api/support', { method: 'POST', body: formData });
-      setIsSupportOpen(false);
-      setSupportMessage("");
-      setSupportFile(null);
-      showToast("Ticket Submitted", "AbaPay Support has received your request.", "success");
-    } catch (error) {
-      showToast("Connection Error", "Failed to send the ticket.", "error");
     } finally {
-      setIsSendingSupport(false);
+      // UNLOCK THE BUTTON
+      setIsProcessing(false);
     }
   };
 
@@ -341,6 +336,30 @@ export default function Home() {
     setModalOptions(options);
     setModalCallback(() => callback);
     setIsSelectionModalOpen(true);
+  };
+
+  // --- SHARE RECEIPT LOGIC FOR MINIPAY ---
+  const handleShareReceipt = async () => {
+    const receiptText = `🧾 AbaPay Protocol Receipt\n\nStatus: ${selectedReceipt.status}\nProduct: ${selectedReceipt.network} ${selectedReceipt.service}\nRecipient: ${selectedReceipt.account}\nAmount Paid: ₦${selectedReceipt.amountNaira}\nCrypto Used: ${selectedReceipt.amountCrypto} ${selectedReceipt.tokenUsed}\nTx Hash: ${selectedReceipt.txHash}\n\nSecured by Celo Network`;
+
+    if (navigator.share) {
+      try {
+        await navigator.share({
+          title: 'AbaPay Receipt',
+          text: receiptText,
+        });
+      } catch (err) {
+        console.log("Share cancelled or failed.", err);
+      }
+    } else {
+      // Fallback to clipboard if share isn't supported
+      try {
+        await navigator.clipboard.writeText(receiptText);
+        showToast("Copied!", "Receipt details copied to clipboard.", "success");
+      } catch (err) {
+        showToast("Error", "Could not copy receipt.", "error");
+      }
+    }
   };
 
   const filteredDataPlans = useMemo(() => {
@@ -420,10 +439,10 @@ export default function Home() {
                    Verify on Celoscan <ExternalLink size={12}/>
                  </button>
                  <button 
-                  onClick={() => window.print()}
+                  onClick={handleShareReceipt} // UPGRADED FOR MINIPAY
                   className="w-full py-4 bg-slate-900 hover:bg-slate-800 text-white rounded-2xl text-xs font-black uppercase tracking-widest flex items-center justify-center gap-2 transition-colors active:scale-95 shadow-xl shadow-slate-900/20"
                  >
-                   <Download size={16}/> Save Receipt
+                   <Share2 size={16}/> Share Receipt
                  </button>
               </div>
            </div>
@@ -450,31 +469,6 @@ export default function Home() {
                  ))}
               </div>
            </div>
-        </div>
-      )}
-
-      {isSupportOpen && (
-        <div className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-sm flex justify-center items-center p-4 animate-in fade-in">
-          <div className="bg-white w-full max-w-md rounded-[2rem] shadow-2xl p-6 animate-in zoom-in-95 duration-200">
-            <div className="flex justify-between items-center mb-4">
-              <h2 className="text-xl font-bold flex items-center gap-2"><HelpCircle className="text-emerald-500"/> Customer Support</h2>
-              <button onClick={() => setIsSupportOpen(false)} className="p-2 bg-slate-100 rounded-full hover:bg-slate-200"><XCircle size={20} className="text-slate-500" /></button>
-            </div>
-            <textarea 
-              className="w-full bg-slate-50 border border-slate-200 rounded-xl p-4 mb-4 text-sm outline-none focus:border-emerald-500"
-              rows={4} placeholder="Describe your issue..."
-              value={supportMessage} onChange={(e) => setSupportMessage(e.target.value)}
-            />
-            <div className="flex gap-2 mb-6">
-              <input type="file" ref={fileInputRef} className="hidden" onChange={(e) => setSupportFile(e.target.files?.[0] || null)} />
-              <button onClick={() => fileInputRef.current?.click()} className="flex-1 py-3 bg-slate-100 hover:bg-slate-200 rounded-xl text-sm font-bold flex items-center justify-center gap-2">
-                <Paperclip size={16} /> {supportFile ? "File Attached" : "Attach Receipt"}
-              </button>
-            </div>
-            <button onClick={submitSupportTicket} disabled={isSendingSupport} className="w-full bg-emerald-600 hover:bg-emerald-500 text-white font-bold py-4 rounded-xl flex items-center justify-center gap-2 transition-colors active:scale-95 disabled:opacity-50">
-              {isSendingSupport ? <Loader2 className="animate-spin" /> : <><Send size={18}/> Send Ticket</>}
-            </button>
-          </div>
         </div>
       )}
 
@@ -692,11 +686,15 @@ export default function Home() {
 
                 <button 
                     onClick={handlePayment}
-                    disabled={isVerifying || !isFormValid}
+                    // UPGRADED: Button locks while processing
+                    disabled={isVerifying || !isFormValid || isProcessing} 
                     className="w-full bg-slate-900 hover:bg-black text-white font-black py-5 rounded-[1.5rem] flex items-center justify-center gap-3 transition-all active:scale-95 disabled:opacity-30 shadow-xl shadow-slate-900/20"
                 >
-                    <ShieldCheck size={20} className="text-emerald-400" /> 
-                    CONFIRM & PAY {cryptoToCharge} {selectedToken.symbol}
+                    {isProcessing ? (
+                      <><Loader2 size={20} className="animate-spin text-emerald-400"/> SECURING BLOCKCHAIN...</>
+                    ) : (
+                      <><ShieldCheck size={20} className="text-emerald-400" /> CONFIRM & PAY {cryptoToCharge} {selectedToken.symbol}</>
+                    )}
                 </button>
             </div>
           </div>
@@ -712,7 +710,7 @@ export default function Home() {
                     {transactions.map((tx, idx) => (
                         <div 
                           key={idx} 
-                          onClick={() => setSelectedReceipt(tx)} // CLICK TO OPEN RECEIPT
+                          onClick={() => setSelectedReceipt(tx)} 
                           className="p-4 bg-slate-50 rounded-2xl border border-slate-100 flex justify-between items-center cursor-pointer hover:bg-emerald-50 hover:border-emerald-100 transition-all group"
                         >
                             <div>
@@ -721,7 +719,9 @@ export default function Home() {
                             </div>
                             <div className="text-right flex flex-col items-end gap-1">
                                 <p className="text-xs font-black text-emerald-600">₦{tx.amountNaira}</p>
-                                <span className="text-[8px] font-black uppercase tracking-widest bg-slate-200 text-slate-500 px-2 py-0.5 rounded-full group-hover:bg-emerald-200 group-hover:text-emerald-800 transition-colors">Receipt</span>
+                                <span className="text-[8px] font-black uppercase tracking-widest bg-slate-200 text-slate-500 px-2 py-0.5 rounded-full group-hover:bg-emerald-200 group-hover:text-emerald-800 transition-colors flex items-center gap-1">
+                                  View Receipt <ExternalLink size={8}/>
+                                </span>
                             </div>
                         </div>
                     ))}
@@ -730,15 +730,7 @@ export default function Home() {
           </div>
         )}
 
-        <div className="mt-8 flex flex-col items-center gap-4">
-            <button 
-                onClick={() => setIsSupportOpen(true)}
-                className="text-[10px] font-black text-slate-400 hover:text-emerald-500 transition-colors uppercase tracking-widest flex items-center gap-2"
-            >
-                <HelpCircle size={14} /> Failed Transaction? Open Support
-            </button>
-        </div>
-
+        {/* UPGRADED: Removed support button and support link from footer */}
         <footer className="mt-12 w-full border-t border-slate-200 pt-8 pb-4 flex flex-col items-center gap-4">
           <div className="flex items-center gap-2 opacity-50">
              <ShieldCheck size={14} className="text-emerald-600" />
@@ -746,8 +738,7 @@ export default function Home() {
           </div>
           <div className="flex gap-6">
             <a href="/terms" className="text-[10px] font-black text-slate-400 hover:text-emerald-600 uppercase tracking-tighter">Terms</a>
-            <a href="/privacy" className="text-[10px] font-black text-slate-400 hover:text-emerald-600 uppercase tracking-tighter">Privacy</a>
-            <a href="https://t.me/investorphem" target="_blank" rel="noopener noreferrer" className="text-[10px] font-black text-emerald-600 hover:underline uppercase tracking-tighter">Support</a>
+            <a href="/privacy" className="text-[10px] font-black text-slate-400 hover:text-emerald-600 uppercase tracking-tighter">Privacy Policy</a>
           </div>
           <p className="text-[9px] font-medium text-slate-300 uppercase tracking-[0.2em] mt-2">© 2026 MASONODE ORGANISATION</p>
         </footer>
