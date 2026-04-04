@@ -4,7 +4,6 @@ import { sendAbaPaySms } from '@/lib/messaging';
 import { sendTelegramAlert } from '@/lib/telegram'; 
 import { supabase } from '@/utils/supabase'; 
 
-// SECURITY: Replay Attack Prevention
 const processedTransactions = new Set();
 
 export async function POST(req: Request) {
@@ -17,8 +16,7 @@ export async function POST(req: Request) {
         token: tokenSymbol, 
         txHash,         
         variation_code, 
-        phone,
-        email           
+        phone 
     } = body;
 
     // 1. REPLAY ATTACK PREVENTION
@@ -37,52 +35,80 @@ export async function POST(req: Request) {
       return NextResponse.json({ success: false, message: "Minimum order value is ₦500." }, { status: 400 });
     }
 
-    // 4. MERCHANT VERIFICATION
-    const verifyRes = await fetch(`${BASE_URL}/merchant-verify`, {
-      method: 'POST',
-      headers: getHeaders('POST'),
-      body: JSON.stringify({
-        billersCode,
-        serviceID,
-        type: variation_code.includes('postpaid') ? 'postpaid' : 'prepaid'
-      })
-    });
+    // 4. MERCHANT VERIFICATION (Only for Electricity & Cable)
+    const needsVerification = serviceID.includes('electric') || serviceID.includes('tv');
+    if (needsVerification) {
+      const verifyRes = await fetch(`${BASE_URL}/merchant-verify`, {
+        method: 'POST',
+        headers: getHeaders('POST'),
+        body: JSON.stringify({
+          billersCode,
+          serviceID,
+          type: variation_code.includes('postpaid') ? 'postpaid' : 'prepaid'
+        })
+      });
 
-    const verifyData = await verifyRes.json();
-    if (verifyData.code !== '000') {
-      return NextResponse.json({ success: false, message: "Account verification failed. Check details." }, { status: 400 });
+      const verifyData = await verifyRes.json();
+      if (verifyData.code !== '000') {
+        return NextResponse.json({ success: false, message: "Account verification failed." }, { status: 400 });
+      }
     }
 
     // 5. FEE & VEND CALCULATION
-    const serviceFee = (serviceID.includes('electric') || serviceID.includes('tv')) ? 100 : 0;
+    const serviceFee = needsVerification ? 100 : 0;
     const vendAmount = Math.floor(totalNairaValue - serviceFee);
 
-    // 6. VTPASS EXECUTION
+    // 6. PERFECT VTPASS PAYLOAD CONSTRUCTION
+    // VTpass has different payload rules for Airtime vs Utilities
+    const isAirtime = ['mtn', 'airtel', 'glo', '9mobile'].includes(serviceID);
+    
+    const vtpassPayload: any = {
+      request_id: generateRequestId(),
+      serviceID: serviceID,
+      amount: vendAmount,
+      phone: phone || billersCode
+    };
+
+    // Only add billersCode and variation_code if it is NOT Airtime
+    if (!isAirtime) {
+      vtpassPayload.billersCode = billersCode;
+      vtpassPayload.variation_code = variation_code;
+    }
+
+    // 7. VTPASS EXECUTION
     const payRes = await fetch(`${BASE_URL}/pay`, {
       method: 'POST',
       headers: getHeaders('POST'),
-      body: JSON.stringify({
-        request_id: generateRequestId(),
-        serviceID,
-        billersCode,
-        variation_code,
-        amount: vendAmount,
-        phone: phone || billersCode
-      })
+      body: JSON.stringify(vtpassPayload)
     });
 
     const payData = await payRes.json();
 
-    // 7. HANDLING SUCCESS, LOGGING & ALERTS
+    // 8. DATABASE PAYLOAD (Fixed to prevent DB crashes)
+    const dbPayload = {
+      tx_hash: txHash,
+      service_category: serviceID,
+      account_number: billersCode,
+      amount_usdt: parseFloat(amount), // FIXED: Sends pure number to prevent DB Type crash
+      amount_naira: vendAmount,
+      fee_naira: serviceFee,
+      status: payData.code === '000' ? 'SUCCESS' : 'FAILED_VENDING'
+    };
+
+    // Save to Database Immediately
+    const { error: dbError } = await supabase.from('transactions').insert([dbPayload]);
+    if (dbError) console.error("SUPABASE ERROR:", dbError.message);
+
+    // 9. HANDLING SUCCESS, LOGGING & ALERTS
     if (payData.code === '000') {
       processedTransactions.add(txHash);
       const vendedToken = payData.purchased_code || payData.token || "Vended Successfully";
 
       // A. DISPATCH SMS
       try {
-        await sendAbaPaySms(phone, `AbaPay: Purchase Successful! Token/Ref: ${vendedToken}. Amt: ₦${vendAmount}`);
+        await sendAbaPaySms(vtpassPayload.phone, `AbaPay: Purchase Successful! Token/Ref: ${vendedToken}. Amt: ₦${vendAmount}`);
       } catch (smsErr) {
-        console.error("SMS Dispatch Failed:", smsErr);
+        console.error("SMS Error:", smsErr);
       }
 
       // B. DISPATCH TELEGRAM ALERT
@@ -96,23 +122,6 @@ export async function POST(req: Request) {
         `⛽ *Fee:* ₦${serviceFee}`
       );
 
-      // C. CLOUD LEDGER SYNC (Supabase) - UPDATED WITH ERROR LOGGING
-      const { error: dbError } = await supabase.from('transactions').insert([{
-        tx_hash: txHash,
-        service_category: serviceID,
-        account_number: billersCode,
-        amount_usdt: `${amount} ${tokenSymbol || 'USDT'}`, 
-        amount_naira: vendAmount,
-        fee_naira: serviceFee,
-        status: 'SUCCESS'
-      }]);
-
-      if (dbError) {
-        console.error("SUPABASE LEDGER ERROR:", dbError.message);
-        // Alert admin that the sale happened but wasn't recorded in DB
-        await sendTelegramAlert(`⚠️ *DATABASE SYNC ERROR*\nSale was successful but record failed to save to Ledger.\nError: ${dbError.message}\nHash: ${txHash}`);
-      }
-
       return NextResponse.json({
         success: true,
         message: "Transaction Successful!",
@@ -122,17 +131,6 @@ export async function POST(req: Request) {
     } else {
       // D. HANDLE VENDING FAILURE
       await sendTelegramAlert(`🚨 *CRITICAL VENDING ERROR*\nHash: \`${txHash}\`\nAsset: ${tokenSymbol}\nVTpass Code: ${payData.code}`);
-
-      // Log the failed attempt even if vending failed
-      await supabase.from('transactions').insert([{
-        tx_hash: txHash,
-        service_category: serviceID,
-        account_number: billersCode,
-        amount_usdt: `${amount} ${tokenSymbol || 'USDT'}`,
-        amount_naira: vendAmount,
-        fee_naira: serviceFee,
-        status: 'FAILED_VENDING'
-      }]);
 
       return NextResponse.json({ 
         success: false, 
