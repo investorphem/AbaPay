@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.20;
 
-// Interface to interact with the USDT token
+// Interface to interact with ERC20 tokens (USDT, USDC, etc.)
 interface IERC20 {
     function transferFrom(address sender, address recipient, uint256 amount) external returns (bool);
     function transfer(address recipient, uint256 amount) external returns (bool);
@@ -11,16 +11,18 @@ interface IERC20 {
 contract AbaPay {
     // The "Boss" variable - This will permanently record your wallet address
     address public owner;
-    IERC20 public acceptedToken;
+    
+    // SECURITY: A whitelist of approved tokens (e.g., true for real USDT/USDC, false for fake tokens)
+    mapping(address => bool) public isSupportedToken;
 
-    // The blockchain receipt generator
-    event PaymentReceived(address indexed user, string serviceType, string accountNumber, uint256 amount);
-    event FundsWithdrawn(address indexed boss, uint256 amount);
+    // The blockchain receipt generator (Now includes the token address)
+    event PaymentReceived(address indexed user, address indexed token, string serviceType, string accountNumber, uint256 amount);
+    event FundsWithdrawn(address indexed boss, address indexed token, uint256 amount);
+    event TokenSupportUpdated(address indexed token, bool isSupported);
 
-    constructor(address _tokenAddress) {
+    constructor() {
         // Whoever deploys this contract becomes the permanent owner
         owner = msg.sender;
-        acceptedToken = IERC20(_tokenAddress);
     }
 
     // Security check: Only the owner can call functions with this tag
@@ -29,25 +31,38 @@ contract AbaPay {
         _;
     }
 
-    // The standard payment function for your users
-    function payBill(string calldata serviceType, string calldata accountNumber, uint256 amount) external {
-        require(amount > 0, "Amount must be greater than zero");
-        
-        // Pull the USDT from the user into this contract
-        require(acceptedToken.transferFrom(msg.sender, address(this), amount), "Payment failed");
+    // --- ADMIN CONTROLS ---
 
-        // Broadcast the receipt to the blockchain
-        emit PaymentReceived(msg.sender, serviceType, accountNumber, amount);
+    // CEO function to add or remove supported tokens (USDT, USDC)
+    function setTokenSupport(address tokenAddress, bool status) external onlyOwner {
+        isSupportedToken[tokenAddress] = status;
+        emit TokenSupportUpdated(tokenAddress, status);
     }
 
-    // 🔥 THE PREMIUM FEATURE: Withdraw all USDT profits to your personal wallet
-    function withdrawFunds() external onlyOwner {
-        uint256 vaultBalance = acceptedToken.balanceOf(address(this));
-        require(vaultBalance > 0, "The vault is currently empty.");
-        
-        // Push all the funds to the owner
-        require(acceptedToken.transfer(owner, vaultBalance), "Withdrawal failed");
+    // --- USER ACTIONS ---
 
-        emit FundsWithdrawn(owner, vaultBalance);
+    // The upgraded payment function that accepts the specific token address
+    function payBill(address tokenAddress, string calldata serviceType, string calldata accountNumber, uint256 amount) external {
+        require(amount > 0, "Amount must be greater than zero");
+        require(isSupportedToken[tokenAddress], "SECURITY ALERT: This token is not supported by AbaPay");
+
+        // Pull the specific token (USDT or USDC) from the user into this contract
+        require(IERC20(tokenAddress).transferFrom(msg.sender, address(this), amount), "Payment transfer failed");
+
+        // Broadcast the receipt to the blockchain
+        emit PaymentReceived(msg.sender, tokenAddress, serviceType, accountNumber, amount);
+    }
+
+    // --- TREASURY ACTIONS ---
+
+    // 🔥 Withdraw profits for a SPECIFIC token to your personal wallet
+    function withdrawFunds(address tokenAddress) external onlyOwner {
+        uint256 vaultBalance = IERC20(tokenAddress).balanceOf(address(this));
+        require(vaultBalance > 0, "The vault for this token is currently empty.");
+
+        // Push all the funds of this specific token to the owner
+        require(IERC20(tokenAddress).transfer(owner, vaultBalance), "Withdrawal failed");
+
+        emit FundsWithdrawn(owner, tokenAddress, vaultBalance);
     }
 }
