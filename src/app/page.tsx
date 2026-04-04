@@ -30,10 +30,10 @@ const ELECTRICITY_PROVIDERS = ["aba-electric", "ikedc", "ekedc", "ibedc", "aedc"
 const CABLE_PROVIDERS = ["dstv", "gotv", "startimes", "showmax"];
 const TELECOM_PROVIDERS = ["mtn", "airtel", "glo", "9mobile"];
 
-// UPGRADED: EXACT USDC SEPOLIA ADDRESS INJECTED
+// UPGRADED: EXACT USDC SEPOLIA ADDRESS INJECTED & DECIMALS FIXED TO 6
 const SUPPORTED_TOKENS = [
   { symbol: "USDT", decimals: 6, mainnet: "0x48065fbbe25f71c9282ddf5e1cd6d6a887483d5e", sepolia: "0xd077A400968890Eacc75cdc901F0356c943e4fDb", icon: "💵" },
-  { symbol: "USDC", decimals: 18, mainnet: "0xcebA9300f2b948710d2653dD7B07f33A8B32118C", sepolia: "0x01C5C0122039549AD1493B8220cABEdD739BC44E", icon: "🪙" },
+  { symbol: "USDC", decimals: 6, mainnet: "0xcebA9300f2b948710d2653dD7B07f33A8B32118C", sepolia: "0x01C5C0122039549AD1493B8220cABEdD739BC44E", icon: "🪙" },
   { symbol: "CELO", decimals: 18, mainnet: "native", sepolia: "native", icon: "🟡" },
 ];
 
