@@ -30,10 +30,10 @@ const ELECTRICITY_PROVIDERS = ["aba-electric", "ikedc", "ekedc", "ibedc", "aedc"
 const CABLE_PROVIDERS = ["dstv", "gotv", "startimes", "showmax"];
 const TELECOM_PROVIDERS = ["mtn", "airtel", "glo", "9mobile"];
 
-// UPGRADED: USDC Fully Supported
+// UPGRADED: EXACT USDC SEPOLIA ADDRESS INJECTED
 const SUPPORTED_TOKENS = [
   { symbol: "USDT", decimals: 6, mainnet: "0x48065fbbe25f71c9282ddf5e1cd6d6a887483d5e", sepolia: "0xd077A400968890Eacc75cdc901F0356c943e4fDb", icon: "💵" },
-  { symbol: "USDC", decimals: 18, mainnet: "0xcebA9300f2b948710d2653dD7B07f33A8B32118C", sepolia: "0x874069Fa1Eb16D44d622F2e0Ca25eeA172369bC1", icon: "🪙" },
+  { symbol: "USDC", decimals: 18, mainnet: "0xcebA9300f2b948710d2653dD7B07f33A8B32118C", sepolia: "0x01C5C0122039549AD1493B8220cABEdD739BC44E", icon: "🪙" },
   { symbol: "CELO", decimals: 18, mainnet: "native", sepolia: "native", icon: "🟡" },
 ];
 
@@ -124,7 +124,7 @@ export default function Home() {
 
       if (typeof window !== "undefined" && (window as any).ethereum) {
         const eth = (window as any).ethereum;
-        
+
         if (eth.isMiniPay) {
           setIsMiniPay(true);
         }
@@ -332,7 +332,7 @@ export default function Home() {
   }, [activeDataCategory]);
 
   return (
-    <main className="min-h-screen bg-slate-50 text-slate-900 font-sans p-4 flex flex-col items-center pb-12 relative">
+    <main className="min-h-screen bg-slate-50 text-slate-900 font-sans p-4 flex flex-col items-center pb-20 relative">
 
       <style>{`
         @keyframes logoScale {
@@ -680,7 +680,7 @@ export default function Home() {
              <ShieldCheck size={14} className="text-emerald-600" />
              <span className="text-[10px] font-bold text-slate-500 uppercase tracking-widest">Secured by Celo Network</span>
           </div>
-          
+
           <div className="flex gap-6">
             <a href="/terms" className="text-[10px] font-black text-slate-400 hover:text-emerald-600 uppercase tracking-tighter">Terms of Service</a>
             <a href="/privacy" className="text-[10px] font-black text-slate-400 hover:text-emerald-600 uppercase tracking-tighter">Privacy Policy</a>
