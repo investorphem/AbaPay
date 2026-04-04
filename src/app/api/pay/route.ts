@@ -35,7 +35,7 @@ export async function POST(req: Request) {
       return NextResponse.json({ success: false, message: "Minimum order value is ₦500." }, { status: 400 });
     }
 
-    // 4. MERCHANT VERIFICATION (Only for Electricity & Cable)
+    // 4. MERCHANT VERIFICATION
     const needsVerification = serviceID.includes('electric') || serviceID.includes('tv');
     if (needsVerification) {
       const verifyRes = await fetch(`${BASE_URL}/merchant-verify`, {
@@ -58,10 +58,8 @@ export async function POST(req: Request) {
     const serviceFee = needsVerification ? 100 : 0;
     const vendAmount = Math.floor(totalNairaValue - serviceFee);
 
-    // 6. PERFECT VTPASS PAYLOAD CONSTRUCTION
-    // VTpass has different payload rules for Airtime vs Utilities
+    // 6. VTPASS PAYLOAD CONSTRUCTION
     const isAirtime = ['mtn', 'airtel', 'glo', '9mobile'].includes(serviceID);
-    
     const vtpassPayload: any = {
       request_id: generateRequestId(),
       serviceID: serviceID,
@@ -69,7 +67,6 @@ export async function POST(req: Request) {
       phone: phone || billersCode
     };
 
-    // Only add billersCode and variation_code if it is NOT Airtime
     if (!isAirtime) {
       vtpassPayload.billersCode = billersCode;
       vtpassPayload.variation_code = variation_code;
@@ -84,43 +81,28 @@ export async function POST(req: Request) {
 
     const payData = await payRes.json();
 
-    // 8. DATABASE PAYLOAD (Fixed to prevent DB crashes)
-    const dbPayload = {
-      tx_hash: txHash,
-      service_category: serviceID,
-      account_number: billersCode,
-      amount_usdt: parseFloat(amount), // FIXED: Sends pure number to prevent DB Type crash
-      amount_naira: vendAmount,
-      fee_naira: serviceFee,
-      status: payData.code === '000' ? 'SUCCESS' : 'FAILED_VENDING'
-    };
-
-    // Save to Database Immediately
-    const { error: dbError } = await supabase.from('transactions').insert([dbPayload]);
-    if (dbError) console.error("SUPABASE ERROR:", dbError.message);
-
-    // 9. HANDLING SUCCESS, LOGGING & ALERTS
+    // 8. HANDLING SUCCESS, LOGGING & ALERTS
     if (payData.code === '000') {
       processedTransactions.add(txHash);
       const vendedToken = payData.purchased_code || payData.token || "Vended Successfully";
 
-      // A. DISPATCH SMS
-      try {
-        await sendAbaPaySms(vtpassPayload.phone, `AbaPay: Purchase Successful! Token/Ref: ${vendedToken}. Amt: ₦${vendAmount}`);
-      } catch (smsErr) {
-        console.error("SMS Error:", smsErr);
-      }
+      // DATABASE SYNC
+      const { error: dbError } = await supabase.from('transactions').insert([{
+        tx_hash: txHash,
+        service_category: serviceID,
+        account_number: billersCode,
+        amount_usdt: parseFloat(amount), 
+        amount_naira: vendAmount,
+        fee_naira: serviceFee,
+        status: 'SUCCESS'
+      }]);
+      if (dbError) console.error("SUPABASE ERROR:", dbError.message);
 
-      // B. DISPATCH TELEGRAM ALERT
-      await sendTelegramAlert(
-        `✅ *SALE SUCCESSFUL*\n` +
-        `━━━━━━━━━━━━━━━\n` +
-        `🛒 *Product:* ${serviceID}\n` +
-        `💰 *Naira:* ₦${vendAmount.toLocaleString()}\n` +
-        `🪙 *Asset:* ${amount} ${tokenSymbol || 'USDT'}\n` + 
-        `👤 *User:* ${billersCode}\n` +
-        `⛽ *Fee:* ₦${serviceFee}`
-      );
+      // ALERTS (Wrapped to prevent crashing)
+      try { await sendAbaPaySms(vtpassPayload.phone, `AbaPay: Purchase Successful! Token/Ref: ${vendedToken}. Amt: ₦${vendAmount}`); } catch (e) {}
+      try {
+        await sendTelegramAlert(`✅ *SALE SUCCESSFUL*\n🛒 *Product:* ${serviceID}\n💰 *Naira:* ₦${vendAmount}\n🪙 *Asset:* ${amount} ${tokenSymbol || 'USDT'}\n👤 *User:* ${billersCode}`);
+      } catch (e) {}
 
       return NextResponse.json({
         success: true,
@@ -129,12 +111,29 @@ export async function POST(req: Request) {
       });
 
     } else {
-      // D. HANDLE VENDING FAILURE
-      await sendTelegramAlert(`🚨 *CRITICAL VENDING ERROR*\nHash: \`${txHash}\`\nAsset: ${tokenSymbol}\nVTpass Code: ${payData.code}`);
+      // 9. HANDLE VENDING FAILURE SAFELY
 
+      // A. Save to Database FIRST before anything else can crash
+      const { error: failDbError } = await supabase.from('transactions').insert([{
+        tx_hash: txHash,
+        service_category: serviceID,
+        account_number: billersCode,
+        amount_usdt: parseFloat(amount),
+        amount_naira: vendAmount,
+        fee_naira: serviceFee,
+        status: 'FAILED_VENDING'
+      }]);
+      if (failDbError) console.error("SUPABASE FAILED LOG ERROR:", failDbError.message);
+
+      // B. Attempt Telegram Alert
+      try {
+        await sendTelegramAlert(`🚨 *CRITICAL VENDING ERROR*\nHash: \`${txHash}\`\nVTpass Code: ${payData.code}`);
+      } catch (e) {}
+
+      // C. Return the exact VTpass code so you can see it on the frontend
       return NextResponse.json({ 
         success: false, 
-        message: "Vending failed. Admin alerted for manual refund.",
+        message: `Vending failed. VTpass Code: ${payData.code}`,
         code: payData.code 
       }, { status: 502 });
     }
