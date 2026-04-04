@@ -18,7 +18,6 @@ const ERC20_ABI = [
   {"inputs":[{"internalType":"address","name":"account","type":"address"}],"name":"balanceOf","outputs":[{"internalType":"uint256","name":"","type":"uint256"}],"stateMutability":"view","type":"function"}
 ];
 
-// PREMIUM COLOURFUL ICONS
 const SERVICES = [
   { id: "AIRTIME", name: "Buy Airtime", icon: Phone, color: "text-[#34d399]", bg: "bg-emerald-500/10" },
   { id: "DATA", name: "Buy Data", icon: Wifi, color: "text-[#a855f7]", bg: "bg-purple-500/10" },
@@ -30,7 +29,7 @@ const ELECTRICITY_PROVIDERS = ["aba-electric", "ikedc", "ekedc", "ibedc", "aedc"
 const CABLE_PROVIDERS = ["dstv", "gotv", "startimes", "showmax"];
 const TELECOM_PROVIDERS = ["mtn", "airtel", "glo", "9mobile"];
 
-// UPGRADED: EXACT USDC SEPOLIA ADDRESS INJECTED & DECIMALS FIXED TO 6
+// UPGRADED: USDC DECIMALS FIXED TO 6
 const SUPPORTED_TOKENS = [
   { symbol: "USDT", decimals: 6, mainnet: "0x48065fbbe25f71c9282ddf5e1cd6d6a887483d5e", sepolia: "0xd077A400968890Eacc75cdc901F0356c943e4fDb", icon: "💵" },
   { symbol: "USDC", decimals: 6, mainnet: "0xcebA9300f2b948710d2653dD7B07f33A8B32118C", sepolia: "0x01C5C0122039549AD1493B8220cABEdD739BC44E", icon: "🪙" },
@@ -110,7 +109,7 @@ export default function Home() {
   const activeChain = isMainnet ? celo : celoSepolia;
   const ABAPAY_CONTRACT = process.env.NEXT_PUBLIC_ABAPAY_ADDRESS as `0x${string}`;
 
-  // --- INITIALIZATION & MINIPAY INTEGRATION ---
+  // --- INITIALIZATION ---
   useEffect(() => {
     async function initSystem() {
       const savedHistory = localStorage.getItem("abapay_history");
@@ -124,10 +123,7 @@ export default function Home() {
 
       if (typeof window !== "undefined" && (window as any).ethereum) {
         const eth = (window as any).ethereum;
-
-        if (eth.isMiniPay) {
-          setIsMiniPay(true);
-        }
+        if (eth.isMiniPay) setIsMiniPay(true);
 
         const walletClient = createWalletClient({ chain: activeChain, transport: custom(eth) });
         walletClient.requestAddresses().then(([acc]) => {
@@ -141,7 +137,7 @@ export default function Home() {
     initSystem();
   }, [activeChain]);
 
-  // --- FETCH LIVE WALLET BALANCE ---
+  // --- FETCH BALANCE ---
   useEffect(() => {
     async function fetchBalance() {
       if (!address) return;
@@ -169,7 +165,7 @@ export default function Home() {
     fetchBalance();
   }, [address, selectedToken, activeChain, isMainnet]);
 
-  // --- TELECOM AUTO-DETECT LOGIC ---
+  // --- AUTO-DETECT LOGIC ---
   useEffect(() => {
     if ((activeService.id === "AIRTIME" || activeService.id === "DATA") && accountNumber.length >= 4) {
       const prefix = accountNumber.substring(0, 4);
@@ -179,15 +175,6 @@ export default function Home() {
       else if (["0809","0817","0818","0908","0909"].includes(prefix)) setTelecomProvider("9mobile");
     }
   }, [accountNumber, activeService]);
-
-  // --- VTPASS MERCHANT VERIFICATION ---
-  useEffect(() => {
-    if ((activeService.id === "ELECTRICITY" || activeService.id === "CABLE") && accountNumber.length >= 10) {
-      verifyMerchant();
-    } else {
-      setCustomerName(null);
-    }
-  }, [accountNumber, elecProvider, cableProvider, activeService, meterType]);
 
   const verifyMerchant = async () => {
     setIsVerifying(true);
@@ -209,6 +196,14 @@ export default function Home() {
     setIsVerifying(false);
   };
 
+  useEffect(() => {
+    if ((activeService.id === "ELECTRICITY" || activeService.id === "CABLE") && accountNumber.length >= 10) {
+      verifyMerchant();
+    } else {
+      setCustomerName(null);
+    }
+  }, [accountNumber, elecProvider, cableProvider, activeService, meterType]);
+
   const { cryptoToCharge, currentFee } = useMemo(() => {
     const bill = parseFloat(nairaAmount) || 0;
     const fee = (activeService.id === "ELECTRICITY" || activeService.id === "CABLE") ? 100 : 0;
@@ -227,12 +222,12 @@ export default function Home() {
     return false;
   }, [accountNumber, nairaAmount, activeService, customerName]);
 
-  // --- EXECUTE PAYMENT ---
+  // --- PAYMENT EXECUTION ---
   const handlePayment = async () => {
     if (!address || !client) return setStatus("Connect Wallet First");
 
     if (selectedToken.symbol === "CELO") {
-      return showToast("Unsupported Asset", `AbaPay Smart Contract upgrade required to pay natively with CELO. Please select USDT or USDC.`, "error");
+      return showToast("Unsupported Asset", `Smart Contract upgrade required for native CELO. Please select USDT or USDC.`, "error");
     }
 
     if (parseFloat(cryptoToCharge) > parseFloat(walletBalance)) {
@@ -267,6 +262,17 @@ export default function Home() {
 
       setStatus(`${selectedToken.symbol} Secured. Vending Utility...`);
 
+      // GUARANTEED HISTORY: Prepare object immediately after hash is received
+      const newTx = { 
+        id: hash.slice(0,8), 
+        date: new Date().toLocaleString(), 
+        status: "PENDING", 
+        amountNaira: nairaAmount, 
+        service: activeService.name, 
+        network: activeServiceID.toUpperCase(), 
+        txHash: hash 
+      };
+
       const res = await fetch('/api/pay', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -285,17 +291,26 @@ export default function Home() {
 
       if (result.success) {
         setStatus("Success! Token/Ref Dispatched.");
-        const newTx = { id: hash.slice(0,8), date: new Date().toLocaleString(), status: "SUCCESS", amountNaira: nairaAmount, service: activeService.name, network: activeServiceID.toUpperCase(), txHash: hash };
-        setTransactions([newTx, ...transactions]);
-        localStorage.setItem("abapay_history", JSON.stringify([newTx, ...transactions]));
-
-        const publicClient = createPublicClient({ chain: activeChain, transport: http() });
-        const balanceWei = await publicClient.readContract({ address: tokenAddress as `0x${string}`, abi: ERC20_ABI, functionName: 'balanceOf', args: [address] });
-        setWalletBalance(parseFloat(formatUnits(balanceWei as bigint, selectedToken.decimals)).toFixed(4));
+        newTx.status = "SUCCESS";
       } else {
         setStatus("Utility Vending Delayed. Admin Notified.");
+        newTx.status = "FAILED/DELAYED";
       }
-    } catch (e) { setStatus("Transaction Cancelled."); }
+
+      // SYNC HISTORY REGARDLESS OF VENDING RESULT
+      const updatedHistory = [newTx, ...transactions];
+      setTransactions(updatedHistory);
+      localStorage.setItem("abapay_history", JSON.stringify(updatedHistory));
+
+      // Refresh Balance
+      const publicClient = createPublicClient({ chain: activeChain, transport: http() });
+      const balanceWei = await publicClient.readContract({ address: tokenAddress as `0x${string}`, abi: ERC20_ABI, functionName: 'balanceOf', args: [address] });
+      setWalletBalance(parseFloat(formatUnits(balanceWei as bigint, selectedToken.decimals)).toFixed(4));
+
+    } catch (e) { 
+      console.error(e);
+      setStatus("Transaction Cancelled."); 
+    }
   };
 
   const submitSupportTicket = async () => {
@@ -306,9 +321,7 @@ export default function Home() {
       formData.append("message", supportMessage);
       if (address) formData.append("userAddress", address);
       if (supportFile) formData.append("file", supportFile);
-
       await fetch('/api/support', { method: 'POST', body: formData });
-
       setIsSupportOpen(false);
       setSupportMessage("");
       setSupportFile(null);
@@ -463,7 +476,6 @@ export default function Home() {
 
         {activeTab === 'pay' ? (
           <div className="bg-white border border-slate-100 rounded-[2.5rem] p-8 shadow-2xl shadow-emerald-900/10 animate-in fade-in zoom-in-95">
-
             <div className="grid grid-cols-4 gap-3 mb-6">
                 {SERVICES.map(s => (
                     <button 
@@ -478,7 +490,6 @@ export default function Home() {
             </div>
 
             <div className="space-y-5">
-
                 <div className="bg-slate-50 border border-slate-100 p-4 rounded-2xl flex justify-between items-center animate-in fade-in">
                   <div 
                     className="flex items-center gap-2 cursor-pointer hover:bg-slate-100 p-2 -ml-2 rounded-xl transition-colors" 
@@ -652,11 +663,11 @@ export default function Home() {
                         <div key={idx} className="p-4 bg-slate-50 rounded-2xl border border-slate-100 flex justify-between items-center hover:bg-slate-100 transition-colors">
                             <div>
                                 <p className="text-xs font-black text-slate-800 uppercase">{tx.network} {tx.service}</p>
-                                <p className="text-[10px] text-slate-500">{tx.date}</p>
+                                <p className="text-[10px] text-slate-500">{tx.date} • <span className={tx.status === 'SUCCESS' ? 'text-emerald-600' : 'text-orange-500'}>{tx.status}</span></p>
                             </div>
                             <div className="text-right">
                                 <p className="text-xs font-black text-emerald-600">₦{tx.amountNaira}</p>
-                                <a href={`https://${isMainnet ? '' : 'sepolia.'}celoscan.io/tx/${tx.txHash}`} target="_blank" className="text-[8px] font-bold text-slate-400 flex items-center justify-end gap-1 hover:text-emerald-500 transition-colors">VIEW HASH <ExternalLink size={8}/></a>
+                                <a href={`https://${isMainnet ? '' : 'sepolia.'}celoscan.io/tx/${tx.txHash}`} target="_blank" className="text-[8px] font-bold text-slate-400 flex items-center justify-end gap-1 hover:text-emerald-500 transition-colors uppercase">View Hash <ExternalLink size={8}/></a>
                             </div>
                         </div>
                     ))}
@@ -674,24 +685,18 @@ export default function Home() {
             </button>
         </div>
 
-        {/* --- MINIPAY COMPLIANCE FOOTER --- */}
         <footer className="mt-12 w-full border-t border-slate-200 pt-8 pb-4 flex flex-col items-center gap-4">
           <div className="flex items-center gap-2 opacity-50">
              <ShieldCheck size={14} className="text-emerald-600" />
              <span className="text-[10px] font-bold text-slate-500 uppercase tracking-widest">Secured by Celo Network</span>
           </div>
-
           <div className="flex gap-6">
-            <a href="/terms" className="text-[10px] font-black text-slate-400 hover:text-emerald-600 uppercase tracking-tighter">Terms of Service</a>
-            <a href="/privacy" className="text-[10px] font-black text-slate-400 hover:text-emerald-600 uppercase tracking-tighter">Privacy Policy</a>
-            <a href="https://t.me/investorphem" target="_blank" rel="noopener noreferrer" className="text-[10px] font-black text-emerald-600 hover:underline uppercase tracking-tighter">Live Support</a>
+            <a href="/terms" className="text-[10px] font-black text-slate-400 hover:text-emerald-600 uppercase tracking-tighter">Terms</a>
+            <a href="/privacy" className="text-[10px] font-black text-slate-400 hover:text-emerald-600 uppercase tracking-tighter">Privacy</a>
+            <a href="https://t.me/investorphem" target="_blank" rel="noopener noreferrer" className="text-[10px] font-black text-emerald-600 hover:underline uppercase tracking-tighter">Support</a>
           </div>
-
-          <p className="text-[9px] font-medium text-slate-300 uppercase tracking-[0.2em] mt-2">
-            © 2026 MASONODE ORGANISATION
-          </p>
+          <p className="text-[9px] font-medium text-slate-300 uppercase tracking-[0.2em] mt-2">© 2026 MASONODE ORGANISATION</p>
         </footer>
-
       </div>
     </main>
   );
