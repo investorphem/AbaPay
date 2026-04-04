@@ -67,8 +67,8 @@ export default function Home() {
 
   // Modals
   const [selectedReceipt, setSelectedReceipt] = useState<any>(null); 
-  const [isTermsOpen, setIsTermsOpen] = useState(false); // NEW
-  const [isPrivacyOpen, setIsPrivacyOpen] = useState(false); // NEW
+  const [isTermsOpen, setIsTermsOpen] = useState(false); 
+  const [isPrivacyOpen, setIsPrivacyOpen] = useState(false); 
 
   // Validation States
   const [customerName, setCustomerName] = useState<string | null>(null);
@@ -305,7 +305,8 @@ export default function Home() {
         newTx.status = "SUCCESS";
         showToast("Vending Successful", "Your utility has been successfully delivered.", "success");
       } else {
-        setStatus("Utility Vending Delayed. Admin Notified.");
+        // UPGRADED ERROR MESSAGE: Displays the VTpass Code
+        setStatus(`Vending Delayed (Code: ${result.code || 'API Error'}). Admin Notified.`);
         newTx.status = "FAILED/DELAYED";
       }
 
