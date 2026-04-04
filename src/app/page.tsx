@@ -6,8 +6,8 @@ import { celo, celoSepolia } from "viem/chains";
 import { 
   Wallet, Receipt, ShieldCheck, Zap, AlertTriangle, 
   CheckCircle2, ExternalLink, Lightbulb, Phone, Wifi, Tv, 
-  ChevronDown, Loader2, XCircle, Mail, 
-  Paperclip, Send, Coins, Briefcase, Share2, Copy
+  ChevronDown, Loader2, HelpCircle, XCircle, Mail, 
+  Paperclip, Send, Coins, Briefcase, Download, Share2
 } from "lucide-react";
 import { supabase } from "@/utils/supabase";
 
@@ -29,7 +29,6 @@ const ELECTRICITY_PROVIDERS = ["aba-electric", "ikedc", "ekedc", "ibedc", "aedc"
 const CABLE_PROVIDERS = ["dstv", "gotv", "startimes", "showmax"];
 const TELECOM_PROVIDERS = ["mtn", "airtel", "glo", "9mobile"];
 
-// UPGRADED: USDC DECIMALS FIXED TO 6
 const SUPPORTED_TOKENS = [
   { symbol: "USDT", decimals: 6, mainnet: "0x48065fbbe25f71c9282ddf5e1cd6d6a887483d5e", sepolia: "0xd077A400968890Eacc75cdc901F0356c943e4fDb", icon: "💵" },
   { symbol: "USDC", decimals: 6, mainnet: "0xcebA9300f2b948710d2653dD7B07f33A8B32118C", sepolia: "0x01C5C0122039549AD1493B8220cABEdD739BC44E", icon: "🪙" },
@@ -64,12 +63,12 @@ export default function Home() {
   const [status, setStatus] = useState("");
   const [activeTab, setActiveTab] = useState("pay");
   const [isMiniPay, setIsMiniPay] = useState(false);
-  
-  // NEW: Locks the UI while transaction is processing
   const [isProcessing, setIsProcessing] = useState(false); 
 
-  // Receipt State
+  // Modals
   const [selectedReceipt, setSelectedReceipt] = useState<any>(null); 
+  const [isTermsOpen, setIsTermsOpen] = useState(false); // NEW
+  const [isPrivacyOpen, setIsPrivacyOpen] = useState(false); // NEW
 
   // Validation States
   const [customerName, setCustomerName] = useState<string | null>(null);
@@ -235,7 +234,6 @@ export default function Home() {
       return setStatus(`Insufficient ${selectedToken.symbol} Balance.`);
     }
 
-    // LOCK THE BUTTON
     setIsProcessing(true);
     setStatus("Initiating Blockchain Escrow...");
 
@@ -265,7 +263,6 @@ export default function Home() {
 
       setStatus(`${selectedToken.symbol} Secured. Vending Utility...`);
 
-      // PREPARE BACKEND PAYLOAD BEFORE CLEARING UI
       const backendPayload = {
         serviceID: activeServiceID,
         billersCode: accountNumber,
@@ -289,14 +286,12 @@ export default function Home() {
         account: accountNumber
       };
 
-      // CLEAR ALL INPUTS INSTANTLY
       setAccountNumber("");
       setNairaAmount("");
       setCustomerPhone("");
       setCustomerName(null);
       setSelectedDataPlan(null);
 
-      // CALL BACKEND
       const res = await fetch('/api/pay', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -326,7 +321,6 @@ export default function Home() {
       console.error(e);
       setStatus("Transaction Cancelled."); 
     } finally {
-      // UNLOCK THE BUTTON
       setIsProcessing(false);
     }
   };
@@ -338,7 +332,6 @@ export default function Home() {
     setIsSelectionModalOpen(true);
   };
 
-  // --- SHARE RECEIPT LOGIC FOR MINIPAY ---
   const handleShareReceipt = async () => {
     const receiptText = `🧾 AbaPay Protocol Receipt\n\nStatus: ${selectedReceipt.status}\nProduct: ${selectedReceipt.network} ${selectedReceipt.service}\nRecipient: ${selectedReceipt.account}\nAmount Paid: ₦${selectedReceipt.amountNaira}\nCrypto Used: ${selectedReceipt.amountCrypto} ${selectedReceipt.tokenUsed}\nTx Hash: ${selectedReceipt.txHash}\n\nSecured by Celo Network`;
 
@@ -352,7 +345,6 @@ export default function Home() {
         console.log("Share cancelled or failed.", err);
       }
     } else {
-      // Fallback to clipboard if share isn't supported
       try {
         await navigator.clipboard.writeText(receiptText);
         showToast("Copied!", "Receipt details copied to clipboard.", "success");
@@ -439,11 +431,51 @@ export default function Home() {
                    Verify on Celoscan <ExternalLink size={12}/>
                  </button>
                  <button 
-                  onClick={handleShareReceipt} // UPGRADED FOR MINIPAY
+                  onClick={handleShareReceipt} 
                   className="w-full py-4 bg-slate-900 hover:bg-slate-800 text-white rounded-2xl text-xs font-black uppercase tracking-widest flex items-center justify-center gap-2 transition-colors active:scale-95 shadow-xl shadow-slate-900/20"
                  >
                    <Share2 size={16}/> Share Receipt
                  </button>
+              </div>
+           </div>
+        </div>
+      )}
+
+      {/* --- TERMS MODAL --- */}
+      {isTermsOpen && (
+        <div className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-sm flex justify-center items-center p-4 animate-in fade-in" onClick={() => setIsTermsOpen(false)}>
+           <div className="bg-white w-full max-w-md rounded-[2rem] shadow-2xl p-6 flex flex-col max-h-[80vh] animate-in zoom-in-95 duration-200" onClick={(e) => e.stopPropagation()}>
+              <div className="flex justify-between items-center mb-4 shrink-0 border-b border-slate-100 pb-4">
+                <h2 className="text-xl font-black tracking-tight text-slate-900">Terms of Service</h2>
+                <button onClick={() => setIsTermsOpen(false)} className="p-2 bg-slate-100 rounded-full hover:bg-slate-200 transition-colors"><XCircle size={20} className="text-slate-500" /></button>
+              </div>
+              <div className="overflow-y-auto text-sm text-slate-600 space-y-4 pr-2 leading-relaxed">
+                 <p className="font-bold text-slate-800">1. Acceptance of Terms</p>
+                 <p>By connecting your wallet and using the AbaPay Protocol, you agree to execute blockchain transactions via smart contracts. You acknowledge that blockchain transactions are immutable.</p>
+                 <p className="font-bold text-slate-800 mt-4">2. Service Delivery</p>
+                 <p>AbaPay acts as a decentralized bridge to fiat utility providers. While we strive for instant vending, delays caused by third-party telecom or electricity providers are beyond our direct control.</p>
+                 <p className="font-bold text-slate-800 mt-4">3. Supported Assets</p>
+                 <p>You are responsible for ensuring you send the correct supported asset (USDC or USDT) on the Celo Network. AbaPay is not liable for funds lost due to incorrect network transfers.</p>
+              </div>
+           </div>
+        </div>
+      )}
+
+      {/* --- PRIVACY MODAL --- */}
+      {isPrivacyOpen && (
+        <div className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-sm flex justify-center items-center p-4 animate-in fade-in" onClick={() => setIsPrivacyOpen(false)}>
+           <div className="bg-white w-full max-w-md rounded-[2rem] shadow-2xl p-6 flex flex-col max-h-[80vh] animate-in zoom-in-95 duration-200" onClick={(e) => e.stopPropagation()}>
+              <div className="flex justify-between items-center mb-4 shrink-0 border-b border-slate-100 pb-4">
+                <h2 className="text-xl font-black tracking-tight text-slate-900">Privacy Policy</h2>
+                <button onClick={() => setIsPrivacyOpen(false)} className="p-2 bg-slate-100 rounded-full hover:bg-slate-200 transition-colors"><XCircle size={20} className="text-slate-500" /></button>
+              </div>
+              <div className="overflow-y-auto text-sm text-slate-600 space-y-4 pr-2 leading-relaxed">
+                 <p className="font-bold text-slate-800">1. Data Collection</p>
+                 <p>As a decentralized application, AbaPay does not require you to create an account or provide personal KYC information. We only collect the data necessary to fulfill your utility order (e.g., Meter Number, Phone Number).</p>
+                 <p className="font-bold text-slate-800 mt-4">2. Wallet Addresses</p>
+                 <p>Your connected Celo wallet address is recorded on the public blockchain when executing a transaction. This is a fundamental property of Web3 and is not hidden.</p>
+                 <p className="font-bold text-slate-800 mt-4">3. Third-Party Services</p>
+                 <p>Utility numbers provided (like phone or meter numbers) are securely passed to our fiat vending partners (e.g., VTpass) solely for the purpose of delivering your purchased service.</p>
               </div>
            </div>
         </div>
@@ -686,8 +718,7 @@ export default function Home() {
 
                 <button 
                     onClick={handlePayment}
-                    // UPGRADED: Button locks while processing
-                    disabled={isVerifying || !isFormValid || isProcessing} 
+                    disabled={isVerifying || !isFormValid || isProcessing}
                     className="w-full bg-slate-900 hover:bg-black text-white font-black py-5 rounded-[1.5rem] flex items-center justify-center gap-3 transition-all active:scale-95 disabled:opacity-30 shadow-xl shadow-slate-900/20"
                 >
                     {isProcessing ? (
@@ -730,15 +761,14 @@ export default function Home() {
           </div>
         )}
 
-        {/* UPGRADED: Removed support button and support link from footer */}
         <footer className="mt-12 w-full border-t border-slate-200 pt-8 pb-4 flex flex-col items-center gap-4">
           <div className="flex items-center gap-2 opacity-50">
              <ShieldCheck size={14} className="text-emerald-600" />
              <span className="text-[10px] font-bold text-slate-500 uppercase tracking-widest">Secured by Celo Network</span>
           </div>
           <div className="flex gap-6">
-            <a href="/terms" className="text-[10px] font-black text-slate-400 hover:text-emerald-600 uppercase tracking-tighter">Terms</a>
-            <a href="/privacy" className="text-[10px] font-black text-slate-400 hover:text-emerald-600 uppercase tracking-tighter">Privacy Policy</a>
+            <a href="#" onClick={(e) => { e.preventDefault(); setIsTermsOpen(true); }} className="text-[10px] font-black text-slate-400 hover:text-emerald-600 uppercase tracking-tighter">Terms</a>
+            <a href="#" onClick={(e) => { e.preventDefault(); setIsPrivacyOpen(true); }} className="text-[10px] font-black text-slate-400 hover:text-emerald-600 uppercase tracking-tighter">Privacy</a>
           </div>
           <p className="text-[9px] font-medium text-slate-300 uppercase tracking-[0.2em] mt-2">© 2026 MASONODE ORGANISATION</p>
         </footer>
