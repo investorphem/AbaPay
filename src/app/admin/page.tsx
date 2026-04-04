@@ -7,7 +7,6 @@ import {
   Database, CheckCircle2, XCircle, Undo2, Download, Search, 
   Filter, BarChart3, Users, Banknote, RefreshCcw, Globe, Zap, ExternalLink 
 } from "lucide-react";
-// FIXED: Using the absolute path alias so Next.js always finds it
 import { supabase } from "@/utils/supabase";
 
 // --- DYNAMIC NETWORK CONFIG ---
@@ -35,10 +34,10 @@ const ERC20_ABI = [
   {"inputs":[{"internalType":"address","name":"account","type":"address"}],"name":"balanceOf","outputs":[{"internalType":"uint256","name":"","type":"uint256"}],"stateMutability":"view","type":"function"}
 ];
 
-// UPGRADED: Added both tokens for Admin tracking (with EXACT USDC Sepolia Address)
+// UPGRADED: Added both tokens for Admin tracking (with EXACT USDC Sepolia Address & 6 Decimals)
 const TOKENS = {
   USDT: { decimals: 6, mainnet: "0x48065fbbe25f71c9282ddf5e1cd6d6a887483d5e", sepolia: "0xd077A400968890Eacc75cdc901F0356c943e4fDb" },
-  USDC: { decimals: 18, mainnet: "0xcebA9300f2b948710d2653dD7B07f33A8B32118C", sepolia: "0x01C5C0122039549AD1493B8220cABEdD739BC44E" }
+  USDC: { decimals: 6, mainnet: "0xcebA9300f2b948710d2653dD7B07f33A8B32118C", sepolia: "0x01C5C0122039549AD1493B8220cABEdD739BC44E" }
 };
 
 export default function AdminDashboard() {
