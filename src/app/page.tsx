@@ -12,7 +12,6 @@ import {
 import { supabase } from "@/utils/supabase";
 
 // --- WEB3 CONFIG ---
-// UPGRADED: ABI now expects the tokenAddress as the first argument in payBill
 const ABAPAY_ABI = [{"inputs":[{"internalType":"address","name":"tokenAddress","type":"address"},{"internalType":"string","name":"serviceType","type":"string"},{"internalType":"string","name":"accountNumber","type":"string"},{"internalType":"uint256","name":"amount","type":"uint256"}],"name":"payBill","outputs":[],"stateMutability":"nonpayable","type":"function"}];
 const ERC20_ABI = [
   {"inputs":[{"internalType":"address","name":"spender","type":"address"},{"internalType":"uint256","name":"amount","type":"uint256"}],"name":"approve","outputs":[{"internalType":"bool","name":"","type":"bool"}],"stateMutability":"nonpayable","type":"function"},
@@ -65,6 +64,7 @@ export default function Home() {
   const [customerPhone, setCustomerPhone] = useState("");
   const [status, setStatus] = useState("");
   const [activeTab, setActiveTab] = useState("pay");
+  const [isMiniPay, setIsMiniPay] = useState(false);
 
   // Validation & Support States
   const [customerName, setCustomerName] = useState<string | null>(null);
@@ -110,7 +110,7 @@ export default function Home() {
   const activeChain = isMainnet ? celo : celoSepolia;
   const ABAPAY_CONTRACT = process.env.NEXT_PUBLIC_ABAPAY_ADDRESS as `0x${string}`;
 
-  // --- INITIALIZATION ---
+  // --- INITIALIZATION & MINIPAY INTEGRATION ---
   useEffect(() => {
     async function initSystem() {
       const savedHistory = localStorage.getItem("abapay_history");
@@ -123,11 +123,17 @@ export default function Home() {
       } catch (consoleError) {}
 
       if (typeof window !== "undefined" && (window as any).ethereum) {
-        const walletClient = createWalletClient({ chain: activeChain, transport: custom((window as any).ethereum) });
+        const eth = (window as any).ethereum;
+        
+        if (eth.isMiniPay) {
+          setIsMiniPay(true);
+        }
+
+        const walletClient = createWalletClient({ chain: activeChain, transport: custom(eth) });
         walletClient.requestAddresses().then(([acc]) => {
           setAddress(acc);
           setClient(walletClient);
-        });
+        }).catch((e) => console.log("Connection deferred"));
       }
 
       setTimeout(() => setIsInitiallyLoading(false), 2000);
@@ -225,7 +231,6 @@ export default function Home() {
   const handlePayment = async () => {
     if (!address || !client) return setStatus("Connect Wallet First");
 
-    // UPGRADED: Allows both USDT and USDC to pass through. Celo Native blocked for now.
     if (selectedToken.symbol === "CELO") {
       return showToast("Unsupported Asset", `AbaPay Smart Contract upgrade required to pay natively with CELO. Please select USDT or USDC.`, "error");
     }
@@ -240,7 +245,6 @@ export default function Home() {
       const valueInWei = parseUnits(cryptoToCharge, selectedToken.decimals);
       const tokenAddress = isMainnet ? selectedToken.mainnet : selectedToken.sepolia;
 
-      // Approves whichever token the user selected
       await client.writeContract({
         address: tokenAddress as `0x${string}`,
         abi: ERC20_ABI,
@@ -253,7 +257,6 @@ export default function Home() {
                               activeService.id === "CABLE" ? cableProvider : 
                               telecomProvider; 
 
-      // UPGRADED: tokenAddress is now passed securely as the first argument
       const hash = await client.writeContract({
         address: ABAPAY_CONTRACT,
         abi: ABAPAY_ABI,
@@ -271,7 +274,7 @@ export default function Home() {
           serviceID: activeServiceID,
           billersCode: accountNumber,
           amount: cryptoToCharge,
-          token: selectedToken.symbol, // Backend now knows which token was used
+          token: selectedToken.symbol,
           txHash: hash,
           variation_code: activeService.id === "ELECTRICITY" ? meterType : 'prepaid',
           phone: customerPhone || accountNumber
@@ -329,7 +332,7 @@ export default function Home() {
   }, [activeDataCategory]);
 
   return (
-    <main className="min-h-screen bg-slate-50 text-slate-900 font-sans p-4 flex flex-col items-center pb-20 relative">
+    <main className="min-h-screen bg-slate-50 text-slate-900 font-sans p-4 flex flex-col items-center pb-12 relative">
 
       <style>{`
         @keyframes logoScale {
@@ -422,7 +425,12 @@ export default function Home() {
             </div>
           </div>
           <div>
-            {address ? (
+            {isMiniPay ? (
+              <div className="bg-emerald-50 border border-emerald-200 px-3 py-1.5 rounded-xl flex items-center gap-2">
+                <div className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
+                <span className="text-[9px] font-black text-emerald-700 uppercase tracking-tight">MiniPay Active</span>
+              </div>
+            ) : address ? (
               <div className="bg-emerald-50 border border-emerald-100 px-3 py-1.5 rounded-xl flex items-center gap-2">
                 <div className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
                 <span className="text-[10px] font-black text-emerald-700 font-mono tracking-tighter">
@@ -430,7 +438,20 @@ export default function Home() {
                 </span>
               </div>
             ) : (
-              <button className="bg-slate-900 text-white text-[10px] font-black uppercase px-4 py-2 rounded-xl active:scale-95 hover:bg-slate-800 transition-all">Connect</button>
+              <button 
+                onClick={async () => {
+                  if (typeof window !== "undefined" && (window as any).ethereum) {
+                    const eth = (window as any).ethereum;
+                    const walletClient = createWalletClient({ chain: activeChain, transport: custom(eth) });
+                    const [acc] = await walletClient.requestAddresses();
+                    setAddress(acc);
+                    setClient(walletClient);
+                  }
+                }}
+                className="bg-slate-900 text-white text-[10px] font-black uppercase px-4 py-2 rounded-xl active:scale-95 hover:bg-slate-800 transition-all shadow-lg shadow-slate-900/20"
+              >
+                Connect
+              </button>
             )}
           </div>
         </div>
@@ -652,6 +673,25 @@ export default function Home() {
                 <HelpCircle size={14} /> Failed Transaction? Open Support
             </button>
         </div>
+
+        {/* --- MINIPAY COMPLIANCE FOOTER --- */}
+        <footer className="mt-12 w-full border-t border-slate-200 pt-8 pb-4 flex flex-col items-center gap-4">
+          <div className="flex items-center gap-2 opacity-50">
+             <ShieldCheck size={14} className="text-emerald-600" />
+             <span className="text-[10px] font-bold text-slate-500 uppercase tracking-widest">Secured by Celo Network</span>
+          </div>
+          
+          <div className="flex gap-6">
+            <a href="/terms" className="text-[10px] font-black text-slate-400 hover:text-emerald-600 uppercase tracking-tighter">Terms of Service</a>
+            <a href="/privacy" className="text-[10px] font-black text-slate-400 hover:text-emerald-600 uppercase tracking-tighter">Privacy Policy</a>
+            <a href="https://t.me/investorphem" target="_blank" rel="noopener noreferrer" className="text-[10px] font-black text-emerald-600 hover:underline uppercase tracking-tighter">Live Support</a>
+          </div>
+
+          <p className="text-[9px] font-medium text-slate-300 uppercase tracking-[0.2em] mt-2">
+            © 2026 MASONODE ORGANISATION
+          </p>
+        </footer>
+
       </div>
     </main>
   );
