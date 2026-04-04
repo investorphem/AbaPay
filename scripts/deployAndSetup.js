@@ -24,7 +24,7 @@ async function main() {
   } else {
     // SEPOLIA TESTNET ADDRESSES
     usdt = "0xd077A400968890Eacc75cdc901F0356c943e4fDb";
-    usdc = "0x874069Fa1Eb16D44d622F2e0Ca25eeA172369bC1";
+    usdc = "0x01C5C0122039549AD1493B8220cABEdD739BC44E";
   }
 
   // 3. Whitelist the Tokens
