@@ -35,10 +35,10 @@ const ERC20_ABI = [
   {"inputs":[{"internalType":"address","name":"account","type":"address"}],"name":"balanceOf","outputs":[{"internalType":"uint256","name":"","type":"uint256"}],"stateMutability":"view","type":"function"}
 ];
 
-// UPGRADED: Added both tokens for Admin tracking
+// UPGRADED: Added both tokens for Admin tracking (with EXACT USDC Sepolia Address)
 const TOKENS = {
   USDT: { decimals: 6, mainnet: "0x48065fbbe25f71c9282ddf5e1cd6d6a887483d5e", sepolia: "0xd077A400968890Eacc75cdc901F0356c943e4fDb" },
-  USDC: { decimals: 18, mainnet: "0xcebA9300f2b948710d2653dD7B07f33A8B32118C", sepolia: "0x874069Fa1Eb16D44d622F2e0Ca25eeA172369bC1" }
+  USDC: { decimals: 18, mainnet: "0xcebA9300f2b948710d2653dD7B07f33A8B32118C", sepolia: "0x01C5C0122039549AD1493B8220cABEdD739BC44E" }
 };
 
 export default function AdminDashboard() {
@@ -46,11 +46,11 @@ export default function AdminDashboard() {
   const [address, setAddress] = useState<string | null>(null);
   const [client, setClient] = useState<any>(null);
   const [isOwner, setIsOwner] = useState<boolean | null>(null);
-  
+
   // UPGRADED: Independent Vault Balances
   const [usdtVaultBalance, setUsdtVaultBalance] = useState("0.00");
   const [usdcVaultBalance, setUsdcVaultBalance] = useState("0.00");
-  
+
   const [vtBalance, setVtBalance] = useState("0.00"); // VTpass Wallet
   const [smsBalance, setSmsBalance] = useState("0");    // SMS Units
   const [status, setStatus] = useState("");
@@ -115,7 +115,7 @@ export default function AdminDashboard() {
   // UPGRADED: Fetches both USDT and USDC from the smart contract
   const fetchOnChainBalances = async () => {
     const publicClient = createPublicClient({ chain: activeChain, transport: http() });
-    
+
     const usdtAddr = isMainnet ? TOKENS.USDT.mainnet : TOKENS.USDT.sepolia;
     const usdcAddr = isMainnet ? TOKENS.USDC.mainnet : TOKENS.USDC.sepolia;
 
@@ -163,7 +163,7 @@ export default function AdminDashboard() {
   // UPGRADED: Now accepts the token symbol so it knows which token to withdraw
   const handleWithdrawal = async (tokenSymbol: 'USDT' | 'USDC') => {
     if (!client || !address) return;
-    
+
     const balanceToCheck = tokenSymbol === 'USDT' ? usdtVaultBalance : usdcVaultBalance;
     if (parseFloat(balanceToCheck) <= 0) return setStatus(`The ${tokenSymbol} Vault is already empty.`);
 
@@ -285,7 +285,7 @@ export default function AdminDashboard() {
             {/* --- TAB CONTENT: VAULT --- */}
             {activeTab === 'vault' && (
               <div className="bg-[#111114] border border-slate-800 rounded-3xl p-8 animate-in fade-in slide-in-from-bottom-4">
-                
+
                 <div className="flex flex-col items-center mb-8">
                     <div className="inline-p-4 bg-emerald-500/10 rounded-full mb-4 p-4">
                       <Lock className="text-emerald-500" size={32} />
