@@ -13,8 +13,8 @@ export async function POST(req: Request) {
     const { 
         serviceID,      
         billersCode,    
-        amount,         // Crypto amount from frontend
-        token: tokenSymbol, // NEW: USDT or USDC
+        amount,         
+        token: tokenSymbol, 
         txHash,         
         variation_code, 
         phone,
@@ -79,9 +79,13 @@ export async function POST(req: Request) {
       const vendedToken = payData.purchased_code || payData.token || "Vended Successfully";
 
       // A. DISPATCH SMS
-      await sendAbaPaySms(phone, `AbaPay: Purchase Successful! Token/Ref: ${vendedToken}. Amt: ₦${vendAmount}`);
+      try {
+        await sendAbaPaySms(phone, `AbaPay: Purchase Successful! Token/Ref: ${vendedToken}. Amt: ₦${vendAmount}`);
+      } catch (smsErr) {
+        console.error("SMS Dispatch Failed:", smsErr);
+      }
 
-      // B. DISPATCH TELEGRAM ALERT (Updated to show which token was used)
+      // B. DISPATCH TELEGRAM ALERT
       await sendTelegramAlert(
         `✅ *SALE SUCCESSFUL*\n` +
         `━━━━━━━━━━━━━━━\n` +
@@ -92,17 +96,22 @@ export async function POST(req: Request) {
         `⛽ *Fee:* ₦${serviceFee}`
       );
 
-      // C. CLOUD LEDGER SYNC (Supabase)
-      // Note: We keep amount_usdt name for DB compatibility but store the value
-      await supabase.from('transactions').insert([{
+      // C. CLOUD LEDGER SYNC (Supabase) - UPDATED WITH ERROR LOGGING
+      const { error: dbError } = await supabase.from('transactions').insert([{
         tx_hash: txHash,
         service_category: serviceID,
         account_number: billersCode,
-        amount_usdt: `${amount} ${tokenSymbol || 'USDT'}`, // Logs asset type in the amount column
+        amount_usdt: `${amount} ${tokenSymbol || 'USDT'}`, 
         amount_naira: vendAmount,
         fee_naira: serviceFee,
         status: 'SUCCESS'
       }]);
+
+      if (dbError) {
+        console.error("SUPABASE LEDGER ERROR:", dbError.message);
+        // Alert admin that the sale happened but wasn't recorded in DB
+        await sendTelegramAlert(`⚠️ *DATABASE SYNC ERROR*\nSale was successful but record failed to save to Ledger.\nError: ${dbError.message}\nHash: ${txHash}`);
+      }
 
       return NextResponse.json({
         success: true,
@@ -113,6 +122,17 @@ export async function POST(req: Request) {
     } else {
       // D. HANDLE VENDING FAILURE
       await sendTelegramAlert(`🚨 *CRITICAL VENDING ERROR*\nHash: \`${txHash}\`\nAsset: ${tokenSymbol}\nVTpass Code: ${payData.code}`);
+
+      // Log the failed attempt even if vending failed
+      await supabase.from('transactions').insert([{
+        tx_hash: txHash,
+        service_category: serviceID,
+        account_number: billersCode,
+        amount_usdt: `${amount} ${tokenSymbol || 'USDT'}`,
+        amount_naira: vendAmount,
+        fee_naira: serviceFee,
+        status: 'FAILED_VENDING'
+      }]);
 
       return NextResponse.json({ 
         success: false, 
