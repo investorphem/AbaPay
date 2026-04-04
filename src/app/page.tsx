@@ -12,7 +12,8 @@ import {
 import { supabase } from "@/utils/supabase";
 
 // --- WEB3 CONFIG ---
-const ABAPAY_ABI = [{"inputs":[{"internalType":"string","name":"serviceType","type":"string"},{"internalType":"string","name":"accountNumber","type":"string"},{"internalType":"uint256","name":"amount","type":"uint256"}],"name":"payBill","outputs":[],"stateMutability":"nonpayable","type":"function"}];
+// UPGRADED: ABI now expects the tokenAddress as the first argument in payBill
+const ABAPAY_ABI = [{"inputs":[{"internalType":"address","name":"tokenAddress","type":"address"},{"internalType":"string","name":"serviceType","type":"string"},{"internalType":"string","name":"accountNumber","type":"string"},{"internalType":"uint256","name":"amount","type":"uint256"}],"name":"payBill","outputs":[],"stateMutability":"nonpayable","type":"function"}];
 const ERC20_ABI = [
   {"inputs":[{"internalType":"address","name":"spender","type":"address"},{"internalType":"uint256","name":"amount","type":"uint256"}],"name":"approve","outputs":[{"internalType":"bool","name":"","type":"bool"}],"stateMutability":"nonpayable","type":"function"},
   {"inputs":[{"internalType":"address","name":"account","type":"address"}],"name":"balanceOf","outputs":[{"internalType":"uint256","name":"","type":"uint256"}],"stateMutability":"view","type":"function"}
@@ -64,7 +65,7 @@ export default function Home() {
   const [customerPhone, setCustomerPhone] = useState("");
   const [status, setStatus] = useState("");
   const [activeTab, setActiveTab] = useState("pay");
-  
+
   // Validation & Support States
   const [customerName, setCustomerName] = useState<string | null>(null);
   const [isVerifying, setIsVerifying] = useState(false);
@@ -87,7 +88,7 @@ export default function Home() {
   const [cableProvider, setCableProvider] = useState(CABLE_PROVIDERS[0]);
   const [telecomProvider, setTelecomProvider] = useState(TELECOM_PROVIDERS[0]);
   const [meterType, setMeterType] = useState<"prepaid" | "postpaid">("prepaid");
-  
+
   const [activeDataCategory, setActiveDataCategory] = useState(DATA_CATEGORIES[0]);
   const [selectedDataPlan, setSelectedDataPlan] = useState<any>(null);
 
@@ -95,7 +96,7 @@ export default function Home() {
   const [modalTitle, setModalTitle] = useState("");
   const [modalOptions, setModalOptions] = useState<string[]>([]);
   const [modalCallback, setModalCallback] = useState<((value: string) => void) | null>(null);
-  
+
   // Token & Balance States
   const [selectedToken, setSelectedToken] = useState(SUPPORTED_TOKENS[0]);
   const [walletBalance, setWalletBalance] = useState("0.00");
@@ -114,7 +115,7 @@ export default function Home() {
     async function initSystem() {
       const savedHistory = localStorage.getItem("abapay_history");
       if (savedHistory) setTransactions(JSON.parse(savedHistory));
-      
+
       try {
         const rateRes = await fetch('/api/rate');
         const rateData = await rateRes.json();
@@ -223,7 +224,7 @@ export default function Home() {
   // --- EXECUTE PAYMENT ---
   const handlePayment = async () => {
     if (!address || !client) return setStatus("Connect Wallet First");
-    
+
     // UPGRADED: Allows both USDT and USDC to pass through. Celo Native blocked for now.
     if (selectedToken.symbol === "CELO") {
       return showToast("Unsupported Asset", `AbaPay Smart Contract upgrade required to pay natively with CELO. Please select USDT or USDC.`, "error");
@@ -238,7 +239,7 @@ export default function Home() {
     try {
       const valueInWei = parseUnits(cryptoToCharge, selectedToken.decimals);
       const tokenAddress = isMainnet ? selectedToken.mainnet : selectedToken.sepolia;
-      
+
       // Approves whichever token the user selected
       await client.writeContract({
         address: tokenAddress as `0x${string}`,
@@ -252,11 +253,12 @@ export default function Home() {
                               activeService.id === "CABLE" ? cableProvider : 
                               telecomProvider; 
 
+      // UPGRADED: tokenAddress is now passed securely as the first argument
       const hash = await client.writeContract({
         address: ABAPAY_CONTRACT,
         abi: ABAPAY_ABI,
         functionName: 'payBill',
-        args: [activeServiceID, accountNumber, valueInWei],
+        args: [tokenAddress, activeServiceID, accountNumber, valueInWei],
         account: address,
       });
 
@@ -283,7 +285,7 @@ export default function Home() {
         const newTx = { id: hash.slice(0,8), date: new Date().toLocaleString(), status: "SUCCESS", amountNaira: nairaAmount, service: activeService.name, network: activeServiceID.toUpperCase(), txHash: hash };
         setTransactions([newTx, ...transactions]);
         localStorage.setItem("abapay_history", JSON.stringify([newTx, ...transactions]));
-        
+
         const publicClient = createPublicClient({ chain: activeChain, transport: http() });
         const balanceWei = await publicClient.readContract({ address: tokenAddress as `0x${string}`, abi: ERC20_ABI, functionName: 'balanceOf', args: [address] });
         setWalletBalance(parseFloat(formatUnits(balanceWei as bigint, selectedToken.decimals)).toFixed(4));
@@ -303,7 +305,7 @@ export default function Home() {
       if (supportFile) formData.append("file", supportFile);
 
       await fetch('/api/support', { method: 'POST', body: formData });
-      
+
       setIsSupportOpen(false);
       setSupportMessage("");
       setSupportFile(null);
@@ -346,7 +348,7 @@ export default function Home() {
           </div>
         </div>
       )}
-      
+
       {toast && (
         <div className="fixed top-4 right-4 sm:top-6 sm:right-6 z-[100] animate-in slide-in-from-top-8 fade-in duration-300">
           <div className="bg-[#111114] border border-slate-800 shadow-2xl rounded-2xl p-4 flex items-start gap-3 w-[300px]">
@@ -440,7 +442,7 @@ export default function Home() {
 
         {activeTab === 'pay' ? (
           <div className="bg-white border border-slate-100 rounded-[2.5rem] p-8 shadow-2xl shadow-emerald-900/10 animate-in fade-in zoom-in-95">
-            
+
             <div className="grid grid-cols-4 gap-3 mb-6">
                 {SERVICES.map(s => (
                     <button 
@@ -455,7 +457,7 @@ export default function Home() {
             </div>
 
             <div className="space-y-5">
-                
+
                 <div className="bg-slate-50 border border-slate-100 p-4 rounded-2xl flex justify-between items-center animate-in fade-in">
                   <div 
                     className="flex items-center gap-2 cursor-pointer hover:bg-slate-100 p-2 -ml-2 rounded-xl transition-colors" 
@@ -478,7 +480,7 @@ export default function Home() {
                     <label className="text-[10px] font-black text-slate-400 uppercase mb-2 block">
                         {activeService.id === "AIRTIME" || activeService.id === "DATA" ? "Network Selection" : "Choose Provider"}
                     </label>
-                    
+
                     <button 
                       onClick={() => {
                         const title = activeService.id === "AIRTIME" || activeService.id === "DATA" ? "Select Network" : "Select Provider";
