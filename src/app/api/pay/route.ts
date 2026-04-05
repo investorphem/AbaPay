@@ -20,14 +20,15 @@ function getStrictRequestId() {
 export async function POST(req: Request) {
   try {
     const body = await req.json();
-    const { serviceID, billersCode, amount, token: tokenSymbol, txHash, variation_code, phone, nairaAmount, wallet_address } = body;
+    // Catch the separated network and serviceCategory
+    const { serviceID, serviceCategory, network, billersCode, amount, token: tokenSymbol, txHash, variation_code, phone, nairaAmount, wallet_address } = body;
 
     if (processedTransactions.has(txHash)) {
       return NextResponse.json({ success: false, code: "DUPLICATE_HASH", message: "Duplicate hash blocked." }, { status: 400 });
     }
 
     const requestedNaira = parseFloat(nairaAmount);
-    const needsVerification = serviceID.includes('electric') || serviceID.includes('tv');
+    const needsVerification = serviceCategory === 'ELECTRICITY' || serviceCategory === 'CABLE';
     const serviceFee = needsVerification ? 100 : 0;
     const vendAmount = requestedNaira; 
 
@@ -39,11 +40,11 @@ export async function POST(req: Request) {
         return NextResponse.json({ success: false, code: "FUNDS", message: "Insufficient crypto paid." }, { status: 400 });
     }
 
-    // 1. GUARANTEED DATABASE LOGGING (Now with 'network' included!)
+    // 1. DATABASE LOGGING (Clean Network & Service Categories)
     const dbPayload = {
       tx_hash: txHash,
-      service_category: serviceID,
-      network: serviceID.toUpperCase(), // <--- THE MISSING PIECE
+      service_category: serviceCategory, // E.g. "DATA", "AIRTIME"
+      network: network, // E.g. "MTN", "IKEDC"
       account_number: billersCode || phone || "N/A",
       amount_usdt: parseFloat(amount), 
       amount_naira: vendAmount,
@@ -77,10 +78,10 @@ export async function POST(req: Request) {
       }
     }
 
-    const isAirtime = ['mtn', 'airtel', 'glo', '9mobile'].includes(serviceID);
+    const isAirtime = serviceCategory === 'AIRTIME';
     const vtpassPayload: any = {
       request_id: getStrictRequestId(),
-      serviceID: serviceID,
+      serviceID: serviceID, // VTpass strictly needs 'mtn-data' etc.
       amount: vendAmount,
       phone: phone || billersCode
     };
@@ -110,7 +111,7 @@ export async function POST(req: Request) {
       await supabase.from('transactions').update({ status: 'SUCCESS' }).eq('tx_hash', txHash);
 
       try { await sendAbaPaySms(vtpassPayload.phone, `AbaPay: Purchase Successful! Token/Ref: ${vendedToken}. Amt: ₦${vendAmount}`); } catch (e) {}
-      try { await sendTelegramAlert(`✅ *SALE SUCCESSFUL*\n🛒 *Product:* ${serviceID}\n💰 *Naira:* ₦${vendAmount}\n🪙 *Asset:* ${amount} ${tokenSymbol || 'USDT'}\n👤 *User:* ${billersCode}\n⛽ *Fee:* ₦${serviceFee}\n🧾 *Ref:* ${vendedToken}`); } catch (e) {}
+      try { await sendTelegramAlert(`✅ *SALE SUCCESSFUL*\n🛒 *Product:* ${network} ${serviceCategory}\n💰 *Naira:* ₦${vendAmount}\n🪙 *Asset:* ${amount} ${tokenSymbol || 'USDT'}\n👤 *User:* ${billersCode}\n⛽ *Fee:* ₦${serviceFee}\n🧾 *Ref:* ${vendedToken}`); } catch (e) {}
 
       return NextResponse.json({
         success: true,
