@@ -5,7 +5,8 @@ import { createWalletClient, createPublicClient, custom, http, formatUnits, defi
 import { 
   Lock, ArrowDownToLine, Wallet, ShieldAlert, Activity, 
   Database, RefreshCcw, Globe, Zap, ExternalLink, 
-  Search, Download, Users, BarChart3, Banknote
+  Search, Download, Users, BarChart3, Banknote,
+  ChevronLeft, ChevronRight
 } from "lucide-react";
 import { supabase } from "@/utils/supabase";
 
@@ -38,6 +39,8 @@ const TOKENS = {
   USDC: { decimals: 6, mainnet: "0xcebA9300f2b948710d2653dD7B07f33A8B32118C", sepolia: "0x01C5C0122039549AD1493B8220cABEdD739BC44E" }
 };
 
+const ITEMS_PER_PAGE = 10; // Number of rows per page in the admin ledger
+
 export default function AdminDashboard() {
   const [address, setAddress] = useState<string | null>(null);
   const [client, setClient] = useState<any>(null);
@@ -54,6 +57,9 @@ export default function AdminDashboard() {
   const [isFetching, setIsFetching] = useState(false);
   const [searchTerm, setSearchTerm] = useState("");
   const [filterStatus, setFilterStatus] = useState("ALL");
+  
+  // PAGINATION STATE
+  const [currentPage, setCurrentPage] = useState(1);
 
   const isMainnet = process.env.NEXT_PUBLIC_NETWORK === "celo";
   const isLive = process.env.NEXT_PUBLIC_APP_MODE === "live";
@@ -160,6 +166,18 @@ export default function AdminDashboard() {
     });
   }, [dbTransactions, searchTerm, filterStatus]);
 
+  // Automatically jump back to Page 1 when the user types a search or changes a filter
+  useEffect(() => {
+    setCurrentPage(1);
+  }, [searchTerm, filterStatus]);
+
+  // Pagination Logic
+  const totalPages = Math.ceil(filteredTx.length / ITEMS_PER_PAGE);
+  const currentTransactions = filteredTx.slice(
+    (currentPage - 1) * ITEMS_PER_PAGE,
+    currentPage * ITEMS_PER_PAGE
+  );
+
   const exportCSV = () => {
     const headers = "Date,Status,Network,Service,Account,Naira,USDT,Hash\n";
     const rows = filteredTx.map(tx => `${tx.created_at},${tx.status},${tx.network},${tx.service_category},${tx.account_number},${tx.amount_naira},${tx.amount_usdt},${tx.tx_hash}`).join("\n");
@@ -229,7 +247,7 @@ export default function AdminDashboard() {
                   <button onClick={exportCSV} className="flex items-center gap-2 bg-slate-800 border border-slate-700 px-6 py-3 rounded-xl text-sm font-bold hover:bg-slate-700"><Download size={16} /> Export</button>
                 </div>
 
-                <div className="overflow-x-auto">
+                <div className="overflow-x-auto min-h-[400px] flex flex-col justify-between">
                   <table className="w-full text-left text-sm">
                     <thead>
                       <tr className="text-slate-500 border-b border-slate-800 text-[10px] uppercase">
@@ -241,7 +259,7 @@ export default function AdminDashboard() {
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-slate-800">
-                      {filteredTx.map((tx) => (
+                      {currentTransactions.map((tx) => (
                         <tr key={tx.id} className="hover:bg-slate-900/40">
                           <td className="py-4 px-2">
                             <p className="text-white font-medium">{new Date(tx.created_at).toLocaleTimeString()}</p>
@@ -265,6 +283,29 @@ export default function AdminDashboard() {
                       ))}
                     </tbody>
                   </table>
+
+                  {/* PAGINATION CONTROLS */}
+                  {totalPages > 1 && (
+                    <div className="flex justify-between items-center mt-6 pt-4 border-t border-slate-800">
+                      <button 
+                        onClick={() => setCurrentPage(p => Math.max(1, p - 1))} 
+                        disabled={currentPage === 1} 
+                        className="flex items-center gap-1 px-4 py-2 text-xs font-bold uppercase text-slate-400 hover:text-emerald-400 disabled:opacity-30 transition-colors"
+                      >
+                        <ChevronLeft size={16} /> Prev
+                      </button>
+                      <span className="text-xs font-black tracking-widest text-slate-500">
+                        PAGE {currentPage} OF {totalPages}
+                      </span>
+                      <button 
+                        onClick={() => setCurrentPage(p => Math.min(totalPages, p + 1))} 
+                        disabled={currentPage === totalPages} 
+                        className="flex items-center gap-1 px-4 py-2 text-xs font-bold uppercase text-slate-400 hover:text-emerald-400 disabled:opacity-30 transition-colors"
+                      >
+                        Next <ChevronRight size={16} />
+                      </button>
+                    </div>
+                  )}
                 </div>
               </div>
             )}
