@@ -3,9 +3,9 @@
 import { useState, useEffect, useMemo } from "react";
 import { createWalletClient, createPublicClient, custom, http, formatUnits, defineChain } from "viem";
 import { 
-  Lock, Unlock, ArrowDownToLine, Wallet, ShieldAlert, Activity, 
-  Database, CheckCircle2, XCircle, Undo2, Download, Search, 
-  Filter, BarChart3, Users, Banknote, RefreshCcw, Globe, Zap, ExternalLink 
+  Lock, ArrowDownToLine, Wallet, ShieldAlert, Activity, 
+  Database, RefreshCcw, Globe, Zap, ExternalLink, 
+  Search, Download, Users, BarChart3, Banknote
 } from "lucide-react";
 import { supabase } from "@/utils/supabase";
 
@@ -24,7 +24,6 @@ const celoSepolia = defineChain({
   rpcUrls: { default: { http: ['https://forno.celo-sepolia.celo-testnet.org'] } },
 });
 
-// UPGRADED: ABI now includes the tokenAddress argument for withdrawFunds
 const ABAPAY_ADMIN_ABI = [
   {"inputs":[],"name":"owner","outputs":[{"internalType":"address","name":"","type":"address"}],"stateMutability":"view","type":"function"},
   {"inputs":[{"internalType":"address","name":"tokenAddress","type":"address"}],"name":"withdrawFunds","outputs":[],"stateMutability":"nonpayable","type":"function"}
@@ -34,42 +33,33 @@ const ERC20_ABI = [
   {"inputs":[{"internalType":"address","name":"account","type":"address"}],"name":"balanceOf","outputs":[{"internalType":"uint256","name":"","type":"uint256"}],"stateMutability":"view","type":"function"}
 ];
 
-// UPGRADED: Added both tokens for Admin tracking (with EXACT USDC Sepolia Address & 6 Decimals)
 const TOKENS = {
   USDT: { decimals: 6, mainnet: "0x48065fbbe25f71c9282ddf5e1cd6d6a887483d5e", sepolia: "0xd077A400968890Eacc75cdc901F0356c943e4fDb" },
   USDC: { decimals: 6, mainnet: "0xcebA9300f2b948710d2653dD7B07f33A8B32118C", sepolia: "0x01C5C0122039549AD1493B8220cABEdD739BC44E" }
 };
 
 export default function AdminDashboard() {
-  // --- SYSTEM STATES ---
   const [address, setAddress] = useState<string | null>(null);
   const [client, setClient] = useState<any>(null);
   const [isOwner, setIsOwner] = useState<boolean | null>(null);
 
-  // UPGRADED: Independent Vault Balances
   const [usdtVaultBalance, setUsdtVaultBalance] = useState("0.00");
   const [usdcVaultBalance, setUsdcVaultBalance] = useState("0.00");
-
-  const [vtBalance, setVtBalance] = useState("0.00"); // VTpass Wallet
-  const [smsBalance, setSmsBalance] = useState("0");    // SMS Units
+  const [vtBalance, setVtBalance] = useState("0.00"); 
+  const [smsBalance, setSmsBalance] = useState("0");    
   const [status, setStatus] = useState("");
   const [activeTab, setActiveTab] = useState("analytics");
 
-  // --- DATABASE & FILTER STATES ---
   const [dbTransactions, setDbTransactions] = useState<any[]>([]);
   const [isFetching, setIsFetching] = useState(false);
   const [searchTerm, setSearchTerm] = useState("");
-  const [filterService, setFilterService] = useState("ALL");
   const [filterStatus, setFilterStatus] = useState("ALL");
 
-  // --- ENVIRONMENT CONFIG ---
   const isMainnet = process.env.NEXT_PUBLIC_NETWORK === "celo";
   const isLive = process.env.NEXT_PUBLIC_APP_MODE === "live";
   const activeChain = isMainnet ? celoMainnet : celoSepolia;
-
   const ABAPAY_CONTRACT = process.env.NEXT_PUBLIC_ABAPAY_ADDRESS as `0x${string}`;
 
-  // --- INITIALIZATION ---
   useEffect(() => {
     async function initAdmin() {
       if (typeof window !== "undefined" && (window as any).ethereum) {
@@ -80,7 +70,6 @@ export default function AdminDashboard() {
           setClient(walletClient);
 
           const publicClient = createPublicClient({ chain: activeChain, transport: http() });
-
           const contractOwner = await publicClient.readContract({
             address: ABAPAY_CONTRACT,
             abi: ABAPAY_ADMIN_ABI,
@@ -93,9 +82,7 @@ export default function AdminDashboard() {
           } else {
             setIsOwner(false);
           }
-        } catch (error) {
-          console.error("Admin init failed", error);
-        }
+        } catch (error) { console.error("Admin init failed", error); }
       }
     }
     initAdmin();
@@ -103,40 +90,20 @@ export default function AdminDashboard() {
 
   const refreshAllData = async () => {
     setIsFetching(true);
-    await Promise.all([
-      fetchCloudLedger(),
-      fetchOnChainBalances(),
-      fetchVtPassHealth()
-    ]);
+    await Promise.all([fetchCloudLedger(), fetchOnChainBalances(), fetchVtPassHealth()]);
     setIsFetching(false);
   };
 
-  // UPGRADED: Fetches both USDT and USDC from the smart contract
   const fetchOnChainBalances = async () => {
     const publicClient = createPublicClient({ chain: activeChain, transport: http() });
-
     const usdtAddr = isMainnet ? TOKENS.USDT.mainnet : TOKENS.USDT.sepolia;
     const usdcAddr = isMainnet ? TOKENS.USDC.mainnet : TOKENS.USDC.sepolia;
-
     try {
-      const usdtBal = await publicClient.readContract({
-        address: usdtAddr as `0x${string}`,
-        abi: ERC20_ABI,
-        functionName: 'balanceOf',
-        args: [ABAPAY_CONTRACT],
-      }) as bigint;
+      const usdtBal = await publicClient.readContract({ address: usdtAddr as `0x${string}`, abi: ERC20_ABI, functionName: 'balanceOf', args: [ABAPAY_CONTRACT] }) as bigint;
       setUsdtVaultBalance(formatUnits(usdtBal, TOKENS.USDT.decimals));
-
-      const usdcBal = await publicClient.readContract({
-        address: usdcAddr as `0x${string}`,
-        abi: ERC20_ABI,
-        functionName: 'balanceOf',
-        args: [ABAPAY_CONTRACT],
-      }) as bigint;
+      const usdcBal = await publicClient.readContract({ address: usdcAddr as `0x${string}`, abi: ERC20_ABI, functionName: 'balanceOf', args: [ABAPAY_CONTRACT] }) as bigint;
       setUsdcVaultBalance(formatUnits(usdcBal, TOKENS.USDC.decimals));
-    } catch (error) {
-      console.error("Failed to fetch vault balances", error);
-    }
+    } catch (error) { console.error("Failed to fetch vault balances", error); }
   };
 
   const fetchVtPassHealth = async () => {
@@ -145,53 +112,38 @@ export default function AdminDashboard() {
       const data = await res.json();
       setVtBalance(data.naira);
       setSmsBalance(data.sms);
-    } catch (e) {
-      console.error("Failed to fetch VTpass health");
-    }
+    } catch (e) { console.error("Failed to fetch VTpass health"); }
   };
 
   const fetchCloudLedger = async () => {
-    const { data, error } = await supabase
-      .from('transactions')
-      .select('*')
-      .order('created_at', { ascending: false });
+    const { data, error } = await supabase.from('transactions').select('*').order('created_at', { ascending: false });
     if (!error) setDbTransactions(data || []);
   };
 
-  // --- ACTIONS ---
-  // UPGRADED: Now accepts the token symbol so it knows which token to withdraw
   const handleWithdrawal = async (tokenSymbol: 'USDT' | 'USDC') => {
     if (!client || !address) return;
-
     const balanceToCheck = tokenSymbol === 'USDT' ? usdtVaultBalance : usdcVaultBalance;
     if (parseFloat(balanceToCheck) <= 0) return setStatus(`The ${tokenSymbol} Vault is already empty.`);
-
-    setStatus(`Executing Secure Smart Contract Withdrawal for ${tokenSymbol}...`);
+    setStatus(`Withdrawing ${tokenSymbol}...`);
     try {
       const tokenAddr = isMainnet ? TOKENS[tokenSymbol].mainnet : TOKENS[tokenSymbol].sepolia;
-
       const hash = await client.writeContract({
         address: ABAPAY_CONTRACT,
         abi: ABAPAY_ADMIN_ABI,
         functionName: 'withdrawFunds',
-        args: [tokenAddr], // Passing the required token address to the smart contract
+        args: [tokenAddr], 
         account: address,
       });
-      setStatus(`Processing ${tokenSymbol}... Hash: ${hash.slice(0, 10)}`);
+      setStatus(`Success! Hash: ${hash.slice(0, 10)}`);
       setTimeout(() => refreshAllData(), 5000);
-    } catch (error) {
-      setStatus("Action Rejected or Insufficient Gas.");
-    }
+    } catch (error) { setStatus("Rejected or Insufficient Gas."); }
   };
 
-  // --- ANALYTICS ENGINE ---
   const analytics = useMemo(() => {
     const successTx = dbTransactions.filter(tx => tx.status === "SUCCESS");
-    const totalVol = successTx.reduce((acc, tx) => acc + Number(tx.amount_naira), 0);
-    const totalFees = successTx.reduce((acc, tx) => acc + Number(tx.fee_naira), 0);
     return {
-      vol: totalVol,
-      fees: totalFees,
+      vol: successTx.reduce((acc, tx) => acc + Number(tx.amount_naira), 0),
+      fees: successTx.reduce((acc, tx) => acc + Number(tx.fee_naira), 0),
       count: successTx.length,
       users: new Set(successTx.map(tx => tx.wallet_address)).size
     };
@@ -199,33 +151,28 @@ export default function AdminDashboard() {
 
   const filteredTx = useMemo(() => {
     return dbTransactions.filter(tx => {
-      const matchesSearch = tx.account_number.includes(searchTerm) || tx.wallet_address.toLowerCase().includes(searchTerm.toLowerCase());
-      const matchesService = filterService === "ALL" || tx.service_category.toUpperCase().includes(filterService);
+      const searchLower = searchTerm.toLowerCase();
+      const matchesSearch = (tx.account_number || "").includes(searchTerm) || 
+                            (tx.network || "").toLowerCase().includes(searchLower) ||
+                            (tx.wallet_address || "").toLowerCase().includes(searchLower);
       const matchesStatus = filterStatus === "ALL" || tx.status === filterStatus;
-      return matchesSearch && matchesService && matchesStatus;
+      return matchesSearch && matchesStatus;
     });
-  }, [dbTransactions, searchTerm, filterService, filterStatus]);
+  }, [dbTransactions, searchTerm, filterStatus]);
 
-  // --- CSV EXPORT ---
   const exportCSV = () => {
-    const headers = "Date,Status,Service,Account,Amount(NGN),Crypto,Hash\n";
-    const rows = filteredTx.map(tx => `${tx.created_at},${tx.status},${tx.service_category},${tx.account_number},${tx.amount_naira},${tx.amount_usdt},${tx.tx_hash}`).join("\n");
+    const headers = "Date,Status,Network,Service,Account,Naira,USDT,Hash\n";
+    const rows = filteredTx.map(tx => `${tx.created_at},${tx.status},${tx.network},${tx.service_category},${tx.account_number},${tx.amount_naira},${tx.amount_usdt},${tx.tx_hash}`).join("\n");
     const blob = new Blob([headers + rows], { type: 'text/csv' });
     const url = window.URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = `AbaPay_Report_${new Date().toISOString().slice(0,10)}.csv`;
-    a.click();
+    const a = document.createElement('a'); a.href = url; a.download = `AbaPay_Report.csv`; a.click();
   };
 
-  // Helper to format total USD estimation for the stats box
-  const totalEstimatedUsd = (parseFloat(usdtVaultBalance) + parseFloat(usdcVaultBalance)).toFixed(2);
-
   return (
-    <main className="min-h-screen bg-[#070709] text-slate-200 p-4 md:p-8 selection:bg-emerald-500/30">
+    <main className="min-h-screen bg-[#070709] text-slate-200 p-4 md:p-8">
       <div className="max-w-6xl mx-auto">
-
-        {/* --- TOP HUD --- */}
+        
+        {/* HEADER */}
         <div className="flex flex-col md:flex-row justify-between items-start md:items-center mb-8 gap-4">
           <div>
             <h1 className="text-2xl font-black tracking-tighter flex items-center gap-3">
@@ -233,154 +180,86 @@ export default function AdminDashboard() {
               ABAPAY <span className="text-slate-500 font-light">OPS CENTER</span>
             </h1>
             <div className="flex gap-3 mt-2">
-              <span className={`flex items-center gap-1.5 px-2 py-0.5 rounded text-[10px] font-bold border ${isLive ? 'bg-red-500/10 text-red-500 border-red-500/20' : 'bg-blue-500/10 text-blue-500 border-blue-500/20'}`}>
-                <Globe size={10} /> {isLive ? 'LIVE PRODUCTION' : 'SANDBOX MODE'}
-              </span>
-              <span className="flex items-center gap-1.5 px-2 py-0.5 rounded text-[10px] font-bold border bg-purple-500/10 text-purple-400 border-purple-500/20">
-                <Database size={10} /> {isMainnet ? 'CELO MAINNET' : 'CELO SEPOLIA'}
-              </span>
+              <span className={`px-2 py-0.5 rounded text-[10px] font-bold border ${isLive ? 'bg-red-500/10 text-red-500 border-red-500/20' : 'bg-blue-500/10 text-blue-500 border-blue-500/20'}`}>{isLive ? 'LIVE' : 'SANDBOX'}</span>
+              <span className="px-2 py-0.5 rounded text-[10px] font-bold border bg-purple-500/10 text-purple-400 border-purple-500/20">{isMainnet ? 'MAINNET' : 'SEPOLIA'}</span>
             </div>
           </div>
-
-          <button 
-            onClick={refreshAllData}
-            className="group flex items-center gap-2 bg-slate-900 border border-slate-800 px-5 py-2.5 rounded-xl hover:bg-slate-800 transition-all active:scale-95"
-          >
-            <RefreshCcw size={18} className={`${isFetching ? 'animate-spin text-emerald-500' : 'text-slate-400'}`} />
+          <button onClick={refreshAllData} className="flex items-center gap-2 bg-slate-900 border border-slate-800 px-5 py-2.5 rounded-xl hover:bg-slate-800 active:scale-95">
+            <RefreshCcw size={18} className={isFetching ? 'animate-spin text-emerald-500' : 'text-slate-400'} />
             <span className="text-sm font-bold">Synchronize Systems</span>
           </button>
         </div>
 
         {!isOwner ? (
-          <div className="flex flex-col items-center justify-center py-40 bg-slate-900/30 border border-dashed border-slate-800 rounded-3xl">
-             <ShieldAlert size={48} className="text-red-500 mb-4 animate-pulse" />
+          <div className="py-40 text-center bg-slate-900/30 border border-dashed border-slate-800 rounded-3xl">
+             <ShieldAlert size={48} className="mx-auto text-red-500 mb-4 animate-pulse" />
              <h2 className="text-xl font-bold">Security Challenge Failed</h2>
              <p className="text-slate-500 text-sm mt-2">Connected: {address?.slice(0,12)}...</p>
           </div>
         ) : (
           <div className="space-y-6">
-
-            {/* --- CORE STATS GRID --- */}
+            
+            {/* STATS */}
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
-              <StatBox label="VTpass Wallet" value={`₦${vtBalance}`} sub="Naira Utility Float" color="text-white" icon={<Banknote size={16}/>} />
-              <StatBox label="Blockchain Vaults" value={`$${totalEstimatedUsd}`} sub="Combined USDT & USDC" color="text-emerald-500" icon={<Wallet size={16}/>} />
-              <StatBox label="Admin Profit" value={`₦${analytics.fees.toLocaleString()}`} sub="Service Fee Accrued" color="text-blue-400" icon={<BarChart3 size={16}/>} />
-              <StatBox label="SMS Health" value={`${smsBalance} Units`} sub="DND Fallback Status" color="text-orange-400" icon={<Activity size={16}/>} />
+              <StatBox label="VTpass Wallet" value={`₦${vtBalance}`} sub="Naira Float" color="text-white" icon={<Banknote size={16}/>} />
+              <StatBox label="Blockchain Vaults" value={`$${(parseFloat(usdtVaultBalance) + parseFloat(usdcVaultBalance)).toFixed(2)}`} sub="Combined Assets" color="text-emerald-500" icon={<Wallet size={16}/>} />
+              <StatBox label="Admin Profit" value={`₦${analytics.fees.toLocaleString()}`} sub="Fee Accrued" color="text-blue-400" icon={<BarChart3 size={16}/>} />
+              <StatBox label="SMS Health" value={`${smsBalance} Units`} sub="Messaging Units" color="text-orange-400" icon={<Activity size={16}/>} />
             </div>
 
-            {/* --- TAB NAVIGATION --- */}
             <div className="bg-[#111114] p-1.5 rounded-2xl border border-slate-800 inline-flex gap-1">
-              {['analytics', 'ledger', 'vault'].map((tab) => (
-                <button
-                  key={tab}
-                  onClick={() => setActiveTab(tab)}
-                  className={`px-6 py-2 rounded-xl text-xs font-black uppercase tracking-widest transition-all ${activeTab === tab ? 'bg-slate-800 text-emerald-400 shadow-xl' : 'text-slate-500 hover:text-slate-300'}`}
-                >
-                  {tab}
-                </button>
+              {['analytics', 'ledger', 'vault'].map((t) => (
+                <button key={t} onClick={() => setActiveTab(t)} className={`px-6 py-2 rounded-xl text-xs font-black uppercase transition-all ${activeTab === t ? 'bg-slate-800 text-emerald-400' : 'text-slate-500'}`}>{t}</button>
               ))}
             </div>
 
-            {/* --- TAB CONTENT: VAULT --- */}
-            {activeTab === 'vault' && (
-              <div className="bg-[#111114] border border-slate-800 rounded-3xl p-8 animate-in fade-in slide-in-from-bottom-4">
-
-                <div className="flex flex-col items-center mb-8">
-                    <div className="inline-p-4 bg-emerald-500/10 rounded-full mb-4 p-4">
-                      <Lock className="text-emerald-500" size={32} />
-                    </div>
-                    <p className="text-slate-500 text-sm text-center max-w-md">These balances are stored in the AbaPay Smart Contract. Only the CEO can trigger a withdrawal.</p>
-                    {status && <div className="mt-4 text-xs font-mono text-emerald-400 bg-emerald-500/5 py-2 px-4 rounded border border-emerald-500/10">{status}</div>}
-                </div>
-
-                {/* TWO-COLUMN LAYOUT FOR USDT AND USDC */}
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-6 max-w-4xl mx-auto">
-                    {/* USDT VAULT */}
-                    <div className="bg-slate-900 border border-slate-800 p-6 rounded-3xl text-center flex flex-col justify-between">
-                        <div>
-                          <h2 className="text-4xl font-black mb-1">${usdtVaultBalance}</h2>
-                          <span className="text-xs text-emerald-500 font-bold uppercase tracking-widest bg-emerald-500/10 px-3 py-1 rounded-full">USDT Vault</span>
-                        </div>
-                        <button 
-                          onClick={() => handleWithdrawal('USDT')}
-                          className="mt-8 w-full bg-slate-800 hover:bg-emerald-500 hover:text-slate-950 text-slate-300 font-black py-3 rounded-xl flex items-center justify-center gap-2 transition-all"
-                        >
-                          <ArrowDownToLine size={16} /> Withdraw USDT
-                        </button>
-                    </div>
-
-                    {/* USDC VAULT */}
-                    <div className="bg-slate-900 border border-slate-800 p-6 rounded-3xl text-center flex flex-col justify-between">
-                        <div>
-                          <h2 className="text-4xl font-black mb-1">${usdcVaultBalance}</h2>
-                          <span className="text-xs text-blue-400 font-bold uppercase tracking-widest bg-blue-500/10 px-3 py-1 rounded-full">USDC Vault</span>
-                        </div>
-                        <button 
-                          onClick={() => handleWithdrawal('USDC')}
-                          className="mt-8 w-full bg-slate-800 hover:bg-blue-500 hover:text-slate-950 text-slate-300 font-black py-3 rounded-xl flex items-center justify-center gap-2 transition-all"
-                        >
-                          <ArrowDownToLine size={16} /> Withdraw USDC
-                        </button>
-                    </div>
-                </div>
-
-              </div>
-            )}
-
-            {/* --- TAB CONTENT: LEDGER --- */}
+            {/* LEDGER TAB */}
             {activeTab === 'ledger' && (
               <div className="bg-[#111114] border border-slate-800 rounded-3xl p-6 animate-in fade-in">
                 <div className="flex flex-col lg:flex-row gap-4 mb-6">
                   <div className="flex-1 relative">
                     <Search className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-600" size={16} />
-                    <input 
-                      type="text" 
-                      placeholder="Search Ledger..." 
-                      className="w-full bg-slate-950 border border-slate-800 rounded-xl pl-12 pr-4 py-3 text-sm focus:border-emerald-500 outline-none transition-all"
-                      value={searchTerm}
-                      onChange={(e) => setSearchTerm(e.target.value)}
-                    />
+                    <input type="text" placeholder="Search by Network, Account or Wallet..." className="w-full bg-slate-950 border border-slate-800 rounded-xl pl-12 pr-4 py-3 text-sm focus:border-emerald-500 outline-none" value={searchTerm} onChange={(e) => setSearchTerm(e.target.value)} />
                   </div>
-                  <button onClick={exportCSV} className="flex items-center gap-2 bg-slate-800 border border-slate-700 px-6 py-3 rounded-xl text-sm font-bold hover:bg-slate-700">
-                    <Download size={16} /> Export CSV
-                  </button>
+                  <select value={filterStatus} onChange={(e) => setFilterStatus(e.target.value)} className="bg-slate-950 border border-slate-800 rounded-xl px-4 py-3 text-sm text-slate-300">
+                    <option value="ALL">All Status</option>
+                    <option value="SUCCESS">Success</option>
+                    <option value="FAILED_VENDING">Failed</option>
+                  </select>
+                  <button onClick={exportCSV} className="flex items-center gap-2 bg-slate-800 border border-slate-700 px-6 py-3 rounded-xl text-sm font-bold hover:bg-slate-700"><Download size={16} /> Export</button>
                 </div>
 
                 <div className="overflow-x-auto">
                   <table className="w-full text-left text-sm">
                     <thead>
-                      <tr className="text-slate-500 border-b border-slate-800 text-[10px] uppercase tracking-tighter">
+                      <tr className="text-slate-500 border-b border-slate-800 text-[10px] uppercase">
                         <th className="pb-4 px-2">Timestamp</th>
-                        <th className="pb-4 px-2">Product</th>
+                        <th className="pb-4 px-2">Product & Service</th>
                         <th className="pb-4 px-2">Financials</th>
                         <th className="pb-4 px-2">Status</th>
-                        <th className="pb-4 px-2 text-right">Verification</th>
+                        <th className="pb-4 px-2 text-right">On-Chain</th>
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-slate-800">
                       {filteredTx.map((tx) => (
-                        <tr key={tx.id} className="group hover:bg-slate-900/40 transition-colors">
+                        <tr key={tx.id} className="hover:bg-slate-900/40">
                           <td className="py-4 px-2">
                             <p className="text-white font-medium">{new Date(tx.created_at).toLocaleTimeString()}</p>
                             <p className="text-[10px] text-slate-600">{new Date(tx.created_at).toLocaleDateString()}</p>
                           </td>
                           <td className="py-4 px-2">
-                            <p className="text-slate-200 font-bold">{tx.service_category}</p>
-                            <p className="text-[10px] text-slate-500 font-mono">{tx.account_number}</p>
+                            <p className="text-slate-200 font-bold uppercase">{tx.network || 'N/A'}</p>
+                            <p className="text-[10px] text-slate-500 uppercase tracking-wider">{tx.service_category} • {tx.account_number}</p>
                           </td>
                           <td className="py-4 px-2">
                             <p className="text-white font-black">₦{tx.amount_naira.toLocaleString()}</p>
                             <p className="text-[10px] text-emerald-500">${tx.amount_usdt} Paid</p>
                           </td>
                           <td className="py-4 px-2">
-                            <span className={`text-[10px] font-black px-2 py-1 rounded ${tx.status === 'SUCCESS' ? 'bg-emerald-500/10 text-emerald-500' : 'bg-red-500/10 text-red-500'}`}>
-                              {tx.status}
-                            </span>
+                            <span className={`text-[10px] font-black px-2 py-1 rounded ${tx.status === 'SUCCESS' ? 'bg-emerald-500/10 text-emerald-500' : 'bg-red-500/10 text-red-500'}`}>{tx.status}</span>
                           </td>
                           <td className="py-4 px-2 text-right">
-                             <a href={`https://${isMainnet ? '' : 'sepolia.'}celoscan.io/tx/${tx.tx_hash}`} target="_blank" className="text-slate-600 hover:text-emerald-400 transition-colors">
-                               <ExternalLink size={14} className="ml-auto" />
-                             </a>
+                             <a href={`https://${isMainnet ? '' : 'sepolia.'}celoscan.io/tx/${tx.tx_hash}`} target="_blank" className="text-slate-600 hover:text-emerald-400"><ExternalLink size={14} className="ml-auto" /></a>
                           </td>
                         </tr>
                       ))}
@@ -390,7 +269,30 @@ export default function AdminDashboard() {
               </div>
             )}
 
-            {/* --- TAB CONTENT: ANALYTICS --- */}
+            {/* VAULT TAB */}
+            {activeTab === 'vault' && (
+              <div className="bg-[#111114] border border-slate-800 rounded-3xl p-8 animate-in fade-in slide-in-from-bottom-4">
+                <div className="flex flex-col items-center mb-8">
+                    <div className="bg-emerald-500/10 rounded-full mb-4 p-4"><Lock className="text-emerald-500" size={32} /></div>
+                    <p className="text-slate-500 text-sm text-center max-w-md italic">Smart Contract Escrow Balances</p>
+                    {status && <div className="mt-4 text-xs font-mono text-emerald-400 bg-emerald-500/5 py-2 px-4 rounded border border-emerald-500/10">{status}</div>}
+                </div>
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-6 max-w-4xl mx-auto">
+                    <div className="bg-slate-900 border border-slate-800 p-6 rounded-3xl text-center">
+                        <h2 className="text-4xl font-black mb-1">${usdtVaultBalance}</h2>
+                        <span className="text-xs text-emerald-500 font-bold uppercase tracking-widest bg-emerald-500/10 px-3 py-1 rounded-full">USDT Vault</span>
+                        <button onClick={() => handleWithdrawal('USDT')} className="mt-8 w-full bg-slate-800 hover:bg-emerald-500 hover:text-slate-950 text-slate-300 font-black py-3 rounded-xl flex items-center justify-center gap-2 transition-all"><ArrowDownToLine size={16} /> Withdraw USDT</button>
+                    </div>
+                    <div className="bg-slate-900 border border-slate-800 p-6 rounded-3xl text-center">
+                        <h2 className="text-4xl font-black mb-1">${usdcVaultBalance}</h2>
+                        <span className="text-xs text-blue-400 font-bold uppercase tracking-widest bg-blue-500/10 px-3 py-1 rounded-full">USDC Vault</span>
+                        <button onClick={() => handleWithdrawal('USDC')} className="mt-8 w-full bg-slate-800 hover:bg-blue-500 hover:text-slate-950 text-slate-300 font-black py-3 rounded-xl flex items-center justify-center gap-2 transition-all"><ArrowDownToLine size={16} /> Withdraw USDC</button>
+                    </div>
+                </div>
+              </div>
+            )}
+
+            {/* ANALYTICS TAB */}
             {activeTab === 'analytics' && (
                <div className="grid grid-cols-1 md:grid-cols-2 gap-6 animate-in fade-in">
                   <div className="bg-[#111114] border border-slate-800 rounded-3xl p-6">
@@ -416,13 +318,10 @@ export default function AdminDashboard() {
   );
 }
 
-// --- REUSABLE SUB-COMPONENTS ---
 function StatBox({ label, value, sub, color, icon }: any) {
   return (
     <div className="bg-[#111114] border border-slate-800 p-6 rounded-3xl hover:border-slate-700 transition-all">
-      <div className="flex items-center gap-2 text-slate-500 text-[10px] font-black uppercase tracking-wider mb-3">
-        {icon} {label}
-      </div>
+      <div className="flex items-center gap-2 text-slate-500 text-[10px] font-black uppercase tracking-wider mb-3">{icon} {label}</div>
       <div className={`text-2xl font-black tracking-tight ${color}`}>{value}</div>
       <div className="text-slate-600 text-[10px] mt-1 font-medium">{sub}</div>
     </div>
