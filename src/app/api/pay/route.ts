@@ -19,40 +19,55 @@ export async function POST(req: Request) {
         phone 
     } = body;
 
+    // 1. REPLAY ATTACK PREVENTION
     if (processedTransactions.has(txHash)) {
-      return NextResponse.json({ success: false, message: "Duplicate hash blocked." }, { status: 400 });
+      return NextResponse.json({ success: false, code: "DUPLICATE_HASH", message: "Duplicate hash blocked." }, { status: 400 });
     }
 
+    // 2. MATH & FEES
     const baseRate = parseFloat(process.env.NEXT_PUBLIC_FIXED_RATE || "1550");
     const profitSpread = 1.03; 
     const exchangeRate = baseRate * profitSpread;
     const totalNairaValue = parseFloat(amount) * exchangeRate;
+    const needsVerification = serviceID.includes('electric') || serviceID.includes('tv');
+    const serviceFee = needsVerification ? 100 : 0;
+    const vendAmount = Math.floor(totalNairaValue - serviceFee);
 
+    // 3. GUARANTEED DATABASE LOGGING (Saves immediately before anything can fail)
+    const { error: dbError } = await supabase.from('transactions').insert([{
+      tx_hash: txHash,
+      service_category: serviceID,
+      account_number: billersCode,
+      amount_usdt: parseFloat(amount), 
+      amount_naira: vendAmount,
+      fee_naira: serviceFee,
+      status: 'PROCESSING'
+    }]);
+    
+    if (dbError) console.error("SUPABASE INITIAL INSERT ERROR:", dbError.message);
+
+    // 4. MINIMUM LIMIT CHECK (Now properly updates the database and returns a code)
     if (totalNairaValue < 500) {
-      return NextResponse.json({ success: false, message: "Minimum order value is ₦500." }, { status: 400 });
+      await supabase.from('transactions').update({ status: 'FAILED_MIN_LIMIT' }).eq('tx_hash', txHash);
+      return NextResponse.json({ success: false, code: "MIN_LIMIT", message: "Minimum order value is ₦500." }, { status: 400 });
     }
 
-    const needsVerification = serviceID.includes('electric') || serviceID.includes('tv');
+    // 5. MERCHANT VERIFICATION
     if (needsVerification) {
       const verifyRes = await fetch(`${BASE_URL}/merchant-verify`, {
         method: 'POST',
         headers: getHeaders('POST'),
-        body: JSON.stringify({
-          billersCode,
-          serviceID,
-          type: variation_code.includes('postpaid') ? 'postpaid' : 'prepaid'
-        })
+        body: JSON.stringify({ billersCode, serviceID, type: variation_code.includes('postpaid') ? 'postpaid' : 'prepaid' })
       });
 
       const verifyData = await verifyRes.json();
       if (verifyData.code !== '000') {
-        return NextResponse.json({ success: false, message: "Account verification failed." }, { status: 400 });
+        await supabase.from('transactions').update({ status: 'FAILED_VERIFICATION' }).eq('tx_hash', txHash);
+        return NextResponse.json({ success: false, code: "VERIFY_FAIL", message: "Account verification failed." }, { status: 400 });
       }
     }
 
-    const serviceFee = needsVerification ? 100 : 0;
-    const vendAmount = Math.floor(totalNairaValue - serviceFee);
-
+    // 6. VTPASS PAYLOAD CONSTRUCTION
     const isAirtime = ['mtn', 'airtel', 'glo', '9mobile'].includes(serviceID);
     const vtpassPayload: any = {
       request_id: generateRequestId(),
@@ -66,44 +81,30 @@ export async function POST(req: Request) {
       vtpassPayload.variation_code = variation_code;
     }
 
-    // --- GOD-MODE DEBUGGING: CATCHING THE EXACT VTPASS CRASH ---
-    let payRes;
+    // 7. VTPASS EXECUTION
+    let payRes, payData;
     try {
       payRes = await fetch(`${BASE_URL}/pay`, {
         method: 'POST',
         headers: getHeaders('POST'),
         body: JSON.stringify(vtpassPayload)
       });
-    } catch (fetchError: any) {
-      return NextResponse.json({ success: false, code: "FETCH_CRASH", message: fetchError.message }, { status: 502 });
-    }
-
-    let payData;
-    try {
       payData = await payRes.json();
-    } catch (jsonError: any) {
-      const errorText = await payRes.text();
-      return NextResponse.json({ success: false, code: "JSON_CRASH", message: errorText.slice(0,100) }, { status: 502 });
+    } catch (e: any) {
+      await supabase.from('transactions').update({ status: 'FAILED_VTPASS_CRASH' }).eq('tx_hash', txHash);
+      return NextResponse.json({ success: false, code: "VTPASS_CRASH", message: e.message }, { status: 502 });
     }
-    // -----------------------------------------------------------
 
+    // 8. FINAL SUCCESS OR FAILURE HANDLING
     if (payData.code === '000') {
       processedTransactions.add(txHash);
       const vendedToken = payData.purchased_code || payData.token || "Vended Successfully";
 
-      const { error: dbError } = await supabase.from('transactions').insert([{
-        tx_hash: txHash,
-        service_category: serviceID,
-        account_number: billersCode,
-        amount_usdt: parseFloat(amount), 
-        amount_naira: vendAmount,
-        fee_naira: serviceFee,
-        status: 'SUCCESS'
-      }]);
-      if (dbError) console.error("SUPABASE ERROR:", dbError.message);
+      // Update Ledger to Success
+      await supabase.from('transactions').update({ status: 'SUCCESS' }).eq('tx_hash', txHash);
 
       try { await sendAbaPaySms(vtpassPayload.phone, `AbaPay: Purchase Successful! Token/Ref: ${vendedToken}. Amt: ₦${vendAmount}`); } catch (e) {}
-      try { await sendTelegramAlert(`✅ *SALE SUCCESSFUL*\n🛒 *Product:* ${serviceID}\n💰 *Naira:* ₦${vendAmount}\n🪙 *Asset:* ${amount} ${tokenSymbol || 'USDT'}\n👤 *User:* ${billersCode}`); } catch (e) {}
+      try { await sendTelegramAlert(`✅ *SALE SUCCESSFUL*\n🛒 *Product:* ${serviceID}\n💰 *Naira:* ₦${vendAmount}\n🪙 *Asset:* ${amount} ${tokenSymbol || 'USDT'}\n👤 *User:* ${billersCode}\n⛽ *Fee:* ₦${serviceFee}`); } catch (e) {}
 
       return NextResponse.json({
         success: true,
@@ -112,17 +113,8 @@ export async function POST(req: Request) {
       });
 
     } else {
-      const { error: failDbError } = await supabase.from('transactions').insert([{
-        tx_hash: txHash,
-        service_category: serviceID,
-        account_number: billersCode,
-        amount_usdt: parseFloat(amount),
-        amount_naira: vendAmount,
-        fee_naira: serviceFee,
-        status: 'FAILED_VENDING'
-      }]);
-      if (failDbError) console.error("SUPABASE FAILED LOG ERROR:", failDbError.message);
-
+      // Update Ledger to Vending Failure
+      await supabase.from('transactions').update({ status: 'FAILED_VENDING' }).eq('tx_hash', txHash);
       try { await sendTelegramAlert(`🚨 *CRITICAL VENDING ERROR*\nHash: \`${txHash}\`\nVTpass Code: ${payData.code}`); } catch (e) {}
 
       return NextResponse.json({ 
@@ -134,6 +126,6 @@ export async function POST(req: Request) {
 
   } catch (error: any) {
     console.error("Payment Engine Failure:", error.message);
-    return NextResponse.json({ success: false, code: "SYSTEM_CRASH", message: error.message }, { status: 500 });
+    return NextResponse.json({ success: false, code: "SYSTEM_CRASH", message: "Internal Server Error" }, { status: 500 });
   }
 }
