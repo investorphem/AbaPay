@@ -1,42 +1,48 @@
 import { NextResponse } from 'next/server';
-import { BASE_URL, generateRequestId, getHeaders } from '@/lib/vtpass';
+import { BASE_URL, getHeaders } from '@/lib/vtpass';
 import { sendAbaPaySms } from '@/lib/messaging';
 import { sendTelegramAlert } from '@/lib/telegram'; 
 import { supabase } from '@/utils/supabase'; 
 
 const processedTransactions = new Set();
 
+// Generate a strict VTpass-compliant Request ID (YYYYMMDDHHII + random)
+function getStrictRequestId() {
+  const now = new Date();
+  const year = now.getFullYear();
+  const month = String(now.getMonth() + 1).padStart(2, '0');
+  const day = String(now.getDate()).padStart(2, '0');
+  const hours = String(now.getHours()).padStart(2, '0');
+  const minutes = String(now.getMinutes()).padStart(2, '0');
+  const random = Math.floor(Math.random() * 10000).toString().padStart(4, '0');
+  return `${year}${month}${day}${hours}${minutes}${random}`;
+}
+
 export async function POST(req: Request) {
   try {
     const body = await req.json();
     const { serviceID, billersCode, amount, token: tokenSymbol, txHash, variation_code, phone, nairaAmount } = body;
 
-    // 1. REPLAY ATTACK PREVENTION
     if (processedTransactions.has(txHash)) {
       return NextResponse.json({ success: false, code: "DUPLICATE_HASH", message: "Duplicate hash blocked." }, { status: 400 });
     }
 
-    // 2. PERFECT FLAT MATH (No hidden percentages)
     const requestedNaira = parseFloat(nairaAmount);
     const needsVerification = serviceID.includes('electric') || serviceID.includes('tv');
     const serviceFee = needsVerification ? 100 : 0;
-    
-    // The EXACT flat amount to send to VTpass (e.g., 100)
     const vendAmount = requestedNaira; 
 
-    // SECURITY: Ensure the user actually paid enough crypto based ONLY on your .env rate
     const baseRate = parseFloat(process.env.NEXT_PUBLIC_FIXED_RATE || "1550");
     const expectedTotalNaira = vendAmount + serviceFee;
     const requiredCrypto = expectedTotalNaira / baseRate;
 
-    // 1% buffer for floating point rounding differences in Javascript
     if (parseFloat(amount) < (requiredCrypto * 0.99)) {
         await sendTelegramAlert(`⚠️ *INSUFFICIENT FUNDS PAID*\nUser requested ₦${expectedTotalNaira} but only paid ${amount} crypto.\nHash: ${txHash}`);
         return NextResponse.json({ success: false, message: "Insufficient crypto paid for this request." }, { status: 400 });
     }
 
-    // 3. GUARANTEED DATABASE LOGGING
-    const { error: dbError } = await supabase.from('transactions').insert([{
+    // 1. GUARANTEED DATABASE LOGGING (Forced .select() to catch silent RLS drops)
+    const { data: dbData, error: dbError } = await supabase.from('transactions').insert([{
       tx_hash: txHash,
       service_category: serviceID,
       account_number: billersCode || phone || "N/A",
@@ -44,14 +50,14 @@ export async function POST(req: Request) {
       amount_naira: vendAmount,
       fee_naira: serviceFee,
       status: 'PROCESSING'
-    }]);
+    }]).select(); // <--- This forces Supabase to return the row or throw a real error
     
-    if (dbError) {
-      console.error("SUPABASE ERROR:", dbError.message);
-      await sendTelegramAlert(`🚨 *DATABASE CRASH!*\nSupabase refused to save the ledger.\n*Reason:* ${dbError.message}\nHash: ${txHash}`);
+    if (dbError || !dbData || dbData.length === 0) {
+      const errorMsg = dbError ? dbError.message : "Row was silently dropped by Supabase (likely an RLS Policy issue).";
+      console.error("SUPABASE ERROR:", errorMsg);
+      await sendTelegramAlert(`🚨 *DATABASE CRASH!*\n*Reason:* ${errorMsg}\nHash: ${txHash}`);
     }
 
-    // 4. MERCHANT VERIFICATION
     if (needsVerification) {
       const verifyRes = await fetch(`${BASE_URL}/merchant-verify`, {
         method: 'POST',
@@ -66,10 +72,9 @@ export async function POST(req: Request) {
       }
     }
 
-    // 5. VTPASS PAYLOAD CONSTRUCTION
     const isAirtime = ['mtn', 'airtel', 'glo', '9mobile'].includes(serviceID);
     const vtpassPayload: any = {
-      request_id: generateRequestId(),
+      request_id: getStrictRequestId(), // <--- Uses strict ID format
       serviceID: serviceID,
       amount: vendAmount,
       phone: phone || billersCode
@@ -80,7 +85,6 @@ export async function POST(req: Request) {
       vtpassPayload.variation_code = variation_code;
     }
 
-    // 6. VTPASS EXECUTION
     let payRes, payData;
     try {
       payRes = await fetch(`${BASE_URL}/pay`, {
@@ -94,7 +98,6 @@ export async function POST(req: Request) {
       return NextResponse.json({ success: false, code: "VTPASS_CRASH", message: e.message }, { status: 502 });
     }
 
-    // 7. FINAL SUCCESS OR FAILURE HANDLING
     if (payData.code === '000') {
       processedTransactions.add(txHash);
       const vendedToken = payData.purchased_code || payData.token || "Vended Successfully";
