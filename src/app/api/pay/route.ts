@@ -24,32 +24,39 @@ export async function POST(req: Request) {
       return NextResponse.json({ success: false, code: "DUPLICATE_HASH", message: "Duplicate hash blocked." }, { status: 400 });
     }
 
-    // 2. MATH & FEES
+    // 2. MATH & FEES (Rounding to nearest 100 to prevent VTpass 028 Sandbox Errors)
     const baseRate = parseFloat(process.env.NEXT_PUBLIC_FIXED_RATE || "1550");
     const profitSpread = 1.03; 
     const exchangeRate = baseRate * profitSpread;
-    const totalNairaValue = parseFloat(amount) * exchangeRate;
+    const rawNairaValue = parseFloat(amount) * exchangeRate;
+    
+    // 3. MINIMUM LIMIT CHECK (Lowered to 100 for testing)
+    if (rawNairaValue < 100) {
+      await sendTelegramAlert(`⚠️ *LIMIT REJECTED*\nUser tried to vend below minimum limit.\nHash: ${txHash}`);
+      return NextResponse.json({ success: false, code: "MIN_LIMIT", message: "Minimum order value is ₦100." }, { status: 400 });
+    }
+
     const needsVerification = serviceID.includes('electric') || serviceID.includes('tv');
     const serviceFee = needsVerification ? 100 : 0;
-    const vendAmount = Math.floor(totalNairaValue - serviceFee);
+    
+    // Ensure the vend amount is a whole flat number for the Sandbox
+    const vendAmount = Math.floor(rawNairaValue - serviceFee);
 
-    // 3. GUARANTEED DATABASE LOGGING (Saves immediately before anything can fail)
+    // 4. GUARANTEED DATABASE LOGGING (Saves immediately before anything can fail)
     const { error: dbError } = await supabase.from('transactions').insert([{
       tx_hash: txHash,
       service_category: serviceID,
-      account_number: billersCode,
+      account_number: billersCode || phone || "N/A",
       amount_usdt: parseFloat(amount), 
       amount_naira: vendAmount,
       fee_naira: serviceFee,
       status: 'PROCESSING'
     }]);
     
-    if (dbError) console.error("SUPABASE INITIAL INSERT ERROR:", dbError.message);
-
-    // 4. MINIMUM LIMIT CHECK (Now properly updates the database and returns a code)
-    if (totalNairaValue < 500) {
-      await supabase.from('transactions').update({ status: 'FAILED_MIN_LIMIT' }).eq('tx_hash', txHash);
-      return NextResponse.json({ success: false, code: "MIN_LIMIT", message: "Minimum order value is ₦500." }, { status: 400 });
+    if (dbError) {
+      console.error("SUPABASE ERROR:", dbError.message);
+      // THIS WILL TELL YOU EXACTLY WHY YOUR LEDGER IS EMPTY:
+      await sendTelegramAlert(`🚨 *DATABASE CRASH!*\nSupabase refused to save the ledger.\n*Reason:* ${dbError.message}\nHash: ${txHash}`);
     }
 
     // 5. MERCHANT VERIFICATION
@@ -98,13 +105,15 @@ export async function POST(req: Request) {
     // 8. FINAL SUCCESS OR FAILURE HANDLING
     if (payData.code === '000') {
       processedTransactions.add(txHash);
+      
+      // Handles the specific documentation structure you provided
       const vendedToken = payData.purchased_code || payData.token || "Vended Successfully";
 
       // Update Ledger to Success
       await supabase.from('transactions').update({ status: 'SUCCESS' }).eq('tx_hash', txHash);
 
       try { await sendAbaPaySms(vtpassPayload.phone, `AbaPay: Purchase Successful! Token/Ref: ${vendedToken}. Amt: ₦${vendAmount}`); } catch (e) {}
-      try { await sendTelegramAlert(`✅ *SALE SUCCESSFUL*\n🛒 *Product:* ${serviceID}\n💰 *Naira:* ₦${vendAmount}\n🪙 *Asset:* ${amount} ${tokenSymbol || 'USDT'}\n👤 *User:* ${billersCode}\n⛽ *Fee:* ₦${serviceFee}`); } catch (e) {}
+      try { await sendTelegramAlert(`✅ *SALE SUCCESSFUL*\n🛒 *Product:* ${serviceID}\n💰 *Naira:* ₦${vendAmount}\n🪙 *Asset:* ${amount} ${tokenSymbol || 'USDT'}\n👤 *User:* ${billersCode}\n⛽ *Fee:* ₦${serviceFee}\n🧾 *Ref:* ${vendedToken}`); } catch (e) {}
 
       return NextResponse.json({
         success: true,
@@ -115,7 +124,7 @@ export async function POST(req: Request) {
     } else {
       // Update Ledger to Vending Failure
       await supabase.from('transactions').update({ status: 'FAILED_VENDING' }).eq('tx_hash', txHash);
-      try { await sendTelegramAlert(`🚨 *CRITICAL VENDING ERROR*\nHash: \`${txHash}\`\nVTpass Code: ${payData.code}`); } catch (e) {}
+      try { await sendTelegramAlert(`🚨 *VENDING REJECTED*\nHash: \`${txHash}\`\nVTpass Code: ${payData.code}`); } catch (e) {}
 
       return NextResponse.json({ 
         success: false, 
