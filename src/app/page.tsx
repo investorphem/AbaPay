@@ -73,6 +73,13 @@ export default function Home() {
   // Validation States
   const [customerName, setCustomerName] = useState<string | null>(null);
   const [isVerifying, setIsVerifying] = useState(false);
+  
+  // RESTORED: Support States
+  const [isSupportOpen, setIsSupportOpen] = useState(false);
+  const [supportMessage, setSupportMessage] = useState("");
+  const [supportFile, setSupportFile] = useState<File | null>(null);
+  const [isSendingSupport, setIsSendingSupport] = useState(false);
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   const [isSelectionModalOpen, setIsSelectionModalOpen] = useState(false);
   const [modalTitle, setModalTitle] = useState("");
@@ -281,7 +288,8 @@ export default function Home() {
         token: selectedToken.symbol,
         txHash: hash,
         variation_code: activeService.id === "ELECTRICITY" ? meterType : 'prepaid',
-        phone: customerPhone || accountNumber
+        phone: customerPhone || accountNumber,
+        wallet_address: address
       };
 
       const newTx = { 
@@ -334,6 +342,27 @@ export default function Home() {
       setStatus("Transaction Cancelled."); 
     } finally {
       setIsProcessing(false);
+    }
+  };
+
+  // RESTORED: Submit Support Ticket Function
+  const submitSupportTicket = async () => {
+    if (!supportMessage.trim()) return;
+    setIsSendingSupport(true);
+    try {
+      const formData = new FormData();
+      formData.append("message", supportMessage);
+      if (address) formData.append("userAddress", address);
+      if (supportFile) formData.append("file", supportFile);
+      await fetch('/api/support', { method: 'POST', body: formData });
+      setIsSupportOpen(false);
+      setSupportMessage("");
+      setSupportFile(null);
+      showToast("Ticket Submitted", "AbaPay Support has received your request.", "success");
+    } catch (error) {
+      showToast("Connection Error", "Failed to send the ticket.", "error");
+    } finally {
+      setIsSendingSupport(false);
     }
   };
 
@@ -442,12 +471,23 @@ export default function Home() {
                  >
                    Verify on Celoscan <ExternalLink size={12}/>
                  </button>
-                 <button 
-                  onClick={handleShareReceipt} 
-                  className="w-full py-4 bg-slate-900 hover:bg-slate-800 text-white rounded-2xl text-xs font-black uppercase tracking-widest flex items-center justify-center gap-2 transition-colors active:scale-95 shadow-xl shadow-slate-900/20"
-                 >
-                   <Share2 size={16}/> Share Receipt
-                 </button>
+                 <div className="flex gap-2">
+                    <button 
+                      onClick={handleShareReceipt} 
+                      className="flex-1 py-4 bg-slate-900 hover:bg-slate-800 text-white rounded-2xl text-xs font-black uppercase tracking-widest flex items-center justify-center gap-2 transition-colors active:scale-95 shadow-xl shadow-slate-900/20"
+                    >
+                      <Share2 size={16}/> Share
+                    </button>
+                    {/* RESTORED: Support Button inside Receipt */}
+                    {selectedReceipt.status !== 'SUCCESS' && (
+                       <button 
+                         onClick={() => { setSelectedReceipt(null); setIsSupportOpen(true); }}
+                         className="flex-1 py-4 bg-orange-100 hover:bg-orange-200 text-orange-700 rounded-2xl text-xs font-black uppercase tracking-widest flex items-center justify-center gap-2 transition-colors active:scale-95"
+                       >
+                         <HelpCircle size={16}/> Support
+                       </button>
+                    )}
+                 </div>
               </div>
            </div>
         </div>
@@ -513,6 +553,32 @@ export default function Home() {
                  ))}
               </div>
            </div>
+        </div>
+      )}
+
+      {/* RESTORED: Support Modal */}
+      {isSupportOpen && (
+        <div className="fixed inset-0 z-[70] bg-slate-900/60 backdrop-blur-sm flex justify-center items-center p-4 animate-in fade-in">
+          <div className="bg-white w-full max-w-md rounded-[2rem] shadow-2xl p-6 animate-in zoom-in-95 duration-200">
+            <div className="flex justify-between items-center mb-4">
+              <h2 className="text-xl font-bold flex items-center gap-2"><HelpCircle className="text-emerald-500"/> Customer Support</h2>
+              <button onClick={() => setIsSupportOpen(false)} className="p-2 bg-slate-100 rounded-full hover:bg-slate-200"><XCircle size={20} className="text-slate-500" /></button>
+            </div>
+            <textarea 
+              className="w-full bg-slate-50 border border-slate-200 rounded-xl p-4 mb-4 text-sm outline-none focus:border-emerald-500"
+              rows={4} placeholder="Describe your issue..."
+              value={supportMessage} onChange={(e) => setSupportMessage(e.target.value)}
+            />
+            <div className="flex gap-2 mb-6">
+              <input type="file" ref={fileInputRef} className="hidden" onChange={(e) => setSupportFile(e.target.files?.[0] || null)} />
+              <button onClick={() => fileInputRef.current?.click()} className="flex-1 py-3 bg-slate-100 hover:bg-slate-200 rounded-xl text-sm font-bold flex items-center justify-center gap-2">
+                <Paperclip size={16} /> {supportFile ? "File Attached" : "Attach Receipt"}
+              </button>
+            </div>
+            <button onClick={submitSupportTicket} disabled={isSendingSupport} className="w-full bg-emerald-600 hover:bg-emerald-500 text-white font-bold py-4 rounded-xl flex items-center justify-center gap-2 transition-colors active:scale-95 disabled:opacity-50">
+              {isSendingSupport ? <Loader2 className="animate-spin" /> : <><Send size={18}/> Send Ticket</>}
+            </button>
+          </div>
         </div>
       )}
 
