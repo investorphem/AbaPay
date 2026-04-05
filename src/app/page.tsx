@@ -73,7 +73,7 @@ export default function Home() {
   // Validation States
   const [customerName, setCustomerName] = useState<string | null>(null);
   const [isVerifying, setIsVerifying] = useState(false);
-  
+
   // RESTORED: Support States
   const [isSupportOpen, setIsSupportOpen] = useState(false);
   const [supportMessage, setSupportMessage] = useState("");
@@ -280,6 +280,16 @@ export default function Home() {
 
       setStatus(`${selectedToken.symbol} Secured. Vending Utility...`);
 
+      // --- SMART VARIATION ROUTER ADDED HERE ---
+      let finalVariationCode = 'prepaid';
+      if (activeService.id === "ELECTRICITY") {
+        finalVariationCode = meterType;
+      } else if (activeService.id === "CABLE") {
+        finalVariationCode = 'dstv1'; // VTpass Sandbox valid DSTV package
+      } else if (activeService.id === "DATA") {
+        finalVariationCode = 'mtn-10mb'; // VTpass Sandbox valid Data package
+      }
+
       const backendPayload = {
         serviceID: activeServiceID,
         billersCode: accountNumber,
@@ -287,7 +297,7 @@ export default function Home() {
         nairaAmount: nairaAmount, 
         token: selectedToken.symbol,
         txHash: hash,
-        variation_code: activeService.id === "ELECTRICITY" ? meterType : 'prepaid',
+        variation_code: finalVariationCode, // Uses the smart router to prevent Sandbox 028 error
         phone: customerPhone || accountNumber,
         wallet_address: address
       };
