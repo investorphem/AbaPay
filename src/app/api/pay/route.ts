@@ -2,7 +2,7 @@ import { NextResponse } from 'next/server';
 import { BASE_URL, getHeaders } from '@/lib/vtpass';
 import { sendAbaPaySms } from '@/lib/messaging';
 import { sendTelegramAlert } from '@/lib/telegram'; 
-import { supabase } from '@/utils/supabase'; 
+import { supabaseAdmin as supabase } from '@/utils/supabase'; 
 
 const processedTransactions = new Set();
 
