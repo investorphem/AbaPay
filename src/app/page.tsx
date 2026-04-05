@@ -111,7 +111,7 @@ export default function Home() {
 
   // --- DYNAMIC MINIMUM CALCULATOR ---
   const dynamicMinAmount = useMemo(() => {
-    if (activeService.id === "ELECTRICITY") return 1000; // Safe minimum for all DisCos
+    if (activeService.id === "ELECTRICITY") return 1000; // Safe minimum for all DisCos (All Bands, Prepaid & Postpaid)
     if (activeService.id === "CABLE") return 500;
     return 100; // Airtime & Data
   }, [activeService]);
@@ -316,7 +316,8 @@ export default function Home() {
         newTx.status = "SUCCESS";
         showToast("Vending Successful", "Your utility has been successfully delivered.", "success");
       } else {
-        setStatus(`Vending Delayed (Code: ${result.code || 'API Error'}). Admin Notified.`);
+        // EXACT ERROR DISPLAY: Shows Database or VTpass errors clearly
+        setStatus(`Error: ${result.message || 'Transaction Failed'}`);
         newTx.status = "FAILED/DELAYED";
       }
 
@@ -687,7 +688,7 @@ export default function Home() {
                     <div className="relative mb-3">
                         <input 
                             type="number" 
-                            placeholder={dynamicMinAmount.toString()}
+                            placeholder="Enter Amount" 
                             className="w-full bg-slate-50 border border-slate-100 p-5 rounded-2xl font-black text-xl text-slate-800 outline-none focus:border-emerald-500 transition-all"
                             value={nairaAmount}
                             onChange={(e) => setNairaAmount(e.target.value)}
