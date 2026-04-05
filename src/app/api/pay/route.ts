@@ -6,7 +6,6 @@ import { supabase } from '@/utils/supabase';
 
 const processedTransactions = new Set();
 
-// Generate a strict VTpass-compliant Request ID (YYYYMMDDHHII + random)
 function getStrictRequestId() {
   const now = new Date();
   const year = now.getFullYear();
@@ -37,12 +36,11 @@ export async function POST(req: Request) {
     const requiredCrypto = expectedTotalNaira / baseRate;
 
     if (parseFloat(amount) < (requiredCrypto * 0.99)) {
-        await sendTelegramAlert(`⚠️ *INSUFFICIENT FUNDS PAID*\nUser requested ₦${expectedTotalNaira} but only paid ${amount} crypto.\nHash: ${txHash}`);
-        return NextResponse.json({ success: false, message: "Insufficient crypto paid for this request." }, { status: 400 });
+        return NextResponse.json({ success: false, code: "FUNDS", message: "Insufficient crypto paid." }, { status: 400 });
     }
 
-    // 1. GUARANTEED DATABASE LOGGING (Forced .select() to catch silent RLS drops)
-    const { data: dbData, error: dbError } = await supabase.from('transactions').insert([{
+    // 1. GUARANTEED DATABASE LOGGING (WITH HARD STOP)
+    const dbPayload = {
       tx_hash: txHash,
       service_category: serviceID,
       account_number: billersCode || phone || "N/A",
@@ -50,12 +48,18 @@ export async function POST(req: Request) {
       amount_naira: vendAmount,
       fee_naira: serviceFee,
       status: 'PROCESSING'
-    }]).select(); // <--- This forces Supabase to return the row or throw a real error
+    };
+
+    const { data: dbData, error: dbError } = await supabase.from('transactions').insert([dbPayload]).select();
     
-    if (dbError || !dbData || dbData.length === 0) {
-      const errorMsg = dbError ? dbError.message : "Row was silently dropped by Supabase (likely an RLS Policy issue).";
-      console.error("SUPABASE ERROR:", errorMsg);
-      await sendTelegramAlert(`🚨 *DATABASE CRASH!*\n*Reason:* ${errorMsg}\nHash: ${txHash}`);
+    // IF THE DATABASE FAILS, WE STOP EVERYTHING AND PRINT THE ERROR TO THE SCREEN.
+    if (dbError) {
+      console.error("SUPABASE ERROR:", dbError.message);
+      return NextResponse.json({ 
+        success: false, 
+        code: "DB_REJECTED", 
+        message: `DB Error: ${dbError.message}` 
+      }, { status: 400 });
     }
 
     if (needsVerification) {
@@ -74,7 +78,7 @@ export async function POST(req: Request) {
 
     const isAirtime = ['mtn', 'airtel', 'glo', '9mobile'].includes(serviceID);
     const vtpassPayload: any = {
-      request_id: getStrictRequestId(), // <--- Uses strict ID format
+      request_id: getStrictRequestId(),
       serviceID: serviceID,
       amount: vendAmount,
       phone: phone || billersCode
