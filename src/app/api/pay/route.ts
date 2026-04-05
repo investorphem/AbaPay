@@ -20,7 +20,8 @@ function getStrictRequestId() {
 export async function POST(req: Request) {
   try {
     const body = await req.json();
-    const { serviceID, billersCode, amount, token: tokenSymbol, txHash, variation_code, phone, nairaAmount } = body;
+    // Added wallet_address to the extracted variables
+    const { serviceID, billersCode, amount, token: tokenSymbol, txHash, variation_code, phone, nairaAmount, wallet_address } = body;
 
     if (processedTransactions.has(txHash)) {
       return NextResponse.json({ success: false, code: "DUPLICATE_HASH", message: "Duplicate hash blocked." }, { status: 400 });
@@ -39,7 +40,7 @@ export async function POST(req: Request) {
         return NextResponse.json({ success: false, code: "FUNDS", message: "Insufficient crypto paid." }, { status: 400 });
     }
 
-    // 1. GUARANTEED DATABASE LOGGING (WITH HARD STOP)
+    // 1. GUARANTEED DATABASE LOGGING
     const dbPayload = {
       tx_hash: txHash,
       service_category: serviceID,
@@ -47,12 +48,12 @@ export async function POST(req: Request) {
       amount_usdt: parseFloat(amount), 
       amount_naira: vendAmount,
       fee_naira: serviceFee,
-      status: 'PROCESSING'
+      status: 'PROCESSING',
+      wallet_address: wallet_address || "UNKNOWN" // <--- SAVES THE WALLET TO SUPABASE
     };
 
     const { data: dbData, error: dbError } = await supabase.from('transactions').insert([dbPayload]).select();
     
-    // IF THE DATABASE FAILS, WE STOP EVERYTHING AND PRINT THE ERROR TO THE SCREEN.
     if (dbError) {
       console.error("SUPABASE ERROR:", dbError.message);
       return NextResponse.json({ 
