@@ -6,21 +6,38 @@ import { supabaseAdmin as supabase } from '@/utils/supabase';
 
 const processedTransactions = new Set();
 
+// UPGRADED: Strict Africa/Lagos Timezone Request ID Generator
 function getStrictRequestId() {
-  const now = new Date();
-  const year = now.getFullYear();
-  const month = String(now.getMonth() + 1).padStart(2, '0');
-  const day = String(now.getDate()).padStart(2, '0');
-  const hours = String(now.getHours()).padStart(2, '0');
-  const minutes = String(now.getMinutes()).padStart(2, '0');
-  const random = Math.floor(Math.random() * 10000).toString().padStart(4, '0');
-  return `${year}${month}${day}${hours}${minutes}${random}`;
+  const date = new Date();
+  
+  // Force the server to generate the time in Lagos time, regardless of where it is hosted.
+  const lagosTime = new Intl.DateTimeFormat('en-GB', {
+    timeZone: 'Africa/Lagos',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+    hour12: false
+  }).format(date);
+
+  // lagosTime format looks exactly like: "05/04/2026, 16:15"
+  const [datePart, timePart] = lagosTime.split(', ');
+  const [day, month, year] = datePart.split('/');
+  const [hour, minute] = timePart.split(':');
+
+  // Handle midnight edge cases
+  const safeHour = hour === '24' ? '00' : hour;
+  
+  // Generate a random alphanumeric string (e.g., 'ad8ef08a')
+  const randomString = Math.random().toString(36).substring(2, 10);
+  
+  return `${year}${month}${day}${safeHour}${minute}${randomString}`;
 }
 
 export async function POST(req: Request) {
   try {
     const body = await req.json();
-    // Catch the separated network and serviceCategory
     const { serviceID, serviceCategory, network, billersCode, amount, token: tokenSymbol, txHash, variation_code, phone, nairaAmount, wallet_address } = body;
 
     if (processedTransactions.has(txHash)) {
@@ -40,11 +57,11 @@ export async function POST(req: Request) {
         return NextResponse.json({ success: false, code: "FUNDS", message: "Insufficient crypto paid." }, { status: 400 });
     }
 
-    // 1. DATABASE LOGGING (Clean Network & Service Categories)
+    // 1. DATABASE LOGGING
     const dbPayload = {
       tx_hash: txHash,
-      service_category: serviceCategory, // E.g. "DATA", "AIRTIME"
-      network: network, // E.g. "MTN", "IKEDC"
+      service_category: serviceCategory, 
+      network: network, 
       account_number: billersCode || phone || "N/A",
       amount_usdt: parseFloat(amount), 
       amount_naira: vendAmount,
@@ -80,8 +97,8 @@ export async function POST(req: Request) {
 
     const isAirtime = serviceCategory === 'AIRTIME';
     const vtpassPayload: any = {
-      request_id: getStrictRequestId(),
-      serviceID: serviceID, // VTpass strictly needs 'mtn-data' etc.
+      request_id: getStrictRequestId(), // Uses the new Lagos GMT+1 Generator
+      serviceID: serviceID, 
       amount: vendAmount,
       phone: phone || billersCode
     };
