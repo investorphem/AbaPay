@@ -109,6 +109,13 @@ export default function Home() {
   const activeChain = isMainnet ? celo : celoSepolia;
   const ABAPAY_CONTRACT = process.env.NEXT_PUBLIC_ABAPAY_ADDRESS as `0x${string}`;
 
+  // --- DYNAMIC MINIMUM CALCULATOR ---
+  const dynamicMinAmount = useMemo(() => {
+    if (activeService.id === "ELECTRICITY") return 1000; // Safe minimum for all DisCos
+    if (activeService.id === "CABLE") return 500;
+    return 100; // Airtime & Data
+  }, [activeService]);
+
   // --- INITIALIZATION ---
   useEffect(() => {
     async function initSystem() {
@@ -212,7 +219,10 @@ export default function Home() {
   }, [nairaAmount, exchangeRate, activeService]);
 
   const isFormValid = useMemo(() => {
-    if (!nairaAmount || parseFloat(nairaAmount) <= 0) return false;
+    const amount = parseFloat(nairaAmount);
+    // Dynamic minimum validation check
+    if (!nairaAmount || isNaN(amount) || amount < dynamicMinAmount) return false;
+
     if (activeService.id === "AIRTIME" || activeService.id === "DATA") {
       return accountNumber.length === 11 && accountNumber.startsWith("0");
     }
@@ -220,7 +230,7 @@ export default function Home() {
       return accountNumber.length >= 10 && customerName !== null;
     }
     return false;
-  }, [accountNumber, nairaAmount, activeService, customerName]);
+  }, [accountNumber, nairaAmount, activeService, customerName, dynamicMinAmount]);
 
   // --- PAYMENT EXECUTION ---
   const handlePayment = async () => {
@@ -267,6 +277,7 @@ export default function Home() {
         serviceID: activeServiceID,
         billersCode: accountNumber,
         amount: cryptoToCharge,
+        nairaAmount: nairaAmount, 
         token: selectedToken.symbol,
         txHash: hash,
         variation_code: activeService.id === "ELECTRICITY" ? meterType : 'prepaid',
@@ -305,7 +316,6 @@ export default function Home() {
         newTx.status = "SUCCESS";
         showToast("Vending Successful", "Your utility has been successfully delivered.", "success");
       } else {
-        // UPGRADED ERROR MESSAGE: Displays the VTpass Code
         setStatus(`Vending Delayed (Code: ${result.code || 'API Error'}). Admin Notified.`);
         newTx.status = "FAILED/DELAYED";
       }
@@ -670,10 +680,14 @@ export default function Home() {
                 )}
 
                 <div className={activeService.id === "DATA" ? "hidden" : ""}>
-                    <label className="text-[10px] font-black text-slate-400 uppercase mb-2 block">Naira Value</label>
+                    <label className="text-[10px] font-black text-slate-400 uppercase mb-2 flex justify-between items-center">
+                       <span>Naira Value</span>
+                       <span className="text-emerald-500 bg-emerald-500/10 px-2 py-0.5 rounded">MIN: ₦{dynamicMinAmount.toLocaleString()}</span>
+                    </label>
                     <div className="relative mb-3">
                         <input 
-                            type="number" placeholder="500"
+                            type="number" 
+                            placeholder={dynamicMinAmount.toString()}
                             className="w-full bg-slate-50 border border-slate-100 p-5 rounded-2xl font-black text-xl text-slate-800 outline-none focus:border-emerald-500 transition-all"
                             value={nairaAmount}
                             onChange={(e) => setNairaAmount(e.target.value)}
