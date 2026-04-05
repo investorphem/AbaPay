@@ -9,40 +9,33 @@ const processedTransactions = new Set();
 export async function POST(req: Request) {
   try {
     const body = await req.json();
-    const { 
-        serviceID,      
-        billersCode,    
-        amount,         
-        token: tokenSymbol, 
-        txHash,         
-        variation_code, 
-        phone 
-    } = body;
+    const { serviceID, billersCode, amount, token: tokenSymbol, txHash, variation_code, phone, nairaAmount } = body;
 
     // 1. REPLAY ATTACK PREVENTION
     if (processedTransactions.has(txHash)) {
       return NextResponse.json({ success: false, code: "DUPLICATE_HASH", message: "Duplicate hash blocked." }, { status: 400 });
     }
 
-    // 2. MATH & FEES (Rounding to nearest 100 to prevent VTpass 028 Sandbox Errors)
-    const baseRate = parseFloat(process.env.NEXT_PUBLIC_FIXED_RATE || "1550");
-    const profitSpread = 1.03; 
-    const exchangeRate = baseRate * profitSpread;
-    const rawNairaValue = parseFloat(amount) * exchangeRate;
-    
-    // 3. MINIMUM LIMIT CHECK (Lowered to 100 for testing)
-    if (rawNairaValue < 100) {
-      await sendTelegramAlert(`⚠️ *LIMIT REJECTED*\nUser tried to vend below minimum limit.\nHash: ${txHash}`);
-      return NextResponse.json({ success: false, code: "MIN_LIMIT", message: "Minimum order value is ₦100." }, { status: 400 });
-    }
-
+    // 2. PERFECT FLAT MATH (No hidden percentages)
+    const requestedNaira = parseFloat(nairaAmount);
     const needsVerification = serviceID.includes('electric') || serviceID.includes('tv');
     const serviceFee = needsVerification ? 100 : 0;
     
-    // Ensure the vend amount is a whole flat number for the Sandbox
-    const vendAmount = Math.floor(rawNairaValue - serviceFee);
+    // The EXACT flat amount to send to VTpass (e.g., 100)
+    const vendAmount = requestedNaira; 
 
-    // 4. GUARANTEED DATABASE LOGGING (Saves immediately before anything can fail)
+    // SECURITY: Ensure the user actually paid enough crypto based ONLY on your .env rate
+    const baseRate = parseFloat(process.env.NEXT_PUBLIC_FIXED_RATE || "1550");
+    const expectedTotalNaira = vendAmount + serviceFee;
+    const requiredCrypto = expectedTotalNaira / baseRate;
+
+    // 1% buffer for floating point rounding differences in Javascript
+    if (parseFloat(amount) < (requiredCrypto * 0.99)) {
+        await sendTelegramAlert(`⚠️ *INSUFFICIENT FUNDS PAID*\nUser requested ₦${expectedTotalNaira} but only paid ${amount} crypto.\nHash: ${txHash}`);
+        return NextResponse.json({ success: false, message: "Insufficient crypto paid for this request." }, { status: 400 });
+    }
+
+    // 3. GUARANTEED DATABASE LOGGING
     const { error: dbError } = await supabase.from('transactions').insert([{
       tx_hash: txHash,
       service_category: serviceID,
@@ -55,11 +48,10 @@ export async function POST(req: Request) {
     
     if (dbError) {
       console.error("SUPABASE ERROR:", dbError.message);
-      // THIS WILL TELL YOU EXACTLY WHY YOUR LEDGER IS EMPTY:
       await sendTelegramAlert(`🚨 *DATABASE CRASH!*\nSupabase refused to save the ledger.\n*Reason:* ${dbError.message}\nHash: ${txHash}`);
     }
 
-    // 5. MERCHANT VERIFICATION
+    // 4. MERCHANT VERIFICATION
     if (needsVerification) {
       const verifyRes = await fetch(`${BASE_URL}/merchant-verify`, {
         method: 'POST',
@@ -74,7 +66,7 @@ export async function POST(req: Request) {
       }
     }
 
-    // 6. VTPASS PAYLOAD CONSTRUCTION
+    // 5. VTPASS PAYLOAD CONSTRUCTION
     const isAirtime = ['mtn', 'airtel', 'glo', '9mobile'].includes(serviceID);
     const vtpassPayload: any = {
       request_id: generateRequestId(),
@@ -88,7 +80,7 @@ export async function POST(req: Request) {
       vtpassPayload.variation_code = variation_code;
     }
 
-    // 7. VTPASS EXECUTION
+    // 6. VTPASS EXECUTION
     let payRes, payData;
     try {
       payRes = await fetch(`${BASE_URL}/pay`, {
@@ -102,14 +94,11 @@ export async function POST(req: Request) {
       return NextResponse.json({ success: false, code: "VTPASS_CRASH", message: e.message }, { status: 502 });
     }
 
-    // 8. FINAL SUCCESS OR FAILURE HANDLING
+    // 7. FINAL SUCCESS OR FAILURE HANDLING
     if (payData.code === '000') {
       processedTransactions.add(txHash);
-      
-      // Handles the specific documentation structure you provided
       const vendedToken = payData.purchased_code || payData.token || "Vended Successfully";
 
-      // Update Ledger to Success
       await supabase.from('transactions').update({ status: 'SUCCESS' }).eq('tx_hash', txHash);
 
       try { await sendAbaPaySms(vtpassPayload.phone, `AbaPay: Purchase Successful! Token/Ref: ${vendedToken}. Amt: ₦${vendAmount}`); } catch (e) {}
@@ -122,7 +111,6 @@ export async function POST(req: Request) {
       });
 
     } else {
-      // Update Ledger to Vending Failure
       await supabase.from('transactions').update({ status: 'FAILED_VENDING' }).eq('tx_hash', txHash);
       try { await sendTelegramAlert(`🚨 *VENDING REJECTED*\nHash: \`${txHash}\`\nVTpass Code: ${payData.code}`); } catch (e) {}
 
