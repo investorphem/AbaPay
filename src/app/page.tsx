@@ -7,7 +7,8 @@ import {
   Wallet, Receipt, ShieldCheck, Zap, AlertTriangle, 
   CheckCircle2, ExternalLink, Lightbulb, Phone, Wifi, Tv, 
   ChevronDown, Loader2, HelpCircle, XCircle, Mail, 
-  Paperclip, Send, Coins, Briefcase, Download, Share2
+  Paperclip, Send, Coins, Briefcase, Download, Share2,
+  ChevronLeft, ChevronRight
 } from "lucide-react";
 import { supabase } from "@/utils/supabase";
 
@@ -50,10 +51,12 @@ const MOCK_DATA_PLANS = [
 ];
 
 const DATA_CATEGORIES = ["Daily", "Weekly", "Monthly"];
+const ITEMS_PER_PAGE = 5; // The number of transactions to show per page
 
 export default function Home() {
   const [isInitiallyLoading, setIsInitiallyLoading] = useState(true);
 
+  // --- SYSTEM STATES ---
   const [address, setAddress] = useState<string | null>(null);
   const [client, setClient] = useState<any>(null);
   const [nairaAmount, setNairaAmount] = useState(""); 
@@ -64,13 +67,16 @@ export default function Home() {
   const [isMiniPay, setIsMiniPay] = useState(false);
   const [isProcessing, setIsProcessing] = useState(false); 
 
+  // Modals
   const [selectedReceipt, setSelectedReceipt] = useState<any>(null); 
   const [isTermsOpen, setIsTermsOpen] = useState(false); 
   const [isPrivacyOpen, setIsPrivacyOpen] = useState(false); 
 
+  // Validation States
   const [customerName, setCustomerName] = useState<string | null>(null);
   const [isVerifying, setIsVerifying] = useState(false);
 
+  // Support States
   const [isSupportOpen, setIsSupportOpen] = useState(false);
   const [supportMessage, setSupportMessage] = useState("");
   const [supportFile, setSupportFile] = useState<File | null>(null);
@@ -84,11 +90,15 @@ export default function Home() {
 
   const [toast, setToast] = useState<{title: string, message: string, type: 'success' | 'error'} | null>(null);
 
+  // Pagination State
+  const [currentPage, setCurrentPage] = useState(1);
+
   const showToast = (title: string, message: string, type: 'success' | 'error' = 'success') => {
     setToast({ title, message, type });
     setTimeout(() => setToast(null), 5000);
   };
 
+  // Service States
   const [activeService, setActiveService] = useState(SERVICES[0]);
   const [elecProvider, setElecProvider] = useState(ELECTRICITY_PROVIDERS[0]);
   const [cableProvider, setCableProvider] = useState(CABLE_PROVIDERS[0]);
@@ -98,6 +108,7 @@ export default function Home() {
   const [activeDataCategory, setActiveDataCategory] = useState(DATA_CATEGORIES[0]);
   const [selectedDataPlan, setSelectedDataPlan] = useState<any>(null);
 
+  // Token & Balance States
   const [selectedToken, setSelectedToken] = useState(SUPPORTED_TOKENS[0]);
   const [walletBalance, setWalletBalance] = useState("0.00");
   const [isFetchingBalance, setIsFetchingBalance] = useState(false);
@@ -105,16 +116,25 @@ export default function Home() {
   const [exchangeRate, setExchangeRate] = useState<number>(1550); 
   const [transactions, setTransactions] = useState<any[]>([]);
 
+  // Env Config
   const isMainnet = process.env.NEXT_PUBLIC_NETWORK === "celo";
   const activeChain = isMainnet ? celo : celoSepolia;
   const ABAPAY_CONTRACT = process.env.NEXT_PUBLIC_ABAPAY_ADDRESS as `0x${string}`;
 
+  // --- DYNAMIC MINIMUM CALCULATOR ---
   const dynamicMinAmount = useMemo(() => {
-    if (activeService.id === "ELECTRICITY") return 1000;
+    if (activeService.id === "ELECTRICITY") return 1000; 
     if (activeService.id === "CABLE") return 500;
-    return 100;
+    return 100; 
   }, [activeService]);
 
+  // --- PAGINATION CALCULATOR ---
+  const indexOfLastItem = currentPage * ITEMS_PER_PAGE;
+  const indexOfFirstItem = indexOfLastItem - ITEMS_PER_PAGE;
+  const currentTransactions = transactions.slice(indexOfFirstItem, indexOfLastItem);
+  const totalPages = Math.ceil(transactions.length / ITEMS_PER_PAGE);
+
+  // --- INITIALIZATION ---
   useEffect(() => {
     async function initSystem() {
       const savedHistory = localStorage.getItem("abapay_history");
@@ -142,6 +162,7 @@ export default function Home() {
     initSystem();
   }, [activeChain]);
 
+  // --- FETCH BALANCE ---
   useEffect(() => {
     async function fetchBalance() {
       if (!address) return;
@@ -169,6 +190,7 @@ export default function Home() {
     fetchBalance();
   }, [address, selectedToken, activeChain, isMainnet]);
 
+  // --- AUTO-DETECT LOGIC ---
   useEffect(() => {
     if ((activeService.id === "AIRTIME" || activeService.id === "DATA") && accountNumber.length >= 4) {
       const prefix = accountNumber.substring(0, 4);
@@ -227,6 +249,7 @@ export default function Home() {
     return false;
   }, [accountNumber, nairaAmount, activeService, customerName, dynamicMinAmount]);
 
+  // --- PAYMENT EXECUTION ---
   const handlePayment = async () => {
     if (!address || !client) return setStatus("Connect Wallet First");
 
@@ -253,7 +276,6 @@ export default function Home() {
         account: address,
       });
 
-      // --- SMART PAYLOAD ROUTING ---
       let vtpassServiceID = "";
       let displayNetwork = "";
       let finalVariationCode = 'prepaid';
@@ -265,13 +287,13 @@ export default function Home() {
       } else if (activeService.id === "CABLE") {
         vtpassServiceID = cableProvider;
         displayNetwork = cableProvider;
-        finalVariationCode = 'dstv1'; // Sandbox safe code
+        finalVariationCode = 'dstv1'; 
       } else if (activeService.id === "DATA") {
-        vtpassServiceID = `${telecomProvider}-data`; // E.g., 'mtn-data' (Fixes VTpass 028 Error!)
+        vtpassServiceID = `${telecomProvider}-data`; 
         displayNetwork = telecomProvider;
-        finalVariationCode = 'mtn-10mb'; // Sandbox safe code
+        finalVariationCode = 'mtn-10mb'; 
       } else {
-        vtpassServiceID = telecomProvider; // Airtime is just 'mtn'
+        vtpassServiceID = telecomProvider; 
         displayNetwork = telecomProvider;
       }
 
@@ -287,8 +309,8 @@ export default function Home() {
 
       const backendPayload = {
         serviceID: vtpassServiceID, 
-        serviceCategory: activeService.id, // Explicitly sends "DATA", "AIRTIME" etc.
-        network: displayNetwork.toUpperCase(), // Explicitly sends "MTN", "IKEDC" etc.
+        serviceCategory: activeService.id, 
+        network: displayNetwork.toUpperCase(), 
         billersCode: accountNumber,
         amount: cryptoToCharge,
         nairaAmount: nairaAmount, 
@@ -338,6 +360,9 @@ export default function Home() {
       const updatedHistory = [newTx, ...transactions];
       setTransactions(updatedHistory);
       localStorage.setItem("abapay_history", JSON.stringify(updatedHistory));
+      
+      // Snap to page 1 to show the newly added transaction
+      setCurrentPage(1);
 
       const publicClient = createPublicClient({ chain: activeChain, transport: http() });
       const balanceWei = await publicClient.readContract({ address: tokenAddress as `0x${string}`, abi: ERC20_ABI, functionName: 'balanceOf', args: [address] });
@@ -476,7 +501,6 @@ export default function Home() {
                     >
                       <Share2 size={16}/> Share
                     </button>
-                    {/* Support Button */}
                     {selectedReceipt.status !== 'SUCCESS' && (
                        <button 
                          onClick={() => { setSelectedReceipt(null); setIsSupportOpen(true); }}
@@ -817,8 +841,9 @@ export default function Home() {
                     <p className="text-slate-400 text-xs font-bold uppercase tracking-widest">No activity found</p>
                 </div>
              ) : (
-                <div className="space-y-4">
-                    {transactions.map((tx, idx) => (
+                <div className="flex flex-col space-y-4">
+                    {/* Render ONLY the transactions for the current page */}
+                    {currentTransactions.map((tx, idx) => (
                         <div 
                           key={idx} 
                           onClick={() => setSelectedReceipt(tx)} 
@@ -836,6 +861,27 @@ export default function Home() {
                             </div>
                         </div>
                     ))}
+
+                    {/* Pagination Controls */}
+                    {totalPages > 1 && (
+                      <div className="flex justify-between items-center mt-4 pt-4 border-t border-slate-100">
+                        <button 
+                          onClick={() => setCurrentPage(p => Math.max(1, p - 1))} 
+                          disabled={currentPage === 1} 
+                          className="flex items-center gap-1 px-3 py-2 text-[10px] font-black uppercase text-slate-500 hover:text-emerald-600 disabled:opacity-30 transition-colors"
+                        >
+                          <ChevronLeft size={14} /> Prev
+                        </button>
+                        <span className="text-[10px] font-black tracking-widest text-slate-400">PAGE {currentPage} OF {totalPages}</span>
+                        <button 
+                          onClick={() => setCurrentPage(p => Math.min(totalPages, p + 1))} 
+                          disabled={currentPage === totalPages} 
+                          className="flex items-center gap-1 px-3 py-2 text-[10px] font-black uppercase text-slate-500 hover:text-emerald-600 disabled:opacity-30 transition-colors"
+                        >
+                          Next <ChevronRight size={14} />
+                        </button>
+                      </div>
+                    )}
                 </div>
              )}
           </div>
