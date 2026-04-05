@@ -54,7 +54,6 @@ const DATA_CATEGORIES = ["Daily", "Weekly", "Monthly"];
 export default function Home() {
   const [isInitiallyLoading, setIsInitiallyLoading] = useState(true);
 
-  // --- SYSTEM STATES ---
   const [address, setAddress] = useState<string | null>(null);
   const [client, setClient] = useState<any>(null);
   const [nairaAmount, setNairaAmount] = useState(""); 
@@ -65,16 +64,13 @@ export default function Home() {
   const [isMiniPay, setIsMiniPay] = useState(false);
   const [isProcessing, setIsProcessing] = useState(false); 
 
-  // Modals
   const [selectedReceipt, setSelectedReceipt] = useState<any>(null); 
   const [isTermsOpen, setIsTermsOpen] = useState(false); 
   const [isPrivacyOpen, setIsPrivacyOpen] = useState(false); 
 
-  // Validation States
   const [customerName, setCustomerName] = useState<string | null>(null);
   const [isVerifying, setIsVerifying] = useState(false);
 
-  // RESTORED: Support States
   const [isSupportOpen, setIsSupportOpen] = useState(false);
   const [supportMessage, setSupportMessage] = useState("");
   const [supportFile, setSupportFile] = useState<File | null>(null);
@@ -93,7 +89,6 @@ export default function Home() {
     setTimeout(() => setToast(null), 5000);
   };
 
-  // Service States
   const [activeService, setActiveService] = useState(SERVICES[0]);
   const [elecProvider, setElecProvider] = useState(ELECTRICITY_PROVIDERS[0]);
   const [cableProvider, setCableProvider] = useState(CABLE_PROVIDERS[0]);
@@ -103,7 +98,6 @@ export default function Home() {
   const [activeDataCategory, setActiveDataCategory] = useState(DATA_CATEGORIES[0]);
   const [selectedDataPlan, setSelectedDataPlan] = useState<any>(null);
 
-  // Token & Balance States
   const [selectedToken, setSelectedToken] = useState(SUPPORTED_TOKENS[0]);
   const [walletBalance, setWalletBalance] = useState("0.00");
   const [isFetchingBalance, setIsFetchingBalance] = useState(false);
@@ -111,19 +105,16 @@ export default function Home() {
   const [exchangeRate, setExchangeRate] = useState<number>(1550); 
   const [transactions, setTransactions] = useState<any[]>([]);
 
-  // Env Config
   const isMainnet = process.env.NEXT_PUBLIC_NETWORK === "celo";
   const activeChain = isMainnet ? celo : celoSepolia;
   const ABAPAY_CONTRACT = process.env.NEXT_PUBLIC_ABAPAY_ADDRESS as `0x${string}`;
 
-  // --- DYNAMIC MINIMUM CALCULATOR ---
   const dynamicMinAmount = useMemo(() => {
-    if (activeService.id === "ELECTRICITY") return 1000; // Safe minimum for all DisCos (All Bands, Prepaid & Postpaid)
+    if (activeService.id === "ELECTRICITY") return 1000;
     if (activeService.id === "CABLE") return 500;
-    return 100; // Airtime & Data
+    return 100;
   }, [activeService]);
 
-  // --- INITIALIZATION ---
   useEffect(() => {
     async function initSystem() {
       const savedHistory = localStorage.getItem("abapay_history");
@@ -151,7 +142,6 @@ export default function Home() {
     initSystem();
   }, [activeChain]);
 
-  // --- FETCH BALANCE ---
   useEffect(() => {
     async function fetchBalance() {
       if (!address) return;
@@ -179,7 +169,6 @@ export default function Home() {
     fetchBalance();
   }, [address, selectedToken, activeChain, isMainnet]);
 
-  // --- AUTO-DETECT LOGIC ---
   useEffect(() => {
     if ((activeService.id === "AIRTIME" || activeService.id === "DATA") && accountNumber.length >= 4) {
       const prefix = accountNumber.substring(0, 4);
@@ -227,7 +216,6 @@ export default function Home() {
 
   const isFormValid = useMemo(() => {
     const amount = parseFloat(nairaAmount);
-    // Dynamic minimum validation check
     if (!nairaAmount || isNaN(amount) || amount < dynamicMinAmount) return false;
 
     if (activeService.id === "AIRTIME" || activeService.id === "DATA") {
@@ -239,7 +227,6 @@ export default function Home() {
     return false;
   }, [accountNumber, nairaAmount, activeService, customerName, dynamicMinAmount]);
 
-  // --- PAYMENT EXECUTION ---
   const handlePayment = async () => {
     if (!address || !client) return setStatus("Connect Wallet First");
 
@@ -266,38 +253,48 @@ export default function Home() {
         account: address,
       });
 
-      const activeServiceID = activeService.id === "ELECTRICITY" ? elecProvider : 
-                              activeService.id === "CABLE" ? cableProvider : 
-                              telecomProvider; 
+      // --- SMART PAYLOAD ROUTING ---
+      let vtpassServiceID = "";
+      let displayNetwork = "";
+      let finalVariationCode = 'prepaid';
+
+      if (activeService.id === "ELECTRICITY") {
+        vtpassServiceID = elecProvider;
+        displayNetwork = elecProvider;
+        finalVariationCode = meterType;
+      } else if (activeService.id === "CABLE") {
+        vtpassServiceID = cableProvider;
+        displayNetwork = cableProvider;
+        finalVariationCode = 'dstv1'; // Sandbox safe code
+      } else if (activeService.id === "DATA") {
+        vtpassServiceID = `${telecomProvider}-data`; // E.g., 'mtn-data' (Fixes VTpass 028 Error!)
+        displayNetwork = telecomProvider;
+        finalVariationCode = 'mtn-10mb'; // Sandbox safe code
+      } else {
+        vtpassServiceID = telecomProvider; // Airtime is just 'mtn'
+        displayNetwork = telecomProvider;
+      }
 
       const hash = await client.writeContract({
         address: ABAPAY_CONTRACT,
         abi: ABAPAY_ABI,
         functionName: 'payBill',
-        args: [tokenAddress, activeServiceID, accountNumber, valueInWei],
+        args: [tokenAddress, vtpassServiceID, accountNumber, valueInWei],
         account: address,
       });
 
       setStatus(`${selectedToken.symbol} Secured. Vending Utility...`);
 
-      // --- SMART VARIATION ROUTER ADDED HERE ---
-      let finalVariationCode = 'prepaid';
-      if (activeService.id === "ELECTRICITY") {
-        finalVariationCode = meterType;
-      } else if (activeService.id === "CABLE") {
-        finalVariationCode = 'dstv1'; // VTpass Sandbox valid DSTV package
-      } else if (activeService.id === "DATA") {
-        finalVariationCode = 'mtn-10mb'; // VTpass Sandbox valid Data package
-      }
-
       const backendPayload = {
-        serviceID: activeServiceID,
+        serviceID: vtpassServiceID, 
+        serviceCategory: activeService.id, // Explicitly sends "DATA", "AIRTIME" etc.
+        network: displayNetwork.toUpperCase(), // Explicitly sends "MTN", "IKEDC" etc.
         billersCode: accountNumber,
         amount: cryptoToCharge,
         nairaAmount: nairaAmount, 
         token: selectedToken.symbol,
         txHash: hash,
-        variation_code: finalVariationCode, // Uses the smart router to prevent Sandbox 028 error
+        variation_code: finalVariationCode,
         phone: customerPhone || accountNumber,
         wallet_address: address
       };
@@ -310,7 +307,7 @@ export default function Home() {
         amountCrypto: cryptoToCharge,
         tokenUsed: selectedToken.symbol, 
         service: activeService.name, 
-        network: activeServiceID.toUpperCase(), 
+        network: displayNetwork.toUpperCase(), 
         txHash: hash,
         account: accountNumber
       };
@@ -334,7 +331,6 @@ export default function Home() {
         newTx.status = "SUCCESS";
         showToast("Vending Successful", "Your utility has been successfully delivered.", "success");
       } else {
-        // EXACT ERROR DISPLAY: Shows Database or VTpass errors clearly
         setStatus(`Error: ${result.message || 'Transaction Failed'}`);
         newTx.status = "FAILED/DELAYED";
       }
@@ -355,7 +351,6 @@ export default function Home() {
     }
   };
 
-  // RESTORED: Submit Support Ticket Function
   const submitSupportTicket = async () => {
     if (!supportMessage.trim()) return;
     setIsSendingSupport(true);
@@ -388,20 +383,13 @@ export default function Home() {
 
     if (navigator.share) {
       try {
-        await navigator.share({
-          title: 'AbaPay Receipt',
-          text: receiptText,
-        });
-      } catch (err) {
-        console.log("Share cancelled or failed.", err);
-      }
+        await navigator.share({ title: 'AbaPay Receipt', text: receiptText });
+      } catch (err) { console.log("Share cancelled or failed.", err); }
     } else {
       try {
         await navigator.clipboard.writeText(receiptText);
         showToast("Copied!", "Receipt details copied to clipboard.", "success");
-      } catch (err) {
-        showToast("Error", "Could not copy receipt.", "error");
-      }
+      } catch (err) { showToast("Error", "Could not copy receipt.", "error"); }
     }
   };
 
@@ -488,7 +476,7 @@ export default function Home() {
                     >
                       <Share2 size={16}/> Share
                     </button>
-                    {/* RESTORED: Support Button inside Receipt */}
+                    {/* Support Button */}
                     {selectedReceipt.status !== 'SUCCESS' && (
                        <button 
                          onClick={() => { setSelectedReceipt(null); setIsSupportOpen(true); }}
@@ -566,7 +554,7 @@ export default function Home() {
         </div>
       )}
 
-      {/* RESTORED: Support Modal */}
+      {/* Support Modal */}
       {isSupportOpen && (
         <div className="fixed inset-0 z-[70] bg-slate-900/60 backdrop-blur-sm flex justify-center items-center p-4 animate-in fade-in">
           <div className="bg-white w-full max-w-md rounded-[2rem] shadow-2xl p-6 animate-in zoom-in-95 duration-200">
