@@ -20,7 +20,6 @@ function getStrictRequestId() {
 export async function POST(req: Request) {
   try {
     const body = await req.json();
-    // Added wallet_address to the extracted variables
     const { serviceID, billersCode, amount, token: tokenSymbol, txHash, variation_code, phone, nairaAmount, wallet_address } = body;
 
     if (processedTransactions.has(txHash)) {
@@ -40,16 +39,17 @@ export async function POST(req: Request) {
         return NextResponse.json({ success: false, code: "FUNDS", message: "Insufficient crypto paid." }, { status: 400 });
     }
 
-    // 1. GUARANTEED DATABASE LOGGING
+    // 1. GUARANTEED DATABASE LOGGING (Now with 'network' included!)
     const dbPayload = {
       tx_hash: txHash,
       service_category: serviceID,
+      network: serviceID.toUpperCase(), // <--- THE MISSING PIECE
       account_number: billersCode || phone || "N/A",
       amount_usdt: parseFloat(amount), 
       amount_naira: vendAmount,
       fee_naira: serviceFee,
       status: 'PROCESSING',
-      wallet_address: wallet_address || "UNKNOWN" // <--- SAVES THE WALLET TO SUPABASE
+      wallet_address: wallet_address || "UNKNOWN"
     };
 
     const { data: dbData, error: dbError } = await supabase.from('transactions').insert([dbPayload]).select();
