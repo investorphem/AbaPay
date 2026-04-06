@@ -11,6 +11,7 @@ import {
   ChevronLeft, ChevronRight, RefreshCw, ListPlus
 } from "lucide-react";
 import { supabase } from "@/utils/supabase";
+import { ELECTRICITY_DISCOS } from "./discos"; // IMPORT THE LOGO MAP
 
 // --- WEB3 CONFIG ---
 const ABAPAY_ABI = [{"inputs":[{"internalType":"address","name":"tokenAddress","type":"address"},{"internalType":"string","name":"serviceType","type":"string"},{"internalType":"string","name":"accountNumber","type":"string"},{"internalType":"uint256","name":"amount","type":"uint256"}],"name":"payBill","outputs":[],"stateMutability":"nonpayable","type":"function"}];
@@ -26,19 +27,8 @@ const SERVICES = [
   { id: "CABLE", name: "Cable TV", icon: Tv, color: "text-[#ec4899]", bg: "bg-pink-500/10" },
 ];
 
-const ELECTRICITY_PROVIDERS = [
-  "ikeja-electric", 
-  "eko-electric", 
-  "abuja-electric", 
-  "kano-electric", 
-  "portharcourt-electric", 
-  "ibadan-electric", 
-  "kaduna-electric",
-  "jos-electric",
-  "enugu-electric",
-  "aba-electric"
-];
-
+// UPGRADED: Updated to strict VTpass mainnet service IDs
+const ELECTRICITY_PROVIDER_IDS = ELECTRICITY_DISCOS.map(d => d.serviceID); 
 const CABLE_PROVIDERS = ["dstv", "gotv", "startimes", "showmax"];
 const TELECOM_PROVIDERS = ["mtn", "glo", "9mobile", "airtel"]; 
 
@@ -91,7 +81,7 @@ export default function Home() {
 
   // Service States
   const [activeService, setActiveService] = useState(SERVICES[0]);
-  const [elecProvider, setElecProvider] = useState(ELECTRICITY_PROVIDERS[0]);
+  const [elecProvider, setElecProvider] = useState(ELECTRICITY_PROVIDER_IDS[0]);
   const [cableProvider, setCableProvider] = useState(CABLE_PROVIDERS[0]);
   const [telecomProvider, setTelecomProvider] = useState(TELECOM_PROVIDERS[0]);
   const [meterType, setMeterType] = useState<"prepaid" | "postpaid">("prepaid");
@@ -109,8 +99,9 @@ export default function Home() {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [isSelectionModalOpen, setIsSelectionModalOpen] = useState(false);
   const [modalTitle, setModalTitle] = useState("");
-  const [modalOptions, setModalOptions] = useState<string[]>([]);
+  const [modalOptions, setModalOptions] = useState<any[]>([]); // UPGRADED: Can be strings or objects
   const [modalCallback, setModalCallback] = useState<((value: string) => void) | null>(null);
+  const [modalType, setModalType] = useState<'standard' | 'token' | 'disco'>('standard'); // UPGRADED
   const [toast, setToast] = useState<{title: string, message: string, type: 'success' | 'error'} | null>(null);
   const [currentPage, setCurrentPage] = useState(1);
 
@@ -253,7 +244,6 @@ export default function Home() {
           if (activeService.id === "CABLE") {
             setCableCurrentBouquet(data.content.Current_Bouquet || "Unknown Package");
             
-            // Only attempt to set Renewal Amount for DSTV/GOTV
             if (data.content.Renewal_Amount && ['dstv', 'gotv'].includes(cableProvider)) {
               setCableRenewAmount(data.content.Renewal_Amount);
               if (cableSubscriptionType === "renew") {
@@ -261,12 +251,14 @@ export default function Home() {
               }
             }
           }
+        } else {
+            // UPGRADED: Friendly error during verification
+            setStatus("Meter/Account number could not be verified.");
         }
     } catch (e) { console.error("Verify Error", e); }
     setIsVerifying(false);
   };
 
-  // UPGRADED: Trigger verify conditionally (Showmax is excluded from verification)
   useEffect(() => {
     if (activeService.id === "ELECTRICITY" && accountNumber.length >= 10) {
       verifyMerchant();
@@ -295,7 +287,6 @@ export default function Home() {
       return accountNumber.length >= 10 && customerName !== null;
     }
     if (activeService.id === "CABLE") {
-      // Showmax requires phone number, the rest require smartcards
       if (cableProvider === "showmax") {
         return accountNumber.length >= 11 && selectedCablePlan !== null;
       } else {
@@ -430,6 +421,7 @@ export default function Home() {
         newTx.status = "SUCCESS";
         showToast("Vending Successful", "Your utility has been successfully delivered.", "success");
       } else {
+        // UPGRADED:result.message now contains the friendly translated message from the backend dictionary
         setStatus(`Error: ${result.message || 'Transaction Failed'}`);
         newTx.status = "FAILED/DELAYED";
       }
@@ -464,7 +456,9 @@ export default function Home() {
     setCableSubscriptionType("renew");
   };
 
-  const openPremiumSelection = (title: string, options: string[], callback: (value: string) => void) => {
+  // UPGRADED: More flexible selection modal opening
+  const openSelectionModal = (type: 'standard' | 'token' | 'disco', title: string, options: any[], callback: (value: string) => void) => {
+    setModalType(type);
     setModalTitle(title);
     setModalOptions(options);
     setModalCallback(() => callback);
@@ -508,6 +502,11 @@ export default function Home() {
   const filteredDataPlans = useMemo(() => {
     return MOCK_DATA_PLANS.filter(plan => plan.category === activeDataCategory);
   }, [activeDataCategory]);
+
+  // UPGRADED: Define current disco details for dropdown display
+  const currentDisco = useMemo(() => {
+    return ELECTRICITY_DISCOS.find(d => d.serviceID === elecProvider);
+  }, [elecProvider]);
 
   return (
     <main className="min-h-screen bg-slate-50 text-slate-900 font-sans p-4 flex flex-col items-center pb-20 relative">
@@ -643,31 +642,58 @@ export default function Home() {
         </div>
       )}
 
-      {/* MODAL (With Token Logo Support) */}
+      {/* UPGRADED: Complex Selection Modal (Supports standard, token, and disco maps) */}
       {isSelectionModalOpen && (
         <div className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-sm flex justify-center items-center p-4 animate-in fade-in" onClick={() => setIsSelectionModalOpen(false)}>
            <div className="bg-white w-full max-w-sm rounded-[2rem] shadow-2xl p-6 animate-in zoom-in-95 duration-200" onClick={(e) => e.stopPropagation()}>
-              <div className="flex justify-between items-center mb-6">
-                <h2 className="text-lg font-bold text-slate-800">{modalTitle}</h2>
+              <div className="flex justify-between items-center mb-6 shrink-0 border-b border-slate-100 pb-4">
+                <h2 className="text-xl font-black text-slate-900 tracking-tight">{modalTitle}</h2>
                 <button onClick={() => setIsSelectionModalOpen(false)} className="p-2 bg-slate-100 rounded-full hover:bg-slate-200 transition-colors"><XCircle size={20} className="text-slate-500" /></button>
               </div>
-              <div className="space-y-2 max-h-[50vh] overflow-y-auto">
-                 {modalOptions.map(option => {
-                   const isToken = SUPPORTED_TOKENS.find(t => t.symbol === option);
-                   return (
+              <div className="space-y-2.5 max-h-[50vh] overflow-y-auto pr-1">
+                 {modalType === 'token' && SUPPORTED_TOKENS.map(token => (
+                   <button 
+                     key={token.symbol} 
+                     onClick={() => { modalCallback?.(token.symbol); setIsSelectionModalOpen(false); }}
+                     className="w-full text-left p-4 rounded-xl font-bold text-slate-700 bg-slate-50 border border-slate-100 uppercase text-xs hover:border-emerald-300 hover:bg-emerald-50/50 transition-all flex justify-between items-center"
+                   >
+                     <div className="flex items-center gap-3">
+                       <img src={token.logo} alt={token.symbol} className="w-6 h-6 object-contain rounded-full shadow-sm bg-white" />
+                       <span className="text-sm font-black text-slate-800 tracking-tight">{token.symbol}</span>
+                     </div>
+                     {selectedToken.symbol === token.symbol && <CheckCircle2 size={18} className="text-emerald-500"/>}
+                   </button>
+                 ))}
+
+                 {modalType === 'disco' && (modalOptions as typeof ELECTRICITY_DISCOS).map(disco => (
+                    <button 
+                        key={disco.serviceID} 
+                        onClick={() => { modalCallback?.(disco.serviceID); setIsSelectionModalOpen(false); }}
+                        className="w-full text-left p-4 rounded-2xl font-bold text-slate-700 bg-white border border-slate-100 hover:border-orange-300 hover:bg-orange-50/50 transition-all flex justify-between items-center group"
+                    >
+                        <div className="flex items-center gap-4">
+                            <div className="w-12 h-12 rounded-full border border-slate-100 bg-white p-2 flex items-center justify-center shadow-sm overflow-hidden group-hover:shadow-lg transition-shadow">
+                                <img src={disco.logo} alt={disco.displayName} className="w-full h-full object-contain" />
+                            </div>
+                            <div>
+                                <span className="text-sm font-black text-slate-900 tracking-tight">{disco.displayName}</span>
+                                <p className="text-[10px] font-black uppercase text-slate-400 tracking-wider group-hover:text-orange-700">{disco.serviceID}</p>
+                            </div>
+                        </div>
+                        {elecProvider === disco.serviceID && <CheckCircle2 size={20} className="text-orange-500"/>}
+                    </button>
+                 ))}
+
+                 {modalType === 'standard' && (modalOptions as string[]).map(option => (
                      <button 
                        key={option} 
                        onClick={() => { modalCallback?.(option); setIsSelectionModalOpen(false); }}
-                       className="w-full text-left p-4 rounded-xl font-bold text-slate-700 bg-slate-50 border border-slate-100 uppercase text-xs hover:border-emerald-300 hover:bg-emerald-50/50 transition-all flex justify-between items-center"
+                       className="w-full text-left p-4 rounded-xl font-black text-slate-700 bg-slate-50 border border-slate-100 uppercase text-xs hover:border-emerald-300 hover:bg-emerald-50/50 transition-all flex justify-between items-center"
                      >
-                       <div className="flex items-center gap-3">
-                         {isToken && <img src={isToken.logo} alt={isToken.symbol} className="w-5 h-5 object-contain rounded-full" />}
-                         <span>{option}</span>
-                       </div>
-                       {(telecomProvider === option || elecProvider === option || cableProvider === option || selectedToken.symbol === option) && <CheckCircle2 size={16} className="text-emerald-500"/>}
+                       <span>{option}</span>
+                       {(telecomProvider === option || cableProvider === option) && <CheckCircle2 size={16} className="text-emerald-500"/>}
                      </button>
-                   );
-                 })}
+                 ))}
               </div>
            </div>
         </div>
@@ -677,23 +703,23 @@ export default function Home() {
       {isSupportOpen && (
         <div className="fixed inset-0 z-[70] bg-slate-900/60 backdrop-blur-sm flex justify-center items-center p-4 animate-in fade-in">
           <div className="bg-white w-full max-w-md rounded-[2rem] shadow-2xl p-6 animate-in zoom-in-95 duration-200">
-            <div className="flex justify-between items-center mb-4">
-              <h2 className="text-xl font-bold flex items-center gap-2"><HelpCircle className="text-emerald-500"/> Customer Support</h2>
+            <div className="flex justify-between items-center mb-4 shrink-0 border-b border-slate-100 pb-4">
+              <h2 className="text-2xl font-black flex items-center gap-2.5 tracking-tight text-slate-900"><Mail className="text-emerald-500" size={24}/> AbaPay Support</h2>
               <button onClick={() => setIsSupportOpen(false)} className="p-2 bg-slate-100 rounded-full hover:bg-slate-200"><XCircle size={20} className="text-slate-500" /></button>
             </div>
             <textarea 
-              className="w-full bg-slate-50 border border-slate-200 rounded-xl p-4 mb-4 text-sm outline-none focus:border-emerald-500"
-              rows={4} placeholder="Describe your issue..."
+              className="w-full bg-slate-50 border border-slate-200 rounded-xl p-5 mb-4 text-sm font-medium outline-none focus:border-emerald-500 transition-colors leading-relaxed"
+              rows={4} placeholder="Describe your issue in detail. AbaPay Support typically responds within 30 minutes."
               value={supportMessage} onChange={(e) => setSupportMessage(e.target.value)}
             />
             <div className="flex gap-2 mb-6">
               <input type="file" ref={fileInputRef} className="hidden" onChange={(e) => setSupportFile(e.target.files?.[0] || null)} />
-              <button onClick={() => fileInputRef.current?.click()} className="flex-1 py-3 bg-slate-100 hover:bg-slate-200 rounded-xl text-sm font-bold flex items-center justify-center gap-2">
-                <Paperclip size={16} /> {supportFile ? "File Attached" : "Attach Receipt"}
+              <button onClick={() => fileInputRef.current?.click()} className="flex-1 py-4 bg-slate-100 hover:bg-slate-200 rounded-xl text-[11px] font-black uppercase tracking-wider flex items-center justify-center gap-2 text-slate-600">
+                <Paperclip size={16} /> {supportFile ? supportFile.name.slice(0, 10) + '...' : "Attach Receipt/Screenshot"}
               </button>
             </div>
-            <button onClick={submitSupportTicket} disabled={isSendingSupport} className="w-full bg-emerald-600 hover:bg-emerald-500 text-white font-bold py-4 rounded-xl flex items-center justify-center gap-2 transition-colors active:scale-95 disabled:opacity-50">
-              {isSendingSupport ? <Loader2 className="animate-spin" /> : <><Send size={18}/> Send Ticket</>}
+            <button onClick={submitSupportTicket} disabled={isSendingSupport} className="w-full bg-slate-900 hover:bg-black text-white font-black py-5 rounded-2xl flex items-center justify-center gap-2 transition-all active:scale-95 disabled:opacity-50">
+              {isSendingSupport ? <Loader2 className="animate-spin" size={18}/> : <><Send size={18} className="text-emerald-400"/> SUBMIT SUPPORT TICKET</>}
             </button>
           </div>
         </div>
@@ -732,7 +758,7 @@ export default function Home() {
                     setClient(walletClient);
                   }
                 }}
-                className="bg-slate-900 text-white text-[10px] font-black uppercase px-4 py-2 rounded-xl active:scale-95 hover:bg-slate-800 transition-all shadow-lg shadow-slate-900/20"
+                className="bg-slate-900 text-white text-[10px] font-black uppercase px-4 py-2 rounded-xl active:scale-95 hover:bg-black transition-all shadow-lg shadow-slate-900/20"
               >
                 Connect
               </button>
@@ -761,11 +787,10 @@ export default function Home() {
             </div>
 
             <div className="space-y-5">
-                {/* UPGRADED: Dynamic Logo Rendering for Token Selector */}
                 <div className="bg-slate-50 border border-slate-100 p-4 rounded-2xl flex justify-between items-center animate-in fade-in">
                   <div 
                     className="flex items-center gap-2 cursor-pointer hover:bg-slate-100 p-2 -ml-2 rounded-xl transition-colors" 
-                    onClick={() => openPremiumSelection("Select Token", SUPPORTED_TOKENS.map(t => t.symbol), (symbol) => setSelectedToken(SUPPORTED_TOKENS.find(t => t.symbol === symbol)!))}
+                    onClick={() => openSelectionModal('token', "Select Token", SUPPORTED_TOKENS, (symbol) => setSelectedToken(SUPPORTED_TOKENS.find(t => t.symbol === symbol)!))}
                   >
                      <img src={selectedToken.logo} alt={selectedToken.symbol} className="w-7 h-7 object-contain rounded-full shadow-sm bg-white" />
                      <span className="font-black text-slate-800 uppercase text-sm tracking-tight">{selectedToken.symbol}</span>
@@ -814,24 +839,38 @@ export default function Home() {
                           </button>
                         ))}
                       </div>
+                    ) : activeService.id === "ELECTRICITY" ? (
+                        // UPGRADED: Electricity provider dropdown with logo
+                        <button 
+                            onClick={() => openSelectionModal('disco', "Select Provider", ELECTRICITY_DISCOS, setElecProvider)}
+                            className="w-full bg-white border border-slate-200 p-4 rounded-2xl flex justify-between items-center hover:border-orange-400 transition-colors shadow-sm active:scale-[0.98]"
+                        >
+                            <div className="flex items-center gap-4">
+                                <div className="w-10 h-10 rounded-full border border-slate-100 bg-white p-2 flex items-center justify-center shadow-inner overflow-hidden">
+                                    <img src={currentDisco?.logo} alt={currentDisco?.displayName} className="w-full h-full object-contain" />
+                                </div>
+                                <div>
+                                    <span className="text-sm font-black text-slate-900 tracking-tight">{currentDisco?.displayName}</span>
+                                    <p className="text-[10px] font-black uppercase text-orange-600 tracking-wider">Tap to change Disco</p>
+                                </div>
+                            </div>
+                            <ChevronDown size={18} className="text-slate-400"/>
+                        </button>
                     ) : (
+                      // CABLE
                       <button 
-                        onClick={() => {
-                          const options = activeService.id === "ELECTRICITY" ? ELECTRICITY_PROVIDERS : CABLE_PROVIDERS;
-                          const callback = activeService.id === "ELECTRICITY" ? setElecProvider : setCableProvider;
-                          openPremiumSelection("Select Provider", options, callback);
-                        }}
+                        onClick={() => openSelectionModal('standard', "Select Provider", CABLE_PROVIDERS, setCableProvider)}
                         className="w-full bg-slate-50 border border-slate-100 p-4 rounded-2xl font-bold text-slate-800 outline-none uppercase text-xs hover:border-emerald-300 transition-all text-left flex justify-between items-center"
                       >
-                        <span>{activeService.id === "ELECTRICITY" ? elecProvider.toUpperCase() : cableProvider.toUpperCase()}</span>
+                        <span>{cableProvider.toUpperCase()}</span>
                         <ChevronDown size={14} className="text-slate-400"/>
                       </button>
                     )}
 
                     {activeService.id === "ELECTRICITY" && (
-                       <div className="flex gap-2 mt-3 p-1 bg-slate-100 rounded-xl border border-slate-200 shadow-inner">
-                          <button onClick={() => setMeterType("prepaid")} className={`flex-1 py-2.5 text-[10px] font-black uppercase rounded-lg transition-colors ${meterType === "prepaid" ? "bg-white shadow-sm text-emerald-600" : "text-slate-500"}`}>Prepaid</button>
-                          <button onClick={() => setMeterType("postpaid")} className={`flex-1 py-2.5 text-[10px] font-black uppercase rounded-lg transition-colors ${meterType === "postpaid" ? "bg-white shadow-sm text-emerald-600" : "text-slate-500"}`}>Postpaid</button>
+                       <div className="flex gap-2 mt-4 p-1.5 bg-slate-100 rounded-2xl border border-slate-200 shadow-inner">
+                          <button onClick={() => setMeterType("prepaid")} className={`flex-1 py-3 text-[11px] font-black uppercase rounded-xl transition-all ${meterType === "prepaid" ? "bg-white shadow-lg text-emerald-600" : "text-slate-500"}`}>Prepaid</button>
+                          <button onClick={() => setMeterType("postpaid")} className={`flex-1 py-3 text-[11px] font-black uppercase rounded-xl transition-all ${meterType === "postpaid" ? "bg-white shadow-lg text-emerald-600" : "text-slate-500"}`}>Postpaid</button>
                        </div>
                     )}
                 </div>
@@ -854,12 +893,15 @@ export default function Home() {
                         value={accountNumber}
                         onChange={(e) => setAccountNumber(e.target.value.replace(/[^0-9]/g, ''))}
                     />
-                    {isVerifying && <p className="text-[10px] text-blue-500 font-bold mt-2 animate-pulse">Verifying Account Details...</p>}
+                    {isVerifying && <p className="text-[10px] text-blue-500 font-bold mt-2 animate-pulse flex items-center gap-1.5"><Loader2 size={12} className="animate-spin"/> Verifying Account Details...</p>}
                     
                     {customerName && activeService.id === "ELECTRICITY" && (
-                        <div className="mt-2 bg-emerald-500/10 p-3 rounded-xl border border-emerald-500/20 flex items-center gap-2 animate-in fade-in">
-                            <CheckCircle2 size={14} className="text-emerald-600" />
-                            <span className="text-[10px] font-black text-emerald-700 uppercase">{customerName}</span>
+                        <div className="mt-2 bg-emerald-500/10 p-4 rounded-xl border border-emerald-500/20 flex items-center gap-3 animate-in fade-in">
+                            <CheckCircle2 size={18} className="text-emerald-600" />
+                            <div>
+                                <span className="text-sm font-black text-emerald-800">{customerName}</span>
+                                <p className="text-[10px] font-black text-emerald-600 uppercase">Meter Verified Successfully</p>
+                            </div>
                         </div>
                     )}
                 </div>
@@ -881,16 +923,16 @@ export default function Home() {
 
                      {['dstv', 'gotv'].includes(cableProvider) ? (
                        <>
-                         <div className="flex gap-2 p-1 bg-slate-200/50 rounded-xl mb-4">
+                         <div className="flex gap-2 p-1.5 bg-slate-200/50 rounded-xl mb-4 shadow-inner">
                             <button 
                               onClick={() => { setCableSubscriptionType("renew"); setNairaAmount(cableRenewAmount ? cableRenewAmount.toString() : ""); setSelectedCablePlan(null); }} 
-                              className={`flex-1 flex items-center justify-center gap-2 py-2.5 text-[10px] font-black uppercase tracking-wider rounded-lg transition-all ${cableSubscriptionType === "renew" ? "bg-white text-emerald-600 shadow-sm" : "text-slate-500 hover:text-slate-700"}`}
+                              className={`flex-1 flex items-center justify-center gap-2 py-3 text-[11px] font-black uppercase tracking-wider rounded-xl transition-all ${cableSubscriptionType === "renew" ? "bg-white text-emerald-600 shadow-lg" : "text-slate-500 hover:text-slate-700"}`}
                             >
                               <RefreshCw size={14}/> Renew Plan
                             </button>
                             <button 
                               onClick={() => { setCableSubscriptionType("change"); setNairaAmount(""); }} 
-                              className={`flex-1 flex items-center justify-center gap-2 py-2.5 text-[10px] font-black uppercase tracking-wider rounded-lg transition-all ${cableSubscriptionType === "change" ? "bg-white text-blue-600 shadow-sm" : "text-slate-500 hover:text-slate-700"}`}
+                              className={`flex-1 flex items-center justify-center gap-2 py-3 text-[11px] font-black uppercase tracking-wider rounded-xl transition-all ${cableSubscriptionType === "change" ? "bg-white text-blue-600 shadow-lg" : "text-slate-500 hover:text-slate-700"}`}
                             >
                               <ListPlus size={14}/> Change Plan
                             </button>
@@ -927,13 +969,13 @@ export default function Home() {
                                        <button 
                                          key={plan.variation_code} 
                                          onClick={() => { setSelectedCablePlan(plan); setNairaAmount(plan.variation_amount); }} 
-                                         className="p-3 rounded-xl border border-slate-200 bg-white hover:border-slate-300 transition-all text-left flex justify-between items-center"
+                                         className="p-3 rounded-xl border border-slate-200 bg-white hover:border-slate-300 transition-all text-left flex justify-between items-center group"
                                        >
                                          <div>
                                            <p className="font-black text-slate-800 text-xs">{plan.name}</p>
                                            <p className="text-[9px] text-slate-400 font-bold mt-0.5">{cryptoPlanCost} {selectedToken.symbol}</p>
                                          </div>
-                                         <p className="font-black text-blue-600 text-sm">₦{parseFloat(plan.variation_amount).toLocaleString()}</p>
+                                         <p className="font-black text-blue-600 text-sm group-hover:scale-110 transition-transform">₦{parseFloat(plan.variation_amount).toLocaleString()}</p>
                                        </button>
                                      );
                                    })
@@ -969,13 +1011,13 @@ export default function Home() {
                                   <button 
                                     key={plan.variation_code} 
                                     onClick={() => { setSelectedCablePlan(plan); setNairaAmount(plan.variation_amount); }} 
-                                    className="p-3 rounded-xl border border-slate-200 bg-white hover:border-slate-300 transition-all text-left flex justify-between items-center"
+                                    className="p-3 rounded-xl border border-slate-200 bg-white hover:border-slate-300 transition-all text-left flex justify-between items-center group"
                                   >
                                     <div>
                                       <p className="font-black text-slate-800 text-xs">{plan.name}</p>
                                       <p className="text-[9px] text-slate-400 font-bold mt-0.5">{cryptoPlanCost} {selectedToken.symbol}</p>
                                     </div>
-                                    <p className="font-black text-blue-600 text-sm">₦{parseFloat(plan.variation_amount).toLocaleString()}</p>
+                                    <p className="font-black text-blue-600 text-sm group-hover:scale-110 transition-transform">₦{parseFloat(plan.variation_amount).toLocaleString()}</p>
                                   </button>
                                 );
                               })
@@ -989,11 +1031,11 @@ export default function Home() {
                 {/* --- UPGRADED DATA UI BLOCK --- */}
                 {activeService.id === "DATA" && (
                    <div className="bg-slate-50 border border-slate-100 p-4 rounded-2xl animate-in fade-in slide-in-from-top-4">
-                      <div className="flex gap-1.5 mb-4 border-b border-slate-200 pb-3 overflow-x-auto">
+                      <div className="flex gap-2 mb-4 border-b border-slate-200 pb-3 overflow-x-auto no-scrollbar shadow-inner bg-slate-100 p-1.5 rounded-2xl">
                         {DATA_CATEGORIES.map(cat => (
-                          <button key={cat} onClick={() => { setActiveDataCategory(cat); setSelectedDataPlan(null); }} className={`px-4 py-1.5 rounded-lg text-[10px] font-black uppercase transition-colors whitespace-nowrap ${activeDataCategory === cat ? 'bg-purple-500/10 text-purple-600' : 'text-slate-500 hover:bg-slate-100'}`}>{cat}</button>
+                          <button key={cat} onClick={() => { setActiveDataCategory(cat); setSelectedDataPlan(null); }} className={`px-4 py-2.5 rounded-xl text-[11px] font-black uppercase transition-all whitespace-nowrap ${activeDataCategory === cat ? 'bg-white shadow-lg text-purple-600' : 'text-slate-500 hover:text-slate-700'}`}>{cat}</button>
                         ))}
-                        <button onClick={() => { setActiveDataCategory("Broadband"); setSelectedDataPlan(null); }} className={`px-4 py-1.5 flex items-center gap-1.5 rounded-lg text-[10px] font-black uppercase transition-colors ${activeDataCategory === "Broadband" ? 'bg-orange-500/10 text-orange-600' : 'text-slate-500 hover:bg-slate-100'}`}><Briefcase size={12}/> Broadband</button>
+                        <button onClick={() => { setActiveDataCategory("Broadband"); setSelectedDataPlan(null); }} className={`px-4 py-2.5 flex items-center gap-1.5 rounded-xl text-[11px] font-black uppercase transition-all ${activeDataCategory === "Broadband" ? 'bg-white shadow-lg text-orange-600' : 'text-slate-500 hover:text-slate-700'}`}><Briefcase size={14}/> Broadband</button>
                       </div>
 
                       {selectedDataPlan ? (
@@ -1018,11 +1060,11 @@ export default function Home() {
                              {(activeDataCategory === "Broadband" ? MOCK_DATA_PLANS.filter(p => p.isBroadband) : filteredDataPlans).map(plan => {
                                const cryptoPlanCost = (plan.cost_naira / exchangeRate).toFixed(4);
                                return (
-                                 <button key={plan.id} onClick={() => { setSelectedDataPlan(plan); setNairaAmount(plan.cost_naira.toString()); }} className="p-4 rounded-xl border border-slate-200 bg-white hover:border-slate-300 transition-all flex flex-col gap-1 text-left shadow-sm">
+                                 <button key={plan.id} onClick={() => { setSelectedDataPlan(plan); setNairaAmount(plan.cost_naira.toString()); }} className="p-4 rounded-xl border border-slate-200 bg-white hover:border-purple-300 transition-all flex flex-col gap-1 text-left shadow-sm group">
                                    <p className="font-black text-slate-900 text-sm tracking-tight">{plan.name}</p>
                                    <p className="text-[10px] text-slate-500 font-bold uppercase tracking-wider">{plan.validity}</p>
                                    <div className="mt-2 pt-2 border-t border-slate-100 flex flex-col gap-0.5">
-                                       <p className="font-black text-purple-600 text-xs">₦{plan.cost_naira.toLocaleString()}</p>
+                                       <p className="font-black text-purple-600 text-xs group-hover:scale-105 transition-transform">₦{plan.cost_naira.toLocaleString()}</p>
                                        <p className="text-[9px] text-slate-400 font-bold">{cryptoPlanCost} {selectedToken.symbol}</p>
                                    </div>
                                  </button>
@@ -1036,30 +1078,30 @@ export default function Home() {
                 <div className={activeService.id === "DATA" || activeService.id === "CABLE" ? "hidden" : ""}>
                     <label className="text-[10px] font-black text-slate-400 uppercase mb-2 flex justify-between items-center">
                        <span>Naira Value</span>
-                       <span className="text-emerald-500 bg-emerald-500/10 px-2 py-0.5 rounded">MIN: ₦{dynamicMinAmount.toLocaleString()}</span>
+                       <span className="text-emerald-500 bg-emerald-500/10 px-2 py-1 rounded font-black">MIN: ₦{dynamicMinAmount.toLocaleString()}</span>
                     </label>
                     <div className="relative mb-3">
                         <input 
                             type="number" 
                             placeholder="Enter Amount" 
-                            className="w-full bg-slate-50 border border-slate-100 p-5 rounded-2xl font-black text-xl text-slate-800 outline-none focus:border-emerald-500 transition-all"
+                            className="w-full bg-slate-50 border border-slate-100 p-6 rounded-2xl font-black text-3xl text-slate-800 outline-none focus:border-emerald-500 transition-all shadow-inner"
                             value={nairaAmount}
                             onChange={(e) => setNairaAmount(e.target.value)}
                         />
-                        <div className="absolute right-4 top-1/2 -translate-y-1/2 text-right">
-                            <p className="text-[10px] font-black text-emerald-600">{cryptoToCharge} {selectedToken.symbol}</p>
-                            {currentFee > 0 && <p className="text-[8px] font-bold text-orange-500">+₦{currentFee} FEE</p>}
+                        <div className="absolute right-5 top-1/2 -translate-y-1/2 text-right">
+                            <p className="text-sm font-black text-emerald-600">{cryptoToCharge} {selectedToken.symbol}</p>
+                            {currentFee > 0 && <p className="text-[9px] font-black text-orange-500 tracking-wider">+₦{currentFee} AbaPay FEE</p>}
                         </div>
                     </div>
 
                     {activeService.id === "AIRTIME" && (
-                       <div className="flex gap-2.5 overflow-x-auto py-1">
+                       <div className="flex gap-2.5 overflow-x-auto py-1.5 no-scrollbar bg-slate-100 p-2 rounded-2xl shadow-inner">
                           {PRE_SELECT_AMOUNTS.map(amount => {
                             const cryptoAmtCost = (parseInt(amount) / exchangeRate).toFixed(4);
                             return (
-                              <button key={amount} onClick={() => setNairaAmount(amount)} className={`flex-1 min-w-[70px] py-3.5 rounded-xl border-2 font-black text-xs transition-all whitespace-nowrap ${nairaAmount === amount ? 'border-emerald-500 bg-emerald-50 text-emerald-700' : 'border-slate-100 bg-slate-100 hover:bg-slate-200 text-slate-700'}`}>
-                                 ₦{amount.toLocaleString()}
-                                 <p className="text-[8px] mt-0.5 text-slate-400 font-normal">{cryptoAmtCost} {selectedToken.symbol}</p>
+                              <button key={amount} onClick={() => setNairaAmount(amount)} className={`flex-1 min-w-[70px] py-4 rounded-xl font-black transition-all whitespace-nowrap ${nairaAmount === amount ? 'bg-white shadow-lg text-emerald-700 scale-105' : 'bg-slate-50 hover:bg-slate-200 text-slate-700'}`}>
+                                 ₦{parseInt(amount).toLocaleString()}
+                                 <p className="text-[8px] mt-0.5 text-slate-400 font-bold">{cryptoAmtCost} {selectedToken.symbol}</p>
                               </button>
                             );
                           })}
@@ -1070,30 +1112,30 @@ export default function Home() {
                 {activeService.id === "ELECTRICITY" && (
                     <div className="animate-in fade-in">
                          <input 
-                            type="tel" placeholder="Phone for SMS Token"
+                            type="tel" placeholder="Phone for SMS Token (11 Digits)"
                             maxLength={11}
-                            className="w-full bg-slate-50 border border-slate-100 p-4 rounded-2xl font-bold text-slate-700 outline-none focus:border-emerald-500"
+                            className="w-full bg-slate-50 border border-slate-100 p-5 rounded-2xl font-bold text-slate-700 outline-none focus:border-emerald-500 transition-colors shadow-inner"
                             onChange={(e) => setCustomerPhone(e.target.value.replace(/[^0-9]/g, ''))}
                         />
                     </div>
                 )}
 
                 {status && (
-                    <div className={`p-4 rounded-2xl text-[10px] font-bold border flex items-center gap-3 animate-in fade-in slide-in-from-top-2 ${status.includes('Success') ? 'bg-emerald-50 border-emerald-100 text-emerald-700' : 'bg-red-50 border-red-100 text-red-700'}`}>
-                        {status.includes('Success') ? <CheckCircle2 size={16}/> : <AlertTriangle size={16}/>}
-                        {status}
+                    <div className={`p-5 rounded-2xl border flex items-center gap-4 animate-in fade-in slide-in-from-top-2 shadow-sm ${status.includes('Success') || status.includes('Secured') || status.includes('Initiating') ? 'bg-emerald-50 border-emerald-100 text-emerald-800' : status.includes('Verifying') ? 'bg-blue-50 border-blue-100 text-blue-800' : 'bg-red-50 border-red-100 text-red-800'}`}>
+                        {status.includes('Success') ? <CheckCircle2 size={24} className="text-emerald-600"/> : status.includes('Verifying') || status.includes('Blockchain') ? <Loader2 size={24} className="animate-spin text-blue-600"/> : <AlertTriangle size={24} className="text-red-600"/>}
+                        <p className="text-sm font-black tracking-tight">{status}</p>
                     </div>
                 )}
 
                 <button 
                     onClick={handlePayment}
                     disabled={isVerifying || !isFormValid || isProcessing}
-                    className="w-full bg-slate-900 hover:bg-black text-white font-black py-5 rounded-[1.5rem] flex items-center justify-center gap-3 transition-all active:scale-95 disabled:opacity-30 shadow-xl shadow-slate-900/20"
+                    className="w-full bg-slate-900 hover:bg-black text-white font-black py-6 rounded-3xl flex items-center justify-center gap-3.5 transition-all active:scale-95 disabled:opacity-30 shadow-xl shadow-slate-900/20 text-lg tracking-tight"
                 >
                     {isProcessing ? (
-                      <><Loader2 size={20} className="animate-spin text-emerald-400"/> SECURING BLOCKCHAIN...</>
+                      <><Loader2 size={24} className="animate-spin text-emerald-400"/> SECURING PROTOCOL...</>
                     ) : (
-                      <><ShieldCheck size={20} className="text-emerald-400" /> CONFIRM & PAY {cryptoToCharge} {selectedToken.symbol}</>
+                      <><ShieldCheck size={24} className="text-emerald-400" /> CONFIRM & PAY {cryptoToCharge} {selectedToken.symbol}</>
                     )}
                 </button>
             </div>
@@ -1101,9 +1143,11 @@ export default function Home() {
         ) : (
           <div className="bg-white border border-slate-100 rounded-[2.5rem] p-6 shadow-2xl animate-in slide-in-from-bottom-4">
              {transactions.length === 0 ? (
-                <div className="py-20 text-center">
-                    <Receipt size={40} className="mx-auto text-slate-200 mb-4" />
-                    <p className="text-slate-400 text-xs font-bold uppercase tracking-widest">No activity found</p>
+                <div className="py-24 text-center">
+                    <div className="bg-slate-100 w-20 h-20 rounded-full flex items-center justify-center mx-auto mb-5 shadow-inner">
+                        <Receipt size={40} className="text-slate-300" />
+                    </div>
+                    <p className="text-slate-400 text-xs font-black uppercase tracking-widest">No transaction activity found</p>
                 </div>
              ) : (
                 <div className="flex flex-col space-y-4">
@@ -1111,37 +1155,37 @@ export default function Home() {
                         <div 
                           key={idx} 
                           onClick={() => setSelectedReceipt(tx)} 
-                          className="p-4 bg-slate-50 rounded-2xl border border-slate-100 flex justify-between items-center cursor-pointer hover:bg-emerald-50 hover:border-emerald-100 transition-all group"
+                          className="p-5 bg-slate-50 rounded-2xl border border-slate-100 flex justify-between items-center cursor-pointer hover:bg-emerald-50 hover:border-emerald-100 transition-all group shadow-sm active:scale-98"
                         >
                             <div>
-                                <p className="text-xs font-black text-slate-800 uppercase group-hover:text-emerald-700 transition-colors">{tx.network} {tx.service}</p>
-                                <p className="text-[10px] text-slate-500">{tx.date} • <span className={tx.status === 'SUCCESS' ? 'text-emerald-600 font-bold' : 'text-orange-500 font-bold'}>{tx.status}</span></p>
+                                <p className="text-sm font-black text-slate-900 uppercase group-hover:text-emerald-700 transition-colors tracking-tight">{tx.network} {tx.service}</p>
+                                <p className="text-[10px] font-medium text-slate-500 mt-0.5">{tx.date} • <span className={tx.status === 'SUCCESS' ? 'text-emerald-600 font-bold' : 'text-red-500 font-bold'}>{tx.status}</span></p>
                             </div>
-                            <div className="text-right flex flex-col items-end gap-1">
-                                <p className="text-xs font-black text-emerald-600">₦{tx.amountNaira}</p>
-                                <span className="text-[8px] font-black uppercase tracking-widest bg-slate-200 text-slate-500 px-2 py-0.5 rounded-full group-hover:bg-emerald-200 group-hover:text-emerald-800 transition-colors flex items-center gap-1">
-                                  View Receipt <ExternalLink size={8}/>
+                            <div className="text-right flex flex-col items-end gap-1.5">
+                                <p className="text-sm font-black text-emerald-600">₦{tx.amountNaira.toLocaleString()}</p>
+                                <span className="text-[9px] font-black uppercase tracking-widest bg-slate-200 text-slate-500 px-3 py-1 rounded-full group-hover:bg-emerald-200 group-hover:text-emerald-800 transition-all flex items-center gap-1">
+                                  View Receipt <ExternalLink size={10}/>
                                 </span>
                             </div>
                         </div>
                     ))}
 
                     {totalPages > 1 && (
-                      <div className="flex justify-between items-center mt-4 pt-4 border-t border-slate-100">
+                      <div className="flex justify-between items-center mt-6 pt-5 border-t border-slate-100">
                         <button 
                           onClick={() => setCurrentPage(p => Math.max(1, p - 1))} 
                           disabled={currentPage === 1} 
-                          className="flex items-center gap-1 px-3 py-2 text-[10px] font-black uppercase text-slate-500 hover:text-emerald-600 disabled:opacity-30 transition-colors"
+                          className="flex items-center gap-1.5 px-4 py-2 text-[10px] font-black uppercase tracking-widest bg-slate-100 rounded-lg text-slate-500 hover:bg-slate-200 hover:text-emerald-600 disabled:opacity-30 transition-all"
                         >
-                          <ChevronLeft size={14} /> Prev
+                          <ChevronLeft size={16} /> Prev
                         </button>
-                        <span className="text-[10px] font-black tracking-widest text-slate-400">PAGE {currentPage} OF {totalPages}</span>
+                        <span className="text-[10px] font-black tracking-widest text-slate-400 bg-slate-100 px-3 py-1.5 rounded-full">PAGE {currentPage} OF {totalPages}</span>
                         <button 
                           onClick={() => setCurrentPage(p => Math.min(totalPages, p + 1))} 
                           disabled={currentPage === totalPages} 
-                          className="flex items-center gap-1 px-3 py-2 text-[10px] font-black uppercase text-slate-500 hover:text-emerald-600 disabled:opacity-30 transition-colors"
+                          className="flex items-center gap-1.5 px-4 py-2 text-[10px] font-black uppercase tracking-widest bg-slate-100 rounded-lg text-slate-500 hover:bg-slate-200 hover:text-emerald-600 disabled:opacity-30 transition-all"
                         >
-                          Next <ChevronRight size={14} />
+                          Next <ChevronRight size={16} />
                         </button>
                       </div>
                     )}
@@ -1150,16 +1194,17 @@ export default function Home() {
           </div>
         )}
 
-        <footer className="mt-12 w-full border-t border-slate-200 pt-8 pb-4 flex flex-col items-center gap-4">
-          <div className="flex items-center gap-2 opacity-50">
-             <ShieldCheck size={14} className="text-emerald-600" />
-             <span className="text-[10px] font-bold text-slate-500 uppercase tracking-widest">Secured by Celo Network</span>
+        <footer className="mt-12 w-full border-t border-slate-200 pt-8 pb-4 flex flex-col items-center gap-4 animate-in fade-in">
+          <div className="flex items-center gap-2.5 bg-white px-4 py-1.5 rounded-full shadow-sm border border-slate-100">
+             <ShieldCheck size={16} className="text-emerald-600" />
+             <span className="text-[11px] font-bold text-slate-500 uppercase tracking-widest">Decentralized & Secured by Celo Network</span>
           </div>
           <div className="flex gap-6">
-            <a href="#" onClick={(e) => { e.preventDefault(); setIsTermsOpen(true); }} className="text-[10px] font-black text-slate-400 hover:text-emerald-600 uppercase tracking-tighter">Terms</a>
-            <a href="#" onClick={(e) => { e.preventDefault(); setIsPrivacyOpen(true); }} className="text-[10px] font-black text-slate-400 hover:text-emerald-600 uppercase tracking-tighter">Privacy</a>
+            <a href="#" onClick={(e) => { e.preventDefault(); setIsTermsOpen(true); }} className="text-[10px] font-black text-slate-400 hover:text-emerald-600 uppercase tracking-tight">Terms of Service</a>
+            <a href="#" onClick={(e) => { e.preventDefault(); setIsPrivacyOpen(true); }} className="text-[10px] font-black text-slate-400 hover:text-emerald-600 uppercase tracking-tight">Privacy Policy</a>
+            <a href="#" onClick={(e) => { e.preventDefault(); setIsSupportOpen(true); }} className="text-[10px] font-black text-slate-400 hover:text-emerald-600 uppercase tracking-tight">Customer Support</a>
           </div>
-          <p className="text-[9px] font-medium text-slate-300 uppercase tracking-[0.2em] mt-2">© 2026 MASONODE ORGANISATION</p>
+          <p className="text-[9px] font-medium text-slate-300 uppercase tracking-[0.2em] mt-2">© 2026 MASONODE ORGANISATION • THE ABAPAY PROTOCOL v3.0</p>
         </footer>
       </div>
     </main>
