@@ -26,7 +26,19 @@ const SERVICES = [
   { id: "CABLE", name: "Cable TV", icon: Tv, color: "text-[#ec4899]", bg: "bg-pink-500/10" },
 ];
 
-const ELECTRICITY_PROVIDERS = ["aba-electric", "ikedc", "ekedc", "ibedc", "aedc", "kedco", "phed"];
+const ELECTRICITY_PROVIDERS = [
+  "ikeja-electric", 
+  "eko-electric", 
+  "abuja-electric", 
+  "kano-electric", 
+  "portharcourt-electric", 
+  "ibadan-electric", 
+  "kaduna-electric",
+  "jos-electric",
+  "enugu-electric",
+  "aba-electric"
+];
+
 const CABLE_PROVIDERS = ["dstv", "gotv", "startimes", "showmax"];
 const TELECOM_PROVIDERS = ["mtn", "glo", "9mobile", "airtel"]; 
 
