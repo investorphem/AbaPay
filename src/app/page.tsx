@@ -30,7 +30,6 @@ const ELECTRICITY_PROVIDERS = ["aba-electric", "ikedc", "ekedc", "ibedc", "aedc"
 const CABLE_PROVIDERS = ["dstv", "gotv", "startimes", "showmax"];
 const TELECOM_PROVIDERS = ["mtn", "glo", "9mobile", "airtel"]; 
 
-// UPGRADED: 3 Stablecoins, exact USD₮ symbol, and USDm
 const SUPPORTED_TOKENS = [
   { symbol: "USD₮", decimals: 6, mainnet: "0x48065fbbe25f71c9282ddf5e1cd6d6a887483d5e", sepolia: "0xd077A400968890Eacc75cdc901F0356c943e4fDb", logo: "/usdt.png" },
   { symbol: "USDC", decimals: 6, mainnet: "0xcebA9300f2b948710d2653dD7B07f33A8B32118C", sepolia: "0x01C5C0122039549AD1493B8220cABEdD739BC44E", logo: "/usdc.png" },
@@ -41,7 +40,6 @@ const PRE_SELECT_AMOUNTS = ["100", "200", "500", "1000", "2000"];
 const DATA_CATEGORIES = ["Daily", "Weekly", "Monthly"];
 const ITEMS_PER_PAGE = 5;
 
-// MOCK DATA PLANS (For Telecom)
 const MOCK_DATA_PLANS = [
   { id: "D1", category: "Daily", name: "100MB", validity: "24 Hrs", cost_naira: 100 },
   { id: "D2", category: "Daily", name: "350MB", validity: "24 Hrs", cost_naira: 200 },
@@ -183,13 +181,12 @@ export default function Home() {
     fetchBalance();
   }, [address, selectedToken, activeChain, isMainnet]);
 
-  // --- FETCH DYNAMIC CABLE PACKAGES ---
+  // --- UPGRADED: SECURE CABLE VARIATION FETCHING ---
   useEffect(() => {
     if (activeService.id === "CABLE") {
       const fetchVariations = async () => {
         try {
-          const baseUrl = process.env.NEXT_PUBLIC_APP_MODE === 'live' ? 'https://vtpass.com/api' : 'https://sandbox.vtpass.com/api';
-          const res = await fetch(`${baseUrl}/service-variations?serviceID=${cableProvider}`);
+          const res = await fetch(`/api/variations?serviceID=${cableProvider}`);
           const data = await res.json();
           if (data.content && data.content.varations) {
             setCableVariations(data.content.varations);
@@ -211,7 +208,7 @@ export default function Home() {
     }
   }, [accountNumber, activeService]);
 
-  // --- MERCHANT VERIFICATION ---
+  // --- UPGRADED: SECURE MERCHANT VERIFICATION ---
   const verifyMerchant = async () => {
     setIsVerifying(true);
     setCustomerName(null);
@@ -220,15 +217,17 @@ export default function Home() {
 
     try {
         const serviceID = activeService.id === "ELECTRICITY" ? elecProvider : cableProvider;
-        const res = await fetch(`${process.env.NEXT_PUBLIC_APP_MODE === 'live' ? 'https://vtpass.com/api' : 'https://sandbox.vtpass.com/api'}/merchant-verify`, {
+        
+        const res = await fetch(`/api/verify`, {
             method: 'POST',
-            headers: { 
-                'api-key': process.env.NEXT_PUBLIC_VTPASS_API_KEY || '', 
-                'public-key': process.env.NEXT_PUBLIC_VTPASS_PUBLIC_KEY || '',
-                'Content-Type': 'application/json' 
-            },
-            body: JSON.stringify({ billersCode: accountNumber, serviceID: serviceID, type: activeService.id === "ELECTRICITY" ? meterType : 'prepaid' }) 
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ 
+              billersCode: accountNumber, 
+              serviceID: serviceID, 
+              type: activeService.id === "ELECTRICITY" ? meterType : undefined 
+            }) 
         });
+        
         const data = await res.json();
         
         if (data.code === '000') {
@@ -418,7 +417,6 @@ export default function Home() {
     }
   };
 
-  // --- RESTORED HELPER FUNCTIONS ---
   const handleResetService = (s: any) => {
     setActiveService(s); 
     setStatus(""); 
