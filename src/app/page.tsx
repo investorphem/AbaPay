@@ -45,20 +45,9 @@ const SUPPORTED_TOKENS = [
 ];
 
 const PRE_SELECT_AMOUNTS = ["100", "200", "500", "1000", "2000"];
-const DATA_CATEGORIES = ["Daily", "Weekly", "Monthly"];
 const ITEMS_PER_PAGE = 5;
 
-const MOCK_DATA_PLANS = [
-  { id: "D1", category: "Daily", name: "100MB", validity: "24 Hrs", cost_naira: 100 },
-  { id: "D2", category: "Daily", name: "350MB", validity: "24 Hrs", cost_naira: 200 },
-  { id: "D3", category: "Daily", name: "1GB", validity: "24 Hrs", cost_naira: 350 },
-  { id: "W1", category: "Weekly", name: "1GB", validity: "7 Days", cost_naira: 600 },
-  { id: "W2", category: "Weekly", name: "2.5GB", validity: "7 Days", cost_naira: 1200 },
-  { id: "W3", category: "Weekly", name: "Broadband Extra", validity: "7 Days", cost_naira: 3500, isBroadband: true },
-  { id: "M1", category: "Monthly", name: "1.5GB", validity: "30 Days", cost_naira: 1100 },
-  { id: "M2", category: "Monthly", name: "4.5GB", validity: "30 Days", cost_naira: 2200 },
-  { id: "M3", category: "Monthly", name: "Broadband Unlimited", validity: "30 Days", cost_naira: 18000, isBroadband: true },
-];
+// (MOCK_DATA_PLANS has been officially deleted!)
 
 export default function Home() {
   const [isInitiallyLoading, setIsInitiallyLoading] = useState(true);
@@ -82,12 +71,14 @@ export default function Home() {
   const [cableVariations, setCableVariations] = useState<any[]>([]);
   const [selectedCablePlan, setSelectedCablePlan] = useState<any>(null);
 
+  // UPGRADED: Dynamic Data Variations State
+  const [dataVariations, setDataVariations] = useState<any[]>([]);
+
   const [activeService, setActiveService] = useState(SERVICES[0]);
   const [elecProvider, setElecProvider] = useState(ELECTRICITY_PROVIDER_IDS[0]);
   const [cableProvider, setCableProvider] = useState(CABLE_PROVIDERS_LIST[0].serviceID);
   const [telecomProvider, setTelecomProvider] = useState(TELECOM_PROVIDERS[0]);
   const [meterType, setMeterType] = useState<"prepaid" | "postpaid">("prepaid");
-  const [activeDataCategory, setActiveDataCategory] = useState(DATA_CATEGORIES[0]);
   const [selectedDataPlan, setSelectedDataPlan] = useState<any>(null);
 
   const [selectedReceipt, setSelectedReceipt] = useState<any>(null); 
@@ -185,6 +176,7 @@ export default function Home() {
     fetchBalance();
   }, [address, selectedToken, activeChain, isMainnet]);
 
+  // --- UPGRADED: SECURE CABLE & DATA VARIATION FETCHING ---
   useEffect(() => {
     if (activeService.id === "CABLE") {
       const fetchVariations = async () => {
@@ -197,8 +189,20 @@ export default function Home() {
         } catch (e) { console.error("Failed to fetch cable packages", e); }
       };
       fetchVariations();
+    } else if (activeService.id === "DATA") {
+      const fetchDataVariations = async () => {
+        setDataVariations([]); // Clear list when network switches
+        try {
+          const res = await fetch(`/api/variations?serviceID=${telecomProvider}-data`);
+          const data = await res.json();
+          if (data.content && data.content.varations) {
+            setDataVariations(data.content.varations);
+          }
+        } catch (e) { console.error("Failed to fetch data packages", e); }
+      };
+      fetchDataVariations();
     }
-  }, [activeService.id, cableProvider]);
+  }, [activeService.id, cableProvider, telecomProvider]);
 
   useEffect(() => {
     if ((activeService.id === "AIRTIME" || activeService.id === "DATA") && accountNumber.length >= 4) {
@@ -272,8 +276,12 @@ export default function Home() {
     const amount = parseFloat(nairaAmount);
     if (!nairaAmount || isNaN(amount) || amount < dynamicMinAmount) return false;
 
-    if (activeService.id === "AIRTIME" || activeService.id === "DATA") {
+    if (activeService.id === "AIRTIME") {
       return accountNumber.length === 11 && accountNumber.startsWith("0");
+    }
+    if (activeService.id === "DATA") {
+      // UPGRADED: Data now strictly requires a selected plan from the live list!
+      return accountNumber.length === 11 && accountNumber.startsWith("0") && selectedDataPlan !== null;
     }
     if (activeService.id === "ELECTRICITY") {
       return accountNumber.length >= 10 && customerName !== null;
@@ -292,7 +300,7 @@ export default function Home() {
       }
     }
     return false;
-  }, [accountNumber, nairaAmount, activeService, customerName, dynamicMinAmount, cableSubscriptionType, selectedCablePlan, cableProvider]);
+  }, [accountNumber, nairaAmount, activeService, customerName, dynamicMinAmount, cableSubscriptionType, selectedCablePlan, selectedDataPlan, cableProvider]);
 
   const handlePayment = async () => {
     if (!address || !client) return setStatus("Connect Wallet First");
@@ -347,7 +355,7 @@ export default function Home() {
       } else if (activeService.id === "DATA") {
         vtpassServiceID = `${telecomProvider}-data`; 
         displayNetwork = telecomProvider;
-        finalVariationCode = selectedDataPlan?.id || 'mtn-10mb'; 
+        finalVariationCode = selectedDataPlan?.variation_code || 'none'; 
       } else {
         vtpassServiceID = telecomProvider; 
         displayNetwork = telecomProvider;
@@ -487,10 +495,6 @@ export default function Home() {
       setIsSendingSupport(false);
     }
   };
-
-  const filteredDataPlans = useMemo(() => {
-    return MOCK_DATA_PLANS.filter(plan => plan.category === activeDataCategory);
-  }, [activeDataCategory]);
 
   const currentDisco = useMemo(() => {
     return ELECTRICITY_DISCOS.find(d => d.serviceID === elecProvider);
@@ -659,7 +663,6 @@ export default function Home() {
                         className={`w-full text-left p-4 rounded-2xl font-bold text-slate-700 bg-white border hover:bg-slate-50 transition-all flex justify-between items-center group ${activeService.id === 'ELECTRICITY' ? 'hover:border-orange-300' : 'hover:border-pink-300'}`}
                     >
                         <div className="flex items-center gap-4">
-                            {/* UPGRADED CONTAINER: Scaled up to w-12 h-12 and reduced padding to p-0.5 */}
                             <div className="w-12 h-12 shrink-0 rounded-full border border-slate-100 bg-white p-0.5 flex items-center justify-center shadow-sm overflow-hidden group-hover:shadow-md transition-shadow">
                                 <img src={provider.logo} alt={provider.displayName} className="w-full h-full object-contain" />
                             </div>
@@ -811,7 +814,6 @@ export default function Home() {
                               : 'border-transparent bg-slate-50 hover:bg-slate-100 opacity-60 hover:opacity-100 grayscale hover:grayscale-0'
                             }`}
                           >
-                            {/* UPGRADED: Scaled up telecom icons to match dropdowns */}
                             <div className="w-12 h-12 rounded-full bg-white shadow-sm border border-slate-100 flex items-center justify-center p-0.5 overflow-hidden">
                               <img 
                                 src={`/${provider}.png`} 
@@ -835,7 +837,6 @@ export default function Home() {
                             className="w-full bg-white border border-slate-200 p-4 rounded-2xl flex justify-between items-center hover:border-orange-400 transition-colors shadow-sm active:scale-[0.98]"
                         >
                             <div className="flex items-center gap-4">
-                                {/* UPGRADED: Scaled up active selection logo to match modal */}
                                 <div className="w-12 h-12 shrink-0 rounded-full border border-slate-100 bg-white p-0.5 flex items-center justify-center shadow-inner overflow-hidden">
                                     <img src={currentDisco?.logo} alt={currentDisco?.displayName} className="w-full h-full object-contain" />
                                 </div>
@@ -852,7 +853,6 @@ export default function Home() {
                         className="w-full bg-white border border-slate-200 p-4 rounded-2xl flex justify-between items-center hover:border-pink-400 transition-colors shadow-sm active:scale-[0.98]"
                       >
                         <div className="flex items-center gap-4">
-                            {/* UPGRADED: Scaled up active selection logo to match modal */}
                             <div className="w-12 h-12 shrink-0 rounded-full border border-slate-100 bg-white p-0.5 flex items-center justify-center shadow-inner overflow-hidden">
                                 <img src={currentCable?.logo} alt={currentCable?.displayName} className="w-full h-full object-contain" />
                             </div>
@@ -1024,15 +1024,9 @@ export default function Home() {
                   </div>
                 )}
 
+                {/* --- UPGRADED LIVE DATA UI BLOCK --- */}
                 {activeService.id === "DATA" && (
                    <div className="bg-slate-50 border border-slate-100 p-4 rounded-2xl animate-in fade-in slide-in-from-top-4">
-                      <div className="flex gap-2 mb-4 border-b border-slate-200 pb-3 overflow-x-auto no-scrollbar shadow-inner bg-slate-100 p-1.5 rounded-2xl">
-                        {DATA_CATEGORIES.map(cat => (
-                          <button key={cat} onClick={() => { setActiveDataCategory(cat); setSelectedDataPlan(null); }} className={`px-4 py-2.5 rounded-xl text-[11px] font-black uppercase transition-all whitespace-nowrap ${activeDataCategory === cat ? 'bg-white shadow-lg text-purple-600' : 'text-slate-500 hover:text-slate-700'}`}>{cat}</button>
-                        ))}
-                        <button onClick={() => { setActiveDataCategory("Broadband"); setSelectedDataPlan(null); }} className={`px-4 py-2.5 flex items-center gap-1.5 rounded-xl text-[11px] font-black uppercase transition-all ${activeDataCategory === "Broadband" ? 'bg-white shadow-lg text-orange-600' : 'text-slate-500 hover:text-slate-700'}`}><Briefcase size={14}/> Broadband</button>
-                      </div>
-
                       {selectedDataPlan ? (
                          <div className="relative animate-in zoom-in-95 duration-200 mt-2">
                             <button onClick={() => { setSelectedDataPlan(null); setNairaAmount(""); }} className="absolute -top-3 -right-3 bg-slate-200 text-slate-500 hover:text-slate-800 hover:bg-slate-300 rounded-full p-1 transition-all z-10 shadow-sm border border-white">
@@ -1040,31 +1034,41 @@ export default function Home() {
                             </button>
                             <div className="p-4 rounded-2xl border-2 border-purple-500 bg-purple-50 flex flex-col gap-1 text-left shadow-sm">
                                <p className="font-black text-slate-900 text-lg tracking-tight">{selectedDataPlan.name}</p>
-                               <p className="text-[10px] text-purple-500 font-bold uppercase tracking-wider">{selectedDataPlan.validity} • Selected Plan</p>
+                               <p className="text-[10px] text-purple-500 font-bold uppercase tracking-wider">Live Data Plan • Selected</p>
                                <div className="mt-2 pt-2 border-t border-purple-200/50 flex justify-between items-end">
                                    <div>
                                      <p className="text-[10px] font-black text-slate-400 uppercase">Cost</p>
-                                     <p className="font-black text-purple-600 text-lg leading-none">₦{selectedDataPlan.cost_naira.toLocaleString()}</p>
+                                     <p className="font-black text-purple-600 text-lg leading-none">₦{parseFloat(selectedDataPlan.variation_amount).toLocaleString()}</p>
                                    </div>
-                                   <p className="text-[10px] text-slate-500 font-bold">{(selectedDataPlan.cost_naira / exchangeRate).toFixed(4)} {selectedToken.symbol}</p>
+                                   <p className="text-[10px] text-slate-500 font-bold">{(parseFloat(selectedDataPlan.variation_amount) / exchangeRate).toFixed(4)} {selectedToken.symbol}</p>
                                </div>
                             </div>
                          </div>
                       ) : (
-                         <div className="grid grid-cols-2 gap-3 max-h-[30vh] overflow-y-auto pr-1">
-                             {(activeDataCategory === "Broadband" ? MOCK_DATA_PLANS.filter(p => p.isBroadband) : filteredDataPlans).map(plan => {
-                               const cryptoPlanCost = (plan.cost_naira / exchangeRate).toFixed(4);
-                               return (
-                                 <button key={plan.id} onClick={() => { setSelectedDataPlan(plan); setNairaAmount(plan.cost_naira.toString()); }} className="p-4 rounded-xl border border-slate-200 bg-white hover:border-purple-300 transition-all flex flex-col gap-1 text-left shadow-sm group">
-                                   <p className="font-black text-slate-900 text-sm tracking-tight">{plan.name}</p>
-                                   <p className="text-[10px] text-slate-500 font-bold uppercase tracking-wider">{plan.validity}</p>
-                                   <div className="mt-2 pt-2 border-t border-slate-100 flex flex-col gap-0.5">
-                                       <p className="font-black text-purple-600 text-xs group-hover:scale-105 transition-transform">₦{plan.cost_naira.toLocaleString()}</p>
-                                       <p className="text-[9px] text-slate-400 font-bold">{cryptoPlanCost} {selectedToken.symbol}</p>
-                                   </div>
-                                 </button>
-                               );
-                             })}
+                         <div className="grid grid-cols-1 gap-2 max-h-[35vh] overflow-y-auto pr-1">
+                             {dataVariations.length === 0 ? (
+                               <p className="text-center text-xs font-bold text-slate-400 py-4"><Loader2 className="animate-spin inline-block mr-2" size={14}/> Fetching Live Data Plans...</p>
+                             ) : (
+                               dataVariations.map(plan => {
+                                 const cryptoPlanCost = (parseFloat(plan.variation_amount) / exchangeRate).toFixed(4);
+                                 return (
+                                   <button 
+                                     key={plan.variation_code} 
+                                     onClick={() => { setSelectedDataPlan(plan); setNairaAmount(plan.variation_amount); }} 
+                                     className="p-3 rounded-xl border border-slate-200 bg-white hover:border-purple-300 transition-all flex flex-col gap-1 text-left shadow-sm group"
+                                   >
+                                     <div className="flex justify-between items-start">
+                                         <p className="font-black text-slate-900 text-xs pr-4">{plan.name}</p>
+                                         <p className="font-black text-purple-600 text-sm whitespace-nowrap group-hover:scale-105 transition-transform">₦{parseFloat(plan.variation_amount).toLocaleString()}</p>
+                                     </div>
+                                     <div className="mt-1 pt-1.5 border-t border-slate-100 flex justify-between items-center">
+                                         <p className="text-[9px] text-slate-400 font-bold">Live Data Package</p>
+                                         <p className="text-[9px] text-slate-500 font-black bg-slate-100 px-2 py-0.5 rounded">{cryptoPlanCost} {selectedToken.symbol}</p>
+                                     </div>
+                                   </button>
+                                 );
+                               })
+                             )}
                          </div>
                       )}
                    </div>
