@@ -122,20 +122,17 @@ export default function Home() {
   const currentTransactions = transactions.slice(indexOfFirstItem, indexOfLastItem);
   const totalPages = Math.ceil(transactions.length / ITEMS_PER_PAGE);
 
-  // --- AUTO-CLEAR STICKY ERRORS ---
   useEffect(() => {
     if (status && !isProcessing) {
       setStatus("");
     }
   }, [accountNumber, nairaAmount, activeService, cableSubscriptionType, selectedDataPlan, selectedCablePlan]);
 
-  // --- NEW: AUTO-HIDE NOTIFICATION TIMER ---
   useEffect(() => {
-    // Only auto-hide if it's an error/success message and NOT currently processing a blockchain transaction
     if (status && !isProcessing) {
       const timer = setTimeout(() => {
         setStatus("");
-      }, 5000); // Disappears after 5 seconds
+      }, 5000); 
       return () => clearTimeout(timer);
     }
   }, [status, isProcessing]);
@@ -287,26 +284,41 @@ export default function Home() {
   const filteredLiveDataPlans = useMemo(() => {
     if (!dataVariations || dataVariations.length === 0) return [];
     
-    return dataVariations.filter(plan => {
+    const filtered = dataVariations.filter(plan => {
       const name = plan.name.toLowerCase();
-      let category = "Monthly"; // Fallback
+      let category = "Monthly"; // Default Fallback
       
+      // 1. BROADBAND STRICT CHECK (Catches 5G, MiFi, Routers)
       if (name.includes('broadband') || name.includes('router') || name.includes('5g') || name.includes('hynet')) {
         category = "Broadband";
-      } else if (name.includes('social') || name.includes('whatsapp') || name.includes('ig') || name.includes('instagram') || name.includes('tiktok') || name.includes('youtube') || name.includes('facebook') || name.includes('opera') || name.includes('xot')) {
+      } 
+      // 2. SOCIAL STRICT CHECK (Catches standalone social bundles)
+      else if (name.includes('social') || name.includes('whatsapp') || name.includes('ig') || name.includes('instagram') || name.includes('tiktok') || name.includes('youtube') || name.includes('facebook') || name.includes('opera') || name.includes('xot')) {
         category = "Social";
-      } else if (name.includes('1 day') || name.includes('2 day') || name.includes('daily') || name.includes('24 hrs') || name.includes('24hrs') || name.includes('night') || name.includes('hourly')) {
-        category = "Daily";
-      } else if (name.includes('week') || name.includes('7 day') || name.includes('14 day') || name.includes('3 day') || name.includes('weekend')) {
-        category = "Weekly";
-      } else if (name.includes('month') || name.includes('30 day')) {
-        category = "Monthly";
-      } else if (name.includes('60 day') || name.includes('90 day') || name.includes('120 day') || name.includes('year') || name.includes('mega') || name.includes('3 month') || name.includes('2 month')) {
+      } 
+      // 3. MEGA PLANS (60+ Days)
+      else if (name.includes('60 day') || name.includes('90 day') || name.includes('120 day') || name.includes('year') || name.includes('mega') || name.includes('3 month') || name.includes('2 month')) {
         category = "Mega";
+      } 
+      // 4. MONTHLY PLANS (Checked BEFORE Weekly/Daily)
+      else if (name.includes('month') || name.includes('30 day')) {
+        category = "Monthly";
+      } 
+      // 5. WEEKLY PLANS (Checked BEFORE Daily to prevent "+ 1 day free" bugs)
+      else if (name.includes('week') || name.includes('7 day') || name.includes('14 day') || name.includes('weekend')) {
+        category = "Weekly";
+      } 
+      // 6. DAILY PLANS (Only triggers if none of the above matched)
+      else if (name.includes('1 day') || name.includes('2 day') || name.includes('3 day') || name.includes('daily') || name.includes('24 hrs') || name.includes('24hrs') || name.includes('night') || name.includes('hourly')) {
+        category = "Daily";
       }
       
       return category === activeDataCategory;
     });
+
+    // UPGRADED: Sort the filtered plans from lowest price to highest price
+    return filtered.sort((a, b) => parseFloat(a.variation_amount) - parseFloat(b.variation_amount));
+
   }, [dataVariations, activeDataCategory]);
 
   const isFormValid = useMemo(() => {
@@ -907,7 +919,6 @@ export default function Home() {
                     )}
                 </div>
 
-                {/* --- UPGRADED CABLE TV UI BLOCK --- */}
                 {activeService.id === "CABLE" && (cableProvider === "showmax" || customerName) && (
                   <div className="bg-slate-50 border border-slate-200 rounded-2xl p-4 shadow-sm animate-in fade-in slide-in-from-top-4">
                      {cableProvider !== "showmax" && (
@@ -1028,7 +1039,6 @@ export default function Home() {
                   </div>
                 )}
 
-                {/* --- UPGRADED LIVE DATA UI BLOCK --- */}
                 {activeService.id === "DATA" && (
                    <div className="bg-slate-50 border border-slate-100 p-4 rounded-2xl animate-in fade-in slide-in-from-top-4">
                       <div className="flex gap-2 mb-4 border-b border-slate-200 pb-3 overflow-x-auto no-scrollbar shadow-inner bg-slate-100 p-1.5 rounded-2xl">
@@ -1076,7 +1086,7 @@ export default function Home() {
                                      className="p-3 rounded-xl border border-slate-200 bg-white hover:border-purple-300 transition-all flex flex-col gap-1 text-left shadow-sm group"
                                    >
                                      <div className="flex justify-between items-start">
-                                         <p className="font-black text-slate-900 text-xs pr-4">{plan.name}</p>
+                                         <p className="font-black text-slate-900 text-xs pr-4 leading-tight">{plan.name}</p>
                                          <p className="font-black text-purple-600 text-sm whitespace-nowrap group-hover:scale-105 transition-transform">₦{parseFloat(plan.variation_amount).toLocaleString()}</p>
                                      </div>
                                      <div className="mt-1 pt-1.5 border-t border-slate-100 flex justify-between items-center">
