@@ -34,12 +34,14 @@ const ERC20_ABI = [
   {"inputs":[{"internalType":"address","name":"account","type":"address"}],"name":"balanceOf","outputs":[{"internalType":"uint256","name":"","type":"uint256"}],"stateMutability":"view","type":"function"}
 ];
 
+// UPGRADED: Added cUSD and exact USD₮ symbol
 const TOKENS = {
-  USDT: { decimals: 6, mainnet: "0x48065fbbe25f71c9282ddf5e1cd6d6a887483d5e", sepolia: "0xd077A400968890Eacc75cdc901F0356c943e4fDb" },
-  USDC: { decimals: 6, mainnet: "0xcebA9300f2b948710d2653dD7B07f33A8B32118C", sepolia: "0x01C5C0122039549AD1493B8220cABEdD739BC44E" }
+  "USD₮": { decimals: 6, mainnet: "0x48065fbbe25f71c9282ddf5e1cd6d6a887483d5e", sepolia: "0xd077A400968890Eacc75cdc901F0356c943e4fDb" },
+  "USDC": { decimals: 6, mainnet: "0xcebA9300f2b948710d2653dD7B07f33A8B32118C", sepolia: "0x01C5C0122039549AD1493B8220cABEdD739BC44E" },
+  "cUSD": { decimals: 18, mainnet: "0x765DE816845861e75A25fCA122bb6898B8B1282a", sepolia: "0xdE9e4C3ce781b4bA68120d6261cbad65ce0aB00b" }
 };
 
-const ITEMS_PER_PAGE = 10; // Number of rows per page in the admin ledger
+const ITEMS_PER_PAGE = 10;
 
 export default function AdminDashboard() {
   const [address, setAddress] = useState<string | null>(null);
@@ -48,6 +50,8 @@ export default function AdminDashboard() {
 
   const [usdtVaultBalance, setUsdtVaultBalance] = useState("0.00");
   const [usdcVaultBalance, setUsdcVaultBalance] = useState("0.00");
+  const [cusdVaultBalance, setCusdVaultBalance] = useState("0.00");
+  
   const [vtBalance, setVtBalance] = useState("0.00"); 
   const [smsBalance, setSmsBalance] = useState("0");    
   const [status, setStatus] = useState("");
@@ -58,7 +62,6 @@ export default function AdminDashboard() {
   const [searchTerm, setSearchTerm] = useState("");
   const [filterStatus, setFilterStatus] = useState("ALL");
   
-  // PAGINATION STATE
   const [currentPage, setCurrentPage] = useState(1);
 
   const isMainnet = process.env.NEXT_PUBLIC_NETWORK === "celo";
@@ -102,13 +105,16 @@ export default function AdminDashboard() {
 
   const fetchOnChainBalances = async () => {
     const publicClient = createPublicClient({ chain: activeChain, transport: http() });
-    const usdtAddr = isMainnet ? TOKENS.USDT.mainnet : TOKENS.USDT.sepolia;
-    const usdcAddr = isMainnet ? TOKENS.USDC.mainnet : TOKENS.USDC.sepolia;
+    
     try {
-      const usdtBal = await publicClient.readContract({ address: usdtAddr as `0x${string}`, abi: ERC20_ABI, functionName: 'balanceOf', args: [ABAPAY_CONTRACT] }) as bigint;
-      setUsdtVaultBalance(formatUnits(usdtBal, TOKENS.USDT.decimals));
-      const usdcBal = await publicClient.readContract({ address: usdcAddr as `0x${string}`, abi: ERC20_ABI, functionName: 'balanceOf', args: [ABAPAY_CONTRACT] }) as bigint;
-      setUsdcVaultBalance(formatUnits(usdcBal, TOKENS.USDC.decimals));
+      const usdtBal = await publicClient.readContract({ address: (isMainnet ? TOKENS["USD₮"].mainnet : TOKENS["USD₮"].sepolia) as `0x${string}`, abi: ERC20_ABI, functionName: 'balanceOf', args: [ABAPAY_CONTRACT] }) as bigint;
+      setUsdtVaultBalance(formatUnits(usdtBal, TOKENS["USD₮"].decimals));
+      
+      const usdcBal = await publicClient.readContract({ address: (isMainnet ? TOKENS["USDC"].mainnet : TOKENS["USDC"].sepolia) as `0x${string}`, abi: ERC20_ABI, functionName: 'balanceOf', args: [ABAPAY_CONTRACT] }) as bigint;
+      setUsdcVaultBalance(formatUnits(usdcBal, TOKENS["USDC"].decimals));
+      
+      const cusdBal = await publicClient.readContract({ address: (isMainnet ? TOKENS["cUSD"].mainnet : TOKENS["cUSD"].sepolia) as `0x${string}`, abi: ERC20_ABI, functionName: 'balanceOf', args: [ABAPAY_CONTRACT] }) as bigint;
+      setCusdVaultBalance(formatUnits(cusdBal, TOKENS["cUSD"].decimals));
     } catch (error) { console.error("Failed to fetch vault balances", error); }
   };
 
@@ -126,11 +132,13 @@ export default function AdminDashboard() {
     if (!error) setDbTransactions(data || []);
   };
 
-  const handleWithdrawal = async (tokenSymbol: 'USDT' | 'USDC') => {
+  const handleWithdrawal = async (tokenSymbol: 'USD₮' | 'USDC' | 'cUSD') => {
     if (!client || !address) return;
-    const balanceToCheck = tokenSymbol === 'USDT' ? usdtVaultBalance : usdcVaultBalance;
+    const balanceToCheck = tokenSymbol === 'USD₮' ? usdtVaultBalance : tokenSymbol === 'USDC' ? usdcVaultBalance : cusdVaultBalance;
+    
     if (parseFloat(balanceToCheck) <= 0) return setStatus(`The ${tokenSymbol} Vault is already empty.`);
     setStatus(`Withdrawing ${tokenSymbol}...`);
+    
     try {
       const tokenAddr = isMainnet ? TOKENS[tokenSymbol].mainnet : TOKENS[tokenSymbol].sepolia;
       const hash = await client.writeContract({
@@ -166,12 +174,10 @@ export default function AdminDashboard() {
     });
   }, [dbTransactions, searchTerm, filterStatus]);
 
-  // Automatically jump back to Page 1 when the user types a search or changes a filter
   useEffect(() => {
     setCurrentPage(1);
   }, [searchTerm, filterStatus]);
 
-  // Pagination Logic
   const totalPages = Math.ceil(filteredTx.length / ITEMS_PER_PAGE);
   const currentTransactions = filteredTx.slice(
     (currentPage - 1) * ITEMS_PER_PAGE,
@@ -220,7 +226,7 @@ export default function AdminDashboard() {
             {/* STATS */}
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
               <StatBox label="VTpass Wallet" value={`₦${vtBalance}`} sub="Naira Float" color="text-white" icon={<Banknote size={16}/>} />
-              <StatBox label="Blockchain Vaults" value={`$${(parseFloat(usdtVaultBalance) + parseFloat(usdcVaultBalance)).toFixed(2)}`} sub="Combined Assets" color="text-emerald-500" icon={<Wallet size={16}/>} />
+              <StatBox label="Blockchain Vaults" value={`$${(parseFloat(usdtVaultBalance) + parseFloat(usdcVaultBalance) + parseFloat(cusdVaultBalance)).toFixed(2)}`} sub="Total Locked Assets" color="text-emerald-500" icon={<Wallet size={16}/>} />
               <StatBox label="Admin Profit" value={`₦${analytics.fees.toLocaleString()}`} sub="Fee Accrued" color="text-blue-400" icon={<BarChart3 size={16}/>} />
               <StatBox label="SMS Health" value={`${smsBalance} Units`} sub="Messaging Units" color="text-orange-400" icon={<Activity size={16}/>} />
             </div>
@@ -284,7 +290,6 @@ export default function AdminDashboard() {
                     </tbody>
                   </table>
 
-                  {/* PAGINATION CONTROLS */}
                   {totalPages > 1 && (
                     <div className="flex justify-between items-center mt-6 pt-4 border-t border-slate-800">
                       <button 
@@ -310,7 +315,7 @@ export default function AdminDashboard() {
               </div>
             )}
 
-            {/* VAULT TAB */}
+            {/* VAULT TAB (Now 3 Columns for 3 Tokens) */}
             {activeTab === 'vault' && (
               <div className="bg-[#111114] border border-slate-800 rounded-3xl p-8 animate-in fade-in slide-in-from-bottom-4">
                 <div className="flex flex-col items-center mb-8">
@@ -318,16 +323,21 @@ export default function AdminDashboard() {
                     <p className="text-slate-500 text-sm text-center max-w-md italic">Smart Contract Escrow Balances</p>
                     {status && <div className="mt-4 text-xs font-mono text-emerald-400 bg-emerald-500/5 py-2 px-4 rounded border border-emerald-500/10">{status}</div>}
                 </div>
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-6 max-w-4xl mx-auto">
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
                     <div className="bg-slate-900 border border-slate-800 p-6 rounded-3xl text-center">
                         <h2 className="text-4xl font-black mb-1">${usdtVaultBalance}</h2>
-                        <span className="text-xs text-emerald-500 font-bold uppercase tracking-widest bg-emerald-500/10 px-3 py-1 rounded-full">USDT Vault</span>
-                        <button onClick={() => handleWithdrawal('USDT')} className="mt-8 w-full bg-slate-800 hover:bg-emerald-500 hover:text-slate-950 text-slate-300 font-black py-3 rounded-xl flex items-center justify-center gap-2 transition-all"><ArrowDownToLine size={16} /> Withdraw USDT</button>
+                        <span className="text-xs text-emerald-500 font-bold uppercase tracking-widest bg-emerald-500/10 px-3 py-1 rounded-full">USD₮ Vault</span>
+                        <button onClick={() => handleWithdrawal('USD₮')} className="mt-8 w-full bg-slate-800 hover:bg-emerald-500 hover:text-slate-950 text-slate-300 font-black py-3 rounded-xl flex items-center justify-center gap-2 transition-all"><ArrowDownToLine size={16} /> Withdraw USD₮</button>
                     </div>
                     <div className="bg-slate-900 border border-slate-800 p-6 rounded-3xl text-center">
                         <h2 className="text-4xl font-black mb-1">${usdcVaultBalance}</h2>
                         <span className="text-xs text-blue-400 font-bold uppercase tracking-widest bg-blue-500/10 px-3 py-1 rounded-full">USDC Vault</span>
                         <button onClick={() => handleWithdrawal('USDC')} className="mt-8 w-full bg-slate-800 hover:bg-blue-500 hover:text-slate-950 text-slate-300 font-black py-3 rounded-xl flex items-center justify-center gap-2 transition-all"><ArrowDownToLine size={16} /> Withdraw USDC</button>
+                    </div>
+                    <div className="bg-slate-900 border border-slate-800 p-6 rounded-3xl text-center">
+                        <h2 className="text-4xl font-black mb-1">${cusdVaultBalance}</h2>
+                        <span className="text-xs text-yellow-500 font-bold uppercase tracking-widest bg-yellow-500/10 px-3 py-1 rounded-full">cUSD Vault</span>
+                        <button onClick={() => handleWithdrawal('cUSD')} className="mt-8 w-full bg-slate-800 hover:bg-yellow-500 hover:text-slate-950 text-slate-300 font-black py-3 rounded-xl flex items-center justify-center gap-2 transition-all"><ArrowDownToLine size={16} /> Withdraw cUSD</button>
                     </div>
                 </div>
               </div>
