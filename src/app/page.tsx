@@ -29,7 +29,6 @@ const SERVICES = [
 
 const ELECTRICITY_PROVIDER_IDS = ELECTRICITY_DISCOS.map(d => d.serviceID); 
 
-// UPGRADED: Added Cable Provider Objects with Logos
 const CABLE_PROVIDERS_LIST = [
   { serviceID: "dstv", displayName: "DSTV", logo: "/dstv.png" },
   { serviceID: "gotv", displayName: "GOTV", logo: "/gotv.png" },
@@ -497,7 +496,6 @@ export default function Home() {
     return ELECTRICITY_DISCOS.find(d => d.serviceID === elecProvider);
   }, [elecProvider]);
 
-  // UPGRADED: Added current Cable object to display the logo in the dropdown
   const currentCable = useMemo(() => {
     return CABLE_PROVIDERS_LIST.find(c => c.serviceID === cableProvider);
   }, [cableProvider]);
@@ -632,7 +630,6 @@ export default function Home() {
         </div>
       )}
 
-      {/* UPGRADED: Modal handles 'provider' type beautifully for both Electricity and Cable */}
       {isSelectionModalOpen && (
         <div className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-sm flex justify-center items-center p-4 animate-in fade-in" onClick={() => setIsSelectionModalOpen(false)}>
            <div className="bg-white w-full max-w-sm rounded-[2rem] shadow-2xl p-6 animate-in zoom-in-95 duration-200" onClick={(e) => e.stopPropagation()}>
@@ -662,7 +659,8 @@ export default function Home() {
                         className={`w-full text-left p-4 rounded-2xl font-bold text-slate-700 bg-white border hover:bg-slate-50 transition-all flex justify-between items-center group ${activeService.id === 'ELECTRICITY' ? 'hover:border-orange-300' : 'hover:border-pink-300'}`}
                     >
                         <div className="flex items-center gap-4">
-                            <div className="w-12 h-12 rounded-full border border-slate-100 bg-white p-2 flex items-center justify-center shadow-sm overflow-hidden group-hover:shadow-lg transition-shadow">
+                            {/* UPGRADED CONTAINER: Scaled up to w-12 h-12 and reduced padding to p-0.5 */}
+                            <div className="w-12 h-12 shrink-0 rounded-full border border-slate-100 bg-white p-0.5 flex items-center justify-center shadow-sm overflow-hidden group-hover:shadow-md transition-shadow">
                                 <img src={provider.logo} alt={provider.displayName} className="w-full h-full object-contain" />
                             </div>
                             <div>
@@ -813,7 +811,8 @@ export default function Home() {
                               : 'border-transparent bg-slate-50 hover:bg-slate-100 opacity-60 hover:opacity-100 grayscale hover:grayscale-0'
                             }`}
                           >
-                            <div className="w-11 h-11 rounded-full bg-white shadow-sm border border-slate-100 flex items-center justify-center p-1.5 overflow-hidden">
+                            {/* UPGRADED: Scaled up telecom icons to match dropdowns */}
+                            <div className="w-12 h-12 rounded-full bg-white shadow-sm border border-slate-100 flex items-center justify-center p-0.5 overflow-hidden">
                               <img 
                                 src={`/${provider}.png`} 
                                 alt={provider} 
@@ -836,7 +835,8 @@ export default function Home() {
                             className="w-full bg-white border border-slate-200 p-4 rounded-2xl flex justify-between items-center hover:border-orange-400 transition-colors shadow-sm active:scale-[0.98]"
                         >
                             <div className="flex items-center gap-4">
-                                <div className="w-10 h-10 rounded-full border border-slate-100 bg-white p-2 flex items-center justify-center shadow-inner overflow-hidden">
+                                {/* UPGRADED: Scaled up active selection logo to match modal */}
+                                <div className="w-12 h-12 shrink-0 rounded-full border border-slate-100 bg-white p-0.5 flex items-center justify-center shadow-inner overflow-hidden">
                                     <img src={currentDisco?.logo} alt={currentDisco?.displayName} className="w-full h-full object-contain" />
                                 </div>
                                 <div>
@@ -847,13 +847,13 @@ export default function Home() {
                             <ChevronDown size={18} className="text-slate-400"/>
                         </button>
                     ) : (
-                      // UPGRADED: Cable UI matches Electricity Dropdown formatting
                       <button 
                         onClick={() => openSelectionModal('provider', "Select Provider", CABLE_PROVIDERS_LIST, setCableProvider)}
                         className="w-full bg-white border border-slate-200 p-4 rounded-2xl flex justify-between items-center hover:border-pink-400 transition-colors shadow-sm active:scale-[0.98]"
                       >
                         <div className="flex items-center gap-4">
-                            <div className="w-10 h-10 rounded-full border border-slate-100 bg-white p-2 flex items-center justify-center shadow-inner overflow-hidden">
+                            {/* UPGRADED: Scaled up active selection logo to match modal */}
+                            <div className="w-12 h-12 shrink-0 rounded-full border border-slate-100 bg-white p-0.5 flex items-center justify-center shadow-inner overflow-hidden">
                                 <img src={currentCable?.logo} alt={currentCable?.displayName} className="w-full h-full object-contain" />
                             </div>
                             <div>
@@ -904,7 +904,6 @@ export default function Home() {
                     )}
                 </div>
 
-                {/* --- UPGRADED CABLE TV UI BLOCK --- */}
                 {activeService.id === "CABLE" && (cableProvider === "showmax" || customerName) && (
                   <div className="bg-slate-50 border border-slate-200 rounded-2xl p-4 shadow-sm animate-in fade-in slide-in-from-top-4">
                      {cableProvider !== "showmax" && (
@@ -1025,7 +1024,6 @@ export default function Home() {
                   </div>
                 )}
 
-                {/* --- UPGRADED DATA UI BLOCK --- */}
                 {activeService.id === "DATA" && (
                    <div className="bg-slate-50 border border-slate-100 p-4 rounded-2xl animate-in fade-in slide-in-from-top-4">
                       <div className="flex gap-2 mb-4 border-b border-slate-200 pb-3 overflow-x-auto no-scrollbar shadow-inner bg-slate-100 p-1.5 rounded-2xl">
