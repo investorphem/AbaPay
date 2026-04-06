@@ -1,6 +1,6 @@
 # ⚡ AbaPay Protocol
 
-AbaPay is a decentralized, Web3-native utility payment platform built on the **Celo Blockchain**. It allows users to seamlessly pay for real-world utilities (Electricity, Cable TV, Airtime, and Data) using **USDT**, with instant fiat settlement via the VTpass API. 
+AbaPay is a decentralized, Web3-native utility payment platform built on the **Celo Blockchain**. It allows users to seamlessly pay for real-world utilities (Electricity, Cable TV, Airtime, and Data) using **USDT**,**USDC**,**CUSD** with instant fiat settlement via the VTpass API. 
 
 Designed for low fees, instant cross-border utility vending, and mobile-first accessibility (optimized for Celo MiniPay and MetaMask).
 
