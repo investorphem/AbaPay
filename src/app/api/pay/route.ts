@@ -4,6 +4,21 @@ import { sendAbaPaySms } from '@/lib/messaging';
 import { sendTelegramAlert } from '@/lib/telegram'; 
 import { supabaseAdmin as supabase } from '@/utils/supabase'; 
 
+// --- ROBUST ERROR CODE DICTIONARY ---
+// Translates raw VTpass codes into friendly, actionable user instructions.
+const error_messages = {
+    "013": "Amount is below the minimum allowed for your specific meter/band.",
+    "014": "Transaction exceeds your daily limit with this utility provider.",
+    "015": "Service with this provider is currently suspended. Please try again later.",
+    "016": "Incorrect meter/account number. Please verify and re-type.",
+    "018": "Service is temporarily unavailable at the provider node. Try again shortly.",
+    "019": "Authentication with the utility provider failed. AbaPay admins are investigating.",
+    "028": "Insufficient funds in AbaPay's central vault. Retrying automated top-up.",
+    "041": "An error occurred with the vending node. AbaPay will re-vend or refund.",
+    "400": "The request payload was malformed. This is a technical error.",
+    "FAILED_VERIFICATION": "Merchant verification failed. The provided meter number is invalid."
+};
+
 const processedTransactions = new Set();
 
 function getStrictRequestId() {
@@ -41,10 +56,7 @@ export async function POST(req: Request) {
     }
 
     const requestedNaira = parseFloat(nairaAmount);
-    
-    // UPGRADED: Showmax skips merchant verification entirely!
     const needsVerification = serviceCategory === 'ELECTRICITY' || (serviceCategory === 'CABLE' && network !== 'SHOWMAX');
-    
     const serviceFee = needsVerification ? 100 : 0;
     const vendAmount = requestedNaira; 
 
@@ -58,7 +70,6 @@ export async function POST(req: Request) {
 
     const vtRequestId = getStrictRequestId();
 
-    // 1. DATABASE LOGGING
     const dbPayload = {
       tx_hash: txHash,
       request_id: vtRequestId,
@@ -94,7 +105,8 @@ export async function POST(req: Request) {
       const verifyData = await verifyRes.json();
       if (verifyData.code !== '000') {
         await supabase.from('transactions').update({ status: 'FAILED_VERIFICATION' }).eq('tx_hash', txHash);
-        return NextResponse.json({ success: false, code: "VERIFY_FAIL", message: "Account verification failed." }, { status: 400 });
+        // UPGRADED: Return descriptive error for verification
+        return NextResponse.json({ success: false, code: "VERIFY_FAIL", message: error_messages.FAILED_VERIFICATION }, { status: 400 });
       }
     }
 
@@ -120,7 +132,6 @@ export async function POST(req: Request) {
           vtpassPayload.quantity = 1;
         }
       } else {
-        // Startimes & Showmax
         vtpassPayload.variation_code = variation_code;
       }
     }
@@ -159,9 +170,12 @@ export async function POST(req: Request) {
       await supabase.from('transactions').update({ status: 'FAILED_VENDING' }).eq('tx_hash', txHash);
       try { await sendTelegramAlert(`🚨 *VENDING REJECTED*\nHash: \`${txHash}\`\nVTpass Code: ${payData.code}`); } catch (e) {}
 
+      // UPGRADED: Send a friendly error message from our dictionary
+      const friendlyMessage = error_messages[payData.code] || "Utility vending failed at the provider level.";
+      
       return NextResponse.json({ 
         success: false, 
-        message: `Vending failed. VTpass Code: ${payData.code}`,
+        message: friendlyMessage,
         code: payData.code 
       }, { status: 502 });
     }
