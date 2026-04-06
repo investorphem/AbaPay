@@ -5,8 +5,8 @@ import { sendTelegramAlert } from '@/lib/telegram';
 import { supabaseAdmin as supabase } from '@/utils/supabase'; 
 
 // --- ROBUST ERROR CODE DICTIONARY ---
-// Translates raw VTpass codes into friendly, actionable user instructions.
-const error_messages = {
+// UPGRADED: Added Record<string, string> to satisfy strict TypeScript builds!
+const error_messages: Record<string, string> = {
     "013": "Amount is below the minimum allowed for your specific meter/band.",
     "014": "Transaction exceeds your daily limit with this utility provider.",
     "015": "Service with this provider is currently suspended. Please try again later.",
@@ -105,7 +105,6 @@ export async function POST(req: Request) {
       const verifyData = await verifyRes.json();
       if (verifyData.code !== '000') {
         await supabase.from('transactions').update({ status: 'FAILED_VERIFICATION' }).eq('tx_hash', txHash);
-        // UPGRADED: Return descriptive error for verification
         return NextResponse.json({ success: false, code: "VERIFY_FAIL", message: error_messages.FAILED_VERIFICATION }, { status: 400 });
       }
     }
@@ -170,8 +169,8 @@ export async function POST(req: Request) {
       await supabase.from('transactions').update({ status: 'FAILED_VENDING' }).eq('tx_hash', txHash);
       try { await sendTelegramAlert(`🚨 *VENDING REJECTED*\nHash: \`${txHash}\`\nVTpass Code: ${payData.code}`); } catch (e) {}
 
-      // UPGRADED: Send a friendly error message from our dictionary
-      const friendlyMessage = error_messages[payData.code] || "Utility vending failed at the provider level.";
+      // UPGRADED: Safely index the error_messages object with TypeScript's blessing
+      const friendlyMessage = error_messages[payData.code as string] || "Utility vending failed at the provider level.";
       
       return NextResponse.json({ 
         success: false, 
