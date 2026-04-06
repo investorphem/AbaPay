@@ -254,8 +254,11 @@ export default function Home() {
     setIsVerifying(false);
   };
 
+  // UPGRADED: Trigger verify conditionally (Showmax is excluded from verification)
   useEffect(() => {
-    if ((activeService.id === "ELECTRICITY" || activeService.id === "CABLE") && accountNumber.length >= 10) {
+    if (activeService.id === "ELECTRICITY" && accountNumber.length >= 10) {
+      verifyMerchant();
+    } else if (activeService.id === "CABLE" && cableProvider !== "showmax" && accountNumber.length >= 10) {
       verifyMerchant();
     } else {
       setCustomerName(null);
@@ -280,15 +283,18 @@ export default function Home() {
       return accountNumber.length >= 10 && customerName !== null;
     }
     if (activeService.id === "CABLE") {
-      if (accountNumber.length < 10 || customerName === null) return false;
-      
-      // Strict Check: DSTV/GOTV need package logic, Startimes just needs a selected plan
-      if (['dstv', 'gotv'].includes(cableProvider)) {
-        if (cableSubscriptionType === 'change' && !selectedCablePlan) return false;
+      // Showmax requires phone number, the rest require smartcards
+      if (cableProvider === "showmax") {
+        return accountNumber.length >= 11 && selectedCablePlan !== null;
       } else {
-        if (!selectedCablePlan) return false;
+        if (accountNumber.length < 10 || customerName === null) return false;
+        if (['dstv', 'gotv'].includes(cableProvider)) {
+          if (cableSubscriptionType === 'change' && !selectedCablePlan) return false;
+        } else {
+          if (!selectedCablePlan) return false;
+        }
+        return true;
       }
-      return true;
     }
     return false;
   }, [accountNumber, nairaAmount, activeService, customerName, dynamicMinAmount, cableSubscriptionType, selectedCablePlan, cableProvider]);
@@ -339,7 +345,6 @@ export default function Home() {
       } else if (activeService.id === "CABLE") {
         vtpassServiceID = cableProvider;
         displayNetwork = cableProvider;
-        // UPGRADED: Correctly assign variation code based on provider logic
         if (['dstv', 'gotv'].includes(cableProvider)) {
           finalVariationCode = cableSubscriptionType === 'change' ? selectedCablePlan?.variation_code : 'none'; 
         } else {
@@ -821,16 +826,16 @@ export default function Home() {
 
                 <div>
                     <label className="text-[10px] font-black text-slate-400 uppercase mb-2 flex justify-between">
-                      <span>{activeService.id === "AIRTIME" || activeService.id === "DATA" ? "Phone Number (11 Digits)" : "Account / Smartcard No"}</span>
-                      {(activeService.id === "AIRTIME" || activeService.id === "DATA") && (
+                      <span>{activeService.id === "AIRTIME" || activeService.id === "DATA" || (activeService.id === "CABLE" && cableProvider === "showmax") ? "Phone Number (11 Digits)" : "Account / Smartcard No"}</span>
+                      {(activeService.id === "AIRTIME" || activeService.id === "DATA" || (activeService.id === "CABLE" && cableProvider === "showmax")) && (
                         <span className={accountNumber.length === 11 ? "text-emerald-500" : "text-slate-400"}>{accountNumber.length}/11</span>
                       )}
                     </label>
                     <input 
-                        type="tel" placeholder={activeService.id === "AIRTIME" || activeService.id === "DATA" ? "08000000000" : "Enter Number"}
-                        maxLength={activeService.id === "AIRTIME" || activeService.id === "DATA" ? 11 : 20}
+                        type="tel" placeholder={activeService.id === "AIRTIME" || activeService.id === "DATA" || (activeService.id === "CABLE" && cableProvider === "showmax") ? "08000000000" : "Enter Number"}
+                        maxLength={activeService.id === "AIRTIME" || activeService.id === "DATA" || (activeService.id === "CABLE" && cableProvider === "showmax") ? 11 : 20}
                         className={`w-full bg-slate-50 border p-5 rounded-2xl font-black text-xl text-slate-800 outline-none transition-all ${
-                          (activeService.id === "AIRTIME" || activeService.id === "DATA") && accountNumber.length > 0 && accountNumber.length < 11 
+                          (activeService.id === "AIRTIME" || activeService.id === "DATA" || (activeService.id === "CABLE" && cableProvider === "showmax")) && accountNumber.length > 0 && accountNumber.length < 11 
                           ? "border-red-300 focus:border-red-500" 
                           : "border-slate-100 focus:border-emerald-500"
                         }`}
@@ -848,17 +853,19 @@ export default function Home() {
                 </div>
 
                 {/* --- UPGRADED CABLE TV UI BLOCK --- */}
-                {activeService.id === "CABLE" && customerName && (
+                {activeService.id === "CABLE" && (cableProvider === "showmax" || customerName) && (
                   <div className="bg-slate-50 border border-slate-200 rounded-2xl p-4 shadow-sm animate-in fade-in slide-in-from-top-4">
-                     <div className="flex items-start justify-between border-b border-slate-200 pb-3 mb-3">
-                        <div>
-                          <p className="text-[10px] font-black uppercase tracking-widest text-slate-400 mb-1">Verified Customer</p>
-                          <p className="font-black text-slate-800 text-sm">{customerName}</p>
-                          {['dstv', 'gotv'].includes(cableProvider) && (
-                            <p className="text-xs font-bold text-emerald-600 mt-1 flex items-center gap-1"><Tv size={12}/> {cableCurrentBouquet}</p>
-                          )}
-                        </div>
-                     </div>
+                     {cableProvider !== "showmax" && (
+                         <div className="flex items-start justify-between border-b border-slate-200 pb-3 mb-3">
+                            <div>
+                              <p className="text-[10px] font-black uppercase tracking-widest text-slate-400 mb-1">Verified Customer</p>
+                              <p className="font-black text-slate-800 text-sm">{customerName}</p>
+                              {['dstv', 'gotv'].includes(cableProvider) && (
+                                <p className="text-xs font-bold text-emerald-600 mt-1 flex items-center gap-1"><Tv size={12}/> {cableCurrentBouquet}</p>
+                              )}
+                            </div>
+                         </div>
+                     )}
 
                      {['dstv', 'gotv'].includes(cableProvider) ? (
                        <>
