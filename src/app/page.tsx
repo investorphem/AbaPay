@@ -1,14 +1,14 @@
 "use client";
 
 import { useState, useEffect, useMemo, useRef } from "react";
-import { createWalletClient, createPublicClient, custom, http, parseUnits, formatUnits, defineChain } from "viem";
+import { createWalletClient, createPublicClient, custom, http, parseUnits, formatUnits } from "viem";
 import { celo, celoSepolia } from "viem/chains";
 import { 
   Wallet, Receipt, ShieldCheck, Zap, AlertTriangle, 
   CheckCircle2, ExternalLink, Lightbulb, Phone, Wifi, Tv, 
   ChevronDown, Loader2, HelpCircle, XCircle, Mail, 
   Paperclip, Send, Coins, Briefcase, Download, Share2,
-  ChevronLeft, ChevronRight, RefreshCw, ListPlus
+  ChevronLeft, ChevronRight, RefreshCw, ListPlus, Users
 } from "lucide-react";
 import { supabase } from "@/utils/supabase";
 import { ELECTRICITY_DISCOS } from "./discos";
@@ -45,8 +45,9 @@ const SUPPORTED_TOKENS = [
 ];
 
 const PRE_SELECT_AMOUNTS = ["100", "200", "500", "1000", "2000"];
-// UPGRADED: Updated Categories to match live data plans perfectly
-const DATA_CATEGORIES = ["Daily", "Weekly", "Monthly", "Mega Plans"];
+
+// UPGRADED: Full list of accurate data categories for Nigeria
+const DATA_CATEGORIES = ["Daily", "Weekly", "Monthly", "Social", "Mega", "Broadband"];
 const ITEMS_PER_PAGE = 5;
 
 export default function Home() {
@@ -271,20 +272,26 @@ export default function Home() {
     return { cryptoToCharge: crypto.toFixed(4), currentFee: fee };
   }, [nairaAmount, exchangeRate, activeService]);
 
-  // UPGRADED: Smart Categorization Engine for Live Data Packages
+  // UPGRADED: Powerful NLP filtering engine for Live Data Plans
   const filteredLiveDataPlans = useMemo(() => {
     if (!dataVariations || dataVariations.length === 0) return [];
     
     return dataVariations.filter(plan => {
       const name = plan.name.toLowerCase();
-      let category = "Mega Plans"; 
+      let category = "Monthly"; // Fallback safety 
       
-      if (name.includes('1 day') || name.includes('2 day') || name.includes('daily')) {
+      if (name.includes('broadband') || name.includes('router') || name.includes('5g') || name.includes('hynet')) {
+        category = "Broadband";
+      } else if (name.includes('social') || name.includes('whatsapp') || name.includes('ig') || name.includes('instagram') || name.includes('tiktok') || name.includes('youtube') || name.includes('facebook') || name.includes('opera') || name.includes('xot')) {
+        category = "Social";
+      } else if (name.includes('1 day') || name.includes('2 day') || name.includes('daily') || name.includes('24 hrs') || name.includes('24hrs') || name.includes('night') || name.includes('hourly')) {
         category = "Daily";
-      } else if (name.includes('week') || name.includes('7 day') || name.includes('14 day')) {
+      } else if (name.includes('week') || name.includes('7 day') || name.includes('14 day') || name.includes('3 day') || name.includes('weekend')) {
         category = "Weekly";
       } else if (name.includes('month') || name.includes('30 day')) {
         category = "Monthly";
+      } else if (name.includes('60 day') || name.includes('90 day') || name.includes('120 day') || name.includes('year') || name.includes('mega') || name.includes('3 month') || name.includes('2 month')) {
+        category = "Mega";
       }
       
       return category === activeDataCategory;
@@ -494,6 +501,26 @@ export default function Home() {
     }
   };
 
+  const submitSupportTicket = async () => {
+    if (!supportMessage.trim()) return;
+    setIsSendingSupport(true);
+    try {
+      const formData = new FormData();
+      formData.append("message", supportMessage);
+      if (address) formData.append("userAddress", address);
+      if (supportFile) formData.append("file", supportFile);
+      await fetch('/api/support', { method: 'POST', body: formData });
+      setIsSupportOpen(false);
+      setSupportMessage("");
+      setSupportFile(null);
+      showToast("Ticket Submitted", "AbaPay Support has received your request.", "success");
+    } catch (error) {
+      showToast("Connection Error", "Failed to send the ticket.", "error");
+    } finally {
+      setIsSendingSupport(false);
+    }
+  };
+
   const currentDisco = useMemo(() => {
     return ELECTRICITY_DISCOS.find(d => d.serviceID === elecProvider);
   }, [elecProvider]);
@@ -679,6 +706,31 @@ export default function Home() {
                  ))}
               </div>
            </div>
+        </div>
+      )}
+
+      {isSupportOpen && (
+        <div className="fixed inset-0 z-[70] bg-slate-900/60 backdrop-blur-sm flex justify-center items-center p-4 animate-in fade-in">
+          <div className="bg-white w-full max-w-md rounded-[2rem] shadow-2xl p-6 animate-in zoom-in-95 duration-200">
+            <div className="flex justify-between items-center mb-4 shrink-0 border-b border-slate-100 pb-4">
+              <h2 className="text-2xl font-black flex items-center gap-2.5 tracking-tight text-slate-900"><Mail className="text-emerald-500" size={24}/> AbaPay Support</h2>
+              <button onClick={() => setIsSupportOpen(false)} className="p-2 bg-slate-100 rounded-full hover:bg-slate-200"><XCircle size={20} className="text-slate-500" /></button>
+            </div>
+            <textarea 
+              className="w-full bg-slate-50 border border-slate-200 rounded-xl p-5 mb-4 text-sm font-medium outline-none focus:border-emerald-500 transition-colors leading-relaxed"
+              rows={4} placeholder="Describe your issue in detail. AbaPay Support typically responds within 30 minutes."
+              value={supportMessage} onChange={(e) => setSupportMessage(e.target.value)}
+            />
+            <div className="flex gap-2 mb-6">
+              <input type="file" ref={fileInputRef} className="hidden" onChange={(e) => setSupportFile(e.target.files?.[0] || null)} />
+              <button onClick={() => fileInputRef.current?.click()} className="flex-1 py-4 bg-slate-100 hover:bg-slate-200 rounded-xl text-[11px] font-black uppercase tracking-wider flex items-center justify-center gap-2 text-slate-600">
+                <Paperclip size={16} /> {supportFile ? supportFile.name.slice(0, 10) + '...' : "Attach Receipt/Screenshot"}
+              </button>
+            </div>
+            <button onClick={submitSupportTicket} disabled={isSendingSupport} className="w-full bg-slate-900 hover:bg-black text-white font-black py-5 rounded-2xl flex items-center justify-center gap-2 transition-all active:scale-95 disabled:opacity-50">
+              {isSendingSupport ? <Loader2 className="animate-spin" size={18}/> : <><Send size={18} className="text-emerald-400"/> SUBMIT SUPPORT TICKET</>}
+            </button>
+          </div>
         </div>
       )}
 
@@ -989,15 +1041,8 @@ export default function Home() {
                   </div>
                 )}
 
-                {/* --- UPGRADED LIVE DATA UI BLOCK --- */}
                 {activeService.id === "DATA" && (
                    <div className="bg-slate-50 border border-slate-100 p-4 rounded-2xl animate-in fade-in slide-in-from-top-4">
-                      <div className="flex gap-2 mb-4 border-b border-slate-200 pb-3 overflow-x-auto no-scrollbar shadow-inner bg-slate-100 p-1.5 rounded-2xl">
-                        {DATA_CATEGORIES.map(cat => (
-                          <button key={cat} onClick={() => { setActiveDataCategory(cat); setSelectedDataPlan(null); }} className={`px-4 py-2.5 rounded-xl text-[11px] font-black uppercase transition-all whitespace-nowrap ${activeDataCategory === cat ? 'bg-white shadow-lg text-purple-600' : 'text-slate-500 hover:text-slate-700'}`}>{cat}</button>
-                        ))}
-                      </div>
-
                       {selectedDataPlan ? (
                          <div className="relative animate-in zoom-in-95 duration-200 mt-2">
                             <button onClick={() => { setSelectedDataPlan(null); setNairaAmount(""); }} className="absolute -top-3 -right-3 bg-slate-200 text-slate-500 hover:text-slate-800 hover:bg-slate-300 rounded-full p-1 transition-all z-10 shadow-sm border border-white">
@@ -1005,7 +1050,7 @@ export default function Home() {
                             </button>
                             <div className="p-4 rounded-2xl border-2 border-purple-500 bg-purple-50 flex flex-col gap-1 text-left shadow-sm">
                                <p className="font-black text-slate-900 text-lg tracking-tight">{selectedDataPlan.name}</p>
-                               <p className="text-[10px] text-purple-500 font-bold uppercase tracking-wider">Selected Plan</p>
+                               <p className="text-[10px] text-purple-500 font-bold uppercase tracking-wider">{activeDataCategory} Plan • Selected</p>
                                <div className="mt-2 pt-2 border-t border-purple-200/50 flex justify-between items-end">
                                    <div>
                                      <p className="text-[10px] font-black text-slate-400 uppercase">Cost</p>
@@ -1016,33 +1061,47 @@ export default function Home() {
                             </div>
                          </div>
                       ) : (
-                         <div className="grid grid-cols-1 gap-2 max-h-[35vh] overflow-y-auto pr-1">
-                             {dataVariations.length === 0 ? (
-                               <p className="text-center text-xs font-bold text-slate-400 py-4"><Loader2 className="animate-spin inline-block mr-2" size={14}/> Fetching Data Plans...</p>
-                             ) : filteredLiveDataPlans.length === 0 ? (
-                               <p className="text-center text-xs font-bold text-slate-400 py-4">No {activeDataCategory} plans available.</p>
-                             ) : (
-                               filteredLiveDataPlans.map(plan => {
-                                 const cryptoPlanCost = (parseFloat(plan.variation_amount) / exchangeRate).toFixed(4);
-                                 return (
-                                   <button 
-                                     key={plan.variation_code} 
-                                     onClick={() => { setSelectedDataPlan(plan); setNairaAmount(plan.variation_amount); }} 
-                                     className="p-3 rounded-xl border border-slate-200 bg-white hover:border-purple-300 transition-all flex flex-col gap-1 text-left shadow-sm group"
-                                   >
-                                     <div className="flex justify-between items-start">
-                                         <p className="font-black text-slate-900 text-xs pr-4">{plan.name}</p>
-                                         <p className="font-black text-purple-600 text-sm whitespace-nowrap group-hover:scale-105 transition-transform">₦{parseFloat(plan.variation_amount).toLocaleString()}</p>
-                                     </div>
-                                     <div className="mt-1 pt-1.5 border-t border-slate-100 flex justify-between items-center">
-                                         <p className="text-[9px] text-slate-400 font-bold uppercase">{activeDataCategory} Plan</p>
-                                         <p className="text-[9px] text-slate-500 font-black bg-slate-100 px-2 py-0.5 rounded">{cryptoPlanCost} {selectedToken.symbol}</p>
-                                     </div>
-                                   </button>
-                                 );
-                               })
-                             )}
-                         </div>
+                         <>
+                           <div className="flex gap-2 mb-4 border-b border-slate-200 pb-3 overflow-x-auto no-scrollbar shadow-inner bg-slate-100 p-1.5 rounded-2xl">
+                             {DATA_CATEGORIES.map(cat => (
+                               <button 
+                                  key={cat} 
+                                  onClick={() => { setActiveDataCategory(cat); setSelectedDataPlan(null); }} 
+                                  className={`px-4 py-2.5 rounded-xl text-[11px] font-black uppercase transition-all whitespace-nowrap ${activeDataCategory === cat ? (cat === 'Broadband' ? 'bg-white shadow-lg text-orange-600' : cat === 'Social' ? 'bg-white shadow-lg text-blue-500' : 'bg-white shadow-lg text-purple-600') : 'text-slate-500 hover:text-slate-700'}`}
+                               >
+                                 {cat === 'Broadband' ? <span className="flex items-center gap-1.5"><Briefcase size={14}/> {cat}</span> : cat === 'Social' ? <span className="flex items-center gap-1.5"><Users size={14}/> {cat}</span> : cat}
+                               </button>
+                             ))}
+                           </div>
+
+                           <div className="grid grid-cols-1 gap-2 max-h-[35vh] overflow-y-auto pr-1">
+                               {dataVariations.length === 0 ? (
+                                 <p className="text-center text-xs font-bold text-slate-400 py-4"><Loader2 className="animate-spin inline-block mr-2" size={14}/> Fetching Live Data Plans...</p>
+                               ) : filteredLiveDataPlans.length === 0 ? (
+                                 <p className="text-center text-xs font-bold text-slate-400 py-4">No {activeDataCategory} plans available.</p>
+                               ) : (
+                                 filteredLiveDataPlans.map(plan => {
+                                   const cryptoPlanCost = (parseFloat(plan.variation_amount) / exchangeRate).toFixed(4);
+                                   return (
+                                     <button 
+                                       key={plan.variation_code} 
+                                       onClick={() => { setSelectedDataPlan(plan); setNairaAmount(plan.variation_amount); }} 
+                                       className="p-3 rounded-xl border border-slate-200 bg-white hover:border-purple-300 transition-all flex flex-col gap-1 text-left shadow-sm group"
+                                     >
+                                       <div className="flex justify-between items-start">
+                                           <p className="font-black text-slate-900 text-xs pr-4 leading-tight">{plan.name}</p>
+                                           <p className="font-black text-purple-600 text-sm whitespace-nowrap group-hover:scale-105 transition-transform">₦{parseFloat(plan.variation_amount).toLocaleString()}</p>
+                                       </div>
+                                       <div className="mt-1 pt-1.5 border-t border-slate-100 flex justify-between items-center">
+                                           <p className="text-[9px] text-slate-400 font-bold uppercase">{activeDataCategory} Plan</p>
+                                           <p className="text-[9px] text-slate-500 font-black bg-slate-100 px-2 py-0.5 rounded">{cryptoPlanCost} {selectedToken.symbol}</p>
+                                       </div>
+                                     </button>
+                                   );
+                                 })
+                               )}
+                           </div>
+                         </>
                       )}
                    </div>
                 )}
