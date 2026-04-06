@@ -132,7 +132,6 @@ export default function Home() {
 
   // --- AUTO-CLEAR STICKY ERRORS ---
   useEffect(() => {
-    // Whenever the user types a new number, picks a new plan, or changes tabs, clear the error!
     if (status) setStatus("");
   }, [accountNumber, nairaAmount, activeService, cableSubscriptionType, selectedDataPlan, selectedCablePlan]);
 
@@ -241,7 +240,9 @@ export default function Home() {
           
           if (activeService.id === "CABLE") {
             setCableCurrentBouquet(data.content.Current_Bouquet || "Unknown Package");
-            if (data.content.Renewal_Amount) {
+            
+            // Only attempt to set Renewal Amount for DSTV/GOTV
+            if (data.content.Renewal_Amount && ['dstv', 'gotv'].includes(cableProvider)) {
               setCableRenewAmount(data.content.Renewal_Amount);
               if (cableSubscriptionType === "renew") {
                 setNairaAmount(data.content.Renewal_Amount.toString());
@@ -280,11 +281,17 @@ export default function Home() {
     }
     if (activeService.id === "CABLE") {
       if (accountNumber.length < 10 || customerName === null) return false;
-      if (cableSubscriptionType === 'change' && !selectedCablePlan) return false;
+      
+      // Strict Check: DSTV/GOTV need package logic, Startimes just needs a selected plan
+      if (['dstv', 'gotv'].includes(cableProvider)) {
+        if (cableSubscriptionType === 'change' && !selectedCablePlan) return false;
+      } else {
+        if (!selectedCablePlan) return false;
+      }
       return true;
     }
     return false;
-  }, [accountNumber, nairaAmount, activeService, customerName, dynamicMinAmount, cableSubscriptionType, selectedCablePlan]);
+  }, [accountNumber, nairaAmount, activeService, customerName, dynamicMinAmount, cableSubscriptionType, selectedCablePlan, cableProvider]);
 
   // --- PAYMENT EXECUTION ---
   const handlePayment = async () => {
@@ -332,7 +339,12 @@ export default function Home() {
       } else if (activeService.id === "CABLE") {
         vtpassServiceID = cableProvider;
         displayNetwork = cableProvider;
-        finalVariationCode = cableSubscriptionType === 'change' ? selectedCablePlan?.variation_code : 'none'; 
+        // UPGRADED: Correctly assign variation code based on provider logic
+        if (['dstv', 'gotv'].includes(cableProvider)) {
+          finalVariationCode = cableSubscriptionType === 'change' ? selectedCablePlan?.variation_code : 'none'; 
+        } else {
+          finalVariationCode = selectedCablePlan?.variation_code || 'none';
+        }
       } else if (activeService.id === "DATA") {
         vtpassServiceID = `${telecomProvider}-data`; 
         displayNetwork = telecomProvider;
@@ -364,7 +376,7 @@ export default function Home() {
         variation_code: finalVariationCode,
         phone: customerPhone || accountNumber,
         wallet_address: address,
-        subscription_type: activeService.id === "CABLE" ? cableSubscriptionType : undefined
+        subscription_type: activeService.id === "CABLE" && ['dstv', 'gotv'].includes(cableProvider) ? cableSubscriptionType : undefined
       };
 
       const newTx = { 
@@ -842,69 +854,115 @@ export default function Home() {
                         <div>
                           <p className="text-[10px] font-black uppercase tracking-widest text-slate-400 mb-1">Verified Customer</p>
                           <p className="font-black text-slate-800 text-sm">{customerName}</p>
-                          <p className="text-xs font-bold text-emerald-600 mt-1 flex items-center gap-1"><Tv size={12}/> {cableCurrentBouquet}</p>
+                          {['dstv', 'gotv'].includes(cableProvider) && (
+                            <p className="text-xs font-bold text-emerald-600 mt-1 flex items-center gap-1"><Tv size={12}/> {cableCurrentBouquet}</p>
+                          )}
                         </div>
                      </div>
 
-                     <div className="flex gap-2 p-1 bg-slate-200/50 rounded-xl mb-4">
-                        <button 
-                          onClick={() => { setCableSubscriptionType("renew"); setNairaAmount(cableRenewAmount ? cableRenewAmount.toString() : ""); setSelectedCablePlan(null); }} 
-                          className={`flex-1 flex items-center justify-center gap-2 py-2.5 text-[10px] font-black uppercase tracking-wider rounded-lg transition-all ${cableSubscriptionType === "renew" ? "bg-white text-emerald-600 shadow-sm" : "text-slate-500 hover:text-slate-700"}`}
-                        >
-                          <RefreshCw size={14}/> Renew Plan
-                        </button>
-                        <button 
-                          onClick={() => { setCableSubscriptionType("change"); setNairaAmount(""); }} 
-                          className={`flex-1 flex items-center justify-center gap-2 py-2.5 text-[10px] font-black uppercase tracking-wider rounded-lg transition-all ${cableSubscriptionType === "change" ? "bg-white text-blue-600 shadow-sm" : "text-slate-500 hover:text-slate-700"}`}
-                        >
-                          <ListPlus size={14}/> Change Plan
-                        </button>
-                     </div>
+                     {['dstv', 'gotv'].includes(cableProvider) ? (
+                       <>
+                         <div className="flex gap-2 p-1 bg-slate-200/50 rounded-xl mb-4">
+                            <button 
+                              onClick={() => { setCableSubscriptionType("renew"); setNairaAmount(cableRenewAmount ? cableRenewAmount.toString() : ""); setSelectedCablePlan(null); }} 
+                              className={`flex-1 flex items-center justify-center gap-2 py-2.5 text-[10px] font-black uppercase tracking-wider rounded-lg transition-all ${cableSubscriptionType === "renew" ? "bg-white text-emerald-600 shadow-sm" : "text-slate-500 hover:text-slate-700"}`}
+                            >
+                              <RefreshCw size={14}/> Renew Plan
+                            </button>
+                            <button 
+                              onClick={() => { setCableSubscriptionType("change"); setNairaAmount(""); }} 
+                              className={`flex-1 flex items-center justify-center gap-2 py-2.5 text-[10px] font-black uppercase tracking-wider rounded-lg transition-all ${cableSubscriptionType === "change" ? "bg-white text-blue-600 shadow-sm" : "text-slate-500 hover:text-slate-700"}`}
+                            >
+                              <ListPlus size={14}/> Change Plan
+                            </button>
+                         </div>
 
-                     {cableSubscriptionType === "renew" ? (
-                        <div className="bg-emerald-500/10 border border-emerald-500/20 rounded-xl p-4 text-center">
-                           <p className="text-[10px] font-black text-emerald-800 uppercase tracking-widest mb-1">Renewal Amount Due</p>
-                           <p className="text-2xl font-black text-emerald-600">₦{cableRenewAmount?.toLocaleString() || "0.00"}</p>
-                        </div>
-                     ) : (
-                        selectedCablePlan ? (
-                           <div className="relative animate-in zoom-in-95 duration-200 mt-2">
-                              <button onClick={() => { setSelectedCablePlan(null); setNairaAmount(""); }} className="absolute -top-3 -right-3 bg-slate-200 text-slate-500 hover:text-slate-800 hover:bg-slate-300 rounded-full p-1 transition-all z-10 shadow-sm border border-white">
-                                <XCircle size={16}/>
-                              </button>
-                              <div className="p-4 rounded-2xl border-2 border-blue-500 bg-blue-50 shadow-sm text-left">
-                                 <p className="font-black text-slate-900 text-lg tracking-tight">{selectedCablePlan.name}</p>
-                                 <p className="text-[10px] text-blue-500 font-bold uppercase tracking-wider mb-2">Selected Package</p>
-                                 <div className="pt-2 border-t border-blue-200/50 flex justify-between items-end">
-                                     <p className="font-black text-blue-600 text-xl leading-none">₦{parseFloat(selectedCablePlan.variation_amount).toLocaleString()}</p>
-                                     <p className="text-[10px] text-slate-500 font-bold">{(parseFloat(selectedCablePlan.variation_amount) / exchangeRate).toFixed(4)} {selectedToken.symbol}</p>
-                                 </div>
-                              </div>
-                           </div>
-                        ) : (
-                           <div className="grid grid-cols-1 gap-2 max-h-[35vh] overflow-y-auto pr-1">
-                             {cableVariations.length === 0 ? (
-                               <p className="text-center text-xs font-bold text-slate-400 py-4"><Loader2 className="animate-spin inline-block mr-2" size={14}/> Fetching Live Packages...</p>
-                             ) : (
-                               cableVariations.map((plan) => {
-                                 const cryptoPlanCost = (parseFloat(plan.variation_amount) / exchangeRate).toFixed(4);
-                                 return (
-                                   <button 
-                                     key={plan.variation_code} 
-                                     onClick={() => { setSelectedCablePlan(plan); setNairaAmount(plan.variation_amount); }} 
-                                     className="p-3 rounded-xl border border-slate-200 bg-white hover:border-slate-300 transition-all text-left flex justify-between items-center"
-                                   >
-                                     <div>
-                                       <p className="font-black text-slate-800 text-xs">{plan.name}</p>
-                                       <p className="text-[9px] text-slate-400 font-bold mt-0.5">{cryptoPlanCost} {selectedToken.symbol}</p>
+                         {cableSubscriptionType === "renew" ? (
+                            <div className="bg-emerald-500/10 border border-emerald-500/20 rounded-xl p-4 text-center">
+                               <p className="text-[10px] font-black text-emerald-800 uppercase tracking-widest mb-1">Renewal Amount Due</p>
+                               <p className="text-2xl font-black text-emerald-600">₦{cableRenewAmount?.toLocaleString() || "0.00"}</p>
+                            </div>
+                         ) : (
+                            selectedCablePlan ? (
+                               <div className="relative animate-in zoom-in-95 duration-200 mt-2">
+                                  <button onClick={() => { setSelectedCablePlan(null); setNairaAmount(""); }} className="absolute -top-3 -right-3 bg-slate-200 text-slate-500 hover:text-slate-800 hover:bg-slate-300 rounded-full p-1 transition-all z-10 shadow-sm border border-white">
+                                    <XCircle size={16}/>
+                                  </button>
+                                  <div className="p-4 rounded-2xl border-2 border-blue-500 bg-blue-50 shadow-sm text-left">
+                                     <p className="font-black text-slate-900 text-lg tracking-tight">{selectedCablePlan.name}</p>
+                                     <p className="text-[10px] text-blue-500 font-bold uppercase tracking-wider mb-2">Selected Package</p>
+                                     <div className="pt-2 border-t border-blue-200/50 flex justify-between items-end">
+                                         <p className="font-black text-blue-600 text-xl leading-none">₦{parseFloat(selectedCablePlan.variation_amount).toLocaleString()}</p>
+                                         <p className="text-[10px] text-slate-500 font-bold">{(parseFloat(selectedCablePlan.variation_amount) / exchangeRate).toFixed(4)} {selectedToken.symbol}</p>
                                      </div>
-                                     <p className="font-black text-blue-600 text-sm">₦{parseFloat(plan.variation_amount).toLocaleString()}</p>
-                                   </button>
-                                 );
-                               })
-                             )}
-                           </div>
-                        )
+                                  </div>
+                               </div>
+                            ) : (
+                               <div className="grid grid-cols-1 gap-2 max-h-[35vh] overflow-y-auto pr-1">
+                                 {cableVariations.length === 0 ? (
+                                   <p className="text-center text-xs font-bold text-slate-400 py-4"><Loader2 className="animate-spin inline-block mr-2" size={14}/> Fetching Live Packages...</p>
+                                 ) : (
+                                   cableVariations.map((plan) => {
+                                     const cryptoPlanCost = (parseFloat(plan.variation_amount) / exchangeRate).toFixed(4);
+                                     return (
+                                       <button 
+                                         key={plan.variation_code} 
+                                         onClick={() => { setSelectedCablePlan(plan); setNairaAmount(plan.variation_amount); }} 
+                                         className="p-3 rounded-xl border border-slate-200 bg-white hover:border-slate-300 transition-all text-left flex justify-between items-center"
+                                       >
+                                         <div>
+                                           <p className="font-black text-slate-800 text-xs">{plan.name}</p>
+                                           <p className="text-[9px] text-slate-400 font-bold mt-0.5">{cryptoPlanCost} {selectedToken.symbol}</p>
+                                         </div>
+                                         <p className="font-black text-blue-600 text-sm">₦{parseFloat(plan.variation_amount).toLocaleString()}</p>
+                                       </button>
+                                     );
+                                   })
+                                 )}
+                               </div>
+                            )
+                         )}
+                       </>
+                     ) : (
+                       // STARTIMES & SHOWMAX LOGIC
+                       selectedCablePlan ? (
+                          <div className="relative animate-in zoom-in-95 duration-200 mt-2">
+                             <button onClick={() => { setSelectedCablePlan(null); setNairaAmount(""); }} className="absolute -top-3 -right-3 bg-slate-200 text-slate-500 hover:text-slate-800 hover:bg-slate-300 rounded-full p-1 transition-all z-10 shadow-sm border border-white">
+                               <XCircle size={16}/>
+                             </button>
+                             <div className="p-4 rounded-2xl border-2 border-blue-500 bg-blue-50 shadow-sm text-left">
+                                <p className="font-black text-slate-900 text-lg tracking-tight">{selectedCablePlan.name}</p>
+                                <p className="text-[10px] text-blue-500 font-bold uppercase tracking-wider mb-2">Selected Package</p>
+                                <div className="pt-2 border-t border-blue-200/50 flex justify-between items-end">
+                                    <p className="font-black text-blue-600 text-xl leading-none">₦{parseFloat(selectedCablePlan.variation_amount).toLocaleString()}</p>
+                                    <p className="text-[10px] text-slate-500 font-bold">{(parseFloat(selectedCablePlan.variation_amount) / exchangeRate).toFixed(4)} {selectedToken.symbol}</p>
+                                </div>
+                             </div>
+                          </div>
+                       ) : (
+                          <div className="grid grid-cols-1 gap-2 max-h-[35vh] overflow-y-auto pr-1">
+                            {cableVariations.length === 0 ? (
+                              <p className="text-center text-xs font-bold text-slate-400 py-4"><Loader2 className="animate-spin inline-block mr-2" size={14}/> Fetching Live Packages...</p>
+                            ) : (
+                              cableVariations.map((plan) => {
+                                const cryptoPlanCost = (parseFloat(plan.variation_amount) / exchangeRate).toFixed(4);
+                                return (
+                                  <button 
+                                    key={plan.variation_code} 
+                                    onClick={() => { setSelectedCablePlan(plan); setNairaAmount(plan.variation_amount); }} 
+                                    className="p-3 rounded-xl border border-slate-200 bg-white hover:border-slate-300 transition-all text-left flex justify-between items-center"
+                                  >
+                                    <div>
+                                      <p className="font-black text-slate-800 text-xs">{plan.name}</p>
+                                      <p className="text-[9px] text-slate-400 font-bold mt-0.5">{cryptoPlanCost} {selectedToken.symbol}</p>
+                                    </div>
+                                    <p className="font-black text-blue-600 text-sm">₦{parseFloat(plan.variation_amount).toLocaleString()}</p>
+                                  </button>
+                                );
+                              })
+                            )}
+                          </div>
+                       )
                      )}
                   </div>
                 )}
