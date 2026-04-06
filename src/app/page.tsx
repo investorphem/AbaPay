@@ -28,7 +28,7 @@ const SERVICES = [
 
 const ELECTRICITY_PROVIDERS = ["aba-electric", "ikedc", "ekedc", "ibedc", "aedc", "kedco", "phed"];
 const CABLE_PROVIDERS = ["dstv", "gotv", "startimes", "showmax"];
-const TELECOM_PROVIDERS = ["mtn", "airtel", "glo", "9mobile"];
+const TELECOM_PROVIDERS = ["mtn", "glo", "9mobile", "airtel"]; // Reordered to match your image
 
 const SUPPORTED_TOKENS = [
   { symbol: "USDT", decimals: 6, mainnet: "0x48065fbbe25f71c9282ddf5e1cd6d6a887483d5e", sepolia: "0xd077A400968890Eacc75cdc901F0356c943e4fDb", icon: "💵" },
@@ -51,7 +51,7 @@ const MOCK_DATA_PLANS = [
 ];
 
 const DATA_CATEGORIES = ["Daily", "Weekly", "Monthly"];
-const ITEMS_PER_PAGE = 5; // The number of transactions to show per page
+const ITEMS_PER_PAGE = 5;
 
 export default function Home() {
   const [isInitiallyLoading, setIsInitiallyLoading] = useState(true);
@@ -361,7 +361,6 @@ export default function Home() {
       setTransactions(updatedHistory);
       localStorage.setItem("abapay_history", JSON.stringify(updatedHistory));
       
-      // Snap to page 1 to show the newly added transaction
       setCurrentPage(1);
 
       const publicClient = createPublicClient({ chain: activeChain, transport: http() });
@@ -407,9 +406,8 @@ export default function Home() {
     const receiptText = `🧾 AbaPay Protocol Receipt\n\nStatus: ${selectedReceipt.status}\nProduct: ${selectedReceipt.network} ${selectedReceipt.service}\nRecipient: ${selectedReceipt.account}\nAmount Paid: ₦${selectedReceipt.amountNaira}\nCrypto Used: ${selectedReceipt.amountCrypto} ${selectedReceipt.tokenUsed}\nTx Hash: ${selectedReceipt.txHash}\n\nSecured by Celo Network`;
 
     if (navigator.share) {
-      try {
-        await navigator.share({ title: 'AbaPay Receipt', text: receiptText });
-      } catch (err) { console.log("Share cancelled or failed.", err); }
+      try { await navigator.share({ title: 'AbaPay Receipt', text: receiptText }); } 
+      catch (err) { console.log("Share cancelled or failed.", err); }
     } else {
       try {
         await navigator.clipboard.writeText(receiptText);
@@ -555,6 +553,7 @@ export default function Home() {
         </div>
       )}
 
+      {/* Modal for Electricity / Cable */}
       {isSelectionModalOpen && (
         <div className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-sm flex justify-center items-center p-4 animate-in fade-in" onClick={() => setIsSelectionModalOpen(false)}>
            <div className="bg-white w-full max-w-sm rounded-[2rem] shadow-2xl p-6 animate-in zoom-in-95 duration-200" onClick={(e) => e.stopPropagation()}>
@@ -684,27 +683,55 @@ export default function Home() {
                   </div>
                 </div>
 
-                <div className="animate-in slide-in-from-left-2">
-                    <label className="text-[10px] font-black text-slate-400 uppercase mb-2 block">
-                        {activeService.id === "AIRTIME" || activeService.id === "DATA" ? "Network Selection" : "Choose Provider"}
+                {/* --- NEW VISUAL LOGO GRID FOR TELECOM --- */}
+                <div className="animate-in slide-in-from-left-2 mb-2">
+                    <label className="text-[10px] font-black text-slate-400 uppercase mb-3 block">
+                        {activeService.id === "AIRTIME" || activeService.id === "DATA" ? "Select Network" : "Choose Provider"}
                     </label>
 
-                    <button 
-                      onClick={() => {
-                        const title = activeService.id === "AIRTIME" || activeService.id === "DATA" ? "Select Network" : "Select Provider";
-                        const options = activeService.id === "ELECTRICITY" ? ELECTRICITY_PROVIDERS : activeService.id === "CABLE" ? CABLE_PROVIDERS : TELECOM_PROVIDERS;
-                        const callback = activeService.id === "ELECTRICITY" ? setElecProvider : activeService.id === "CABLE" ? setCableProvider : setTelecomProvider;
-                        openPremiumSelection(title, options, callback);
-                      }}
-                      className="w-full bg-slate-50 border border-slate-100 p-4 rounded-2xl font-bold text-slate-800 outline-none uppercase text-xs hover:border-emerald-300 transition-all text-left flex justify-between items-center"
-                    >
-                      <span>
-                        {activeService.id === "ELECTRICITY" ? elecProvider.toUpperCase() : 
-                         activeService.id === "CABLE" ? cableProvider.toUpperCase() : 
-                         telecomProvider.toUpperCase()}
-                      </span>
-                      <ChevronDown size={14} className="text-slate-400"/>
-                    </button>
+                    {activeService.id === "AIRTIME" || activeService.id === "DATA" ? (
+                      <div className="flex justify-between items-center gap-2">
+                        {TELECOM_PROVIDERS.map((provider) => (
+                          <button
+                            key={provider}
+                            onClick={() => setTelecomProvider(provider)}
+                            className={`flex flex-col items-center gap-2 flex-1 py-3 rounded-2xl transition-all border-2 ${
+                              telecomProvider === provider 
+                              ? 'border-emerald-500 bg-emerald-50/50 scale-105 shadow-sm' 
+                              : 'border-transparent bg-slate-50 hover:bg-slate-100 opacity-60 hover:opacity-100 grayscale hover:grayscale-0'
+                            }`}
+                          >
+                            <div className="w-11 h-11 rounded-full bg-white shadow-sm border border-slate-100 flex items-center justify-center p-1.5 overflow-hidden">
+                              <img 
+                                src={`/${provider}.png`} 
+                                alt={provider} 
+                                className="w-full h-full object-contain" 
+                                onError={(e) => { 
+                                  // Fallback text if they forget to save the images in the public folder
+                                  e.currentTarget.style.display = 'none'; 
+                                  e.currentTarget.parentElement!.innerHTML = `<span class="text-[9px] font-black uppercase text-slate-400">${provider.slice(0,3)}</span>`;
+                                }}
+                              />
+                            </div>
+                            <span className={`text-[9px] font-black uppercase tracking-wider ${telecomProvider === provider ? 'text-emerald-700' : 'text-slate-500'}`}>
+                              {provider}
+                            </span>
+                          </button>
+                        ))}
+                      </div>
+                    ) : (
+                      <button 
+                        onClick={() => {
+                          const options = activeService.id === "ELECTRICITY" ? ELECTRICITY_PROVIDERS : CABLE_PROVIDERS;
+                          const callback = activeService.id === "ELECTRICITY" ? setElecProvider : setCableProvider;
+                          openPremiumSelection("Select Provider", options, callback);
+                        }}
+                        className="w-full bg-slate-50 border border-slate-100 p-4 rounded-2xl font-bold text-slate-800 outline-none uppercase text-xs hover:border-emerald-300 transition-all text-left flex justify-between items-center"
+                      >
+                        <span>{activeService.id === "ELECTRICITY" ? elecProvider.toUpperCase() : cableProvider.toUpperCase()}</span>
+                        <ChevronDown size={14} className="text-slate-400"/>
+                      </button>
+                    )}
 
                     {activeService.id === "ELECTRICITY" && (
                        <div className="flex gap-2 mt-3 p-1 bg-slate-100 rounded-xl border border-slate-200 shadow-inner">
@@ -842,7 +869,6 @@ export default function Home() {
                 </div>
              ) : (
                 <div className="flex flex-col space-y-4">
-                    {/* Render ONLY the transactions for the current page */}
                     {currentTransactions.map((tx, idx) => (
                         <div 
                           key={idx} 
@@ -862,7 +888,6 @@ export default function Home() {
                         </div>
                     ))}
 
-                    {/* Pagination Controls */}
                     {totalPages > 1 && (
                       <div className="flex justify-between items-center mt-4 pt-4 border-t border-slate-100">
                         <button 
