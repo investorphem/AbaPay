@@ -130,6 +130,12 @@ export default function Home() {
   const currentTransactions = transactions.slice(indexOfFirstItem, indexOfLastItem);
   const totalPages = Math.ceil(transactions.length / ITEMS_PER_PAGE);
 
+  // --- AUTO-CLEAR STICKY ERRORS ---
+  useEffect(() => {
+    // Whenever the user types a new number, picks a new plan, or changes tabs, clear the error!
+    if (status) setStatus("");
+  }, [accountNumber, nairaAmount, activeService, cableSubscriptionType, selectedDataPlan, selectedCablePlan]);
+
   // --- INITIALIZATION ---
   useEffect(() => {
     async function initSystem() {
@@ -181,7 +187,7 @@ export default function Home() {
     fetchBalance();
   }, [address, selectedToken, activeChain, isMainnet]);
 
-  // --- UPGRADED: SECURE CABLE VARIATION FETCHING ---
+  // --- SECURE CABLE VARIATION FETCHING ---
   useEffect(() => {
     if (activeService.id === "CABLE") {
       const fetchVariations = async () => {
@@ -208,7 +214,7 @@ export default function Home() {
     }
   }, [accountNumber, activeService]);
 
-  // --- UPGRADED: SECURE MERCHANT VERIFICATION ---
+  // --- SECURE MERCHANT VERIFICATION ---
   const verifyMerchant = async () => {
     setIsVerifying(true);
     setCustomerName(null);
@@ -419,7 +425,6 @@ export default function Home() {
 
   const handleResetService = (s: any) => {
     setActiveService(s); 
-    setStatus(""); 
     setAccountNumber(""); 
     setCustomerName(null); 
     setNairaAmount(""); 
@@ -862,57 +867,92 @@ export default function Home() {
                            <p className="text-2xl font-black text-emerald-600">₦{cableRenewAmount?.toLocaleString() || "0.00"}</p>
                         </div>
                      ) : (
-                        <div className="grid grid-cols-1 gap-2 max-h-[35vh] overflow-y-auto pr-1">
-                          {cableVariations.length === 0 ? (
-                            <p className="text-center text-xs font-bold text-slate-400 py-4"><Loader2 className="animate-spin inline-block mr-2" size={14}/> Fetching Live Packages...</p>
-                          ) : (
-                            cableVariations.map((plan) => {
-                              const cryptoPlanCost = (parseFloat(plan.variation_amount) / exchangeRate).toFixed(4);
-                              return (
-                                <button 
-                                  key={plan.variation_code} 
-                                  onClick={() => { setSelectedCablePlan(plan); setNairaAmount(plan.variation_amount); }} 
-                                  className={`p-3 rounded-xl border transition-all text-left flex justify-between items-center ${selectedCablePlan?.variation_code === plan.variation_code ? 'border-blue-500 bg-blue-50/50 shadow-sm' : 'border-slate-200 bg-white hover:border-slate-300'}`}
-                                >
-                                  <div>
-                                    <p className="font-black text-slate-800 text-xs">{plan.name}</p>
-                                    <p className="text-[9px] text-slate-400 font-bold mt-0.5">{cryptoPlanCost} {selectedToken.symbol}</p>
-                                  </div>
-                                  <p className="font-black text-blue-600 text-sm">₦{parseFloat(plan.variation_amount).toLocaleString()}</p>
-                                </button>
-                              );
-                            })
-                          )}
-                        </div>
+                        selectedCablePlan ? (
+                           <div className="relative animate-in zoom-in-95 duration-200 mt-2">
+                              <button onClick={() => { setSelectedCablePlan(null); setNairaAmount(""); }} className="absolute -top-3 -right-3 bg-slate-200 text-slate-500 hover:text-slate-800 hover:bg-slate-300 rounded-full p-1 transition-all z-10 shadow-sm border border-white">
+                                <XCircle size={16}/>
+                              </button>
+                              <div className="p-4 rounded-2xl border-2 border-blue-500 bg-blue-50 shadow-sm text-left">
+                                 <p className="font-black text-slate-900 text-lg tracking-tight">{selectedCablePlan.name}</p>
+                                 <p className="text-[10px] text-blue-500 font-bold uppercase tracking-wider mb-2">Selected Package</p>
+                                 <div className="pt-2 border-t border-blue-200/50 flex justify-between items-end">
+                                     <p className="font-black text-blue-600 text-xl leading-none">₦{parseFloat(selectedCablePlan.variation_amount).toLocaleString()}</p>
+                                     <p className="text-[10px] text-slate-500 font-bold">{(parseFloat(selectedCablePlan.variation_amount) / exchangeRate).toFixed(4)} {selectedToken.symbol}</p>
+                                 </div>
+                              </div>
+                           </div>
+                        ) : (
+                           <div className="grid grid-cols-1 gap-2 max-h-[35vh] overflow-y-auto pr-1">
+                             {cableVariations.length === 0 ? (
+                               <p className="text-center text-xs font-bold text-slate-400 py-4"><Loader2 className="animate-spin inline-block mr-2" size={14}/> Fetching Live Packages...</p>
+                             ) : (
+                               cableVariations.map((plan) => {
+                                 const cryptoPlanCost = (parseFloat(plan.variation_amount) / exchangeRate).toFixed(4);
+                                 return (
+                                   <button 
+                                     key={plan.variation_code} 
+                                     onClick={() => { setSelectedCablePlan(plan); setNairaAmount(plan.variation_amount); }} 
+                                     className="p-3 rounded-xl border border-slate-200 bg-white hover:border-slate-300 transition-all text-left flex justify-between items-center"
+                                   >
+                                     <div>
+                                       <p className="font-black text-slate-800 text-xs">{plan.name}</p>
+                                       <p className="text-[9px] text-slate-400 font-bold mt-0.5">{cryptoPlanCost} {selectedToken.symbol}</p>
+                                     </div>
+                                     <p className="font-black text-blue-600 text-sm">₦{parseFloat(plan.variation_amount).toLocaleString()}</p>
+                                   </button>
+                                 );
+                               })
+                             )}
+                           </div>
+                        )
                      )}
                   </div>
                 )}
 
-                {/* Amount Input (Hidden if CABLE is handling it dynamically) */}
+                {/* --- UPGRADED DATA UI BLOCK --- */}
                 {activeService.id === "DATA" && (
                    <div className="bg-slate-50 border border-slate-100 p-4 rounded-2xl animate-in fade-in slide-in-from-top-4">
                       <div className="flex gap-1.5 mb-4 border-b border-slate-200 pb-3 overflow-x-auto">
                         {DATA_CATEGORIES.map(cat => (
                           <button key={cat} onClick={() => { setActiveDataCategory(cat); setSelectedDataPlan(null); }} className={`px-4 py-1.5 rounded-lg text-[10px] font-black uppercase transition-colors whitespace-nowrap ${activeDataCategory === cat ? 'bg-purple-500/10 text-purple-600' : 'text-slate-500 hover:bg-slate-100'}`}>{cat}</button>
                         ))}
-                        <button onClick={() => setActiveDataCategory("Broadband")} className={`px-4 py-1.5 flex items-center gap-1.5 rounded-lg text-[10px] font-black uppercase transition-colors ${activeDataCategory === "Broadband" ? 'bg-orange-500/10 text-orange-600' : 'text-slate-500 hover:bg-slate-100'}`}><Briefcase size={12}/> Broadband</button>
+                        <button onClick={() => { setActiveDataCategory("Broadband"); setSelectedDataPlan(null); }} className={`px-4 py-1.5 flex items-center gap-1.5 rounded-lg text-[10px] font-black uppercase transition-colors ${activeDataCategory === "Broadband" ? 'bg-orange-500/10 text-orange-600' : 'text-slate-500 hover:bg-slate-100'}`}><Briefcase size={12}/> Broadband</button>
                       </div>
 
-                      <div className="grid grid-cols-2 gap-3 max-h-[30vh] overflow-y-auto pr-1">
-                          {(activeDataCategory === "Broadband" ? MOCK_DATA_PLANS.filter(p => p.isBroadband) : filteredDataPlans).map(plan => {
-                            const cryptoPlanCost = (plan.cost_naira / exchangeRate).toFixed(4);
-                            return (
-                              <button key={plan.id} onClick={() => { setSelectedDataPlan(plan); setNairaAmount(plan.cost_naira.toString()); }} className={`p-4 rounded-xl border-2 transition-all flex flex-col gap-1 text-left ${selectedDataPlan?.id === plan.id ? 'border-purple-500 bg-purple-50/50 scale-105 shadow-md' : 'border-slate-100 bg-white hover:border-slate-200'}`}>
-                                <p className="font-black text-slate-900 text-sm tracking-tight">{plan.name}</p>
-                                <p className="text-[10px] text-slate-500 font-bold uppercase tracking-wider">{plan.validity}</p>
-                                <div className="mt-2 pt-2 border-t border-slate-100 flex flex-col gap-0.5">
-                                    <p className="font-black text-purple-600 text-xs">₦{plan.cost_naira.toLocaleString()}</p>
-                                    <p className="text-[9px] text-slate-400 font-bold">{cryptoPlanCost} {selectedToken.symbol}</p>
-                                </div>
-                              </button>
-                            );
-                          })}
-                      </div>
+                      {selectedDataPlan ? (
+                         <div className="relative animate-in zoom-in-95 duration-200 mt-2">
+                            <button onClick={() => { setSelectedDataPlan(null); setNairaAmount(""); }} className="absolute -top-3 -right-3 bg-slate-200 text-slate-500 hover:text-slate-800 hover:bg-slate-300 rounded-full p-1 transition-all z-10 shadow-sm border border-white">
+                              <XCircle size={16}/>
+                            </button>
+                            <div className="p-4 rounded-2xl border-2 border-purple-500 bg-purple-50 flex flex-col gap-1 text-left shadow-sm">
+                               <p className="font-black text-slate-900 text-lg tracking-tight">{selectedDataPlan.name}</p>
+                               <p className="text-[10px] text-purple-500 font-bold uppercase tracking-wider">{selectedDataPlan.validity} • Selected Plan</p>
+                               <div className="mt-2 pt-2 border-t border-purple-200/50 flex justify-between items-end">
+                                   <div>
+                                     <p className="text-[10px] font-black text-slate-400 uppercase">Cost</p>
+                                     <p className="font-black text-purple-600 text-lg leading-none">₦{selectedDataPlan.cost_naira.toLocaleString()}</p>
+                                   </div>
+                                   <p className="text-[10px] text-slate-500 font-bold">{(selectedDataPlan.cost_naira / exchangeRate).toFixed(4)} {selectedToken.symbol}</p>
+                               </div>
+                            </div>
+                         </div>
+                      ) : (
+                         <div className="grid grid-cols-2 gap-3 max-h-[30vh] overflow-y-auto pr-1">
+                             {(activeDataCategory === "Broadband" ? MOCK_DATA_PLANS.filter(p => p.isBroadband) : filteredDataPlans).map(plan => {
+                               const cryptoPlanCost = (plan.cost_naira / exchangeRate).toFixed(4);
+                               return (
+                                 <button key={plan.id} onClick={() => { setSelectedDataPlan(plan); setNairaAmount(plan.cost_naira.toString()); }} className="p-4 rounded-xl border border-slate-200 bg-white hover:border-slate-300 transition-all flex flex-col gap-1 text-left shadow-sm">
+                                   <p className="font-black text-slate-900 text-sm tracking-tight">{plan.name}</p>
+                                   <p className="text-[10px] text-slate-500 font-bold uppercase tracking-wider">{plan.validity}</p>
+                                   <div className="mt-2 pt-2 border-t border-slate-100 flex flex-col gap-0.5">
+                                       <p className="font-black text-purple-600 text-xs">₦{plan.cost_naira.toLocaleString()}</p>
+                                       <p className="text-[9px] text-slate-400 font-bold">{cryptoPlanCost} {selectedToken.symbol}</p>
+                                   </div>
+                                 </button>
+                               );
+                             })}
+                         </div>
+                      )}
                    </div>
                 )}
 
