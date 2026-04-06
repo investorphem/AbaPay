@@ -45,9 +45,9 @@ const SUPPORTED_TOKENS = [
 ];
 
 const PRE_SELECT_AMOUNTS = ["100", "200", "500", "1000", "2000"];
+// UPGRADED: Updated Categories to match live data plans perfectly
+const DATA_CATEGORIES = ["Daily", "Weekly", "Monthly", "Mega Plans"];
 const ITEMS_PER_PAGE = 5;
-
-// (MOCK_DATA_PLANS has been officially deleted!)
 
 export default function Home() {
   const [isInitiallyLoading, setIsInitiallyLoading] = useState(true);
@@ -71,7 +71,6 @@ export default function Home() {
   const [cableVariations, setCableVariations] = useState<any[]>([]);
   const [selectedCablePlan, setSelectedCablePlan] = useState<any>(null);
 
-  // UPGRADED: Dynamic Data Variations State
   const [dataVariations, setDataVariations] = useState<any[]>([]);
 
   const [activeService, setActiveService] = useState(SERVICES[0]);
@@ -79,6 +78,7 @@ export default function Home() {
   const [cableProvider, setCableProvider] = useState(CABLE_PROVIDERS_LIST[0].serviceID);
   const [telecomProvider, setTelecomProvider] = useState(TELECOM_PROVIDERS[0]);
   const [meterType, setMeterType] = useState<"prepaid" | "postpaid">("prepaid");
+  const [activeDataCategory, setActiveDataCategory] = useState(DATA_CATEGORIES[0]);
   const [selectedDataPlan, setSelectedDataPlan] = useState<any>(null);
 
   const [selectedReceipt, setSelectedReceipt] = useState<any>(null); 
@@ -176,7 +176,6 @@ export default function Home() {
     fetchBalance();
   }, [address, selectedToken, activeChain, isMainnet]);
 
-  // --- UPGRADED: SECURE CABLE & DATA VARIATION FETCHING ---
   useEffect(() => {
     if (activeService.id === "CABLE") {
       const fetchVariations = async () => {
@@ -191,7 +190,7 @@ export default function Home() {
       fetchVariations();
     } else if (activeService.id === "DATA") {
       const fetchDataVariations = async () => {
-        setDataVariations([]); // Clear list when network switches
+        setDataVariations([]);
         try {
           const res = await fetch(`/api/variations?serviceID=${telecomProvider}-data`);
           const data = await res.json();
@@ -272,6 +271,26 @@ export default function Home() {
     return { cryptoToCharge: crypto.toFixed(4), currentFee: fee };
   }, [nairaAmount, exchangeRate, activeService]);
 
+  // UPGRADED: Smart Categorization Engine for Live Data Packages
+  const filteredLiveDataPlans = useMemo(() => {
+    if (!dataVariations || dataVariations.length === 0) return [];
+    
+    return dataVariations.filter(plan => {
+      const name = plan.name.toLowerCase();
+      let category = "Mega Plans"; 
+      
+      if (name.includes('1 day') || name.includes('2 day') || name.includes('daily')) {
+        category = "Daily";
+      } else if (name.includes('week') || name.includes('7 day') || name.includes('14 day')) {
+        category = "Weekly";
+      } else if (name.includes('month') || name.includes('30 day')) {
+        category = "Monthly";
+      }
+      
+      return category === activeDataCategory;
+    });
+  }, [dataVariations, activeDataCategory]);
+
   const isFormValid = useMemo(() => {
     const amount = parseFloat(nairaAmount);
     if (!nairaAmount || isNaN(amount) || amount < dynamicMinAmount) return false;
@@ -280,7 +299,6 @@ export default function Home() {
       return accountNumber.length === 11 && accountNumber.startsWith("0");
     }
     if (activeService.id === "DATA") {
-      // UPGRADED: Data now strictly requires a selected plan from the live list!
       return accountNumber.length === 11 && accountNumber.startsWith("0") && selectedDataPlan !== null;
     }
     if (activeService.id === "ELECTRICITY") {
@@ -476,26 +494,6 @@ export default function Home() {
     }
   };
 
-  const submitSupportTicket = async () => {
-    if (!supportMessage.trim()) return;
-    setIsSendingSupport(true);
-    try {
-      const formData = new FormData();
-      formData.append("message", supportMessage);
-      if (address) formData.append("userAddress", address);
-      if (supportFile) formData.append("file", supportFile);
-      await fetch('/api/support', { method: 'POST', body: formData });
-      setIsSupportOpen(false);
-      setSupportMessage("");
-      setSupportFile(null);
-      showToast("Ticket Submitted", "AbaPay Support has received your request.", "success");
-    } catch (error) {
-      showToast("Connection Error", "Failed to send the ticket.", "error");
-    } finally {
-      setIsSendingSupport(false);
-    }
-  };
-
   const currentDisco = useMemo(() => {
     return ELECTRICITY_DISCOS.find(d => d.serviceID === elecProvider);
   }, [elecProvider]);
@@ -582,14 +580,6 @@ export default function Home() {
                     >
                       <Share2 size={16}/> Share
                     </button>
-                    {selectedReceipt.status !== 'SUCCESS' && (
-                       <button 
-                         onClick={() => { setSelectedReceipt(null); setIsSupportOpen(true); }}
-                         className="flex-1 py-4 bg-orange-100 hover:bg-orange-200 text-orange-700 rounded-2xl text-xs font-black uppercase tracking-widest flex items-center justify-center gap-2 transition-colors active:scale-95"
-                       >
-                         <HelpCircle size={16}/> Support
-                       </button>
-                    )}
                  </div>
               </div>
            </div>
@@ -689,31 +679,6 @@ export default function Home() {
                  ))}
               </div>
            </div>
-        </div>
-      )}
-
-      {isSupportOpen && (
-        <div className="fixed inset-0 z-[70] bg-slate-900/60 backdrop-blur-sm flex justify-center items-center p-4 animate-in fade-in">
-          <div className="bg-white w-full max-w-md rounded-[2rem] shadow-2xl p-6 animate-in zoom-in-95 duration-200">
-            <div className="flex justify-between items-center mb-4 shrink-0 border-b border-slate-100 pb-4">
-              <h2 className="text-2xl font-black flex items-center gap-2.5 tracking-tight text-slate-900"><Mail className="text-emerald-500" size={24}/> AbaPay Support</h2>
-              <button onClick={() => setIsSupportOpen(false)} className="p-2 bg-slate-100 rounded-full hover:bg-slate-200"><XCircle size={20} className="text-slate-500" /></button>
-            </div>
-            <textarea 
-              className="w-full bg-slate-50 border border-slate-200 rounded-xl p-5 mb-4 text-sm font-medium outline-none focus:border-emerald-500 transition-colors leading-relaxed"
-              rows={4} placeholder="Describe your issue in detail. AbaPay Support typically responds within 30 minutes."
-              value={supportMessage} onChange={(e) => setSupportMessage(e.target.value)}
-            />
-            <div className="flex gap-2 mb-6">
-              <input type="file" ref={fileInputRef} className="hidden" onChange={(e) => setSupportFile(e.target.files?.[0] || null)} />
-              <button onClick={() => fileInputRef.current?.click()} className="flex-1 py-4 bg-slate-100 hover:bg-slate-200 rounded-xl text-[11px] font-black uppercase tracking-wider flex items-center justify-center gap-2 text-slate-600">
-                <Paperclip size={16} /> {supportFile ? supportFile.name.slice(0, 10) + '...' : "Attach Receipt/Screenshot"}
-              </button>
-            </div>
-            <button onClick={submitSupportTicket} disabled={isSendingSupport} className="w-full bg-slate-900 hover:bg-black text-white font-black py-5 rounded-2xl flex items-center justify-center gap-2 transition-all active:scale-95 disabled:opacity-50">
-              {isSendingSupport ? <Loader2 className="animate-spin" size={18}/> : <><Send size={18} className="text-emerald-400"/> SUBMIT SUPPORT TICKET</>}
-            </button>
-          </div>
         </div>
       )}
 
@@ -1027,6 +992,12 @@ export default function Home() {
                 {/* --- UPGRADED LIVE DATA UI BLOCK --- */}
                 {activeService.id === "DATA" && (
                    <div className="bg-slate-50 border border-slate-100 p-4 rounded-2xl animate-in fade-in slide-in-from-top-4">
+                      <div className="flex gap-2 mb-4 border-b border-slate-200 pb-3 overflow-x-auto no-scrollbar shadow-inner bg-slate-100 p-1.5 rounded-2xl">
+                        {DATA_CATEGORIES.map(cat => (
+                          <button key={cat} onClick={() => { setActiveDataCategory(cat); setSelectedDataPlan(null); }} className={`px-4 py-2.5 rounded-xl text-[11px] font-black uppercase transition-all whitespace-nowrap ${activeDataCategory === cat ? 'bg-white shadow-lg text-purple-600' : 'text-slate-500 hover:text-slate-700'}`}>{cat}</button>
+                        ))}
+                      </div>
+
                       {selectedDataPlan ? (
                          <div className="relative animate-in zoom-in-95 duration-200 mt-2">
                             <button onClick={() => { setSelectedDataPlan(null); setNairaAmount(""); }} className="absolute -top-3 -right-3 bg-slate-200 text-slate-500 hover:text-slate-800 hover:bg-slate-300 rounded-full p-1 transition-all z-10 shadow-sm border border-white">
@@ -1034,7 +1005,7 @@ export default function Home() {
                             </button>
                             <div className="p-4 rounded-2xl border-2 border-purple-500 bg-purple-50 flex flex-col gap-1 text-left shadow-sm">
                                <p className="font-black text-slate-900 text-lg tracking-tight">{selectedDataPlan.name}</p>
-                               <p className="text-[10px] text-purple-500 font-bold uppercase tracking-wider">Live Data Plan • Selected</p>
+                               <p className="text-[10px] text-purple-500 font-bold uppercase tracking-wider">Selected Plan</p>
                                <div className="mt-2 pt-2 border-t border-purple-200/50 flex justify-between items-end">
                                    <div>
                                      <p className="text-[10px] font-black text-slate-400 uppercase">Cost</p>
@@ -1047,9 +1018,11 @@ export default function Home() {
                       ) : (
                          <div className="grid grid-cols-1 gap-2 max-h-[35vh] overflow-y-auto pr-1">
                              {dataVariations.length === 0 ? (
-                               <p className="text-center text-xs font-bold text-slate-400 py-4"><Loader2 className="animate-spin inline-block mr-2" size={14}/> Fetching Live Data Plans...</p>
+                               <p className="text-center text-xs font-bold text-slate-400 py-4"><Loader2 className="animate-spin inline-block mr-2" size={14}/> Fetching Data Plans...</p>
+                             ) : filteredLiveDataPlans.length === 0 ? (
+                               <p className="text-center text-xs font-bold text-slate-400 py-4">No {activeDataCategory} plans available.</p>
                              ) : (
-                               dataVariations.map(plan => {
+                               filteredLiveDataPlans.map(plan => {
                                  const cryptoPlanCost = (parseFloat(plan.variation_amount) / exchangeRate).toFixed(4);
                                  return (
                                    <button 
@@ -1062,7 +1035,7 @@ export default function Home() {
                                          <p className="font-black text-purple-600 text-sm whitespace-nowrap group-hover:scale-105 transition-transform">₦{parseFloat(plan.variation_amount).toLocaleString()}</p>
                                      </div>
                                      <div className="mt-1 pt-1.5 border-t border-slate-100 flex justify-between items-center">
-                                         <p className="text-[9px] text-slate-400 font-bold">Live Data Package</p>
+                                         <p className="text-[9px] text-slate-400 font-bold uppercase">{activeDataCategory} Plan</p>
                                          <p className="text-[9px] text-slate-500 font-black bg-slate-100 px-2 py-0.5 rounded">{cryptoPlanCost} {selectedToken.symbol}</p>
                                      </div>
                                    </button>
