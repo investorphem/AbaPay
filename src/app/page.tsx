@@ -11,7 +11,7 @@ import {
   ChevronLeft, ChevronRight, RefreshCw, ListPlus
 } from "lucide-react";
 import { supabase } from "@/utils/supabase";
-import { ELECTRICITY_DISCOS } from "./discos"; // IMPORT THE LOGO MAP
+import { ELECTRICITY_DISCOS } from "./discos";
 
 // --- WEB3 CONFIG ---
 const ABAPAY_ABI = [{"inputs":[{"internalType":"address","name":"tokenAddress","type":"address"},{"internalType":"string","name":"serviceType","type":"string"},{"internalType":"string","name":"accountNumber","type":"string"},{"internalType":"uint256","name":"amount","type":"uint256"}],"name":"payBill","outputs":[],"stateMutability":"nonpayable","type":"function"}];
@@ -27,9 +27,16 @@ const SERVICES = [
   { id: "CABLE", name: "Cable TV", icon: Tv, color: "text-[#ec4899]", bg: "bg-pink-500/10" },
 ];
 
-// UPGRADED: Updated to strict VTpass mainnet service IDs
 const ELECTRICITY_PROVIDER_IDS = ELECTRICITY_DISCOS.map(d => d.serviceID); 
-const CABLE_PROVIDERS = ["dstv", "gotv", "startimes", "showmax"];
+
+// UPGRADED: Added Cable Provider Objects with Logos
+const CABLE_PROVIDERS_LIST = [
+  { serviceID: "dstv", displayName: "DSTV", logo: "/dstv.png" },
+  { serviceID: "gotv", displayName: "GOTV", logo: "/gotv.png" },
+  { serviceID: "startimes", displayName: "Startimes", logo: "/startimes.png" },
+  { serviceID: "showmax", displayName: "Showmax", logo: "/showmax.png" },
+];
+
 const TELECOM_PROVIDERS = ["mtn", "glo", "9mobile", "airtel"]; 
 
 const SUPPORTED_TOKENS = [
@@ -57,7 +64,6 @@ const MOCK_DATA_PLANS = [
 export default function Home() {
   const [isInitiallyLoading, setIsInitiallyLoading] = useState(true);
 
-  // --- SYSTEM STATES ---
   const [address, setAddress] = useState<string | null>(null);
   const [client, setClient] = useState<any>(null);
   const [nairaAmount, setNairaAmount] = useState(""); 
@@ -68,27 +74,23 @@ export default function Home() {
   const [isMiniPay, setIsMiniPay] = useState(false);
   const [isProcessing, setIsProcessing] = useState(false); 
 
-  // Validation States
   const [customerName, setCustomerName] = useState<string | null>(null);
   const [isVerifying, setIsVerifying] = useState(false);
 
-  // --- CABLE TV STATES ---
   const [cableCurrentBouquet, setCableCurrentBouquet] = useState<string | null>(null);
   const [cableRenewAmount, setCableRenewAmount] = useState<number | null>(null);
   const [cableSubscriptionType, setCableSubscriptionType] = useState<"renew" | "change">("renew");
   const [cableVariations, setCableVariations] = useState<any[]>([]);
   const [selectedCablePlan, setSelectedCablePlan] = useState<any>(null);
 
-  // Service States
   const [activeService, setActiveService] = useState(SERVICES[0]);
   const [elecProvider, setElecProvider] = useState(ELECTRICITY_PROVIDER_IDS[0]);
-  const [cableProvider, setCableProvider] = useState(CABLE_PROVIDERS[0]);
+  const [cableProvider, setCableProvider] = useState(CABLE_PROVIDERS_LIST[0].serviceID);
   const [telecomProvider, setTelecomProvider] = useState(TELECOM_PROVIDERS[0]);
   const [meterType, setMeterType] = useState<"prepaid" | "postpaid">("prepaid");
   const [activeDataCategory, setActiveDataCategory] = useState(DATA_CATEGORIES[0]);
   const [selectedDataPlan, setSelectedDataPlan] = useState<any>(null);
 
-  // Modals & UI States
   const [selectedReceipt, setSelectedReceipt] = useState<any>(null); 
   const [isTermsOpen, setIsTermsOpen] = useState(false); 
   const [isPrivacyOpen, setIsPrivacyOpen] = useState(false); 
@@ -99,20 +101,18 @@ export default function Home() {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [isSelectionModalOpen, setIsSelectionModalOpen] = useState(false);
   const [modalTitle, setModalTitle] = useState("");
-  const [modalOptions, setModalOptions] = useState<any[]>([]); // UPGRADED: Can be strings or objects
+  const [modalOptions, setModalOptions] = useState<any[]>([]); 
   const [modalCallback, setModalCallback] = useState<((value: string) => void) | null>(null);
-  const [modalType, setModalType] = useState<'standard' | 'token' | 'disco'>('standard'); // UPGRADED
+  const [modalType, setModalType] = useState<'standard' | 'token' | 'provider'>('standard'); 
   const [toast, setToast] = useState<{title: string, message: string, type: 'success' | 'error'} | null>(null);
   const [currentPage, setCurrentPage] = useState(1);
 
-  // Token & Balance States
   const [selectedToken, setSelectedToken] = useState(SUPPORTED_TOKENS[0]);
   const [walletBalance, setWalletBalance] = useState("0.00");
   const [isFetchingBalance, setIsFetchingBalance] = useState(false);
   const [exchangeRate, setExchangeRate] = useState<number>(1550); 
   const [transactions, setTransactions] = useState<any[]>([]);
 
-  // Env Config
   const isMainnet = process.env.NEXT_PUBLIC_NETWORK === "celo";
   const activeChain = isMainnet ? celo : celoSepolia;
   const ABAPAY_CONTRACT = process.env.NEXT_PUBLIC_ABAPAY_ADDRESS as `0x${string}`;
@@ -133,12 +133,10 @@ export default function Home() {
   const currentTransactions = transactions.slice(indexOfFirstItem, indexOfLastItem);
   const totalPages = Math.ceil(transactions.length / ITEMS_PER_PAGE);
 
-  // --- AUTO-CLEAR STICKY ERRORS ---
   useEffect(() => {
     if (status) setStatus("");
   }, [accountNumber, nairaAmount, activeService, cableSubscriptionType, selectedDataPlan, selectedCablePlan]);
 
-  // --- INITIALIZATION ---
   useEffect(() => {
     async function initSystem() {
       const savedHistory = localStorage.getItem("abapay_history");
@@ -166,7 +164,6 @@ export default function Home() {
     initSystem();
   }, [activeChain]);
 
-  // --- FETCH BALANCE ---
   useEffect(() => {
     async function fetchBalance() {
       if (!address) return;
@@ -189,7 +186,6 @@ export default function Home() {
     fetchBalance();
   }, [address, selectedToken, activeChain, isMainnet]);
 
-  // --- SECURE CABLE VARIATION FETCHING ---
   useEffect(() => {
     if (activeService.id === "CABLE") {
       const fetchVariations = async () => {
@@ -205,7 +201,6 @@ export default function Home() {
     }
   }, [activeService.id, cableProvider]);
 
-  // --- AUTO-DETECT TELECOM LOGIC ---
   useEffect(() => {
     if ((activeService.id === "AIRTIME" || activeService.id === "DATA") && accountNumber.length >= 4) {
       const prefix = accountNumber.substring(0, 4);
@@ -216,7 +211,6 @@ export default function Home() {
     }
   }, [accountNumber, activeService]);
 
-  // --- SECURE MERCHANT VERIFICATION ---
   const verifyMerchant = async () => {
     setIsVerifying(true);
     setCustomerName(null);
@@ -252,7 +246,6 @@ export default function Home() {
             }
           }
         } else {
-            // UPGRADED: Friendly error during verification
             setStatus("Meter/Account number could not be verified.");
         }
     } catch (e) { console.error("Verify Error", e); }
@@ -302,7 +295,6 @@ export default function Home() {
     return false;
   }, [accountNumber, nairaAmount, activeService, customerName, dynamicMinAmount, cableSubscriptionType, selectedCablePlan, cableProvider]);
 
-  // --- PAYMENT EXECUTION ---
   const handlePayment = async () => {
     if (!address || !client) return setStatus("Connect Wallet First");
 
@@ -421,7 +413,6 @@ export default function Home() {
         newTx.status = "SUCCESS";
         showToast("Vending Successful", "Your utility has been successfully delivered.", "success");
       } else {
-        // UPGRADED:result.message now contains the friendly translated message from the backend dictionary
         setStatus(`Error: ${result.message || 'Transaction Failed'}`);
         newTx.status = "FAILED/DELAYED";
       }
@@ -456,8 +447,7 @@ export default function Home() {
     setCableSubscriptionType("renew");
   };
 
-  // UPGRADED: More flexible selection modal opening
-  const openSelectionModal = (type: 'standard' | 'token' | 'disco', title: string, options: any[], callback: (value: string) => void) => {
+  const openSelectionModal = (type: 'standard' | 'token' | 'provider', title: string, options: any[], callback: (value: string) => void) => {
     setModalType(type);
     setModalTitle(title);
     setModalOptions(options);
@@ -503,10 +493,14 @@ export default function Home() {
     return MOCK_DATA_PLANS.filter(plan => plan.category === activeDataCategory);
   }, [activeDataCategory]);
 
-  // UPGRADED: Define current disco details for dropdown display
   const currentDisco = useMemo(() => {
     return ELECTRICITY_DISCOS.find(d => d.serviceID === elecProvider);
   }, [elecProvider]);
+
+  // UPGRADED: Added current Cable object to display the logo in the dropdown
+  const currentCable = useMemo(() => {
+    return CABLE_PROVIDERS_LIST.find(c => c.serviceID === cableProvider);
+  }, [cableProvider]);
 
   return (
     <main className="min-h-screen bg-slate-50 text-slate-900 font-sans p-4 flex flex-col items-center pb-20 relative">
@@ -529,7 +523,6 @@ export default function Home() {
         </div>
       )}
 
-      {/* --- TOAST --- */}
       {toast && (
         <div className="fixed top-4 right-4 sm:top-6 sm:right-6 z-[100] animate-in slide-in-from-top-8 fade-in duration-300">
           <div className="bg-[#111114] border border-slate-800 shadow-2xl rounded-2xl p-4 flex items-start gap-3 w-[300px]">
@@ -545,7 +538,6 @@ export default function Home() {
         </div>
       )}
 
-      {/* --- RECEIPT MODAL --- */}
       {selectedReceipt && (
         <div className="fixed inset-0 z-[60] bg-slate-900/80 backdrop-blur-md flex justify-center items-center p-6 animate-in fade-in">
            <div className="bg-white w-full max-w-sm rounded-[2.5rem] overflow-hidden shadow-2xl animate-in zoom-in-95">
@@ -602,7 +594,6 @@ export default function Home() {
         </div>
       )}
 
-      {/* --- TERMS MODAL --- */}
       {isTermsOpen && (
         <div className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-sm flex justify-center items-center p-4 animate-in fade-in" onClick={() => setIsTermsOpen(false)}>
            <div className="bg-white w-full max-w-md rounded-[2rem] shadow-2xl p-6 flex flex-col max-h-[80vh] animate-in zoom-in-95 duration-200" onClick={(e) => e.stopPropagation()}>
@@ -622,7 +613,6 @@ export default function Home() {
         </div>
       )}
 
-      {/* --- PRIVACY MODAL --- */}
       {isPrivacyOpen && (
         <div className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-sm flex justify-center items-center p-4 animate-in fade-in" onClick={() => setIsPrivacyOpen(false)}>
            <div className="bg-white w-full max-w-md rounded-[2rem] shadow-2xl p-6 flex flex-col max-h-[80vh] animate-in zoom-in-95 duration-200" onClick={(e) => e.stopPropagation()}>
@@ -642,7 +632,7 @@ export default function Home() {
         </div>
       )}
 
-      {/* UPGRADED: Complex Selection Modal (Supports standard, token, and disco maps) */}
+      {/* UPGRADED: Modal handles 'provider' type beautifully for both Electricity and Cable */}
       {isSelectionModalOpen && (
         <div className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-sm flex justify-center items-center p-4 animate-in fade-in" onClick={() => setIsSelectionModalOpen(false)}>
            <div className="bg-white w-full max-w-sm rounded-[2rem] shadow-2xl p-6 animate-in zoom-in-95 duration-200" onClick={(e) => e.stopPropagation()}>
@@ -665,22 +655,24 @@ export default function Home() {
                    </button>
                  ))}
 
-                 {modalType === 'disco' && (modalOptions as typeof ELECTRICITY_DISCOS).map(disco => (
+                 {modalType === 'provider' && (modalOptions as any[]).map(provider => (
                     <button 
-                        key={disco.serviceID} 
-                        onClick={() => { modalCallback?.(disco.serviceID); setIsSelectionModalOpen(false); }}
-                        className="w-full text-left p-4 rounded-2xl font-bold text-slate-700 bg-white border border-slate-100 hover:border-orange-300 hover:bg-orange-50/50 transition-all flex justify-between items-center group"
+                        key={provider.serviceID} 
+                        onClick={() => { modalCallback?.(provider.serviceID); setIsSelectionModalOpen(false); }}
+                        className={`w-full text-left p-4 rounded-2xl font-bold text-slate-700 bg-white border hover:bg-slate-50 transition-all flex justify-between items-center group ${activeService.id === 'ELECTRICITY' ? 'hover:border-orange-300' : 'hover:border-pink-300'}`}
                     >
                         <div className="flex items-center gap-4">
                             <div className="w-12 h-12 rounded-full border border-slate-100 bg-white p-2 flex items-center justify-center shadow-sm overflow-hidden group-hover:shadow-lg transition-shadow">
-                                <img src={disco.logo} alt={disco.displayName} className="w-full h-full object-contain" />
+                                <img src={provider.logo} alt={provider.displayName} className="w-full h-full object-contain" />
                             </div>
                             <div>
-                                <span className="text-sm font-black text-slate-900 tracking-tight">{disco.displayName}</span>
-                                <p className="text-[10px] font-black uppercase text-slate-400 tracking-wider group-hover:text-orange-700">{disco.serviceID}</p>
+                                <span className="text-sm font-black text-slate-900 tracking-tight">{provider.displayName}</span>
+                                <p className={`text-[10px] font-black uppercase text-slate-400 tracking-wider transition-colors ${activeService.id === 'ELECTRICITY' ? 'group-hover:text-orange-700' : 'group-hover:text-pink-700'}`}>{provider.serviceID}</p>
                             </div>
                         </div>
-                        {elecProvider === disco.serviceID && <CheckCircle2 size={20} className="text-orange-500"/>}
+                        {(activeService.id === 'ELECTRICITY' ? elecProvider === provider.serviceID : cableProvider === provider.serviceID) && (
+                          <CheckCircle2 size={20} className={activeService.id === 'ELECTRICITY' ? "text-orange-500" : "text-pink-500"}/>
+                        )}
                     </button>
                  ))}
 
@@ -699,7 +691,6 @@ export default function Home() {
         </div>
       )}
 
-      {/* Support Modal */}
       {isSupportOpen && (
         <div className="fixed inset-0 z-[70] bg-slate-900/60 backdrop-blur-sm flex justify-center items-center p-4 animate-in fade-in">
           <div className="bg-white w-full max-w-md rounded-[2rem] shadow-2xl p-6 animate-in zoom-in-95 duration-200">
@@ -840,9 +831,8 @@ export default function Home() {
                         ))}
                       </div>
                     ) : activeService.id === "ELECTRICITY" ? (
-                        // UPGRADED: Electricity provider dropdown with logo
                         <button 
-                            onClick={() => openSelectionModal('disco', "Select Provider", ELECTRICITY_DISCOS, setElecProvider)}
+                            onClick={() => openSelectionModal('provider', "Select Provider", ELECTRICITY_DISCOS, setElecProvider)}
                             className="w-full bg-white border border-slate-200 p-4 rounded-2xl flex justify-between items-center hover:border-orange-400 transition-colors shadow-sm active:scale-[0.98]"
                         >
                             <div className="flex items-center gap-4">
@@ -857,13 +847,21 @@ export default function Home() {
                             <ChevronDown size={18} className="text-slate-400"/>
                         </button>
                     ) : (
-                      // CABLE
+                      // UPGRADED: Cable UI matches Electricity Dropdown formatting
                       <button 
-                        onClick={() => openSelectionModal('standard', "Select Provider", CABLE_PROVIDERS, setCableProvider)}
-                        className="w-full bg-slate-50 border border-slate-100 p-4 rounded-2xl font-bold text-slate-800 outline-none uppercase text-xs hover:border-emerald-300 transition-all text-left flex justify-between items-center"
+                        onClick={() => openSelectionModal('provider', "Select Provider", CABLE_PROVIDERS_LIST, setCableProvider)}
+                        className="w-full bg-white border border-slate-200 p-4 rounded-2xl flex justify-between items-center hover:border-pink-400 transition-colors shadow-sm active:scale-[0.98]"
                       >
-                        <span>{cableProvider.toUpperCase()}</span>
-                        <ChevronDown size={14} className="text-slate-400"/>
+                        <div className="flex items-center gap-4">
+                            <div className="w-10 h-10 rounded-full border border-slate-100 bg-white p-2 flex items-center justify-center shadow-inner overflow-hidden">
+                                <img src={currentCable?.logo} alt={currentCable?.displayName} className="w-full h-full object-contain" />
+                            </div>
+                            <div>
+                                <span className="text-sm font-black text-slate-900 tracking-tight">{currentCable?.displayName}</span>
+                                <p className="text-[10px] font-black uppercase text-pink-600 tracking-wider">Tap to change Provider</p>
+                            </div>
+                        </div>
+                        <ChevronDown size={18} className="text-slate-400"/>
                       </button>
                     )}
 
@@ -985,7 +983,6 @@ export default function Home() {
                          )}
                        </>
                      ) : (
-                       // STARTIMES & SHOWMAX LOGIC
                        selectedCablePlan ? (
                           <div className="relative animate-in zoom-in-95 duration-200 mt-2">
                              <button onClick={() => { setSelectedCablePlan(null); setNairaAmount(""); }} className="absolute -top-3 -right-3 bg-slate-200 text-slate-500 hover:text-slate-800 hover:bg-slate-300 rounded-full p-1 transition-all z-10 shadow-sm border border-white">
@@ -1202,7 +1199,6 @@ export default function Home() {
           <div className="flex gap-6">
             <a href="#" onClick={(e) => { e.preventDefault(); setIsTermsOpen(true); }} className="text-[10px] font-black text-slate-400 hover:text-emerald-600 uppercase tracking-tight">Terms of Service</a>
             <a href="#" onClick={(e) => { e.preventDefault(); setIsPrivacyOpen(true); }} className="text-[10px] font-black text-slate-400 hover:text-emerald-600 uppercase tracking-tight">Privacy Policy</a>
-            <a href="#" onClick={(e) => { e.preventDefault(); setIsSupportOpen(true); }} className="text-[10px] font-black text-slate-400 hover:text-emerald-600 uppercase tracking-tight">Customer Support</a>
           </div>
           <p className="text-[9px] font-medium text-slate-300 uppercase tracking-[0.2em] mt-2">© 2026 MASONODE ORGANISATION • THE ABAPAY PROTOCOL v3.0</p>
         </footer>
