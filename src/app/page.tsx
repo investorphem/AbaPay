@@ -8,7 +8,7 @@ import {
   CheckCircle2, ExternalLink, Lightbulb, Phone, Wifi, Tv, 
   ChevronDown, Loader2, HelpCircle, XCircle, Mail, 
   Paperclip, Send, Coins, Briefcase, Download, Share2,
-  ChevronLeft, ChevronRight
+  ChevronLeft, ChevronRight, RefreshCw, ListPlus
 } from "lucide-react";
 import { supabase } from "@/utils/supabase";
 
@@ -30,7 +30,7 @@ const ELECTRICITY_PROVIDERS = ["aba-electric", "ikedc", "ekedc", "ibedc", "aedc"
 const CABLE_PROVIDERS = ["dstv", "gotv", "startimes", "showmax"];
 const TELECOM_PROVIDERS = ["mtn", "glo", "9mobile", "airtel"]; 
 
-// UPGRADED: Changed cUSD to USDm
+// UPGRADED: 3 Stablecoins, exact USD₮ symbol, and USDm
 const SUPPORTED_TOKENS = [
   { symbol: "USD₮", decimals: 6, mainnet: "0x48065fbbe25f71c9282ddf5e1cd6d6a887483d5e", sepolia: "0xd077A400968890Eacc75cdc901F0356c943e4fDb", logo: "/usdt.png" },
   { symbol: "USDC", decimals: 6, mainnet: "0xcebA9300f2b948710d2653dD7B07f33A8B32118C", sepolia: "0x01C5C0122039549AD1493B8220cABEdD739BC44E", logo: "/usdc.png" },
@@ -38,21 +38,18 @@ const SUPPORTED_TOKENS = [
 ];
 
 const PRE_SELECT_AMOUNTS = ["100", "200", "500", "1000", "2000"];
+const DATA_CATEGORIES = ["Daily", "Weekly", "Monthly"];
+const ITEMS_PER_PAGE = 5;
 
+// MOCK DATA PLANS (For Telecom)
 const MOCK_DATA_PLANS = [
   { id: "D1", category: "Daily", name: "100MB", validity: "24 Hrs", cost_naira: 100 },
   { id: "D2", category: "Daily", name: "350MB", validity: "24 Hrs", cost_naira: 200 },
   { id: "D3", category: "Daily", name: "1GB", validity: "24 Hrs", cost_naira: 350 },
   { id: "W1", category: "Weekly", name: "1GB", validity: "7 Days", cost_naira: 600 },
-  { id: "W2", category: "Weekly", name: "2.5GB", validity: "7 Days", cost_naira: 1200 },
-  { id: "W3", category: "Weekly", name: "Broadband Extra", validity: "7 Days", cost_naira: 3500, isBroadband: true },
   { id: "M1", category: "Monthly", name: "1.5GB", validity: "30 Days", cost_naira: 1100 },
-  { id: "M2", category: "Monthly", name: "4.5GB", validity: "30 Days", cost_naira: 2200 },
   { id: "M3", category: "Monthly", name: "Broadband Unlimited", validity: "30 Days", cost_naira: 18000, isBroadband: true },
 ];
-
-const DATA_CATEGORIES = ["Daily", "Weekly", "Monthly"];
-const ITEMS_PER_PAGE = 5;
 
 export default function Home() {
   const [isInitiallyLoading, setIsInitiallyLoading] = useState(true);
@@ -68,34 +65,16 @@ export default function Home() {
   const [isMiniPay, setIsMiniPay] = useState(false);
   const [isProcessing, setIsProcessing] = useState(false); 
 
-  // Modals
-  const [selectedReceipt, setSelectedReceipt] = useState<any>(null); 
-  const [isTermsOpen, setIsTermsOpen] = useState(false); 
-  const [isPrivacyOpen, setIsPrivacyOpen] = useState(false); 
-
   // Validation States
   const [customerName, setCustomerName] = useState<string | null>(null);
   const [isVerifying, setIsVerifying] = useState(false);
 
-  // Support States
-  const [isSupportOpen, setIsSupportOpen] = useState(false);
-  const [supportMessage, setSupportMessage] = useState("");
-  const [supportFile, setSupportFile] = useState<File | null>(null);
-  const [isSendingSupport, setIsSendingSupport] = useState(false);
-  const fileInputRef = useRef<HTMLInputElement>(null);
-
-  const [isSelectionModalOpen, setIsSelectionModalOpen] = useState(false);
-  const [modalTitle, setModalTitle] = useState("");
-  const [modalOptions, setModalOptions] = useState<string[]>([]);
-  const [modalCallback, setModalCallback] = useState<((value: string) => void) | null>(null);
-
-  const [toast, setToast] = useState<{title: string, message: string, type: 'success' | 'error'} | null>(null);
-  const [currentPage, setCurrentPage] = useState(1);
-
-  const showToast = (title: string, message: string, type: 'success' | 'error' = 'success') => {
-    setToast({ title, message, type });
-    setTimeout(() => setToast(null), 5000);
-  };
+  // --- CABLE TV STATES ---
+  const [cableCurrentBouquet, setCableCurrentBouquet] = useState<string | null>(null);
+  const [cableRenewAmount, setCableRenewAmount] = useState<number | null>(null);
+  const [cableSubscriptionType, setCableSubscriptionType] = useState<"renew" | "change">("renew");
+  const [cableVariations, setCableVariations] = useState<any[]>([]);
+  const [selectedCablePlan, setSelectedCablePlan] = useState<any>(null);
 
   // Service States
   const [activeService, setActiveService] = useState(SERVICES[0]);
@@ -103,15 +82,29 @@ export default function Home() {
   const [cableProvider, setCableProvider] = useState(CABLE_PROVIDERS[0]);
   const [telecomProvider, setTelecomProvider] = useState(TELECOM_PROVIDERS[0]);
   const [meterType, setMeterType] = useState<"prepaid" | "postpaid">("prepaid");
-
   const [activeDataCategory, setActiveDataCategory] = useState(DATA_CATEGORIES[0]);
   const [selectedDataPlan, setSelectedDataPlan] = useState<any>(null);
+
+  // Modals & UI States
+  const [selectedReceipt, setSelectedReceipt] = useState<any>(null); 
+  const [isTermsOpen, setIsTermsOpen] = useState(false); 
+  const [isPrivacyOpen, setIsPrivacyOpen] = useState(false); 
+  const [isSupportOpen, setIsSupportOpen] = useState(false);
+  const [supportMessage, setSupportMessage] = useState("");
+  const [supportFile, setSupportFile] = useState<File | null>(null);
+  const [isSendingSupport, setIsSendingSupport] = useState(false);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const [isSelectionModalOpen, setIsSelectionModalOpen] = useState(false);
+  const [modalTitle, setModalTitle] = useState("");
+  const [modalOptions, setModalOptions] = useState<string[]>([]);
+  const [modalCallback, setModalCallback] = useState<((value: string) => void) | null>(null);
+  const [toast, setToast] = useState<{title: string, message: string, type: 'success' | 'error'} | null>(null);
+  const [currentPage, setCurrentPage] = useState(1);
 
   // Token & Balance States
   const [selectedToken, setSelectedToken] = useState(SUPPORTED_TOKENS[0]);
   const [walletBalance, setWalletBalance] = useState("0.00");
   const [isFetchingBalance, setIsFetchingBalance] = useState(false);
-
   const [exchangeRate, setExchangeRate] = useState<number>(1550); 
   const [transactions, setTransactions] = useState<any[]>([]);
 
@@ -126,11 +119,17 @@ export default function Home() {
     return 100; 
   }, [activeService]);
 
+  const showToast = (title: string, message: string, type: 'success' | 'error' = 'success') => {
+    setToast({ title, message, type });
+    setTimeout(() => setToast(null), 5000);
+  };
+
   const indexOfLastItem = currentPage * ITEMS_PER_PAGE;
   const indexOfFirstItem = indexOfLastItem - ITEMS_PER_PAGE;
   const currentTransactions = transactions.slice(indexOfFirstItem, indexOfLastItem);
   const totalPages = Math.ceil(transactions.length / ITEMS_PER_PAGE);
 
+  // --- INITIALIZATION ---
   useEffect(() => {
     async function initSystem() {
       const savedHistory = localStorage.getItem("abapay_history");
@@ -145,20 +144,18 @@ export default function Home() {
       if (typeof window !== "undefined" && (window as any).ethereum) {
         const eth = (window as any).ethereum;
         if (eth.isMiniPay) setIsMiniPay(true);
-
         const walletClient = createWalletClient({ chain: activeChain, transport: custom(eth) });
         walletClient.requestAddresses().then(([acc]) => {
           setAddress(acc);
           setClient(walletClient);
-        }).catch((e) => console.log("Connection deferred"));
+        }).catch(() => console.log("Connection deferred"));
       }
-
       setTimeout(() => setIsInitiallyLoading(false), 2000);
     }
     initSystem();
   }, [activeChain]);
 
-  // UPGRADED: Simplified Balance Fetch (All tokens are ERC20 now)
+  // --- FETCH BALANCE ---
   useEffect(() => {
     async function fetchBalance() {
       if (!address) return;
@@ -173,14 +170,30 @@ export default function Home() {
           args: [address],
         });
         setWalletBalance(parseFloat(formatUnits(balanceWei as bigint, selectedToken.decimals)).toFixed(4));
-      } catch (error) {
-        setWalletBalance("0.00");
-      }
+      } catch (error) { setWalletBalance("0.00"); }
       setIsFetchingBalance(false);
     }
     fetchBalance();
   }, [address, selectedToken, activeChain, isMainnet]);
 
+  // --- FETCH DYNAMIC CABLE PACKAGES ---
+  useEffect(() => {
+    if (activeService.id === "CABLE") {
+      const fetchVariations = async () => {
+        try {
+          const baseUrl = process.env.NEXT_PUBLIC_APP_MODE === 'live' ? 'https://vtpass.com/api' : 'https://sandbox.vtpass.com/api';
+          const res = await fetch(`${baseUrl}/service-variations?serviceID=${cableProvider}`);
+          const data = await res.json();
+          if (data.content && data.content.varations) {
+            setCableVariations(data.content.varations);
+          }
+        } catch (e) { console.error("Failed to fetch cable packages", e); }
+      };
+      fetchVariations();
+    }
+  }, [activeService.id, cableProvider]);
+
+  // --- AUTO-DETECT TELECOM LOGIC ---
   useEffect(() => {
     if ((activeService.id === "AIRTIME" || activeService.id === "DATA") && accountNumber.length >= 4) {
       const prefix = accountNumber.substring(0, 4);
@@ -191,9 +204,13 @@ export default function Home() {
     }
   }, [accountNumber, activeService]);
 
+  // --- MERCHANT VERIFICATION ---
   const verifyMerchant = async () => {
     setIsVerifying(true);
     setCustomerName(null);
+    setCableCurrentBouquet(null);
+    setCableRenewAmount(null);
+
     try {
         const serviceID = activeService.id === "ELECTRICITY" ? elecProvider : cableProvider;
         const res = await fetch(`${process.env.NEXT_PUBLIC_APP_MODE === 'live' ? 'https://vtpass.com/api' : 'https://sandbox.vtpass.com/api'}/merchant-verify`, {
@@ -206,7 +223,20 @@ export default function Home() {
             body: JSON.stringify({ billersCode: accountNumber, serviceID: serviceID, type: activeService.id === "ELECTRICITY" ? meterType : 'prepaid' }) 
         });
         const data = await res.json();
-        if (data.code === '000') setCustomerName(data.content.Customer_Name);
+        
+        if (data.code === '000') {
+          setCustomerName(data.content.Customer_Name);
+          
+          if (activeService.id === "CABLE") {
+            setCableCurrentBouquet(data.content.Current_Bouquet || "Unknown Package");
+            if (data.content.Renewal_Amount) {
+              setCableRenewAmount(data.content.Renewal_Amount);
+              if (cableSubscriptionType === "renew") {
+                setNairaAmount(data.content.Renewal_Amount.toString());
+              }
+            }
+          }
+        }
     } catch (e) { console.error("Verify Error", e); }
     setIsVerifying(false);
   };
@@ -233,12 +263,18 @@ export default function Home() {
     if (activeService.id === "AIRTIME" || activeService.id === "DATA") {
       return accountNumber.length === 11 && accountNumber.startsWith("0");
     }
-    if (activeService.id === "ELECTRICITY" || activeService.id === "CABLE") {
+    if (activeService.id === "ELECTRICITY") {
       return accountNumber.length >= 10 && customerName !== null;
     }
+    if (activeService.id === "CABLE") {
+      if (accountNumber.length < 10 || customerName === null) return false;
+      if (cableSubscriptionType === 'change' && !selectedCablePlan) return false;
+      return true;
+    }
     return false;
-  }, [accountNumber, nairaAmount, activeService, customerName, dynamicMinAmount]);
+  }, [accountNumber, nairaAmount, activeService, customerName, dynamicMinAmount, cableSubscriptionType, selectedCablePlan]);
 
+  // --- PAYMENT EXECUTION ---
   const handlePayment = async () => {
     if (!address || !client) return setStatus("Connect Wallet First");
 
@@ -250,8 +286,21 @@ export default function Home() {
     setStatus("Initiating Blockchain Escrow...");
 
     try {
+      // AUTO-SWITCH NETWORK LOGIC FOR EXTERNAL WALLETS
+      try {
+        const currentChainId = await client.getChainId();
+        if (currentChainId !== activeChain.id) {
+          setStatus("Switching wallet to Celo network...");
+          await client.switchChain({ id: activeChain.id });
+        }
+      } catch (switchError) {
+        await client.addChain({ chain: activeChain });
+      }
+
       const valueInWei = parseUnits(cryptoToCharge, selectedToken.decimals);
       const tokenAddress = isMainnet ? selectedToken.mainnet : selectedToken.sepolia;
+
+      setStatus("Awaiting token approval...");
 
       await client.writeContract({
         address: tokenAddress as `0x${string}`,
@@ -272,11 +321,11 @@ export default function Home() {
       } else if (activeService.id === "CABLE") {
         vtpassServiceID = cableProvider;
         displayNetwork = cableProvider;
-        finalVariationCode = 'dstv1'; 
+        finalVariationCode = cableSubscriptionType === 'change' ? selectedCablePlan?.variation_code : 'none'; 
       } else if (activeService.id === "DATA") {
         vtpassServiceID = `${telecomProvider}-data`; 
         displayNetwork = telecomProvider;
-        finalVariationCode = 'mtn-10mb'; 
+        finalVariationCode = selectedDataPlan?.id || 'mtn-10mb'; 
       } else {
         vtpassServiceID = telecomProvider; 
         displayNetwork = telecomProvider;
@@ -303,7 +352,8 @@ export default function Home() {
         txHash: hash,
         variation_code: finalVariationCode,
         phone: customerPhone || accountNumber,
-        wallet_address: address
+        wallet_address: address,
+        subscription_type: activeService.id === "CABLE" ? cableSubscriptionType : undefined
       };
 
       const newTx = { 
@@ -319,11 +369,14 @@ export default function Home() {
         account: accountNumber
       };
 
+      // Reset form
       setAccountNumber("");
       setNairaAmount("");
       setCustomerPhone("");
       setCustomerName(null);
       setSelectedDataPlan(null);
+      setSelectedCablePlan(null);
+      setCableCurrentBouquet(null);
 
       const res = await fetch('/api/pay', {
         method: 'POST',
@@ -360,24 +413,17 @@ export default function Home() {
     }
   };
 
-  const submitSupportTicket = async () => {
-    if (!supportMessage.trim()) return;
-    setIsSendingSupport(true);
-    try {
-      const formData = new FormData();
-      formData.append("message", supportMessage);
-      if (address) formData.append("userAddress", address);
-      if (supportFile) formData.append("file", supportFile);
-      await fetch('/api/support', { method: 'POST', body: formData });
-      setIsSupportOpen(false);
-      setSupportMessage("");
-      setSupportFile(null);
-      showToast("Ticket Submitted", "AbaPay Support has received your request.", "success");
-    } catch (error) {
-      showToast("Connection Error", "Failed to send the ticket.", "error");
-    } finally {
-      setIsSendingSupport(false);
-    }
+  const handleResetService = (s: any) => {
+    setActiveService(s); 
+    setStatus(""); 
+    setAccountNumber(""); 
+    setCustomerName(null); 
+    setNairaAmount(""); 
+    setSelectedDataPlan(null);
+    setCableCurrentBouquet(null);
+    setCableRenewAmount(null);
+    setSelectedCablePlan(null);
+    setCableSubscriptionType("renew");
   };
 
   const openPremiumSelection = (title: string, options: string[], callback: (value: string) => void) => {
@@ -426,6 +472,7 @@ export default function Home() {
         </div>
       )}
 
+      {/* --- TOAST --- */}
       {toast && (
         <div className="fixed top-4 right-4 sm:top-6 sm:right-6 z-[100] animate-in slide-in-from-top-8 fade-in duration-300">
           <div className="bg-[#111114] border border-slate-800 shadow-2xl rounded-2xl p-4 flex items-start gap-3 w-[300px]">
@@ -646,7 +693,7 @@ export default function Home() {
                 {SERVICES.map(s => (
                     <button 
                         key={s.id} 
-                        onClick={() => { setActiveService(s); setStatus(""); setAccountNumber(""); setCustomerName(null); setNairaAmount(""); setSelectedDataPlan(null); }}
+                        onClick={() => handleResetService(s)}
                         className={`p-4 rounded-2xl border-2 transition-all flex flex-col items-center gap-2 ${activeService.id === s.id ? 'border-emerald-500 bg-emerald-50/50 scale-105' : 'border-slate-50 bg-slate-50/50 hover:bg-slate-100'}`}
                     >
                         <s.icon size={20} className={s.color} />
@@ -733,13 +780,13 @@ export default function Home() {
 
                 <div>
                     <label className="text-[10px] font-black text-slate-400 uppercase mb-2 flex justify-between">
-                      <span>{activeService.id === "AIRTIME" || activeService.id === "DATA" ? "Phone Number (11 Digits)" : "Account / Meter No"}</span>
+                      <span>{activeService.id === "AIRTIME" || activeService.id === "DATA" ? "Phone Number (11 Digits)" : "Account / Smartcard No"}</span>
                       {(activeService.id === "AIRTIME" || activeService.id === "DATA") && (
                         <span className={accountNumber.length === 11 ? "text-emerald-500" : "text-slate-400"}>{accountNumber.length}/11</span>
                       )}
                     </label>
                     <input 
-                        type="tel" placeholder={activeService.id === "AIRTIME" || activeService.id === "DATA" ? "08000000000" : "Enter Meter Number"}
+                        type="tel" placeholder={activeService.id === "AIRTIME" || activeService.id === "DATA" ? "08000000000" : "Enter Number"}
                         maxLength={activeService.id === "AIRTIME" || activeService.id === "DATA" ? 11 : 20}
                         className={`w-full bg-slate-50 border p-5 rounded-2xl font-black text-xl text-slate-800 outline-none transition-all ${
                           (activeService.id === "AIRTIME" || activeService.id === "DATA") && accountNumber.length > 0 && accountNumber.length < 11 
@@ -750,7 +797,8 @@ export default function Home() {
                         onChange={(e) => setAccountNumber(e.target.value.replace(/[^0-9]/g, ''))}
                     />
                     {isVerifying && <p className="text-[10px] text-blue-500 font-bold mt-2 animate-pulse">Verifying Account Details...</p>}
-                    {customerName && (activeService.id === "ELECTRICITY" || activeService.id === "CABLE") && (
+                    
+                    {customerName && activeService.id === "ELECTRICITY" && (
                         <div className="mt-2 bg-emerald-500/10 p-3 rounded-xl border border-emerald-500/20 flex items-center gap-2 animate-in fade-in">
                             <CheckCircle2 size={14} className="text-emerald-600" />
                             <span className="text-[10px] font-black text-emerald-700 uppercase">{customerName}</span>
@@ -758,6 +806,65 @@ export default function Home() {
                     )}
                 </div>
 
+                {/* --- UPGRADED CABLE TV UI BLOCK --- */}
+                {activeService.id === "CABLE" && customerName && (
+                  <div className="bg-slate-50 border border-slate-200 rounded-2xl p-4 shadow-sm animate-in fade-in slide-in-from-top-4">
+                     <div className="flex items-start justify-between border-b border-slate-200 pb-3 mb-3">
+                        <div>
+                          <p className="text-[10px] font-black uppercase tracking-widest text-slate-400 mb-1">Verified Customer</p>
+                          <p className="font-black text-slate-800 text-sm">{customerName}</p>
+                          <p className="text-xs font-bold text-emerald-600 mt-1 flex items-center gap-1"><Tv size={12}/> {cableCurrentBouquet}</p>
+                        </div>
+                     </div>
+
+                     <div className="flex gap-2 p-1 bg-slate-200/50 rounded-xl mb-4">
+                        <button 
+                          onClick={() => { setCableSubscriptionType("renew"); setNairaAmount(cableRenewAmount ? cableRenewAmount.toString() : ""); setSelectedCablePlan(null); }} 
+                          className={`flex-1 flex items-center justify-center gap-2 py-2.5 text-[10px] font-black uppercase tracking-wider rounded-lg transition-all ${cableSubscriptionType === "renew" ? "bg-white text-emerald-600 shadow-sm" : "text-slate-500 hover:text-slate-700"}`}
+                        >
+                          <RefreshCw size={14}/> Renew Plan
+                        </button>
+                        <button 
+                          onClick={() => { setCableSubscriptionType("change"); setNairaAmount(""); }} 
+                          className={`flex-1 flex items-center justify-center gap-2 py-2.5 text-[10px] font-black uppercase tracking-wider rounded-lg transition-all ${cableSubscriptionType === "change" ? "bg-white text-blue-600 shadow-sm" : "text-slate-500 hover:text-slate-700"}`}
+                        >
+                          <ListPlus size={14}/> Change Plan
+                        </button>
+                     </div>
+
+                     {cableSubscriptionType === "renew" ? (
+                        <div className="bg-emerald-500/10 border border-emerald-500/20 rounded-xl p-4 text-center">
+                           <p className="text-[10px] font-black text-emerald-800 uppercase tracking-widest mb-1">Renewal Amount Due</p>
+                           <p className="text-2xl font-black text-emerald-600">₦{cableRenewAmount?.toLocaleString() || "0.00"}</p>
+                        </div>
+                     ) : (
+                        <div className="grid grid-cols-1 gap-2 max-h-[35vh] overflow-y-auto pr-1">
+                          {cableVariations.length === 0 ? (
+                            <p className="text-center text-xs font-bold text-slate-400 py-4"><Loader2 className="animate-spin inline-block mr-2" size={14}/> Fetching Live Packages...</p>
+                          ) : (
+                            cableVariations.map((plan) => {
+                              const cryptoPlanCost = (parseFloat(plan.variation_amount) / exchangeRate).toFixed(4);
+                              return (
+                                <button 
+                                  key={plan.variation_code} 
+                                  onClick={() => { setSelectedCablePlan(plan); setNairaAmount(plan.variation_amount); }} 
+                                  className={`p-3 rounded-xl border transition-all text-left flex justify-between items-center ${selectedCablePlan?.variation_code === plan.variation_code ? 'border-blue-500 bg-blue-50/50 shadow-sm' : 'border-slate-200 bg-white hover:border-slate-300'}`}
+                                >
+                                  <div>
+                                    <p className="font-black text-slate-800 text-xs">{plan.name}</p>
+                                    <p className="text-[9px] text-slate-400 font-bold mt-0.5">{cryptoPlanCost} {selectedToken.symbol}</p>
+                                  </div>
+                                  <p className="font-black text-blue-600 text-sm">₦{parseFloat(plan.variation_amount).toLocaleString()}</p>
+                                </button>
+                              );
+                            })
+                          )}
+                        </div>
+                     )}
+                  </div>
+                )}
+
+                {/* Amount Input (Hidden if CABLE is handling it dynamically) */}
                 {activeService.id === "DATA" && (
                    <div className="bg-slate-50 border border-slate-100 p-4 rounded-2xl animate-in fade-in slide-in-from-top-4">
                       <div className="flex gap-1.5 mb-4 border-b border-slate-200 pb-3 overflow-x-auto">
@@ -785,7 +892,7 @@ export default function Home() {
                    </div>
                 )}
 
-                <div className={activeService.id === "DATA" ? "hidden" : ""}>
+                <div className={activeService.id === "DATA" || activeService.id === "CABLE" ? "hidden" : ""}>
                     <label className="text-[10px] font-black text-slate-400 uppercase mb-2 flex justify-between items-center">
                        <span>Naira Value</span>
                        <span className="text-emerald-500 bg-emerald-500/10 px-2 py-0.5 rounded">MIN: ₦{dynamicMinAmount.toLocaleString()}</span>
