@@ -21,19 +21,20 @@ const ERC20_ABI = [
 
 const SERVICES = [
   { id: "AIRTIME", name: "Buy Airtime", icon: Phone, color: "text-[#34d399]", bg: "bg-emerald-500/10" },
-  { id: "DATA", name: "Buy Data", icon: Wifi, color: "text-[#a855f7]", bg: "bg-purple-500/10" },
+  { id: "DATA", name: "Buy Data", icon Wifi, color: "text-[#a855f7]", bg: "bg-purple-500/10" },
   { id: "ELECTRICITY", name: "Electricity", icon: Lightbulb, color: "text-[#f97316]", bg: "bg-orange-500/10" },
   { id: "CABLE", name: "Cable TV", icon: Tv, color: "text-[#ec4899]", bg: "bg-pink-500/10" },
 ];
 
 const ELECTRICITY_PROVIDERS = ["aba-electric", "ikedc", "ekedc", "ibedc", "aedc", "kedco", "phed"];
 const CABLE_PROVIDERS = ["dstv", "gotv", "startimes", "showmax"];
-const TELECOM_PROVIDERS = ["mtn", "glo", "9mobile", "airtel"]; // Reordered to match your image
+const TELECOM_PROVIDERS = ["mtn", "glo", "9mobile", "airtel"]; 
 
+// UPGRADED: 3 Stablecoins, exact USD₮ symbol, and image logos
 const SUPPORTED_TOKENS = [
-  { symbol: "USDT", decimals: 6, mainnet: "0x48065fbbe25f71c9282ddf5e1cd6d6a887483d5e", sepolia: "0xd077A400968890Eacc75cdc901F0356c943e4fDb", icon: "💵" },
-  { symbol: "USDC", decimals: 6, mainnet: "0xcebA9300f2b948710d2653dD7B07f33A8B32118C", sepolia: "0x01C5C0122039549AD1493B8220cABEdD739BC44E", icon: "🪙" },
-  { symbol: "CELO", decimals: 18, mainnet: "native", sepolia: "native", icon: "🟡" },
+  { symbol: "USD₮", decimals: 6, mainnet: "0x48065fbbe25f71c9282ddf5e1cd6d6a887483d5e", sepolia: "0xd077A400968890Eacc75cdc901F0356c943e4fDb", logo: "/usdt.png" },
+  { symbol: "USDC", decimals: 6, mainnet: "0xcebA9300f2b948710d2653dD7B07f33A8B32118C", sepolia: "0x01C5C0122039549AD1493B8220cABEdD739BC44E", logo: "/usdc.png" },
+  { symbol: "cUSD", decimals: 18, mainnet: "0x765DE816845861e75A25fCA122bb6898B8B1282a", sepolia: "0xdE9e4C3ce781b4bA68120d6261cbad65ce0aB00b", logo: "/cusd.png" },
 ];
 
 const PRE_SELECT_AMOUNTS = ["100", "200", "500", "1000", "2000"];
@@ -89,8 +90,6 @@ export default function Home() {
   const [modalCallback, setModalCallback] = useState<((value: string) => void) | null>(null);
 
   const [toast, setToast] = useState<{title: string, message: string, type: 'success' | 'error'} | null>(null);
-
-  // Pagination State
   const [currentPage, setCurrentPage] = useState(1);
 
   const showToast = (title: string, message: string, type: 'success' | 'error' = 'success') => {
@@ -121,20 +120,17 @@ export default function Home() {
   const activeChain = isMainnet ? celo : celoSepolia;
   const ABAPAY_CONTRACT = process.env.NEXT_PUBLIC_ABAPAY_ADDRESS as `0x${string}`;
 
-  // --- DYNAMIC MINIMUM CALCULATOR ---
   const dynamicMinAmount = useMemo(() => {
     if (activeService.id === "ELECTRICITY") return 1000; 
     if (activeService.id === "CABLE") return 500;
     return 100; 
   }, [activeService]);
 
-  // --- PAGINATION CALCULATOR ---
   const indexOfLastItem = currentPage * ITEMS_PER_PAGE;
   const indexOfFirstItem = indexOfLastItem - ITEMS_PER_PAGE;
   const currentTransactions = transactions.slice(indexOfFirstItem, indexOfLastItem);
   const totalPages = Math.ceil(transactions.length / ITEMS_PER_PAGE);
 
-  // --- INITIALIZATION ---
   useEffect(() => {
     async function initSystem() {
       const savedHistory = localStorage.getItem("abapay_history");
@@ -162,25 +158,20 @@ export default function Home() {
     initSystem();
   }, [activeChain]);
 
-  // --- FETCH BALANCE ---
+  // UPGRADED: Simplified Balance Fetch (All tokens are ERC20 now)
   useEffect(() => {
     async function fetchBalance() {
       if (!address) return;
       setIsFetchingBalance(true);
       try {
         const publicClient = createPublicClient({ chain: activeChain, transport: http() });
-        let balanceWei;
-        if (selectedToken.symbol === "CELO") {
-          balanceWei = await publicClient.getBalance({ address: address as `0x${string}` });
-        } else {
-          const tokenAddress = isMainnet ? selectedToken.mainnet : selectedToken.sepolia;
-          balanceWei = await publicClient.readContract({
-            address: tokenAddress as `0x${string}`,
-            abi: ERC20_ABI,
-            functionName: 'balanceOf',
-            args: [address],
-          });
-        }
+        const tokenAddress = isMainnet ? selectedToken.mainnet : selectedToken.sepolia;
+        const balanceWei = await publicClient.readContract({
+          address: tokenAddress as `0x${string}`,
+          abi: ERC20_ABI,
+          functionName: 'balanceOf',
+          args: [address],
+        });
         setWalletBalance(parseFloat(formatUnits(balanceWei as bigint, selectedToken.decimals)).toFixed(4));
       } catch (error) {
         setWalletBalance("0.00");
@@ -190,7 +181,6 @@ export default function Home() {
     fetchBalance();
   }, [address, selectedToken, activeChain, isMainnet]);
 
-  // --- AUTO-DETECT LOGIC ---
   useEffect(() => {
     if ((activeService.id === "AIRTIME" || activeService.id === "DATA") && accountNumber.length >= 4) {
       const prefix = accountNumber.substring(0, 4);
@@ -249,13 +239,8 @@ export default function Home() {
     return false;
   }, [accountNumber, nairaAmount, activeService, customerName, dynamicMinAmount]);
 
-  // --- PAYMENT EXECUTION ---
   const handlePayment = async () => {
     if (!address || !client) return setStatus("Connect Wallet First");
-
-    if (selectedToken.symbol === "CELO") {
-      return showToast("Unsupported Asset", `Smart Contract upgrade required for native CELO. Please select USDT or USDC.`, "error");
-    }
 
     if (parseFloat(cryptoToCharge) > parseFloat(walletBalance)) {
       return setStatus(`Insufficient ${selectedToken.symbol} Balance.`);
@@ -483,7 +468,7 @@ export default function Home() {
                     <span className="text-slate-400 text-[10px] font-bold uppercase tracking-wider">Amount Paid</span>
                     <div className="text-right">
                        <p className="text-slate-800 font-black text-sm">₦{selectedReceipt.amountNaira}</p>
-                       <p className="text-slate-400 text-[9px] font-bold">{selectedReceipt.amountCrypto} {selectedReceipt.tokenUsed || 'USDT'}</p>
+                       <p className="text-slate-400 text-[9px] font-bold">{selectedReceipt.amountCrypto} {selectedReceipt.tokenUsed || 'USD₮'}</p>
                     </div>
                  </div>
                  <button 
@@ -527,7 +512,7 @@ export default function Home() {
                  <p className="font-bold text-slate-800 mt-4">2. Service Delivery</p>
                  <p>AbaPay acts as a decentralized bridge to fiat utility providers. While we strive for instant vending, delays caused by third-party telecom or electricity providers are beyond our direct control.</p>
                  <p className="font-bold text-slate-800 mt-4">3. Supported Assets</p>
-                 <p>You are responsible for ensuring you send the correct supported asset (USDC or USDT) on the Celo Network. AbaPay is not liable for funds lost due to incorrect network transfers.</p>
+                 <p>You are responsible for ensuring you send the correct supported asset on the Celo Network. AbaPay is not liable for funds lost due to incorrect network transfers.</p>
               </div>
            </div>
         </div>
@@ -553,7 +538,7 @@ export default function Home() {
         </div>
       )}
 
-      {/* Modal for Electricity / Cable */}
+      {/* MODAL (With Token Logo Support) */}
       {isSelectionModalOpen && (
         <div className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-sm flex justify-center items-center p-4 animate-in fade-in" onClick={() => setIsSelectionModalOpen(false)}>
            <div className="bg-white w-full max-w-sm rounded-[2rem] shadow-2xl p-6 animate-in zoom-in-95 duration-200" onClick={(e) => e.stopPropagation()}>
@@ -562,16 +547,22 @@ export default function Home() {
                 <button onClick={() => setIsSelectionModalOpen(false)} className="p-2 bg-slate-100 rounded-full hover:bg-slate-200 transition-colors"><XCircle size={20} className="text-slate-500" /></button>
               </div>
               <div className="space-y-2 max-h-[50vh] overflow-y-auto">
-                 {modalOptions.map(option => (
-                   <button 
-                     key={option} 
-                     onClick={() => { modalCallback?.(option); setIsSelectionModalOpen(false); }}
-                     className="w-full text-left p-4 rounded-xl font-bold text-slate-700 bg-slate-50 border border-slate-100 uppercase text-xs hover:border-emerald-300 hover:bg-emerald-50/50 transition-all flex justify-between items-center"
-                   >
-                     {option}
-                     {(telecomProvider === option || elecProvider === option || cableProvider === option || selectedToken.symbol === option) && <CheckCircle2 size={16} className="text-emerald-500"/>}
-                   </button>
-                 ))}
+                 {modalOptions.map(option => {
+                   const isToken = SUPPORTED_TOKENS.find(t => t.symbol === option);
+                   return (
+                     <button 
+                       key={option} 
+                       onClick={() => { modalCallback?.(option); setIsSelectionModalOpen(false); }}
+                       className="w-full text-left p-4 rounded-xl font-bold text-slate-700 bg-slate-50 border border-slate-100 uppercase text-xs hover:border-emerald-300 hover:bg-emerald-50/50 transition-all flex justify-between items-center"
+                     >
+                       <div className="flex items-center gap-3">
+                         {isToken && <img src={isToken.logo} alt={isToken.symbol} className="w-5 h-5 object-contain rounded-full" />}
+                         <span>{option}</span>
+                       </div>
+                       {(telecomProvider === option || elecProvider === option || cableProvider === option || selectedToken.symbol === option) && <CheckCircle2 size={16} className="text-emerald-500"/>}
+                     </button>
+                   );
+                 })}
               </div>
            </div>
         </div>
@@ -665,12 +656,13 @@ export default function Home() {
             </div>
 
             <div className="space-y-5">
+                {/* UPGRADED: Dynamic Logo Rendering for Token Selector */}
                 <div className="bg-slate-50 border border-slate-100 p-4 rounded-2xl flex justify-between items-center animate-in fade-in">
                   <div 
                     className="flex items-center gap-2 cursor-pointer hover:bg-slate-100 p-2 -ml-2 rounded-xl transition-colors" 
                     onClick={() => openPremiumSelection("Select Token", SUPPORTED_TOKENS.map(t => t.symbol), (symbol) => setSelectedToken(SUPPORTED_TOKENS.find(t => t.symbol === symbol)!))}
                   >
-                     <span className="text-xl">{selectedToken.icon}</span>
+                     <img src={selectedToken.logo} alt={selectedToken.symbol} className="w-7 h-7 object-contain rounded-full shadow-sm bg-white" />
                      <span className="font-black text-slate-800 uppercase text-sm tracking-tight">{selectedToken.symbol}</span>
                      <ChevronDown size={14} className="text-slate-400"/>
                   </div>
@@ -683,7 +675,6 @@ export default function Home() {
                   </div>
                 </div>
 
-                {/* --- NEW VISUAL LOGO GRID FOR TELECOM --- */}
                 <div className="animate-in slide-in-from-left-2 mb-2">
                     <label className="text-[10px] font-black text-slate-400 uppercase mb-3 block">
                         {activeService.id === "AIRTIME" || activeService.id === "DATA" ? "Select Network" : "Choose Provider"}
@@ -707,7 +698,6 @@ export default function Home() {
                                 alt={provider} 
                                 className="w-full h-full object-contain" 
                                 onError={(e) => { 
-                                  // Fallback text if they forget to save the images in the public folder
                                   e.currentTarget.style.display = 'none'; 
                                   e.currentTarget.parentElement!.innerHTML = `<span class="text-[9px] font-black uppercase text-slate-400">${provider.slice(0,3)}</span>`;
                                 }}
