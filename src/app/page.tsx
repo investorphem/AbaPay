@@ -47,7 +47,10 @@ const MOCK_DATA_PLANS = [
   { id: "D2", category: "Daily", name: "350MB", validity: "24 Hrs", cost_naira: 200 },
   { id: "D3", category: "Daily", name: "1GB", validity: "24 Hrs", cost_naira: 350 },
   { id: "W1", category: "Weekly", name: "1GB", validity: "7 Days", cost_naira: 600 },
+  { id: "W2", category: "Weekly", name: "2.5GB", validity: "7 Days", cost_naira: 1200 },
+  { id: "W3", category: "Weekly", name: "Broadband Extra", validity: "7 Days", cost_naira: 3500, isBroadband: true },
   { id: "M1", category: "Monthly", name: "1.5GB", validity: "30 Days", cost_naira: 1100 },
+  { id: "M2", category: "Monthly", name: "4.5GB", validity: "30 Days", cost_naira: 2200 },
   { id: "M3", category: "Monthly", name: "Broadband Unlimited", validity: "30 Days", cost_naira: 18000, isBroadband: true },
 ];
 
@@ -113,16 +116,16 @@ export default function Home() {
   const activeChain = isMainnet ? celo : celoSepolia;
   const ABAPAY_CONTRACT = process.env.NEXT_PUBLIC_ABAPAY_ADDRESS as `0x${string}`;
 
+  const showToast = (title: string, message: string, type: 'success' | 'error' = 'success') => {
+    setToast({ title, message, type });
+    setTimeout(() => setToast(null), 5000);
+  };
+
   const dynamicMinAmount = useMemo(() => {
     if (activeService.id === "ELECTRICITY") return 1000; 
     if (activeService.id === "CABLE") return 500;
     return 100; 
   }, [activeService]);
-
-  const showToast = (title: string, message: string, type: 'success' | 'error' = 'success') => {
-    setToast({ title, message, type });
-    setTimeout(() => setToast(null), 5000);
-  };
 
   const indexOfLastItem = currentPage * ITEMS_PER_PAGE;
   const indexOfFirstItem = indexOfLastItem - ITEMS_PER_PAGE;
@@ -144,12 +147,14 @@ export default function Home() {
       if (typeof window !== "undefined" && (window as any).ethereum) {
         const eth = (window as any).ethereum;
         if (eth.isMiniPay) setIsMiniPay(true);
+
         const walletClient = createWalletClient({ chain: activeChain, transport: custom(eth) });
         walletClient.requestAddresses().then(([acc]) => {
           setAddress(acc);
           setClient(walletClient);
-        }).catch(() => console.log("Connection deferred"));
+        }).catch((e) => console.log("Connection deferred"));
       }
+
       setTimeout(() => setIsInitiallyLoading(false), 2000);
     }
     initSystem();
@@ -170,7 +175,9 @@ export default function Home() {
           args: [address],
         });
         setWalletBalance(parseFloat(formatUnits(balanceWei as bigint, selectedToken.decimals)).toFixed(4));
-      } catch (error) { setWalletBalance("0.00"); }
+      } catch (error) {
+        setWalletBalance("0.00");
+      }
       setIsFetchingBalance(false);
     }
     fetchBalance();
@@ -286,7 +293,6 @@ export default function Home() {
     setStatus("Initiating Blockchain Escrow...");
 
     try {
-      // AUTO-SWITCH NETWORK LOGIC FOR EXTERNAL WALLETS
       try {
         const currentChainId = await client.getChainId();
         if (currentChainId !== activeChain.id) {
@@ -369,7 +375,6 @@ export default function Home() {
         account: accountNumber
       };
 
-      // Reset form
       setAccountNumber("");
       setNairaAmount("");
       setCustomerPhone("");
@@ -413,6 +418,7 @@ export default function Home() {
     }
   };
 
+  // --- RESTORED HELPER FUNCTIONS ---
   const handleResetService = (s: any) => {
     setActiveService(s); 
     setStatus(""); 
@@ -444,6 +450,26 @@ export default function Home() {
         await navigator.clipboard.writeText(receiptText);
         showToast("Copied!", "Receipt details copied to clipboard.", "success");
       } catch (err) { showToast("Error", "Could not copy receipt.", "error"); }
+    }
+  };
+
+  const submitSupportTicket = async () => {
+    if (!supportMessage.trim()) return;
+    setIsSendingSupport(true);
+    try {
+      const formData = new FormData();
+      formData.append("message", supportMessage);
+      if (address) formData.append("userAddress", address);
+      if (supportFile) formData.append("file", supportFile);
+      await fetch('/api/support', { method: 'POST', body: formData });
+      setIsSupportOpen(false);
+      setSupportMessage("");
+      setSupportFile(null);
+      showToast("Ticket Submitted", "AbaPay Support has received your request.", "success");
+    } catch (error) {
+      showToast("Connection Error", "Failed to send the ticket.", "error");
+    } finally {
+      setIsSendingSupport(false);
     }
   };
 
