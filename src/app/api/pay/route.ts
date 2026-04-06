@@ -41,7 +41,10 @@ export async function POST(req: Request) {
     }
 
     const requestedNaira = parseFloat(nairaAmount);
-    const needsVerification = serviceCategory === 'ELECTRICITY' || serviceCategory === 'CABLE';
+    
+    // UPGRADED: Showmax skips merchant verification entirely!
+    const needsVerification = serviceCategory === 'ELECTRICITY' || (serviceCategory === 'CABLE' && network !== 'SHOWMAX');
+    
     const serviceFee = needsVerification ? 100 : 0;
     const vendAmount = requestedNaira; 
 
@@ -110,7 +113,6 @@ export async function POST(req: Request) {
     else if (serviceCategory === 'CABLE') {
       vtpassPayload.billersCode = billersCode;
       
-      // UPGRADED: DSTV/GOTV use "subscription_type", Startimes just uses "variation_code"
       if (serviceID === 'dstv' || serviceID === 'gotv') {
         vtpassPayload.subscription_type = subscription_type;
         if (subscription_type === 'change') {
