@@ -6,10 +6,8 @@ import { supabaseAdmin as supabase } from '@/utils/supabase';
 
 const processedTransactions = new Set();
 
-// UPGRADED: Strict Africa/Lagos Timezone Request ID Generator
 function getStrictRequestId() {
   const date = new Date();
-
   const lagosTime = new Intl.DateTimeFormat('en-GB', {
     timeZone: 'Africa/Lagos',
     year: 'numeric',
@@ -23,7 +21,6 @@ function getStrictRequestId() {
   const [datePart, timePart] = lagosTime.split(', ');
   const [day, month, year] = datePart.split('/');
   const [hour, minute] = timePart.split(':');
-
   const safeHour = hour === '24' ? '00' : hour;
   const randomString = Math.random().toString(36).substring(2, 10);
 
@@ -33,7 +30,6 @@ function getStrictRequestId() {
 export async function POST(req: Request) {
   try {
     const body = await req.json();
-    // NEW: We now accept 'subscription_type' from the frontend (defaults to 'change' if not provided)
     const { 
       serviceID, serviceCategory, network, billersCode, amount, 
       token: tokenSymbol, txHash, variation_code, phone, 
@@ -77,14 +73,10 @@ export async function POST(req: Request) {
 
     if (dbError) {
       console.error("SUPABASE ERROR:", dbError.message);
-      return NextResponse.json({ 
-        success: false, 
-        code: "DB_REJECTED", 
-        message: `DB Error: ${dbError.message}` 
-      }, { status: 400 });
+      return NextResponse.json({ success: false, code: "DB_REJECTED", message: `DB Error: ${dbError.message}` }, { status: 400 });
     }
 
-    // 2. MERCHANT VERIFICATION (ELECTRICITY & CABLE)
+    // 2. MERCHANT VERIFICATION
     if (needsVerification) {
       const verifyRes = await fetch(`${BASE_URL}/merchant-verify`, {
         method: 'POST',
@@ -111,26 +103,23 @@ export async function POST(req: Request) {
       phone: phone || billersCode
     };
 
-    // UPGRADED LOGIC: Handle specific payload rules based on category
-    if (serviceCategory === 'AIRTIME') {
-      // Airtime only needs request_id, serviceID, amount, phone (Already set above)
-    } 
-    else if (serviceCategory === 'DATA') {
+    if (serviceCategory === 'DATA' || serviceCategory === 'ELECTRICITY') {
       vtpassPayload.billersCode = billersCode;
       vtpassPayload.variation_code = variation_code;
     }
-    else if (serviceCategory === 'ELECTRICITY') {
-      vtpassPayload.billersCode = billersCode;
-      vtpassPayload.variation_code = variation_code; // prepaid or postpaid
-    }
     else if (serviceCategory === 'CABLE') {
       vtpassPayload.billersCode = billersCode;
-      vtpassPayload.subscription_type = subscription_type; // 'renew' or 'change'
       
-      // Only attach variation_code and quantity if the user is changing their bouquet
-      if (subscription_type === 'change') {
+      // UPGRADED: DSTV/GOTV use "subscription_type", Startimes just uses "variation_code"
+      if (serviceID === 'dstv' || serviceID === 'gotv') {
+        vtpassPayload.subscription_type = subscription_type;
+        if (subscription_type === 'change') {
+          vtpassPayload.variation_code = variation_code;
+          vtpassPayload.quantity = 1;
+        }
+      } else {
+        // Startimes & Showmax
         vtpassPayload.variation_code = variation_code;
-        vtpassPayload.quantity = 1;
       }
     }
 
@@ -155,7 +144,7 @@ export async function POST(req: Request) {
 
       await supabase.from('transactions').update({ status: 'SUCCESS' }).eq('tx_hash', txHash);
 
-      try { await sendAbaPaySms(vtpassPayload.phone, `AbaPay: Purchase Successful! Token/Ref: ${vendedToken}. Amt: ₦${vendAmount}`); } catch (e) {}
+      try { await sendAbaPaySms(vtpassPayload.phone, `Purchase Successful! Token/Ref: ${vendedToken}. Amt: ₦${vendAmount}`); } catch (e) {}
       try { await sendTelegramAlert(`✅ *SALE SUCCESSFUL*\n🛒 *Product:* ${network} ${serviceCategory}\n💰 *Naira:* ₦${vendAmount}\n🪙 *Asset:* ${amount} ${tokenSymbol || 'USD₮'}\n👤 *User:* ${billersCode}\n⛽ *Fee:* ₦${serviceFee}\n🧾 *Ref:* ${vendedToken}`); } catch (e) {}
 
       return NextResponse.json({
