@@ -9,7 +9,7 @@ const processedTransactions = new Set();
 // UPGRADED: Strict Africa/Lagos Timezone Request ID Generator
 function getStrictRequestId() {
   const date = new Date();
-  
+
   // Force the server to generate the time in Lagos time, regardless of where it is hosted.
   const lagosTime = new Intl.DateTimeFormat('en-GB', {
     timeZone: 'Africa/Lagos',
@@ -28,10 +28,10 @@ function getStrictRequestId() {
 
   // Handle midnight edge cases
   const safeHour = hour === '24' ? '00' : hour;
-  
+
   // Generate a random alphanumeric string (e.g., 'ad8ef08a')
   const randomString = Math.random().toString(36).substring(2, 10);
-  
+
   return `${year}${month}${day}${safeHour}${minute}${randomString}`;
 }
 
@@ -57,9 +57,13 @@ export async function POST(req: Request) {
         return NextResponse.json({ success: false, code: "FUNDS", message: "Insufficient crypto paid." }, { status: 400 });
     }
 
+    // --- Capture the Request ID early so we can save it to the DB ---
+    const vtRequestId = getStrictRequestId();
+
     // 1. DATABASE LOGGING
     const dbPayload = {
       tx_hash: txHash,
+      request_id: vtRequestId, // <--- ADDED FOR WEBHOOK TRACKING
       service_category: serviceCategory, 
       network: network, 
       account_number: billersCode || phone || "N/A",
@@ -71,7 +75,7 @@ export async function POST(req: Request) {
     };
 
     const { data: dbData, error: dbError } = await supabase.from('transactions').insert([dbPayload]).select();
-    
+
     if (dbError) {
       console.error("SUPABASE ERROR:", dbError.message);
       return NextResponse.json({ 
@@ -97,7 +101,7 @@ export async function POST(req: Request) {
 
     const isAirtime = serviceCategory === 'AIRTIME';
     const vtpassPayload: any = {
-      request_id: getStrictRequestId(), // Uses the new Lagos GMT+1 Generator
+      request_id: vtRequestId, // <--- REUSES THE EXACT SAME ID
       serviceID: serviceID, 
       amount: vendAmount,
       phone: phone || billersCode
