@@ -1,12 +1,12 @@
 "use client";
 
 import { useState, useEffect, useMemo } from "react";
-import { createWalletClient, createPublicClient, custom, http, formatUnits, defineChain } from "viem";
+import { createWalletClient, createPublicClient, custom, http, formatUnits, parseUnits, defineChain } from "viem";
 import { 
   Lock, ArrowDownToLine, Wallet, ShieldAlert, Activity, 
   Database, RefreshCcw, Globe, Zap, ExternalLink, 
   Search, Download, Users, BarChart3, Banknote,
-  ChevronLeft, ChevronRight
+  ChevronLeft, ChevronRight, Loader2
 } from "lucide-react";
 import { supabase } from "@/utils/supabase";
 
@@ -30,11 +30,12 @@ const ABAPAY_ADMIN_ABI = [
   {"inputs":[{"internalType":"address","name":"tokenAddress","type":"address"}],"name":"withdrawFunds","outputs":[],"stateMutability":"nonpayable","type":"function"}
 ];
 
+// UPGRADED: Added 'transfer' function so the Admin can issue refunds!
 const ERC20_ABI = [
-  {"inputs":[{"internalType":"address","name":"account","type":"address"}],"name":"balanceOf","outputs":[{"internalType":"uint256","name":"","type":"uint256"}],"stateMutability":"view","type":"function"}
+  {"inputs":[{"internalType":"address","name":"account","type":"address"}],"name":"balanceOf","outputs":[{"internalType":"uint256","name":"","type":"uint256"}],"stateMutability":"view","type":"function"},
+  {"inputs":[{"internalType":"address","name":"recipient","type":"address"},{"internalType":"uint256","name":"amount","type":"uint256"}],"name":"transfer","outputs":[{"internalType":"bool","name":"","type":"bool"}],"stateMutability":"nonpayable","type":"function"}
 ];
 
-// UPGRADED: Added cUSD and exact USD₮ symbol
 const TOKENS = {
   "USD₮": { decimals: 6, mainnet: "0x48065fbbe25f71c9282ddf5e1cd6d6a887483d5e", sepolia: "0xd077A400968890Eacc75cdc901F0356c943e4fDb" },
   "USDC": { decimals: 6, mainnet: "0xcebA9300f2b948710d2653dD7B07f33A8B32118C", sepolia: "0x01C5C0122039549AD1493B8220cABEdD739BC44E" },
@@ -51,7 +52,7 @@ export default function AdminDashboard() {
   const [usdtVaultBalance, setUsdtVaultBalance] = useState("0.00");
   const [usdcVaultBalance, setUsdcVaultBalance] = useState("0.00");
   const [cusdVaultBalance, setCusdVaultBalance] = useState("0.00");
-  
+
   const [vtBalance, setVtBalance] = useState("0.00"); 
   const [smsBalance, setSmsBalance] = useState("0");    
   const [status, setStatus] = useState("");
@@ -61,8 +62,11 @@ export default function AdminDashboard() {
   const [isFetching, setIsFetching] = useState(false);
   const [searchTerm, setSearchTerm] = useState("");
   const [filterStatus, setFilterStatus] = useState("ALL");
-  
+
   const [currentPage, setCurrentPage] = useState(1);
+  
+  // UPGRADED: Track which refund is currently processing
+  const [processingRefundId, setProcessingRefundId] = useState<string | null>(null);
 
   const isMainnet = process.env.NEXT_PUBLIC_NETWORK === "celo";
   const isLive = process.env.NEXT_PUBLIC_APP_MODE === "live";
@@ -105,14 +109,14 @@ export default function AdminDashboard() {
 
   const fetchOnChainBalances = async () => {
     const publicClient = createPublicClient({ chain: activeChain, transport: http() });
-    
+
     try {
       const usdtBal = await publicClient.readContract({ address: (isMainnet ? TOKENS["USD₮"].mainnet : TOKENS["USD₮"].sepolia) as `0x${string}`, abi: ERC20_ABI, functionName: 'balanceOf', args: [ABAPAY_CONTRACT] }) as bigint;
       setUsdtVaultBalance(formatUnits(usdtBal, TOKENS["USD₮"].decimals));
-      
+
       const usdcBal = await publicClient.readContract({ address: (isMainnet ? TOKENS["USDC"].mainnet : TOKENS["USDC"].sepolia) as `0x${string}`, abi: ERC20_ABI, functionName: 'balanceOf', args: [ABAPAY_CONTRACT] }) as bigint;
       setUsdcVaultBalance(formatUnits(usdcBal, TOKENS["USDC"].decimals));
-      
+
       const cusdBal = await publicClient.readContract({ address: (isMainnet ? TOKENS["cUSD"].mainnet : TOKENS["cUSD"].sepolia) as `0x${string}`, abi: ERC20_ABI, functionName: 'balanceOf', args: [ABAPAY_CONTRACT] }) as bigint;
       setCusdVaultBalance(formatUnits(cusdBal, TOKENS["cUSD"].decimals));
     } catch (error) { console.error("Failed to fetch vault balances", error); }
@@ -135,10 +139,10 @@ export default function AdminDashboard() {
   const handleWithdrawal = async (tokenSymbol: 'USD₮' | 'USDC' | 'cUSD') => {
     if (!client || !address) return;
     const balanceToCheck = tokenSymbol === 'USD₮' ? usdtVaultBalance : tokenSymbol === 'USDC' ? usdcVaultBalance : cusdVaultBalance;
-    
+
     if (parseFloat(balanceToCheck) <= 0) return setStatus(`The ${tokenSymbol} Vault is already empty.`);
     setStatus(`Withdrawing ${tokenSymbol}...`);
-    
+
     try {
       const tokenAddr = isMainnet ? TOKENS[tokenSymbol].mainnet : TOKENS[tokenSymbol].sepolia;
       const hash = await client.writeContract({
@@ -151,6 +155,52 @@ export default function AdminDashboard() {
       setStatus(`Success! Hash: ${hash.slice(0, 10)}`);
       setTimeout(() => refreshAllData(), 5000);
     } catch (error) { setStatus("Rejected or Insufficient Gas."); }
+  };
+
+  // UPGRADED: 1-Click Web3 Refund Engine
+  const handleRefund = async (tx: any) => {
+    try {
+      if (!client || !address) return alert("Connect your Admin Wallet first.");
+
+      setProcessingRefundId(tx.id);
+
+      // Default to USDT if tokenUsed wasn't explicitly saved
+      const tokenSymbol = tx.tokenUsed || "USD₮"; 
+      const tokenAddr = isMainnet ? TOKENS[tokenSymbol as keyof typeof TOKENS].mainnet : TOKENS[tokenSymbol as keyof typeof TOKENS].sepolia;
+      const decimals = TOKENS[tokenSymbol as keyof typeof TOKENS].decimals;
+      const valueInWei = parseUnits(tx.amount_usdt.toString(), decimals);
+
+      // Trigger MetaMask to send the exact refund amount
+      const refundHash = await client.writeContract({
+        address: tokenAddr as `0x${string}`,
+        abi: ERC20_ABI,
+        functionName: 'transfer',
+        args: [tx.wallet_address, valueInWei],
+        account: address,
+      });
+
+      // Update Supabase to show REFUNDED and store the receipt hash
+      const { error } = await supabase
+        .from('transactions')
+        .update({ 
+          status: 'REFUNDED', 
+          refund_hash: refundHash 
+        })
+        .eq('id', tx.id);
+
+      if (!error) {
+        alert(`Refund Successful! Hash: ${refundHash}`);
+        fetchCloudLedger(); // Instantly refresh the table
+      } else {
+        alert("Crypto successfully sent, but failed to update database. Please update manually.");
+      }
+
+    } catch (error: any) {
+      console.error(error);
+      alert(`Refund failed or was rejected: ${error.message}`);
+    } finally {
+      setProcessingRefundId(null);
+    }
   };
 
   const analytics = useMemo(() => {
@@ -195,7 +245,7 @@ export default function AdminDashboard() {
   return (
     <main className="min-h-screen bg-[#070709] text-slate-200 p-4 md:p-8">
       <div className="max-w-6xl mx-auto">
-        
+
         {/* HEADER */}
         <div className="flex flex-col md:flex-row justify-between items-start md:items-center mb-8 gap-4">
           <div>
@@ -222,7 +272,7 @@ export default function AdminDashboard() {
           </div>
         ) : (
           <div className="space-y-6">
-            
+
             {/* STATS */}
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
               <StatBox label="VTpass Wallet" value={`₦${vtBalance}`} sub="Naira Float" color="text-white" icon={<Banknote size={16}/>} />
@@ -249,6 +299,8 @@ export default function AdminDashboard() {
                     <option value="ALL">All Status</option>
                     <option value="SUCCESS">Success</option>
                     <option value="FAILED_VENDING">Failed</option>
+                    {/* UPGRADED: Added Refunded option to filter */}
+                    <option value="REFUNDED">Refunded</option>
                   </select>
                   <button onClick={exportCSV} className="flex items-center gap-2 bg-slate-800 border border-slate-700 px-6 py-3 rounded-xl text-sm font-bold hover:bg-slate-700"><Download size={16} /> Export</button>
                 </div>
@@ -260,7 +312,7 @@ export default function AdminDashboard() {
                         <th className="pb-4 px-2">Timestamp</th>
                         <th className="pb-4 px-2">Product & Service</th>
                         <th className="pb-4 px-2">Financials</th>
-                        <th className="pb-4 px-2">Status</th>
+                        <th className="pb-4 px-2">Status & Actions</th>
                         <th className="pb-4 px-2 text-right">On-Chain</th>
                       </tr>
                     </thead>
@@ -280,7 +332,26 @@ export default function AdminDashboard() {
                             <p className="text-[10px] text-emerald-500">${tx.amount_usdt} Paid</p>
                           </td>
                           <td className="py-4 px-2">
-                            <span className={`text-[10px] font-black px-2 py-1 rounded ${tx.status === 'SUCCESS' ? 'bg-emerald-500/10 text-emerald-500' : 'bg-red-500/10 text-red-500'}`}>{tx.status}</span>
+                            {/* UPGRADED: Status styling and Inline Refund Button */}
+                            <div className="flex flex-col items-start gap-2">
+                              <span className={`text-[10px] font-black px-2 py-1 rounded ${
+                                tx.status === 'SUCCESS' ? 'bg-emerald-500/10 text-emerald-500' : 
+                                tx.status === 'REFUNDED' ? 'bg-blue-500/10 text-blue-400' :
+                                'bg-red-500/10 text-red-500'
+                              }`}>
+                                {tx.status}
+                              </span>
+                              {tx.status === 'FAILED_VENDING' && (
+                                <button 
+                                  onClick={() => handleRefund(tx)}
+                                  disabled={processingRefundId === tx.id}
+                                  className="bg-slate-800 hover:bg-slate-700 border border-slate-700 text-white text-[9px] font-bold uppercase tracking-widest px-2 py-1.5 rounded-lg flex items-center gap-1.5 transition-colors disabled:opacity-50"
+                                >
+                                  {processingRefundId === tx.id ? <Loader2 size={10} className="animate-spin text-emerald-400" /> : <Zap size={10} className="text-emerald-400" />}
+                                  {processingRefundId === tx.id ? 'Refunding...' : 'Refund'}
+                                </button>
+                              )}
+                            </div>
                           </td>
                           <td className="py-4 px-2 text-right">
                              <a href={`https://${isMainnet ? '' : 'sepolia.'}celoscan.io/tx/${tx.tx_hash}`} target="_blank" className="text-slate-600 hover:text-emerald-400"><ExternalLink size={14} className="ml-auto" /></a>
@@ -315,7 +386,7 @@ export default function AdminDashboard() {
               </div>
             )}
 
-            {/* VAULT TAB (Now 3 Columns for 3 Tokens) */}
+            {/* VAULT TAB */}
             {activeTab === 'vault' && (
               <div className="bg-[#111114] border border-slate-800 rounded-3xl p-8 animate-in fade-in slide-in-from-bottom-4">
                 <div className="flex flex-col items-center mb-8">
