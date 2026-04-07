@@ -84,11 +84,15 @@ export default function Home() {
   const [selectedReceipt, setSelectedReceipt] = useState<any>(null); 
   const [isTermsOpen, setIsTermsOpen] = useState(false); 
   const [isPrivacyOpen, setIsPrivacyOpen] = useState(false); 
+  
+  // UPGRADED: Added supportTxHash to silently store the hash
   const [isSupportOpen, setIsSupportOpen] = useState(false);
   const [supportMessage, setSupportMessage] = useState("");
+  const [supportTxHash, setSupportTxHash] = useState<string | null>(null);
   const [supportFile, setSupportFile] = useState<File | null>(null);
   const [isSendingSupport, setIsSendingSupport] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  
   const [isSelectionModalOpen, setIsSelectionModalOpen] = useState(false);
   const [modalTitle, setModalTitle] = useState("");
   const [modalOptions, setModalOptions] = useState<any[]>([]); 
@@ -519,6 +523,7 @@ export default function Home() {
     }
   };
 
+  // UPGRADED: Silently appends txHash and address to the payload without cluttering the text box
   const submitSupportTicket = async () => {
     if (!supportMessage.trim()) return;
     setIsSendingSupport(true);
@@ -526,11 +531,15 @@ export default function Home() {
       const formData = new FormData();
       formData.append("message", supportMessage);
       if (address) formData.append("userAddress", address);
+      if (supportTxHash) formData.append("txHash", supportTxHash); // Pass hash silently
       if (supportFile) formData.append("file", supportFile);
+      
       await fetch('/api/support', { method: 'POST', body: formData });
+      
       setIsSupportOpen(false);
       setSupportMessage("");
       setSupportFile(null);
+      setSupportTxHash(null); // Clear secret hash
       showToast("Ticket Submitted", "Support has received your request.", "success");
     } catch (error) {
       showToast("Connection Error", "Failed to send the ticket.", "error");
@@ -544,13 +553,13 @@ export default function Home() {
       if (activeTab === "history" && transactions.length > 0) {
         const failedHashes = transactions.filter(tx => tx.status !== 'SUCCESS').map(tx => tx.txHash);
         if (failedHashes.length === 0) return;
-        
+
         try {
           const { data, error } = await supabase
             .from('transactions')
             .select('tx_hash, status, refund_hash')
             .in('tx_hash', failedHashes);
-            
+
           if (data && data.length > 0) {
             let updated = false;
             const newHistory = transactions.map(tx => {
@@ -668,11 +677,12 @@ export default function Home() {
                     >
                       <Share2 size={16}/> Share
                     </button>
-                    {/* UPGRADED: Instantly loads the transaction hash into the support message */}
+                    {/* UPGRADED: Caches the txHash silently and opens an empty text box */}
                     {selectedReceipt.status !== 'SUCCESS' && selectedReceipt.status !== 'REFUNDED' && (
                        <button 
                          onClick={() => { 
-                           setSupportMessage(`[TX ID: ${selectedReceipt.txHash}]\n\nHello Support, `);
+                           setSupportTxHash(selectedReceipt.txHash);
+                           setSupportMessage(""); 
                            setSelectedReceipt(null); 
                            setIsSupportOpen(true); 
                          }}
@@ -724,7 +734,7 @@ export default function Home() {
           <div className="bg-white w-full max-w-md rounded-[2rem] shadow-2xl p-6 animate-in zoom-in-95 duration-200">
             <div className="flex justify-between items-center mb-4 shrink-0 border-b border-slate-100 pb-4">
               <h2 className="text-2xl font-black flex items-center gap-2.5 tracking-tight text-slate-900"><Mail className="text-emerald-500" size={24}/> Protocol Support</h2>
-              <button onClick={() => setIsSupportOpen(false)} className="p-2 bg-slate-100 rounded-full hover:bg-slate-200"><XCircle size={20} className="text-slate-500" /></button>
+              <button onClick={() => { setIsSupportOpen(false); setSupportTxHash(null); }} className="p-2 bg-slate-100 rounded-full hover:bg-slate-200"><XCircle size={20} className="text-slate-500" /></button>
             </div>
             <textarea 
               className="w-full bg-slate-50 border border-slate-200 rounded-xl p-5 mb-4 text-sm font-medium outline-none focus:border-emerald-500 transition-colors leading-relaxed"
