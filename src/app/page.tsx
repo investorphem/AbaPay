@@ -45,7 +45,6 @@ const SUPPORTED_TOKENS = [
 ];
 
 const PRE_SELECT_AMOUNTS = ["100", "200", "500", "1000", "2000"];
-// UPGRADED: Added Electricity Quick-Selects
 const ELEC_PRE_SELECT_AMOUNTS = ["1000", "2000", "5000", "10000", "20000"];
 const DATA_CATEGORIES = ["Daily", "Weekly", "Monthly", "Social", "Mega", "Broadband"];
 const ITEMS_PER_PAGE = 5;
@@ -119,7 +118,6 @@ export default function Home() {
     return 100; 
   }, [activeService]);
 
-  // UPGRADED: Added intelligent max limits
   const dynamicMaxAmount = useMemo(() => {
     if (activeService.id === "ELECTRICITY") return 1000000; 
     if (activeService.id === "AIRTIME") return 50000;
@@ -240,7 +238,7 @@ export default function Home() {
 
     try {
         const serviceID = activeService.id === "ELECTRICITY" ? elecProvider : cableProvider;
-        
+
         const res = await fetch(`/api/verify`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
@@ -250,15 +248,15 @@ export default function Home() {
               type: activeService.id === "ELECTRICITY" ? meterType : undefined 
             }) 
         });
-        
+
         const data = await res.json();
-        
+
         if (data.code === '000') {
           setCustomerName(data.content.Customer_Name);
-          
+
           if (activeService.id === "CABLE") {
             setCableCurrentBouquet(data.content.Current_Bouquet || "Unknown Package");
-            
+
             if (data.content.Renewal_Amount && ['dstv', 'gotv'].includes(cableProvider)) {
               setCableRenewAmount(data.content.Renewal_Amount);
               if (cableSubscriptionType === "renew") {
@@ -292,11 +290,11 @@ export default function Home() {
 
   const filteredLiveDataPlans = useMemo(() => {
     if (!dataVariations || dataVariations.length === 0) return [];
-    
+
     const filtered = dataVariations.filter(plan => {
       const name = plan.name.toLowerCase();
       let category = "Monthly"; // Default Fallback
-      
+
       if (name.includes('broadband') || name.includes('router') || name.includes('5g') || name.includes('hynet')) {
         category = "Broadband";
       } else if (name.includes('social') || name.includes('whatsapp') || name.includes('ig') || name.includes('instagram') || name.includes('tiktok') || name.includes('youtube') || name.includes('facebook') || name.includes('opera') || name.includes('xot')) {
@@ -310,7 +308,7 @@ export default function Home() {
       } else if (name.includes('1 day') || name.includes('2 day') || name.includes('3 day') || name.includes('daily') || name.includes('24 hrs') || name.includes('24hrs') || name.includes('night') || name.includes('hourly')) {
         category = "Daily";
       }
-      
+
       return category === activeDataCategory;
     });
 
@@ -320,7 +318,6 @@ export default function Home() {
 
   const isFormValid = useMemo(() => {
     const amount = parseFloat(nairaAmount);
-    // UPGRADED: Added strict dynamicMaxAmount check
     if (!nairaAmount || isNaN(amount) || amount < dynamicMinAmount || amount > dynamicMaxAmount) return false;
 
     if (activeService.id === "AIRTIME") {
@@ -467,13 +464,13 @@ export default function Home() {
         showToast("Vending Successful", "Your utility has been successfully delivered.", "success");
       } else {
         setStatus(`Error: ${result.message || 'Transaction Failed'}`);
-        newTx.status = "FAILED/DELAYED";
+        newTx.status = "FAILED_VENDING"; // Updated to map to your new backend state structure better
       }
 
       const updatedHistory = [newTx, ...transactions];
       setTransactions(updatedHistory);
       localStorage.setItem("abapay_history", JSON.stringify(updatedHistory));
-      
+
       setCurrentPage(1);
 
       const publicClient = createPublicClient({ chain: activeChain, transport: http() });
@@ -542,6 +539,40 @@ export default function Home() {
     }
   };
 
+  // Sync historical refund statuses with Supabase on history tab open
+  useEffect(() => {
+    const checkRefunds = async () => {
+      if (activeTab === "history" && transactions.length > 0) {
+        const failedHashes = transactions.filter(tx => tx.status !== 'SUCCESS').map(tx => tx.txHash);
+        if (failedHashes.length === 0) return;
+        
+        try {
+          const { data, error } = await supabase
+            .from('transactions')
+            .select('tx_hash, status, refund_hash')
+            .in('tx_hash', failedHashes);
+            
+          if (data && data.length > 0) {
+            let updated = false;
+            const newHistory = transactions.map(tx => {
+              const dbRecord = data.find(r => r.tx_hash === tx.txHash);
+              if (dbRecord && dbRecord.status === 'REFUNDED' && tx.status !== 'REFUNDED') {
+                updated = true;
+                return { ...tx, status: 'REFUNDED', refund_hash: dbRecord.refund_hash };
+              }
+              return tx;
+            });
+            if (updated) {
+              setTransactions(newHistory);
+              localStorage.setItem("abapay_history", JSON.stringify(newHistory));
+            }
+          }
+        } catch(e) {}
+      }
+    };
+    checkRefunds();
+  }, [activeTab]);
+
   const currentDisco = useMemo(() => {
     return ELECTRICITY_DISCOS.find(d => d.serviceID === elecProvider);
   }, [elecProvider]);
@@ -598,7 +629,8 @@ export default function Home() {
               <div className="p-8 space-y-4">
                  <div className="flex justify-between border-b border-slate-100 pb-3">
                     <span className="text-slate-400 text-[10px] font-bold uppercase tracking-wider">Status</span>
-                    <span className={`font-black text-xs uppercase ${selectedReceipt.status === 'SUCCESS' ? 'text-emerald-600' : 'text-orange-500'}`}>{selectedReceipt.status}</span>
+                    {/* UPGRADED: Added REFUNDED color logic */}
+                    <span className={`font-black text-xs uppercase ${selectedReceipt.status === 'SUCCESS' ? 'text-emerald-600' : selectedReceipt.status === 'REFUNDED' ? 'text-blue-600' : 'text-orange-500'}`}>{selectedReceipt.status}</span>
                  </div>
                  <div className="flex justify-between border-b border-slate-100 pb-3">
                     <span className="text-slate-400 text-[10px] font-bold uppercase tracking-wider">Product</span>
@@ -615,6 +647,17 @@ export default function Home() {
                        <p className="text-slate-400 text-[9px] font-bold">{selectedReceipt.amountCrypto} {selectedReceipt.tokenUsed || 'USD₮'}</p>
                     </div>
                  </div>
+
+                 {/* UPGRADED: Added Refund Hash Display */}
+                 {selectedReceipt.status === 'REFUNDED' && selectedReceipt.refund_hash && (
+                   <div className="flex justify-between border-b border-slate-100 pb-3">
+                      <span className="text-slate-400 text-[10px] font-bold uppercase tracking-wider">Refund Hash</span>
+                      <a href={`https://${isMainnet?'':'sepolia.'}celoscan.io/tx/${selectedReceipt.refund_hash}`} target="_blank" className="text-blue-600 font-mono font-bold text-xs flex items-center justify-end gap-1 hover:underline">
+                         View Transfer <ExternalLink size={10}/>
+                      </a>
+                   </div>
+                 )}
+
                  <button 
                   onClick={() => window.open(`https://${isMainnet?'':'sepolia.'}celoscan.io/tx/${selectedReceipt.txHash}`)}
                   className="w-full py-3 bg-slate-50 hover:bg-slate-100 rounded-xl text-[10px] font-black uppercase tracking-widest text-slate-500 flex items-center justify-center gap-2 transition-colors"
@@ -628,8 +671,7 @@ export default function Home() {
                     >
                       <Share2 size={16}/> Share
                     </button>
-                    {/* UPGRADED: Support button explicitly restored for failed/delayed transactions */}
-                    {selectedReceipt.status !== 'SUCCESS' && (
+                    {selectedReceipt.status !== 'SUCCESS' && selectedReceipt.status !== 'REFUNDED' && (
                        <button 
                          onClick={() => { setSelectedReceipt(null); setIsSupportOpen(true); }}
                          className="flex-1 py-4 bg-orange-100 hover:bg-orange-200 text-orange-700 rounded-2xl text-xs font-black uppercase tracking-widest flex items-center justify-center gap-2 transition-colors active:scale-95"
@@ -939,7 +981,7 @@ export default function Home() {
                         onChange={(e) => setAccountNumber(e.target.value.replace(/[^0-9]/g, ''))}
                     />
                     {isVerifying && <p className="text-[10px] text-blue-500 font-bold mt-2 animate-pulse flex items-center gap-1.5"><Loader2 size={12} className="animate-spin"/> Verifying Account Details...</p>}
-                    
+
                     {customerName && activeService.id === "ELECTRICITY" && (
                         <div className="mt-2 bg-emerald-500/10 p-4 rounded-xl border border-emerald-500/20 flex items-center gap-3 animate-in fade-in">
                             <CheckCircle2 size={18} className="text-emerald-600" />
@@ -1040,7 +1082,7 @@ export default function Home() {
                                 <div className="pt-2 border-t border-blue-200/50 flex justify-between items-end">
                                     <p className="font-black text-blue-600 text-xl leading-none">₦{parseFloat(selectedCablePlan.variation_amount).toLocaleString()}</p>
                                     <p className="text-[10px] text-slate-500 font-bold">{(parseFloat(selectedCablePlan.variation_amount) / exchangeRate).toFixed(4)} {selectedToken.symbol}</p>
-                                </div>
+                                 </div>
                              </div>
                           </div>
                        ) : (
@@ -1157,7 +1199,6 @@ export default function Home() {
                         </div>
                     </div>
 
-                    {/* UPGRADED: Smart Warning Message for Min/Max Validation */}
                     {nairaAmount && (parseFloat(nairaAmount) < dynamicMinAmount || parseFloat(nairaAmount) > dynamicMaxAmount) && (
                         <p className="text-[10px] font-bold text-red-500 flex items-center gap-1.5 mt-[-6px] mb-3 animate-in fade-in">
                             <AlertTriangle size={12} /> Please enter an amount between ₦{dynamicMinAmount.toLocaleString()} and ₦{dynamicMaxAmount.toLocaleString()}.
@@ -1229,7 +1270,8 @@ export default function Home() {
                         >
                             <div>
                                 <p className="text-sm font-black text-slate-900 uppercase group-hover:text-emerald-700 transition-colors tracking-tight">{tx.network} {tx.service}</p>
-                                <p className="text-[10px] font-medium text-slate-500 mt-0.5">{tx.date} • <span className={tx.status === 'SUCCESS' ? 'text-emerald-600 font-bold' : 'text-red-500 font-bold'}>{tx.status}</span></p>
+                                {/* UPGRADED: Dynamic color for REFUNDED status */}
+                                <p className="text-[10px] font-medium text-slate-500 mt-0.5">{tx.date} • <span className={tx.status === 'SUCCESS' ? 'text-emerald-600 font-bold' : tx.status === 'REFUNDED' ? 'text-blue-500 font-bold' : 'text-red-500 font-bold'}>{tx.status}</span></p>
                             </div>
                             <div className="text-right flex flex-col items-end gap-1.5">
                                 <p className="text-sm font-black text-emerald-600">₦{tx.amountNaira.toLocaleString()}</p>
