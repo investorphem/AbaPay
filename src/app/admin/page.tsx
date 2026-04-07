@@ -30,7 +30,6 @@ const ABAPAY_ADMIN_ABI = [
   {"inputs":[{"internalType":"address","name":"tokenAddress","type":"address"}],"name":"withdrawFunds","outputs":[],"stateMutability":"nonpayable","type":"function"}
 ];
 
-// UPGRADED: Added 'transfer' function so the Admin can issue refunds!
 const ERC20_ABI = [
   {"inputs":[{"internalType":"address","name":"account","type":"address"}],"name":"balanceOf","outputs":[{"internalType":"uint256","name":"","type":"uint256"}],"stateMutability":"view","type":"function"},
   {"inputs":[{"internalType":"address","name":"recipient","type":"address"},{"internalType":"uint256","name":"amount","type":"uint256"}],"name":"transfer","outputs":[{"internalType":"bool","name":"","type":"bool"}],"stateMutability":"nonpayable","type":"function"}
@@ -64,8 +63,6 @@ export default function AdminDashboard() {
   const [filterStatus, setFilterStatus] = useState("ALL");
 
   const [currentPage, setCurrentPage] = useState(1);
-  
-  // UPGRADED: Track which refund is currently processing
   const [processingRefundId, setProcessingRefundId] = useState<string | null>(null);
 
   const isMainnet = process.env.NEXT_PUBLIC_NETWORK === "celo";
@@ -157,20 +154,19 @@ export default function AdminDashboard() {
     } catch (error) { setStatus("Rejected or Insufficient Gas."); }
   };
 
-  // UPGRADED: 1-Click Web3 Refund Engine
+  // UPGRADED: Awaits the blockchain receipt & calls the secure backend route to bypass RLS!
   const handleRefund = async (tx: any) => {
     try {
       if (!client || !address) return alert("Connect your Admin Wallet first.");
 
       setProcessingRefundId(tx.id);
 
-      // Default to USDT if tokenUsed wasn't explicitly saved
       const tokenSymbol = tx.tokenUsed || "USD₮"; 
       const tokenAddr = isMainnet ? TOKENS[tokenSymbol as keyof typeof TOKENS].mainnet : TOKENS[tokenSymbol as keyof typeof TOKENS].sepolia;
       const decimals = TOKENS[tokenSymbol as keyof typeof TOKENS].decimals;
       const valueInWei = parseUnits(tx.amount_usdt.toString(), decimals);
 
-      // Trigger MetaMask to send the exact refund amount
+      // 1. Send the exact refund amount from Admin Wallet to User
       const refundHash = await client.writeContract({
         address: tokenAddr as `0x${string}`,
         abi: ERC20_ABI,
@@ -179,25 +175,31 @@ export default function AdminDashboard() {
         account: address,
       });
 
-      // Update Supabase to show REFUNDED and store the receipt hash
-      const { error } = await supabase
-        .from('transactions')
-        .update({ 
-          status: 'REFUNDED', 
-          refund_hash: refundHash 
-        })
-        .eq('id', tx.id);
+      // 2. WAIT for the blockchain to actually confirm the block!
+      const publicClient = createPublicClient({ chain: activeChain, transport: http() });
+      const receipt = await publicClient.waitForTransactionReceipt({ hash: refundHash });
 
-      if (!error) {
-        alert(`Refund Successful! Hash: ${refundHash}`);
+      if (receipt.status !== 'success') {
+          throw new Error("Transaction reverted on the blockchain. Do you have enough USDC?");
+      }
+
+      // 3. Call the secure backend API route to bypass Supabase RLS
+      const dbRes = await fetch('/api/admin/refund', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ id: tx.id, refundHash })
+      });
+
+      if (dbRes.ok) {
+        alert(`Refund confirmed on-chain! Hash: ${refundHash}`);
         fetchCloudLedger(); // Instantly refresh the table
       } else {
-        alert("Crypto successfully sent, but failed to update database. Please update manually.");
+        alert("Crypto sent successfully, but backend failed to secure the database update.");
       }
 
     } catch (error: any) {
       console.error(error);
-      alert(`Refund failed or was rejected: ${error.message}`);
+      alert(`Refund rejected or failed: ${error.message}`);
     } finally {
       setProcessingRefundId(null);
     }
@@ -299,7 +301,6 @@ export default function AdminDashboard() {
                     <option value="ALL">All Status</option>
                     <option value="SUCCESS">Success</option>
                     <option value="FAILED_VENDING">Failed</option>
-                    {/* UPGRADED: Added Refunded option to filter */}
                     <option value="REFUNDED">Refunded</option>
                   </select>
                   <button onClick={exportCSV} className="flex items-center gap-2 bg-slate-800 border border-slate-700 px-6 py-3 rounded-xl text-sm font-bold hover:bg-slate-700"><Download size={16} /> Export</button>
@@ -332,7 +333,6 @@ export default function AdminDashboard() {
                             <p className="text-[10px] text-emerald-500">${tx.amount_usdt} Paid</p>
                           </td>
                           <td className="py-4 px-2">
-                            {/* UPGRADED: Status styling and Inline Refund Button */}
                             <div className="flex flex-col items-start gap-2">
                               <span className={`text-[10px] font-black px-2 py-1 rounded ${
                                 tx.status === 'SUCCESS' ? 'bg-emerald-500/10 text-emerald-500' : 
