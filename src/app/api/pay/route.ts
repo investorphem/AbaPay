@@ -200,11 +200,14 @@ export async function POST(req: Request) {
       }
 
     } else {
-      // SCENARIO: VTpass instantly rejected the request with an error code (e.g. 018, 013, 030)
+      // SCENARIO: VTpass instantly rejected the request
       await supabase.from('transactions').update({ status: 'FAILED_VENDING' }).eq('tx_hash', txHash);
-      try { await sendTelegramAlert(`🚨 *VENDING REJECTED*\nHash: \`${txHash}\`\nVTpass Code: ${payData.code}`); } catch (e) {}
+      
+      // UPGRADED ADMIN ALERT: Sends the exact raw VTpass error description to the Admin's Telegram!
+      const rawAdminError = payData.response_description || 'Unknown Provider Error';
+      try { await sendTelegramAlert(`🚨 *VENDING REJECTED*\n🛒 *Product:* ${network} ${serviceCategory}\n👤 *User:* ${billersCode}\n❌ *VTpass Code:* ${payData.code}\n🛑 *Real Error:* ${rawAdminError}\n🔗 *Hash:* \`${txHash}\``); } catch (e) {}
 
-      // Match the raw VTpass code to our friendly dictionary, default to generic error if unknown
+      // Match the raw VTpass code to our friendly dictionary for the User UI
       const friendlyMessage = error_messages[payData.code as string] || "Utility vending failed at the provider level. Please contact support.";
 
       return NextResponse.json({ 
