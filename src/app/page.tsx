@@ -149,6 +149,7 @@ export default function Home() {
 
   useEffect(() => {
     async function initSystem() {
+      // Still load local storage initially for instant UI rendering
       const savedHistory = localStorage.getItem("abapay_history");
       if (savedHistory) setTransactions(JSON.parse(savedHistory));
 
@@ -173,6 +174,50 @@ export default function Home() {
     }
     initSystem();
   }, [activeChain]);
+
+  // UPGRADED: Cloud-Sync User History based on Wallet Address
+  useEffect(() => {
+    if (!address) return;
+
+    async function fetchCloudHistory() {
+      try {
+        const { data, error } = await supabase
+          .from('transactions')
+          .select('*')
+          .eq('wallet_address', address)
+          .order('created_at', { ascending: false });
+
+        if (error) {
+          console.error("Supabase fetch error:", error.message);
+          return;
+        }
+
+        if (data && data.length > 0) {
+          const cloudHistory = data.map((tx: any) => ({
+            id: tx.tx_hash.slice(0, 8),
+            date: new Date(tx.created_at).toLocaleString(),
+            status: tx.status,
+            amountNaira: tx.amount_naira.toString(),
+            amountCrypto: tx.amount_usdt.toString(),
+            tokenUsed: "USD₮", 
+            service: tx.service_category,
+            network: tx.network,
+            txHash: tx.tx_hash,
+            account: tx.account_number,
+            refund_hash: tx.refund_hash
+          }));
+
+          setTransactions(cloudHistory);
+          // Sync it back to local storage for instant loading next time
+          localStorage.setItem("abapay_history", JSON.stringify(cloudHistory));
+        }
+      } catch (e) {
+        console.error("Failed to sync cloud history:", e);
+      }
+    }
+
+    fetchCloudHistory();
+  }, [address]);
 
   useEffect(() => {
     async function fetchBalance() {
@@ -296,7 +341,7 @@ export default function Home() {
 
     const filtered = dataVariations.filter(plan => {
       const name = plan.name.toLowerCase();
-      let category = "Monthly"; 
+      let category = "Monthly"; // Default Fallback
 
       if (name.includes('broadband') || name.includes('router') || name.includes('5g') || name.includes('hynet')) {
         category = "Broadband";
@@ -694,7 +739,6 @@ export default function Home() {
         </div>
       )}
 
-      {/* FULLY RESTORED TERMS AND PRIVACY MODALS */}
       {isTermsOpen && (
         <div className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-sm flex justify-center items-center p-4 animate-in fade-in" onClick={() => setIsTermsOpen(false)}>
            <div className="bg-white w-full max-w-md rounded-[2rem] shadow-2xl p-6 flex flex-col max-h-[80vh] animate-in zoom-in-95 duration-200" onClick={(e) => e.stopPropagation()}>
