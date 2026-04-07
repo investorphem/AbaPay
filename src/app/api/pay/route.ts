@@ -4,19 +4,29 @@ import { sendAbaPaySms } from '@/lib/messaging';
 import { sendTelegramAlert } from '@/lib/telegram'; 
 import { supabaseAdmin as supabase } from '@/utils/supabase'; 
 
-// --- ROBUST ERROR CODE DICTIONARY ---
-// UPGRADED: Added Record<string, string> to satisfy strict TypeScript builds!
+// --- ROBUST VTPASS ERROR CODE DICTIONARY ---
+// UPGRADED: Maps raw VTpass codes to highly professional, user-friendly UI messages
 const error_messages: Record<string, string> = {
-    "013": "Amount is below the minimum allowed for your specific meter/band.",
-    "014": "Transaction exceeds your daily limit with this utility provider.",
-    "015": "Service with this provider is currently suspended. Please try again later.",
-    "016": "Incorrect meter/account number. Please verify and re-type.",
-    "018": "Service is temporarily unavailable at the provider node. Try again shortly.",
-    "019": "Authentication with the utility provider failed. AbaPay admins are investigating.",
-    "028": "Insufficient funds in AbaPay's central vault. Retrying automated top-up.",
+    "011": "Invalid arguments. Please check your phone/meter number and try again.",
+    "012": "This product does not exist or is currently unavailable.",
+    "013": "Amount is below the minimum allowed for this specific utility.",
+    "014": "Request blocked. Transaction exceeds your daily limit with this provider.",
+    "016": "Transaction failed at the provider level. Please verify details and retry.",
+    "017": "Amount is above the maximum allowed for this product.",
+    "018": "Service is temporarily unavailable at the provider node. Try again shortly.", // Masks 'Low Wallet Balance'
+    "019": "Duplicate transaction detected. Please wait 30 seconds before retrying.",
+    "021": "Authentication with the utility provider failed. AbaPay admins are investigating.",
+    "022": "Authentication with the utility provider failed. AbaPay admins are investigating.",
+    "023": "Authentication with the utility provider failed. AbaPay admins are investigating.",
+    "024": "Authentication with the utility provider failed. AbaPay admins are investigating.",
+    "028": "Service is temporarily unavailable for this specific product.",
+    "030": "Provider network is currently down. Please try again.",
+    "034": "Service with this provider is currently suspended. Please try again later.",
+    "035": "Service is inactive at the moment. Please try again later.",
     "041": "An error occurred with the vending node. AbaPay will re-vend or refund.",
+    "089": "The network is currently processing your previous request. Please wait.",
     "400": "The request payload was malformed. This is a technical error.",
-    "FAILED_VERIFICATION": "Merchant verification failed. The provided meter number is invalid."
+    "FAILED_VERIFICATION": "Merchant verification failed. The provided meter/account number is invalid."
 };
 
 const processedTransactions = new Set();
@@ -123,7 +133,7 @@ export async function POST(req: Request) {
     }
     else if (serviceCategory === 'CABLE') {
       vtpassPayload.billersCode = billersCode;
-      
+
       if (serviceID === 'dstv' || serviceID === 'gotv') {
         vtpassPayload.subscription_type = subscription_type;
         if (subscription_type === 'change') {
@@ -146,32 +156,57 @@ export async function POST(req: Request) {
       payData = await payRes.json();
     } catch (e: any) {
       await supabase.from('transactions').update({ status: 'FAILED_VTPASS_CRASH' }).eq('tx_hash', txHash);
-      return NextResponse.json({ success: false, code: "VTPASS_CRASH", message: e.message }, { status: 502 });
+      return NextResponse.json({ success: false, code: "VTPASS_CRASH", message: "Network timeout while contacting provider." }, { status: 502 });
     }
 
-    // 5. HANDLE VTPASS RESPONSE
-    if (payData.code === '000') {
+    // 5. HANDLE VTPASS RESPONSE (WITH DEEP STATUS CHECK)
+    if (payData.code === '000' || payData.code === '099') {
       processedTransactions.add(txHash);
-      const vendedToken = payData.purchased_code || payData.token || "Vended Successfully";
 
-      await supabase.from('transactions').update({ status: 'SUCCESS' }).eq('tx_hash', txHash);
+      // UPGRADED: Look inwards into the response object for the actual transaction status
+      const actualStatus = payData.content?.transactions?.status || 'pending';
 
-      try { await sendAbaPaySms(vtpassPayload.phone, `Purchase Successful! Token/Ref: ${vendedToken}. Amt: ₦${vendAmount}`); } catch (e) {}
-      try { await sendTelegramAlert(`✅ *SALE SUCCESSFUL*\n🛒 *Product:* ${network} ${serviceCategory}\n💰 *Naira:* ₦${vendAmount}\n🪙 *Asset:* ${amount} ${tokenSymbol || 'USD₮'}\n👤 *User:* ${billersCode}\n⛽ *Fee:* ₦${serviceFee}\n🧾 *Ref:* ${vendedToken}`); } catch (e) {}
+      if (actualStatus === 'delivered' || actualStatus === 'successful') {
+        const vendedToken = payData.purchased_code || payData.token || payData.content?.transactions?.product_name || "Vended Successfully";
 
-      return NextResponse.json({
-        success: true,
-        message: "Transaction Successful!",
-        data: { vendedToken, vendAmount, requestId: payData.requestId }
-      });
+        await supabase.from('transactions').update({ status: 'SUCCESS' }).eq('tx_hash', txHash);
+
+        try { await sendAbaPaySms(vtpassPayload.phone, `Purchase Successful! Token/Ref: ${vendedToken}. Amt: ₦${vendAmount}`); } catch (e) {}
+        try { await sendTelegramAlert(`✅ *SALE SUCCESSFUL*\n🛒 *Product:* ${network} ${serviceCategory}\n💰 *Naira:* ₦${vendAmount}\n🪙 *Asset:* ${amount} ${tokenSymbol || 'USD₮'}\n👤 *User:* ${billersCode}\n⛽ *Fee:* ₦${serviceFee}\n🧾 *Ref:* ${vendedToken}`); } catch (e) {}
+
+        return NextResponse.json({
+          success: true,
+          message: "Transaction Successful!",
+          data: { vendedToken, vendAmount, requestId: payData.requestId }
+        });
+
+      } else if (actualStatus === 'pending' || actualStatus === 'initiated' || payData.code === '099') {
+        // SCENARIO: VTpass accepted it, but the telco/disco is taking a long time to deliver
+        await supabase.from('transactions').update({ status: 'PENDING' }).eq('tx_hash', txHash);
+        
+        try { await sendTelegramAlert(`⏳ *TRANSACTION PENDING*\n🛒 *Product:* ${network} ${serviceCategory}\n👤 *User:* ${billersCode}\n⚠️ Network delayed. Awaiting final delivery confirmation from VTpass.`); } catch (e) {}
+
+        return NextResponse.json({
+          success: true, // Return true so the frontend still shows a receipt, but marks it processing
+          message: "Transaction is processing. Your utility will be delivered shortly.",
+          data: { vendedToken: "Processing...", vendAmount, requestId: payData.requestId }
+        });
+      } else {
+        // SCENARIO: VTpass accepted the request (000), but the inner status immediately failed
+        await supabase.from('transactions').update({ status: 'FAILED_VENDING' }).eq('tx_hash', txHash);
+        try { await sendTelegramAlert(`🚨 *VENDING FAILED (Inner Status)*\nHash: \`${txHash}\`\nStatus: ${actualStatus}`); } catch (e) {}
+        
+        return NextResponse.json({ success: false, message: "Transaction failed at the provider network level.", code: "INNER_FAIL" }, { status: 502 });
+      }
 
     } else {
+      // SCENARIO: VTpass instantly rejected the request with an error code (e.g. 018, 013, 030)
       await supabase.from('transactions').update({ status: 'FAILED_VENDING' }).eq('tx_hash', txHash);
       try { await sendTelegramAlert(`🚨 *VENDING REJECTED*\nHash: \`${txHash}\`\nVTpass Code: ${payData.code}`); } catch (e) {}
 
-      // UPGRADED: Safely index the error_messages object with TypeScript's blessing
-      const friendlyMessage = error_messages[payData.code as string] || "Utility vending failed at the provider level.";
-      
+      // Match the raw VTpass code to our friendly dictionary, default to generic error if unknown
+      const friendlyMessage = error_messages[payData.code as string] || "Utility vending failed at the provider level. Please contact support.";
+
       return NextResponse.json({ 
         success: false, 
         message: friendlyMessage,
