@@ -6,6 +6,9 @@ export async function POST(req: Request) {
     const message = formData.get('message') as string;
     const file = formData.get('file') as File;
     const userAddress = formData.get('userAddress') as string;
+    
+    // UPGRADED: Catch the hidden transaction hash!
+    const txHash = formData.get('txHash') as string; 
 
     // Mapping to your .env.local names
     const botToken = process.env.TELEGRAM_BOT_TOKEN;
@@ -16,10 +19,11 @@ export async function POST(req: Request) {
        return NextResponse.json({ success: false, message: "Server configuration error." }, { status: 500 });
     }
 
-    // Professional Support Template
+    // Professional Support Template (Now dynamically includes the Hash if it exists)
     const caption = `🎫 *ABAPAY SUPPORT TICKET*\n` +
                     `━━━━━━━━━━━━━━━━━━\n` +
                     `👤 *Wallet:* \`${userAddress || 'Anonymous'}\`\n` +
+                    (txHash ? `🔗 *TX ID:* \`${txHash}\`\n` : '') +
                     `💬 *Issue:* ${message}\n` +
                     `━━━━━━━━━━━━━━━━━━\n` +
                     `⏰ *Time:* ${new Date().toLocaleString('en-GB', { timeZone: 'Africa/Lagos' })} WAT`;
@@ -27,7 +31,7 @@ export async function POST(req: Request) {
     let tgUrl = `https://api.telegram.org/bot${botToken}/sendMessage`;
     const tgFormData = new FormData();
     tgFormData.append('chat_id', chatId);
-    tgFormData.append('parse_mode', 'Markdown'); // Makes the wallet address "tap to copy"
+    tgFormData.append('parse_mode', 'Markdown'); // Makes the wallet and hash "tap to copy"
 
     // File Handling Logic
     if (file && file.size > 0) {
@@ -44,7 +48,7 @@ export async function POST(req: Request) {
         method: 'POST', 
         body: tgFormData 
     });
-    
+
     if (!tgResponse.ok) {
         const errorData = await tgResponse.json();
         console.error("Telegram Error Details:", errorData);
