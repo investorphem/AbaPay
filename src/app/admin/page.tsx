@@ -25,9 +25,11 @@ const celoSepolia = defineChain({
   rpcUrls: { default: { http: ['https://forno.celo-sepolia.celo-testnet.org'] } },
 });
 
+// UPGRADED: Added refundUser to the Contract ABI
 const ABAPAY_ADMIN_ABI = [
   {"inputs":[],"name":"owner","outputs":[{"internalType":"address","name":"","type":"address"}],"stateMutability":"view","type":"function"},
-  {"inputs":[{"internalType":"address","name":"tokenAddress","type":"address"}],"name":"withdrawFunds","outputs":[],"stateMutability":"nonpayable","type":"function"}
+  {"inputs":[{"internalType":"address","name":"tokenAddress","type":"address"}],"name":"withdrawFunds","outputs":[],"stateMutability":"nonpayable","type":"function"},
+  {"inputs":[{"internalType":"address","name":"tokenAddress","type":"address"},{"internalType":"address","name":"recipient","type":"address"},{"internalType":"uint256","name":"amount","type":"uint256"}],"name":"refundUser","outputs":[],"stateMutability":"nonpayable","type":"function"}
 ];
 
 const ERC20_ABI = [
@@ -154,33 +156,40 @@ export default function AdminDashboard() {
     } catch (error) { setStatus("Rejected or Insufficient Gas."); }
   };
 
-  // UPGRADED: Awaits the blockchain receipt & calls the secure backend route to bypass RLS!
+  // UPGRADED: Admin calls the Smart Contract to refund the user from the vault, with safe token fallback
   const handleRefund = async (tx: any) => {
     try {
       if (!client || !address) return alert("Connect your Admin Wallet first.");
 
       setProcessingRefundId(tx.id);
 
-      const tokenSymbol = tx.tokenUsed || "USD₮"; 
-      const tokenAddr = isMainnet ? TOKENS[tokenSymbol as keyof typeof TOKENS].mainnet : TOKENS[tokenSymbol as keyof typeof TOKENS].sepolia;
-      const decimals = TOKENS[tokenSymbol as keyof typeof TOKENS].decimals;
-      const valueInWei = parseUnits(tx.amount_usdt.toString(), decimals);
+      // Safely grab the crypto amount regardless of which database column it sits in
+      const rawAmount = tx.amount_usdt || tx.amount_crypto || tx.amountCrypto;
+      if (!rawAmount) throw new Error("Could not locate the crypto amount for this transaction.");
 
-      // 1. Send the exact refund amount from Admin Wallet to User
+      const tokenSymbol = tx.tokenUsed || tx.token_used || "USD₮"; 
+      const tokenData = TOKENS[tokenSymbol as keyof typeof TOKENS];
+      if (!tokenData) throw new Error(`Token ${tokenSymbol} is not supported.`);
+
+      const tokenAddr = isMainnet ? tokenData.mainnet : tokenData.sepolia;
+      const decimals = tokenData.decimals;
+      const valueInWei = parseUnits(rawAmount.toString(), decimals);
+
+      // 1. Call the Contract's refundUser function
       const refundHash = await client.writeContract({
-        address: tokenAddr as `0x${string}`,
-        abi: ERC20_ABI,
-        functionName: 'transfer',
-        args: [tx.wallet_address, valueInWei],
+        address: ABAPAY_CONTRACT as `0x${string}`,
+        abi: ABAPAY_ADMIN_ABI,
+        functionName: 'refundUser',
+        args: [tokenAddr, tx.wallet_address, valueInWei],
         account: address,
       });
 
-      // 2. WAIT for the blockchain to actually confirm the block!
+      // 2. WAIT for the blockchain to confirm the block!
       const publicClient = createPublicClient({ chain: activeChain, transport: http() });
       const receipt = await publicClient.waitForTransactionReceipt({ hash: refundHash });
 
       if (receipt.status !== 'success') {
-          throw new Error("Transaction reverted on the blockchain. Do you have enough USDC?");
+          throw new Error("Transaction reverted. Does the Vault have enough balance?");
       }
 
       // 3. Call the secure backend API route to bypass Supabase RLS
@@ -192,9 +201,10 @@ export default function AdminDashboard() {
 
       if (dbRes.ok) {
         alert(`Refund confirmed on-chain! Hash: ${refundHash}`);
-        fetchCloudLedger(); // Instantly refresh the table
+        fetchCloudLedger(); 
+        fetchOnChainBalances(); // Refresh Vault Balances
       } else {
-        alert("Crypto sent successfully, but backend failed to secure the database update.");
+        alert("Crypto refunded successfully, but backend failed to secure the database update.");
       }
 
     } catch (error: any) {
@@ -330,7 +340,7 @@ export default function AdminDashboard() {
                           </td>
                           <td className="py-4 px-2">
                             <p className="text-white font-black">₦{tx.amount_naira.toLocaleString()}</p>
-                            <p className="text-[10px] text-emerald-500">${tx.amount_usdt} Paid</p>
+                            <p className="text-[10px] text-emerald-500">${(tx.amount_usdt || tx.amount_crypto || 0).toString()} Paid</p>
                           </td>
                           <td className="py-4 px-2">
                             <div className="flex flex-col items-start gap-2">
