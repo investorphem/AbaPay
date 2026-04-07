@@ -85,7 +85,6 @@ export default function Home() {
   const [isTermsOpen, setIsTermsOpen] = useState(false); 
   const [isPrivacyOpen, setIsPrivacyOpen] = useState(false); 
   
-  // UPGRADED: Added supportTxHash to silently store the hash
   const [isSupportOpen, setIsSupportOpen] = useState(false);
   const [supportMessage, setSupportMessage] = useState("");
   const [supportTxHash, setSupportTxHash] = useState<string | null>(null);
@@ -297,7 +296,7 @@ export default function Home() {
 
     const filtered = dataVariations.filter(plan => {
       const name = plan.name.toLowerCase();
-      let category = "Monthly"; // Default Fallback
+      let category = "Monthly"; 
 
       if (name.includes('broadband') || name.includes('router') || name.includes('5g') || name.includes('hynet')) {
         category = "Broadband";
@@ -510,7 +509,7 @@ export default function Home() {
   };
 
   const handleShareReceipt = async () => {
-    const receiptText = `🧾 Protocol Receipt\n\nStatus: ${selectedReceipt.status}\nProduct: ${selectedReceipt.network} ${selectedReceipt.service}\nRecipient: ${selectedReceipt.account}\nAmount Paid: ₦${selectedReceipt.amountNaira}\nCrypto Used: ${selectedReceipt.amountCrypto} ${selectedReceipt.tokenUsed}\nTx Hash: ${selectedReceipt.txHash}\n\nSecured by Celo Network`;
+    const receiptText = `🧾 AbaPay Receipt\n\nStatus: ${selectedReceipt.status}\nProduct: ${selectedReceipt.network} ${selectedReceipt.service}\nRecipient: ${selectedReceipt.account}\nAmount Paid: ₦${selectedReceipt.amountNaira}\nCrypto Used: ${selectedReceipt.amountCrypto} ${selectedReceipt.tokenUsed}\nTx Hash: ${selectedReceipt.txHash}\n\nSecured by Celo Network`;
 
     if (navigator.share) {
       try { await navigator.share({ title: 'Receipt', text: receiptText }); } 
@@ -523,7 +522,6 @@ export default function Home() {
     }
   };
 
-  // UPGRADED: Silently appends txHash and address to the payload without cluttering the text box
   const submitSupportTicket = async () => {
     if (!supportMessage.trim()) return;
     setIsSendingSupport(true);
@@ -531,7 +529,7 @@ export default function Home() {
       const formData = new FormData();
       formData.append("message", supportMessage);
       if (address) formData.append("userAddress", address);
-      if (supportTxHash) formData.append("txHash", supportTxHash); // Pass hash silently
+      if (supportTxHash) formData.append("txHash", supportTxHash); 
       if (supportFile) formData.append("file", supportFile);
       
       await fetch('/api/support', { method: 'POST', body: formData });
@@ -539,7 +537,7 @@ export default function Home() {
       setIsSupportOpen(false);
       setSupportMessage("");
       setSupportFile(null);
-      setSupportTxHash(null); // Clear secret hash
+      setSupportTxHash(null); 
       showToast("Ticket Submitted", "Support has received your request.", "success");
     } catch (error) {
       showToast("Connection Error", "Failed to send the ticket.", "error");
@@ -602,10 +600,10 @@ export default function Home() {
 
       {isInitiallyLoading && (
         <div className="fixed inset-0 z-[100] bg-white flex flex-col items-center justify-center animate-in fade-out duration-500 fill-mode-forwards" style={{ animationDelay: '1.5s' }}>
-          <img src="/logo.png" alt="Logo" className="h-28 w-auto object-contain animate-logo-scale mb-10" />
+          <img src="/logo.png" alt="AbaPay" className="h-28 w-auto object-contain animate-logo-scale mb-10" />
           <div className="flex flex-col items-center gap-2">
              <div className="w-12 h-0.5 bg-emerald-500 rounded-full animate-pulse" />
-             <p className="text-[10px] font-black uppercase tracking-widest text-slate-400">Loading Protocol...</p>
+             <p className="text-[10px] font-black uppercase tracking-widest text-slate-400">Loading AbaPay Protocol...</p>
           </div>
         </div>
       )}
@@ -632,7 +630,7 @@ export default function Home() {
                  <button onClick={() => setSelectedReceipt(null)} className="absolute top-4 right-4 bg-white/20 p-1.5 rounded-full hover:bg-white/30 transition-colors"><XCircle size={20}/></button>
                  <CheckCircle2 size={48} className="mx-auto mb-3 opacity-90" />
                  <h2 className="text-xl font-black tracking-tight">Payment Receipt</h2>
-                 <p className="text-emerald-100 text-xs font-bold uppercase tracking-widest mt-1">Protocol Secured</p>
+                 <p className="text-emerald-100 text-xs font-bold uppercase tracking-widest mt-1">AbaPay Secured</p>
               </div>
               <div className="p-8 space-y-4">
                  <div className="flex justify-between border-b border-slate-100 pb-3">
@@ -677,7 +675,6 @@ export default function Home() {
                     >
                       <Share2 size={16}/> Share
                     </button>
-                    {/* UPGRADED: Caches the txHash silently and opens an empty text box */}
                     {selectedReceipt.status !== 'SUCCESS' && selectedReceipt.status !== 'REFUNDED' && (
                        <button 
                          onClick={() => { 
@@ -697,31 +694,96 @@ export default function Home() {
         </div>
       )}
 
-      {/* MODALS HIDDEN FOR BREVITY */}
-      {isTermsOpen && (<div className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-sm flex justify-center items-center p-4" onClick={() => setIsTermsOpen(false)}><div className="bg-white w-full max-w-md rounded-[2rem] shadow-2xl p-6" onClick={(e) => e.stopPropagation()}><h2 className="text-xl font-black mb-4">Terms</h2></div></div>)}
-      {isPrivacyOpen && (<div className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-sm flex justify-center items-center p-4" onClick={() => setIsPrivacyOpen(false)}><div className="bg-white w-full max-w-md rounded-[2rem] shadow-2xl p-6" onClick={(e) => e.stopPropagation()}><h2 className="text-xl font-black mb-4">Privacy</h2></div></div>)}
-      {isSelectionModalOpen && (
-        <div className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-sm flex justify-center items-center p-4" onClick={() => setIsSelectionModalOpen(false)}>
-           <div className="bg-white w-full max-w-sm rounded-[2rem] shadow-2xl p-6" onClick={(e) => e.stopPropagation()}>
-              <div className="flex justify-between items-center mb-6 border-b border-slate-100 pb-4">
-                <h2 className="text-xl font-black">{modalTitle}</h2>
-                <button onClick={() => setIsSelectionModalOpen(false)} className="p-2 bg-slate-100 rounded-full"><XCircle size={20} className="text-slate-500" /></button>
+      {/* FULLY RESTORED TERMS AND PRIVACY MODALS */}
+      {isTermsOpen && (
+        <div className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-sm flex justify-center items-center p-4 animate-in fade-in" onClick={() => setIsTermsOpen(false)}>
+           <div className="bg-white w-full max-w-md rounded-[2rem] shadow-2xl p-6 flex flex-col max-h-[80vh] animate-in zoom-in-95 duration-200" onClick={(e) => e.stopPropagation()}>
+              <div className="flex justify-between items-center mb-4 shrink-0 border-b border-slate-100 pb-4">
+                <h2 className="text-xl font-black tracking-tight text-slate-900">Terms of Service</h2>
+                <button onClick={() => setIsTermsOpen(false)} className="p-2 bg-slate-100 rounded-full hover:bg-slate-200 transition-colors"><XCircle size={20} className="text-slate-500" /></button>
               </div>
-              <div className="space-y-2.5 max-h-[50vh] overflow-y-auto">
+              <div className="overflow-y-auto text-sm text-slate-600 space-y-4 pr-2 leading-relaxed">
+                 <p className="font-bold text-slate-800">1. Acceptance of Terms</p>
+                 <p>By connecting your wallet and using the AbaPay Protocol, you agree to execute blockchain transactions via smart contracts. You acknowledge that blockchain transactions are immutable.</p>
+                 <p className="font-bold text-slate-800 mt-4">2. Service Delivery</p>
+                 <p>AbaPay acts as a decentralized bridge to fiat utility providers. While we strive for instant vending, delays caused by third-party telecom or electricity providers are beyond our direct control.</p>
+                 <p className="font-bold text-slate-800 mt-4">3. Supported Assets</p>
+                 <p>You are responsible for ensuring you send the correct supported asset on the Celo Network. AbaPay is not liable for funds lost due to incorrect network transfers.</p>
+              </div>
+           </div>
+        </div>
+      )}
+
+      {isPrivacyOpen && (
+        <div className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-sm flex justify-center items-center p-4 animate-in fade-in" onClick={() => setIsPrivacyOpen(false)}>
+           <div className="bg-white w-full max-w-md rounded-[2rem] shadow-2xl p-6 flex flex-col max-h-[80vh] animate-in zoom-in-95 duration-200" onClick={(e) => e.stopPropagation()}>
+              <div className="flex justify-between items-center mb-4 shrink-0 border-b border-slate-100 pb-4">
+                <h2 className="text-xl font-black tracking-tight text-slate-900">Privacy Policy</h2>
+                <button onClick={() => setIsPrivacyOpen(false)} className="p-2 bg-slate-100 rounded-full hover:bg-slate-200 transition-colors"><XCircle size={20} className="text-slate-500" /></button>
+              </div>
+              <div className="overflow-y-auto text-sm text-slate-600 space-y-4 pr-2 leading-relaxed">
+                 <p className="font-bold text-slate-800">1. Data Collection</p>
+                 <p>As a decentralized application, AbaPay does not require you to create an account or provide personal KYC information. We only collect the data necessary to fulfill your utility order (e.g., Meter Number, Phone Number).</p>
+                 <p className="font-bold text-slate-800 mt-4">2. Wallet Addresses</p>
+                 <p>Your connected Celo wallet address is recorded on the public blockchain when executing a transaction. This is a fundamental property of Web3 and is not hidden.</p>
+                 <p className="font-bold text-slate-800 mt-4">3. Third-Party Services</p>
+                 <p>Utility numbers provided (like phone or meter numbers) are securely passed to our fiat vending partners solely for the purpose of delivering your purchased service.</p>
+              </div>
+           </div>
+        </div>
+      )}
+
+      {isSelectionModalOpen && (
+        <div className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-sm flex justify-center items-center p-4 animate-in fade-in" onClick={() => setIsSelectionModalOpen(false)}>
+           <div className="bg-white w-full max-w-sm rounded-[2rem] shadow-2xl p-6 animate-in zoom-in-95 duration-200" onClick={(e) => e.stopPropagation()}>
+              <div className="flex justify-between items-center mb-6 shrink-0 border-b border-slate-100 pb-4">
+                <h2 className="text-xl font-black text-slate-900 tracking-tight">{modalTitle}</h2>
+                <button onClick={() => setIsSelectionModalOpen(false)} className="p-2 bg-slate-100 rounded-full hover:bg-slate-200 transition-colors"><XCircle size={20} className="text-slate-500" /></button>
+              </div>
+              <div className="space-y-2.5 max-h-[50vh] overflow-y-auto pr-1">
                  {modalType === 'token' && SUPPORTED_TOKENS.map(token => (
-                   <button key={token.symbol} onClick={() => { modalCallback?.(token.symbol); setIsSelectionModalOpen(false); }} className="w-full text-left p-4 rounded-xl font-bold bg-slate-50 border flex justify-between items-center">
-                     <div className="flex items-center gap-3"><img src={token.logo} className="w-6 h-6 rounded-full bg-white" /> <span>{token.symbol}</span></div>
+                   <button 
+                     key={token.symbol} 
+                     onClick={() => { modalCallback?.(token.symbol); setIsSelectionModalOpen(false); }}
+                     className="w-full text-left p-4 rounded-xl font-bold text-slate-700 bg-slate-50 border border-slate-100 uppercase text-xs hover:border-emerald-300 hover:bg-emerald-50/50 transition-all flex justify-between items-center"
+                   >
+                     <div className="flex items-center gap-3">
+                       <img src={token.logo} alt={token.symbol} className="w-6 h-6 object-contain rounded-full shadow-sm bg-white" />
+                       <span className="text-sm font-black text-slate-800 tracking-tight">{token.symbol}</span>
+                     </div>
                      {selectedToken.symbol === token.symbol && <CheckCircle2 size={18} className="text-emerald-500"/>}
                    </button>
                  ))}
+
                  {modalType === 'provider' && (modalOptions as any[]).map(provider => (
-                    <button key={provider.serviceID} onClick={() => { modalCallback?.(provider.serviceID); setIsSelectionModalOpen(false); }} className="w-full text-left p-4 rounded-2xl font-bold bg-white border flex justify-between items-center">
-                        <div className="flex items-center gap-4"><img src={provider.logo} className="w-12 h-12 object-contain" /> <div><span className="text-sm font-black">{provider.displayName}</span><p className="text-[10px] uppercase text-slate-400">{provider.serviceID}</p></div></div>
+                    <button 
+                        key={provider.serviceID} 
+                        onClick={() => { modalCallback?.(provider.serviceID); setIsSelectionModalOpen(false); }}
+                        className={`w-full text-left p-4 rounded-2xl font-bold text-slate-700 bg-white border hover:bg-slate-50 transition-all flex justify-between items-center group ${activeService.id === 'ELECTRICITY' ? 'hover:border-orange-300' : 'hover:border-pink-300'}`}
+                    >
+                        <div className="flex items-center gap-4">
+                            <div className="w-12 h-12 shrink-0 rounded-full border border-slate-100 bg-white p-0.5 flex items-center justify-center shadow-sm overflow-hidden group-hover:shadow-md transition-shadow">
+                                <img src={provider.logo} alt={provider.displayName} className="w-full h-full object-contain" />
+                            </div>
+                            <div>
+                                <span className="text-sm font-black text-slate-900 tracking-tight">{provider.displayName}</span>
+                                <p className={`text-[10px] font-black uppercase text-slate-400 tracking-wider transition-colors ${activeService.id === 'ELECTRICITY' ? 'group-hover:text-orange-700' : 'group-hover:text-pink-700'}`}>{provider.serviceID}</p>
+                            </div>
+                        </div>
+                        {(activeService.id === 'ELECTRICITY' ? elecProvider === provider.serviceID : cableProvider === provider.serviceID) && (
+                          <CheckCircle2 size={20} className={activeService.id === 'ELECTRICITY' ? "text-orange-500" : "text-pink-500"}/>
+                        )}
                     </button>
                  ))}
+
                  {modalType === 'standard' && (modalOptions as string[]).map(option => (
-                     <button key={option} onClick={() => { modalCallback?.(option); setIsSelectionModalOpen(false); }} className="w-full text-left p-4 rounded-xl font-black uppercase text-xs bg-slate-50 border">
+                     <button 
+                       key={option} 
+                       onClick={() => { modalCallback?.(option); setIsSelectionModalOpen(false); }}
+                       className="w-full text-left p-4 rounded-xl font-black text-slate-700 bg-slate-50 border border-slate-100 uppercase text-xs hover:border-emerald-300 hover:bg-emerald-50/50 transition-all flex justify-between items-center"
+                     >
                        <span>{option}</span>
+                       {(telecomProvider === option || cableProvider === option) && <CheckCircle2 size={16} className="text-emerald-500"/>}
                      </button>
                  ))}
               </div>
@@ -733,7 +795,7 @@ export default function Home() {
         <div className="fixed inset-0 z-[70] bg-slate-900/60 backdrop-blur-sm flex justify-center items-center p-4 animate-in fade-in">
           <div className="bg-white w-full max-w-md rounded-[2rem] shadow-2xl p-6 animate-in zoom-in-95 duration-200">
             <div className="flex justify-between items-center mb-4 shrink-0 border-b border-slate-100 pb-4">
-              <h2 className="text-2xl font-black flex items-center gap-2.5 tracking-tight text-slate-900"><Mail className="text-emerald-500" size={24}/> Protocol Support</h2>
+              <h2 className="text-2xl font-black flex items-center gap-2.5 tracking-tight text-slate-900"><Mail className="text-emerald-500" size={24}/> AbaPay Support</h2>
               <button onClick={() => { setIsSupportOpen(false); setSupportTxHash(null); }} className="p-2 bg-slate-100 rounded-full hover:bg-slate-200"><XCircle size={20} className="text-slate-500" /></button>
             </div>
             <textarea 
@@ -757,9 +819,9 @@ export default function Home() {
       <div className="w-full max-w-md">
         <div className="flex justify-between items-center bg-white p-4 rounded-3xl shadow-sm border border-slate-100 mb-6">
           <div className="flex items-center gap-3">
-            <img src="/logo.png" alt="Protocol" className="h-10 w-auto object-contain" />
+            <img src="/logo.png" alt="AbaPay" className="h-10 w-auto object-contain" />
             <div className="flex flex-col">
-              <span className="text-xl font-black text-slate-900 leading-none tracking-tight">Protocol<span className="text-emerald-500">.</span></span>
+              <span className="text-xl font-black text-slate-900 leading-none tracking-tight">AbaPay<span className="text-emerald-500">.</span></span>
               <span className="text-[8px] font-black uppercase text-slate-400 tracking-widest mt-1">Seamless Payments.</span>
             </div>
           </div>
@@ -1262,7 +1324,7 @@ export default function Home() {
             <a href="#" onClick={(e) => { e.preventDefault(); setIsTermsOpen(true); }} className="text-[10px] font-black text-slate-400 hover:text-emerald-600 uppercase tracking-tight">Terms of Service</a>
             <a href="#" onClick={(e) => { e.preventDefault(); setIsPrivacyOpen(true); }} className="text-[10px] font-black text-slate-400 hover:text-emerald-600 uppercase tracking-tight">Privacy Policy</a>
           </div>
-          <p className="text-[9px] font-medium text-slate-300 uppercase tracking-[0.2em] mt-2">© 2026 MASONODE ORGANISATION • THE PROTOCOL v3.0</p>
+          <p className="text-[9px] font-medium text-slate-300 uppercase tracking-[0.2em] mt-2">© 2026 MASONODE ORGANISATION • THE ABAPAY PROTOCOL v3.0</p>
         </footer>
       </div>
     </main>
