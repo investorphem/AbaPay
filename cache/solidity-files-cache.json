@@ -2,8 +2,8 @@
   "_format": "hh-sol-cache-2",
   "files": {
     "C:\\Users\\USER\\abapay\\contracts\\AbaPay.sol": {
-      "lastModificationDate": 1775307928262,
-      "contentHash": "918911dab016621bba03b77ec0819da3",
+      "lastModificationDate": 1775560446230,
+      "contentHash": "03b2d7987efd9179a5ac151a31a2b61e",
       "sourceName": "contracts/AbaPay.sol",
       "solcConfig": {
         "version": "0.8.20",
