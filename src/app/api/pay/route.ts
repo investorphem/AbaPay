@@ -169,21 +169,27 @@ export async function POST(req: Request) {
       if (actualStatus === 'delivered' || actualStatus === 'successful') {
         const vendedToken = payData.purchased_code || payData.token || payData.content?.transactions?.product_name || "Vended Successfully";
 
-        await supabase.from('transactions').update({ status: 'SUCCESS' }).eq('tx_hash', txHash);
+        // 🛡️ UPGRADED: Save the token directly to Supabase
+        await supabase.from('transactions').update({ 
+            status: 'SUCCESS',
+            purchased_code: vendedToken // <-- Database save
+        }).eq('tx_hash', txHash);
 
         try { await sendAbaPaySms(vtpassPayload.phone, `Purchase Successful! Token/Ref: ${vendedToken}. Amt: ₦${vendAmount}`); } catch (e) {}
         try { await sendTelegramAlert(`✅ *SALE SUCCESSFUL*\n🛒 *Product:* ${network} ${serviceCategory}\n💰 *Naira:* ₦${vendAmount}\n🪙 *Asset:* ${amount} ${tokenSymbol || 'USD₮'}\n👤 *User:* ${billersCode}\n⛽ *Fee:* ₦${serviceFee}\n🧾 *Ref:* ${vendedToken}`); } catch (e) {}
 
+        // 🛡️ UPGRADED: Send the purchased_code back to the frontend
         return NextResponse.json({
           success: true,
           message: "Transaction Successful!",
+          purchased_code: vendedToken, // <-- Frontend capture
           data: { vendedToken, vendAmount, requestId: payData.requestId }
         });
 
       } else if (actualStatus === 'pending' || actualStatus === 'initiated' || payData.code === '099') {
         // SCENARIO: VTpass accepted it, but the telco/disco is taking a long time to deliver
         await supabase.from('transactions').update({ status: 'PENDING' }).eq('tx_hash', txHash);
-        
+
         try { await sendTelegramAlert(`⏳ *TRANSACTION PENDING*\n🛒 *Product:* ${network} ${serviceCategory}\n👤 *User:* ${billersCode}\n⚠️ Network delayed. Awaiting final delivery confirmation from VTpass.`); } catch (e) {}
 
         return NextResponse.json({
@@ -195,14 +201,14 @@ export async function POST(req: Request) {
         // SCENARIO: VTpass accepted the request (000), but the inner status immediately failed
         await supabase.from('transactions').update({ status: 'FAILED_VENDING' }).eq('tx_hash', txHash);
         try { await sendTelegramAlert(`🚨 *VENDING FAILED (Inner Status)*\nHash: \`${txHash}\`\nStatus: ${actualStatus}`); } catch (e) {}
-        
+
         return NextResponse.json({ success: false, message: "Transaction failed at the provider network level.", code: "INNER_FAIL" }, { status: 502 });
       }
 
     } else {
       // SCENARIO: VTpass instantly rejected the request
       await supabase.from('transactions').update({ status: 'FAILED_VENDING' }).eq('tx_hash', txHash);
-      
+
       // UPGRADED ADMIN ALERT: Sends the exact raw VTpass error description to the Admin's Telegram!
       const rawAdminError = payData.response_description || 'Unknown Provider Error';
       try { await sendTelegramAlert(`🚨 *VENDING REJECTED*\n🛒 *Product:* ${network} ${serviceCategory}\n👤 *User:* ${billersCode}\n❌ *VTpass Code:* ${payData.code}\n🛑 *Real Error:* ${rawAdminError}\n🔗 *Hash:* \`${txHash}\``); } catch (e) {}
