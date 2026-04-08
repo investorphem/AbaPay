@@ -84,14 +84,14 @@ export default function Home() {
   const [selectedReceipt, setSelectedReceipt] = useState<any>(null); 
   const [isTermsOpen, setIsTermsOpen] = useState(false); 
   const [isPrivacyOpen, setIsPrivacyOpen] = useState(false); 
-  
+
   const [isSupportOpen, setIsSupportOpen] = useState(false);
   const [supportMessage, setSupportMessage] = useState("");
   const [supportTxHash, setSupportTxHash] = useState<string | null>(null);
   const [supportFile, setSupportFile] = useState<File | null>(null);
   const [isSendingSupport, setIsSendingSupport] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
-  
+
   const [isSelectionModalOpen, setIsSelectionModalOpen] = useState(false);
   const [modalTitle, setModalTitle] = useState("");
   const [modalOptions, setModalOptions] = useState<any[]>([]); 
@@ -175,16 +175,23 @@ export default function Home() {
     initSystem();
   }, [activeChain]);
 
-  // UPGRADED: Cloud-Sync User History based on Wallet Address
+  // UPGRADED: Cloud-Sync User History with 6-Month Filter
   useEffect(() => {
     if (!address) return;
 
     async function fetchCloudHistory() {
       try {
+        // 1. Calculate the exact date 6 months ago
+        const sixMonthsAgo = new Date();
+        sixMonthsAgo.setMonth(sixMonthsAgo.getMonth() - 6);
+        const isoDate = sixMonthsAgo.toISOString(); // Format it for Supabase
+
+        // 2. Fetch only transactions from that date to today
         const { data, error } = await supabase
           .from('transactions')
           .select('*')
           .eq('wallet_address', address)
+          .gte('created_at', isoDate) // 🛡️ The 6-Month Filter applied
           .order('created_at', { ascending: false });
 
         if (error) {
@@ -576,9 +583,9 @@ export default function Home() {
       if (address) formData.append("userAddress", address);
       if (supportTxHash) formData.append("txHash", supportTxHash); 
       if (supportFile) formData.append("file", supportFile);
-      
+
       await fetch('/api/support', { method: 'POST', body: formData });
-      
+
       setIsSupportOpen(false);
       setSupportMessage("");
       setSupportFile(null);
