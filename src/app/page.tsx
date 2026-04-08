@@ -175,7 +175,7 @@ export default function Home() {
     initSystem();
   }, [activeChain]);
 
-  // UPGRADED: Cloud-Sync User History with 6-Month Filter
+  // UPGRADED: Cloud-Sync User History with 6-Month Filter & Purchased Code
   useEffect(() => {
     if (!address) return;
 
@@ -211,7 +211,8 @@ export default function Home() {
             network: tx.network,
             txHash: tx.tx_hash,
             account: tx.account_number,
-            refund_hash: tx.refund_hash
+            refund_hash: tx.refund_hash,
+            purchased_code: tx.purchased_code // 🛡️ UPGRADED: Grab the token from DB
           }));
 
           setTransactions(cloudHistory);
@@ -484,7 +485,8 @@ export default function Home() {
         subscription_type: activeService.id === "CABLE" && ['dstv', 'gotv'].includes(cableProvider) ? cableSubscriptionType : undefined
       };
 
-      const newTx = { 
+      // 🛡️ Explicitly typed any here so we can inject purchased_code safely
+      const newTx: any = { 
         id: hash.slice(0,8), 
         date: new Date().toLocaleString(), 
         status: "PENDING", 
@@ -516,6 +518,8 @@ export default function Home() {
       if (result.success) {
         setStatus("Success! Token/Ref Dispatched.");
         newTx.status = "SUCCESS";
+        // 🛡️ UPGRADED: Save the token directly to the new transaction object so it shows instantly
+        newTx.purchased_code = result.purchased_code; 
         showToast("Vending Successful", "Your utility has been successfully delivered.", "success");
       } else {
         setStatus(`Error: ${result.message || 'Transaction Failed'}`);
@@ -704,6 +708,15 @@ export default function Home() {
                        <p className="text-slate-400 text-[9px] font-bold">{selectedReceipt.amountCrypto} {selectedReceipt.tokenUsed || 'USD₮'}</p>
                     </div>
                  </div>
+
+                 {/* ⚡ UPGRADED: ELECTRICITY TOKEN SECTION ⚡ */}
+                 {selectedReceipt.status === 'SUCCESS' && selectedReceipt.purchased_code && (
+                   <div className="mt-4 bg-orange-50 border-2 border-orange-200 rounded-xl p-4 text-center">
+                      <p className="text-[10px] font-black text-orange-600 uppercase tracking-widest mb-1">Meter Token PIN</p>
+                      <p className="font-mono text-xl font-black text-slate-900 tracking-[0.2em] break-all">{selectedReceipt.purchased_code}</p>
+                      <p className="text-[9px] font-bold text-orange-500 mt-2">Enter this exactly as shown into your meter or decoder.</p>
+                   </div>
+                 )}
 
                  {selectedReceipt.status === 'REFUNDED' && selectedReceipt.refund_hash && (
                    <div className="flex justify-between border-b border-slate-100 pb-3">
