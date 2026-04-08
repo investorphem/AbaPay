@@ -210,9 +210,9 @@ export default function Home() {
             txHash: tx.tx_hash,
             account: tx.account_number,
             refund_hash: tx.refund_hash,
-            purchased_code: tx.purchased_code, // DB Catch
-            request_id: tx.request_id, // ⚡ NEW: DB Catch Transaction ID
-            units: tx.units // ⚡ NEW: DB Catch Units
+            purchased_code: tx.purchased_code, 
+            request_id: tx.request_id, 
+            units: tx.units 
           }));
 
           setTransactions(cloudHistory);
@@ -517,8 +517,8 @@ export default function Home() {
         setStatus("Success! Token/Ref Dispatched.");
         newTx.status = "SUCCESS";
         newTx.purchased_code = result.purchased_code; 
-        newTx.units = result.units; // ⚡ NEW: Instant UI Units Catch
-        newTx.request_id = result.data?.requestId; // ⚡ NEW: Instant UI ID Catch
+        newTx.units = result.units; 
+        newTx.request_id = result.data?.requestId; 
         showToast("Vending Successful", "Your utility has been successfully delivered.", "success");
       } else {
         setStatus(`Error: ${result.message || 'Transaction Failed'}`);
@@ -692,13 +692,12 @@ export default function Home() {
                     <span className="text-slate-400 text-[10px] font-bold uppercase tracking-wider">Status</span>
                     <span className={`font-black text-xs uppercase ${selectedReceipt.status === 'SUCCESS' ? 'text-emerald-600' : selectedReceipt.status === 'REFUNDED' ? 'text-blue-600' : 'text-orange-500'}`}>{selectedReceipt.status}</span>
                  </div>
-                 
-                 {/* ⚡ UPGRADED RECEIPT LAYOUT ⚡ */}
+
                  <div className="flex justify-between border-b border-slate-100 pb-3">
                     <span className="text-slate-400 text-[10px] font-bold uppercase tracking-wider">Service</span>
                     <span className="text-slate-800 font-black text-xs text-right w-2/3 uppercase">{selectedReceipt.network} {selectedReceipt.service}</span>
                  </div>
-                 
+
                  <div className="flex justify-between border-b border-slate-100 pb-3">
                     <span className="text-slate-400 text-[10px] font-bold uppercase tracking-wider">
                       {selectedReceipt.service === 'Electricity' ? 'Meter Number' : 'Recipient'}
@@ -713,7 +712,8 @@ export default function Home() {
                    </div>
                  )}
 
-                 {selectedReceipt.units && selectedReceipt.units !== "N/A" && (
+                 {/* ⚡ ISOLATED UNITS SECTION ⚡ */}
+                 {selectedReceipt.units && selectedReceipt.units !== "N/A" && (selectedReceipt.service?.toUpperCase() === 'ELECTRICITY' || selectedReceipt.service === 'Electricity') && (
                    <div className="flex justify-between border-b border-slate-100 pb-3">
                       <span className="text-slate-400 text-[10px] font-bold uppercase tracking-wider">Purchased Units</span>
                       <span className="text-slate-800 font-black text-xs">{selectedReceipt.units} kWh</span>
@@ -728,12 +728,11 @@ export default function Home() {
                     </div>
                  </div>
 
-                 {/* ⚡ UPGRADED: ELECTRICITY TOKEN FIX ⚡ */}
-                 {selectedReceipt.status === 'SUCCESS' && selectedReceipt.purchased_code && (
+                 {/* ⚡ ISOLATED TOKEN SECTION ⚡ */}
+                 {selectedReceipt.status === 'SUCCESS' && selectedReceipt.purchased_code && selectedReceipt.purchased_code !== "Vended Successfully" && (selectedReceipt.service?.toUpperCase() === 'ELECTRICITY' || selectedReceipt.service === 'Electricity') && (
                    <div className="mt-4 bg-orange-50 border-2 border-orange-200 rounded-xl p-4 text-center">
                       <p className="text-[10px] font-black text-orange-600 uppercase tracking-widest mb-1">Meter Token PIN</p>
                       <p className="font-mono text-xl font-black text-slate-900 tracking-[0.2em] break-all">
-                        {/* 🛡️ This line beautifully deletes the 'Token : token:' glitch! */}
                         {selectedReceipt.purchased_code.replace(/token\s*[:\-]*\s*/gi, '').trim()}
                       </p>
                       <p className="text-[9px] font-bold text-orange-500 mt-2">Enter this exactly as shown into your meter.</p>
