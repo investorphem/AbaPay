@@ -168,22 +168,27 @@ export async function POST(req: Request) {
 
       if (actualStatus === 'delivered' || actualStatus === 'successful') {
         const vendedToken = payData.purchased_code || payData.token || payData.content?.transactions?.product_name || "Vended Successfully";
+        
+        // ⚡ NEW: Catch the units from VTPass
+        const vendedUnits = payData.content?.transactions?.unit || "N/A";
 
-        // 🛡️ UPGRADED: Save the token directly to Supabase
+        // 🛡️ UPGRADED: Save the token AND units directly to Supabase
         await supabase.from('transactions').update({ 
             status: 'SUCCESS',
-            purchased_code: vendedToken // <-- Database save
+            purchased_code: vendedToken,
+            units: vendedUnits // <-- Database save
         }).eq('tx_hash', txHash);
 
         try { await sendAbaPaySms(vtpassPayload.phone, `Purchase Successful! Token/Ref: ${vendedToken}. Amt: ₦${vendAmount}`); } catch (e) {}
         try { await sendTelegramAlert(`✅ *SALE SUCCESSFUL*\n🛒 *Product:* ${network} ${serviceCategory}\n💰 *Naira:* ₦${vendAmount}\n🪙 *Asset:* ${amount} ${tokenSymbol || 'USD₮'}\n👤 *User:* ${billersCode}\n⛽ *Fee:* ₦${serviceFee}\n🧾 *Ref:* ${vendedToken}`); } catch (e) {}
 
-        // 🛡️ UPGRADED: Send the purchased_code back to the frontend
+        // 🛡️ UPGRADED: Send the purchased_code AND units back to the frontend
         return NextResponse.json({
           success: true,
           message: "Transaction Successful!",
-          purchased_code: vendedToken, // <-- Frontend capture
-          data: { vendedToken, vendAmount, requestId: payData.requestId }
+          purchased_code: vendedToken, 
+          units: vendedUnits, // <-- Frontend capture
+          data: { vendedToken, vendAmount, requestId: payData.requestId, units: vendedUnits }
         });
 
       } else if (actualStatus === 'pending' || actualStatus === 'initiated' || payData.code === '099') {
