@@ -168,9 +168,16 @@ export async function POST(req: Request) {
 
       if (actualStatus === 'delivered' || actualStatus === 'successful') {
         const vendedToken = payData.purchased_code || payData.token || payData.content?.transactions?.product_name || "Vended Successfully";
-        
-        // ⚡ NEW: Catch the units from VTPass
-        const vendedUnits = payData.content?.transactions?.unit || "N/A";
+
+        // ⚡ UPGRADED: Aggressively search for units in every possible place VTPass might hide it
+        let vendedUnits = "N/A";
+        if (payData.units) {
+          vendedUnits = payData.units.toString();
+        } else if (payData.content?.transactions?.units) {
+          vendedUnits = payData.content.transactions.units.toString();
+        } else if (payData.content?.transactions?.unit) {
+          vendedUnits = payData.content.transactions.unit.toString();
+        }
 
         // 🛡️ UPGRADED: Save the token AND units directly to Supabase
         await supabase.from('transactions').update({ 
