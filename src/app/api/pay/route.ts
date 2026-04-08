@@ -5,7 +5,6 @@ import { sendTelegramAlert } from '@/lib/telegram';
 import { supabaseAdmin as supabase } from '@/utils/supabase'; 
 
 // --- ROBUST VTPASS ERROR CODE DICTIONARY ---
-// UPGRADED: Maps raw VTpass codes to highly professional, user-friendly UI messages
 const error_messages: Record<string, string> = {
     "011": "Invalid arguments. Please check your phone/meter number and try again.",
     "012": "This product does not exist or is currently unavailable.",
@@ -13,7 +12,7 @@ const error_messages: Record<string, string> = {
     "014": "Request blocked. Transaction exceeds your daily limit with this provider.",
     "016": "Transaction failed at the provider level. Please verify details and retry.",
     "017": "Amount is above the maximum allowed for this product.",
-    "018": "Service is temporarily unavailable at the provider node. Try again shortly.", // Masks 'Low Wallet Balance'
+    "018": "Service is temporarily unavailable at the provider node. Try again shortly.", 
     "019": "Duplicate transaction detected. Please wait 30 seconds before retrying.",
     "021": "Authentication with the utility provider failed. AbaPay admins are investigating.",
     "022": "Authentication with the utility provider failed. AbaPay admins are investigating.",
@@ -159,58 +158,60 @@ export async function POST(req: Request) {
       return NextResponse.json({ success: false, code: "VTPASS_CRASH", message: "Network timeout while contacting provider." }, { status: 502 });
     }
 
-    // 5. HANDLE VTPASS RESPONSE (WITH DEEP STATUS CHECK)
+    // 5. HANDLE VTPASS RESPONSE
     if (payData.code === '000' || payData.code === '099') {
       processedTransactions.add(txHash);
 
-      // UPGRADED: Look inwards into the response object for the actual transaction status
       const actualStatus = payData.content?.transactions?.status || 'pending';
 
       if (actualStatus === 'delivered' || actualStatus === 'successful') {
-        const vendedToken = payData.purchased_code || payData.token || payData.content?.transactions?.product_name || "Vended Successfully";
+        
+        // ⚡ ISOLATION FIX: ONLY parse tokens & units for Electricity!
+        let dbPurchasedCode = null;
+        let vendedUnits = null;
+        let alertTokenRef = "Success"; 
 
-        // ⚡ UPGRADED: Aggressively search for units in every possible place VTPass might hide it
-        let vendedUnits = "N/A";
-        if (payData.units) {
-          vendedUnits = payData.units.toString();
-        } else if (payData.content?.transactions?.units) {
-          vendedUnits = payData.content.transactions.units.toString();
-        } else if (payData.content?.transactions?.unit) {
-          vendedUnits = payData.content.transactions.unit.toString();
+        if (serviceCategory === 'ELECTRICITY') {
+          dbPurchasedCode = payData.purchased_code || payData.token || null;
+          alertTokenRef = dbPurchasedCode || "Processing Token";
+
+          // Catch units from various possible payload structures
+          if (payData.units) vendedUnits = payData.units.toString();
+          else if (payData.content?.transactions?.units) vendedUnits = payData.content.transactions.units.toString();
+          else if (payData.content?.transactions?.unit) vendedUnits = payData.content.transactions.unit.toString();
+        } else {
+          // For Airtime/Data/Cable, grab the VTPass transaction ID for the receipt instead of a token
+          alertTokenRef = payData.content?.transactions?.transactionId || payData.requestId || "Success";
         }
 
-        // 🛡️ UPGRADED: Save the token AND units directly to Supabase
+        // Save safely to database
         await supabase.from('transactions').update({ 
             status: 'SUCCESS',
-            purchased_code: vendedToken,
-            units: vendedUnits // <-- Database save
+            purchased_code: dbPurchasedCode, // Will be Null for airtime/data
+            units: vendedUnits // Will be Null for airtime/data
         }).eq('tx_hash', txHash);
 
-        try { await sendAbaPaySms(vtpassPayload.phone, `Purchase Successful! Token/Ref: ${vendedToken}. Amt: ₦${vendAmount}`); } catch (e) {}
-        try { await sendTelegramAlert(`✅ *SALE SUCCESSFUL*\n🛒 *Product:* ${network} ${serviceCategory}\n💰 *Naira:* ₦${vendAmount}\n🪙 *Asset:* ${amount} ${tokenSymbol || 'USD₮'}\n👤 *User:* ${billersCode}\n⛽ *Fee:* ₦${serviceFee}\n🧾 *Ref:* ${vendedToken}`); } catch (e) {}
+        try { await sendAbaPaySms(vtpassPayload.phone, `Purchase Successful! Ref: ${alertTokenRef}. Amt: ₦${vendAmount}`); } catch (e) {}
+        try { await sendTelegramAlert(`✅ *SALE SUCCESSFUL*\n🛒 *Product:* ${network} ${serviceCategory}\n💰 *Naira:* ₦${vendAmount}\n🪙 *Asset:* ${amount} ${tokenSymbol || 'USD₮'}\n👤 *User:* ${billersCode}\n⛽ *Fee:* ₦${serviceFee}\n🧾 *Ref:* ${alertTokenRef}`); } catch (e) {}
 
-        // 🛡️ UPGRADED: Send the purchased_code AND units back to the frontend
         return NextResponse.json({
           success: true,
           message: "Transaction Successful!",
-          purchased_code: vendedToken, 
-          units: vendedUnits, // <-- Frontend capture
-          data: { vendedToken, vendAmount, requestId: payData.requestId, units: vendedUnits }
+          purchased_code: dbPurchasedCode, 
+          units: vendedUnits, 
+          data: { vendedToken: alertTokenRef, vendAmount, requestId: payData.requestId, units: vendedUnits }
         });
 
       } else if (actualStatus === 'pending' || actualStatus === 'initiated' || payData.code === '099') {
-        // SCENARIO: VTpass accepted it, but the telco/disco is taking a long time to deliver
         await supabase.from('transactions').update({ status: 'PENDING' }).eq('tx_hash', txHash);
-
         try { await sendTelegramAlert(`⏳ *TRANSACTION PENDING*\n🛒 *Product:* ${network} ${serviceCategory}\n👤 *User:* ${billersCode}\n⚠️ Network delayed. Awaiting final delivery confirmation from VTpass.`); } catch (e) {}
 
         return NextResponse.json({
-          success: true, // Return true so the frontend still shows a receipt, but marks it processing
+          success: true, 
           message: "Transaction is processing. Your utility will be delivered shortly.",
           data: { vendedToken: "Processing...", vendAmount, requestId: payData.requestId }
         });
       } else {
-        // SCENARIO: VTpass accepted the request (000), but the inner status immediately failed
         await supabase.from('transactions').update({ status: 'FAILED_VENDING' }).eq('tx_hash', txHash);
         try { await sendTelegramAlert(`🚨 *VENDING FAILED (Inner Status)*\nHash: \`${txHash}\`\nStatus: ${actualStatus}`); } catch (e) {}
 
@@ -218,21 +219,12 @@ export async function POST(req: Request) {
       }
 
     } else {
-      // SCENARIO: VTpass instantly rejected the request
       await supabase.from('transactions').update({ status: 'FAILED_VENDING' }).eq('tx_hash', txHash);
-
-      // UPGRADED ADMIN ALERT: Sends the exact raw VTpass error description to the Admin's Telegram!
       const rawAdminError = payData.response_description || 'Unknown Provider Error';
       try { await sendTelegramAlert(`🚨 *VENDING REJECTED*\n🛒 *Product:* ${network} ${serviceCategory}\n👤 *User:* ${billersCode}\n❌ *VTpass Code:* ${payData.code}\n🛑 *Real Error:* ${rawAdminError}\n🔗 *Hash:* \`${txHash}\``); } catch (e) {}
 
-      // Match the raw VTpass code to our friendly dictionary for the User UI
       const friendlyMessage = error_messages[payData.code as string] || "Utility vending failed at the provider level. Please contact support.";
-
-      return NextResponse.json({ 
-        success: false, 
-        message: friendlyMessage,
-        code: payData.code 
-      }, { status: 502 });
+      return NextResponse.json({ success: false, message: friendlyMessage, code: payData.code }, { status: 502 });
     }
 
   } catch (error: any) {
