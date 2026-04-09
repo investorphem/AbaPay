@@ -4,7 +4,6 @@ import { sendAbaPaySms } from '@/lib/messaging';
 import { sendTelegramAlert } from '@/lib/telegram'; 
 import { supabaseAdmin as supabase } from '@/utils/supabase'; 
 
-// --- ROBUST VTPASS ERROR CODE DICTIONARY ---
 const error_messages: Record<string, string> = {
     "011": "Invalid arguments. Please check your phone/meter number and try again.",
     "012": "This product does not exist or is currently unavailable.",
@@ -68,17 +67,9 @@ export async function POST(req: Request) {
     const needsVerification = serviceCategory === 'ELECTRICITY' || (serviceCategory === 'CABLE' && network !== 'SHOWMAX');
     const serviceFee = needsVerification ? 100 : 0;
     const vendAmount = requestedNaira; 
-
-    const baseRate = parseFloat(process.env.NEXT_PUBLIC_FIXED_RATE || "1550");
-    const expectedTotalNaira = vendAmount + serviceFee;
-    const requiredCrypto = expectedTotalNaira / baseRate;
-
-    if (parseFloat(amount) < (requiredCrypto * 0.99)) {
-        return NextResponse.json({ success: false, code: "FUNDS", message: "Insufficient crypto paid." }, { status: 400 });
-    }
-
     const vtRequestId = getStrictRequestId();
 
+    // 1. SAVE TO DB FIRST
     const dbPayload = {
       tx_hash: txHash,
       request_id: vtRequestId,
@@ -92,11 +83,34 @@ export async function POST(req: Request) {
       wallet_address: wallet_address || "UNKNOWN"
     };
 
-    const { data: dbData, error: dbError } = await supabase.from('transactions').insert([dbPayload]).select();
+    const { error: dbError } = await supabase.from('transactions').insert([dbPayload]);
 
     if (dbError) {
       console.error("SUPABASE ERROR:", dbError.message);
       return NextResponse.json({ success: false, code: "DB_REJECTED", message: `DB Error: ${dbError.message}` }, { status: 400 });
+    }
+
+    // ⚡ UNIFIED ENGINE: FETCH RATE FROM DB ⚡
+    const { data: settingsData, error: settingsError } = await supabase
+      .from('platform_settings')
+      .select('exchange_rate')
+      .eq('id', 1)
+      .single();
+
+    if (settingsError || !settingsData) {
+      await supabase.from('transactions').update({ status: 'FAILED_RATE_FETCH' }).eq('tx_hash', txHash);
+      return NextResponse.json({ success: false, code: "SYSTEM_ERROR", message: "Failed to fetch platform exchange rate." }, { status: 500 });
+    }
+
+    const baseRate = parseFloat(settingsData.exchange_rate);
+    const expectedTotalNaira = vendAmount + serviceFee;
+    const requiredCrypto = expectedTotalNaira / baseRate;
+
+    // We keep the 0.99 (1%) slippage tolerance in case the user clicked pay exactly when you changed the rate
+    if (parseFloat(amount) < (requiredCrypto * 0.99)) {
+        await supabase.from('transactions').update({ status: 'FAILED_FUNDS_MISMATCH' }).eq('tx_hash', txHash);
+        try { await sendTelegramAlert(`🚨 *RATE MISMATCH / UNDERPAYMENT*\nUser: ${wallet_address}\nHash: \`${txHash}\`\nThey paid: ${amount} ${tokenSymbol}. We expected: ${requiredCrypto.toFixed(4)} based on rate ₦${baseRate}.`); } catch (e) {}
+        return NextResponse.json({ success: false, code: "FUNDS", message: "Insufficient crypto paid. Admin has been notified." }, { status: 400 });
     }
 
     // 2. MERCHANT VERIFICATION
@@ -166,7 +180,6 @@ export async function POST(req: Request) {
 
       if (actualStatus === 'delivered' || actualStatus === 'successful') {
         
-        // ⚡ ISOLATION FIX: ONLY parse tokens & units for Electricity!
         let dbPurchasedCode = null;
         let vendedUnits = null;
         let alertTokenRef = "Success"; 
@@ -175,20 +188,17 @@ export async function POST(req: Request) {
           dbPurchasedCode = payData.purchased_code || payData.token || null;
           alertTokenRef = dbPurchasedCode || "Processing Token";
 
-          // Catch units from various possible payload structures
           if (payData.units) vendedUnits = payData.units.toString();
           else if (payData.content?.transactions?.units) vendedUnits = payData.content.transactions.units.toString();
           else if (payData.content?.transactions?.unit) vendedUnits = payData.content.transactions.unit.toString();
         } else {
-          // For Airtime/Data/Cable, grab the VTPass transaction ID for the receipt instead of a token
           alertTokenRef = payData.content?.transactions?.transactionId || payData.requestId || "Success";
         }
 
-        // Save safely to database
         await supabase.from('transactions').update({ 
             status: 'SUCCESS',
-            purchased_code: dbPurchasedCode, // Will be Null for airtime/data
-            units: vendedUnits // Will be Null for airtime/data
+            purchased_code: dbPurchasedCode, 
+            units: vendedUnits 
         }).eq('tx_hash', txHash);
 
         try { await sendAbaPaySms(vtpassPayload.phone, `Purchase Successful! Ref: ${alertTokenRef}. Amt: ₦${vendAmount}`); } catch (e) {}
