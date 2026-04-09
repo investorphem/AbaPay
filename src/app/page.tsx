@@ -149,14 +149,24 @@ export default function Home() {
 
   useEffect(() => {
     async function initSystem() {
+      // Still load local storage initially for instant UI rendering
       const savedHistory = localStorage.getItem("abapay_history");
       if (savedHistory) setTransactions(JSON.parse(savedHistory));
 
+      // ⚡ UNIFIED ENGINE: Fetch rate directly from Supabase ⚡
       try {
-        const rateRes = await fetch('/api/rate');
-        const rateData = await rateRes.json();
-        if (rateData.success && rateData.abaPayRate) setExchangeRate(Number(rateData.abaPayRate));
-      } catch (consoleError) {}
+        const { data: settingsData } = await supabase
+          .from('platform_settings')
+          .select('exchange_rate')
+          .eq('id', 1)
+          .single();
+          
+        if (settingsData && settingsData.exchange_rate) {
+          setExchangeRate(Number(settingsData.exchange_rate));
+        }
+      } catch (consoleError) {
+        console.log("Using default local rate fallback.", consoleError);
+      }
 
       if (typeof window !== "undefined" && (window as any).ethereum) {
         const eth = (window as any).ethereum;
@@ -174,6 +184,7 @@ export default function Home() {
     initSystem();
   }, [activeChain]);
 
+  // UPGRADED: Cloud-Sync User History with 6-Month Filter, Code & Units
   useEffect(() => {
     if (!address) return;
 
@@ -208,9 +219,9 @@ export default function Home() {
             txHash: tx.tx_hash,
             account: tx.account_number,
             refund_hash: tx.refund_hash,
-            purchased_code: tx.purchased_code, 
-            request_id: tx.request_id, 
-            units: tx.units 
+            purchased_code: tx.purchased_code, // DB Catch
+            request_id: tx.request_id, // ⚡ NEW: DB Catch Transaction ID
+            units: tx.units // ⚡ NEW: DB Catch Units
           }));
 
           setTransactions(cloudHistory);
@@ -436,7 +447,7 @@ export default function Home() {
       });
 
       setStatus("Mining approval on Celo Mainnet... Please wait.");
-      
+
       // Wait for the approval block to actually confirm before moving to payBill
       await publicClient.waitForTransactionReceipt({ hash: approvalHash });
 
@@ -725,6 +736,7 @@ export default function Home() {
                    </div>
                  )}
 
+                 {/* ⚡ ISOLATED UNITS SECTION ⚡ */}
                  {selectedReceipt.units && selectedReceipt.units !== "N/A" && (selectedReceipt.service?.toUpperCase() === 'ELECTRICITY' || selectedReceipt.service === 'Electricity') && (
                    <div className="flex justify-between border-b border-slate-100 pb-3">
                       <span className="text-slate-400 text-[10px] font-bold uppercase tracking-wider">Purchased Units</span>
@@ -740,6 +752,7 @@ export default function Home() {
                     </div>
                  </div>
 
+                 {/* ⚡ ISOLATED TOKEN SECTION ⚡ */}
                  {selectedReceipt.status === 'SUCCESS' && selectedReceipt.purchased_code && selectedReceipt.purchased_code !== "Vended Successfully" && (selectedReceipt.service?.toUpperCase() === 'ELECTRICITY' || selectedReceipt.service === 'Electricity') && (
                    <div className="mt-4 bg-orange-50 border-2 border-orange-200 rounded-xl p-4 text-center">
                       <p className="text-[10px] font-black text-orange-600 uppercase tracking-widest mb-1">Meter Token PIN</p>
