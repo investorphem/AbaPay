@@ -67,7 +67,7 @@ export default function AdminDashboard() {
   const [currentPage, setCurrentPage] = useState(1);
   const [processingRefundId, setProcessingRefundId] = useState<string | null>(null);
 
-  // ⚡ NEW: PRICING ENGINE STATE ⚡
+  // ⚡ PRICING ENGINE STATE ⚡
   const [currentExchangeRate, setCurrentExchangeRate] = useState<string>("Loading...");
   const [newExchangeRate, setNewExchangeRate] = useState<string>("");
   const [isUpdatingRate, setIsUpdatingRate] = useState(false);
@@ -111,14 +111,14 @@ export default function AdminDashboard() {
     setIsFetching(false);
   };
 
-  // ⚡ NEW: FETCH DYNAMIC RATE FROM DB ⚡
+  // ⚡ FETCH DYNAMIC RATE FROM DB ⚡
   const fetchExchangeRate = async () => {
     const { data, error } = await supabase
       .from('platform_settings')
       .select('exchange_rate')
       .eq('id', 1)
       .single();
-    
+
     if (data) {
       setCurrentExchangeRate(data.exchange_rate.toString());
       setNewExchangeRate(data.exchange_rate.toString());
@@ -128,23 +128,31 @@ export default function AdminDashboard() {
     }
   };
 
-  // ⚡ NEW: UPDATE DYNAMIC RATE IN DB ⚡
+  // ⚡ UPGRADED: SECURE BACKEND RATE UPDATE ⚡
   const updateExchangeRate = async () => {
     if (!newExchangeRate || isNaN(Number(newExchangeRate))) return alert("Invalid rate");
-    
+
     setIsUpdatingRate(true);
-    const { error } = await supabase
-      .from('platform_settings')
-      .update({ exchange_rate: Number(newExchangeRate) })
-      .eq('id', 1);
 
-    setIsUpdatingRate(false);
+    try {
+      const res = await fetch('/api/admin/rate', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ newRate: newExchangeRate })
+      });
 
-    if (error) {
-      alert(`Failed to update rate: ${error.message}`);
-    } else {
-      alert("Rate successfully updated globally!");
-      setCurrentExchangeRate(newExchangeRate);
+      const data = await res.json();
+
+      if (data.success) {
+        alert("Rate successfully updated globally!");
+        setCurrentExchangeRate(newExchangeRate);
+      } else {
+        alert(`Failed to update rate: ${data.message}`);
+      }
+    } catch (e) {
+      alert("Network error while updating rate.");
+    } finally {
+      setIsUpdatingRate(false);
     }
   };
 
@@ -338,7 +346,7 @@ export default function AdminDashboard() {
               ))}
             </div>
 
-            {/* ⚡ NEW: PRICING ENGINE TAB ⚡ */}
+            {/* ⚡ PRICING ENGINE TAB ⚡ */}
             {activeTab === 'pricing' && (
               <div className="bg-[#111114] border border-slate-800 rounded-3xl p-8 animate-in fade-in">
                  <div className="flex items-center gap-3 mb-6">
@@ -355,7 +363,7 @@ export default function AdminDashboard() {
                        <p className="text-5xl font-black text-emerald-400 font-mono tracking-tighter">₦{currentExchangeRate}</p>
                        <p className="text-xs text-slate-500 mt-2">This is the exact rate currently driving both the frontend App UI and the secure Backend smart contract checks.</p>
                     </div>
-                    
+
                     <div>
                        <label className="text-slate-400 text-xs font-bold uppercase tracking-wider mb-2 block">Update Rate</label>
                        <div className="flex flex-col gap-3">
