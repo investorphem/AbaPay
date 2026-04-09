@@ -56,7 +56,9 @@ export async function POST(req: Request) {
     const { 
       serviceID, serviceCategory, network, billersCode, amount, 
       token: tokenSymbol, txHash, variation_code, phone, 
-      nairaAmount, wallet_address, subscription_type = 'change' 
+      nairaAmount, wallet_address, subscription_type = 'change',
+      // ⚡ NEW: FOREIGN API PARAMS ⚡
+      isForeign, operator_id, country_code, product_type_id, email
     } = body;
 
     if (processedTransactions.has(txHash)) {
@@ -64,7 +66,8 @@ export async function POST(req: Request) {
     }
 
     const requestedNaira = parseFloat(nairaAmount);
-    const needsVerification = serviceCategory === 'ELECTRICITY' || (serviceCategory === 'CABLE' && network !== 'SHOWMAX');
+    // ⚡ FIX: Skip verification for foreign transactions
+    const needsVerification = !isForeign && (serviceCategory === 'ELECTRICITY' || (serviceCategory === 'CABLE' && network !== 'SHOWMAX'));
     const serviceFee = needsVerification ? 100 : 0;
     const vendAmount = requestedNaira; 
     const vtRequestId = getStrictRequestId();
@@ -113,7 +116,7 @@ export async function POST(req: Request) {
         return NextResponse.json({ success: false, code: "FUNDS", message: "Insufficient crypto paid. Admin has been notified." }, { status: 400 });
     }
 
-    // 2. MERCHANT VERIFICATION
+    // 2. MERCHANT VERIFICATION (NIGERIA ONLY)
     if (needsVerification) {
       const verifyRes = await fetch(`${BASE_URL}/merchant-verify`, {
         method: 'POST',
@@ -133,28 +136,39 @@ export async function POST(req: Request) {
     }
 
     // 3. BUILD THE VTPASS PAYLOAD
-    const vtpassPayload: any = {
+    let vtpassPayload: any = {
       request_id: vtRequestId,
       serviceID: serviceID, 
       amount: vendAmount,
       phone: phone || billersCode
     };
 
-    if (serviceCategory === 'DATA' || serviceCategory === 'ELECTRICITY') {
+    // ⚡ NEW: INJECT FOREIGN SPECIFIC PAYLOAD REQUIREMENTS ⚡
+    if (isForeign) {
       vtpassPayload.billersCode = billersCode;
       vtpassPayload.variation_code = variation_code;
-    }
-    else if (serviceCategory === 'CABLE') {
-      vtpassPayload.billersCode = billersCode;
-
-      if (serviceID === 'dstv' || serviceID === 'gotv') {
-        vtpassPayload.subscription_type = subscription_type;
-        if (subscription_type === 'change') {
-          vtpassPayload.variation_code = variation_code;
-          vtpassPayload.quantity = 1;
-        }
-      } else {
+      vtpassPayload.operator_id = operator_id;
+      vtpassPayload.country_code = country_code;
+      vtpassPayload.product_type_id = product_type_id;
+      vtpassPayload.email = email || "support@abapay.com";
+    } else {
+      // STANDARD NIGERIAN PAYLOAD LOGIC
+      if (serviceCategory === 'DATA' || serviceCategory === 'ELECTRICITY') {
+        vtpassPayload.billersCode = billersCode;
         vtpassPayload.variation_code = variation_code;
+      }
+      else if (serviceCategory === 'CABLE') {
+        vtpassPayload.billersCode = billersCode;
+
+        if (serviceID === 'dstv' || serviceID === 'gotv') {
+          vtpassPayload.subscription_type = subscription_type;
+          if (subscription_type === 'change') {
+            vtpassPayload.variation_code = variation_code;
+            vtpassPayload.quantity = 1;
+          }
+        } else {
+          vtpassPayload.variation_code = variation_code;
+        }
       }
     }
 
@@ -179,12 +193,12 @@ export async function POST(req: Request) {
       const actualStatus = payData.content?.transactions?.status || 'pending';
 
       if (actualStatus === 'delivered' || actualStatus === 'successful') {
-        
+
         let dbPurchasedCode = null;
         let vendedUnits = null;
         let alertTokenRef = "Success"; 
 
-        if (serviceCategory === 'ELECTRICITY') {
+        if (serviceCategory === 'ELECTRICITY' && !isForeign) {
           dbPurchasedCode = payData.purchased_code || payData.token || null;
           alertTokenRef = dbPurchasedCode || "Processing Token";
 
