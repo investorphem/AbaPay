@@ -8,7 +8,7 @@ import {
   CheckCircle2, ExternalLink, Lightbulb, Phone, Wifi, Tv, 
   ChevronDown, Loader2, HelpCircle, XCircle, Mail, 
   Paperclip, Send, Coins, Briefcase, Download, Share2,
-  ChevronLeft, ChevronRight, RefreshCw, ListPlus, Users
+  ChevronLeft, ChevronRight, RefreshCw, ListPlus, Users, Globe
 } from "lucide-react";
 import { supabase } from "@/utils/supabase";
 import { ELECTRICITY_DISCOS } from "./discos";
@@ -44,6 +44,15 @@ const SUPPORTED_TOKENS = [
   { symbol: "USDm", decimals: 18, mainnet: "0x765DE816845861e75A25fCA122bb6898B8B1282a", sepolia: "0xdE9e4C3ce781b4bA68120d6261cbad65ce0aB00b", logo: "/cusd.png" },
 ];
 
+// ⚡ NEW: SUPPORTED COUNTRIES ⚡
+const SUPPORTED_COUNTRIES = [
+  { code: "NG", name: "Nigeria", flag: "🇳🇬" },
+  { code: "GH", name: "Ghana", flag: "🇬🇭" },
+  { code: "KE", name: "Kenya", flag: "🇰🇪" },
+  { code: "ZA", name: "South Africa", flag: "🇿🇦" },
+  { code: "UG", name: "Uganda", flag: "🇺🇬" },
+];
+
 const PRE_SELECT_AMOUNTS = ["100", "200", "500", "1000", "2000"];
 const ELEC_PRE_SELECT_AMOUNTS = ["1000", "2000", "5000", "10000", "20000"];
 const DATA_CATEGORIES = ["Daily", "Weekly", "Monthly", "Social", "Mega", "Broadband"];
@@ -73,6 +82,9 @@ export default function Home() {
 
   const [dataVariations, setDataVariations] = useState<any[]>([]);
 
+  // ⚡ NEW: COUNTRY STATE ⚡
+  const [activeCountry, setActiveCountry] = useState(SUPPORTED_COUNTRIES[0]);
+
   const [activeService, setActiveService] = useState(SERVICES[0]);
   const [elecProvider, setElecProvider] = useState(ELECTRICITY_PROVIDER_IDS[0]);
   const [cableProvider, setCableProvider] = useState(CABLE_PROVIDERS_LIST[0].serviceID);
@@ -96,7 +108,7 @@ export default function Home() {
   const [modalTitle, setModalTitle] = useState("");
   const [modalOptions, setModalOptions] = useState<any[]>([]); 
   const [modalCallback, setModalCallback] = useState<((value: string) => void) | null>(null);
-  const [modalType, setModalType] = useState<'standard' | 'token' | 'provider'>('standard'); 
+  const [modalType, setModalType] = useState<'standard' | 'token' | 'provider' | 'country'>('standard'); 
   const [toast, setToast] = useState<{title: string, message: string, type: 'success' | 'error'} | null>(null);
   const [currentPage, setCurrentPage] = useState(1);
 
@@ -136,7 +148,7 @@ export default function Home() {
     if (status && !isProcessing) {
       setStatus("");
     }
-  }, [accountNumber, nairaAmount, activeService, cableSubscriptionType, selectedDataPlan, selectedCablePlan]);
+  }, [accountNumber, nairaAmount, activeService, cableSubscriptionType, selectedDataPlan, selectedCablePlan, activeCountry]);
 
   useEffect(() => {
     if (status && !isProcessing) {
@@ -149,11 +161,9 @@ export default function Home() {
 
   useEffect(() => {
     async function initSystem() {
-      // Still load local storage initially for instant UI rendering
       const savedHistory = localStorage.getItem("abapay_history");
       if (savedHistory) setTransactions(JSON.parse(savedHistory));
 
-      // ⚡ UNIFIED ENGINE: Fetch rate directly from Supabase ⚡
       try {
         const { data: settingsData } = await supabase
           .from('platform_settings')
@@ -165,7 +175,7 @@ export default function Home() {
           setExchangeRate(Number(settingsData.exchange_rate));
         }
       } catch (consoleError) {
-        console.log("Using default local rate fallback.", consoleError);
+        console.log("Using default local rate fallback.");
       }
 
       if (typeof window !== "undefined" && (window as any).ethereum) {
@@ -184,7 +194,6 @@ export default function Home() {
     initSystem();
   }, [activeChain]);
 
-  // UPGRADED: Cloud-Sync User History with 6-Month Filter, Code & Units
   useEffect(() => {
     if (!address) return;
 
@@ -201,11 +210,6 @@ export default function Home() {
           .gte('created_at', isoDate)
           .order('created_at', { ascending: false });
 
-        if (error) {
-          console.error("Supabase fetch error:", error.message);
-          return;
-        }
-
         if (data && data.length > 0) {
           const cloudHistory = data.map((tx: any) => ({
             id: tx.tx_hash.slice(0, 8),
@@ -219,9 +223,9 @@ export default function Home() {
             txHash: tx.tx_hash,
             account: tx.account_number,
             refund_hash: tx.refund_hash,
-            purchased_code: tx.purchased_code, // DB Catch
-            request_id: tx.request_id, // ⚡ NEW: DB Catch Transaction ID
-            units: tx.units // ⚡ NEW: DB Catch Units
+            purchased_code: tx.purchased_code, 
+            request_id: tx.request_id, 
+            units: tx.units 
           }));
 
           setTransactions(cloudHistory);
@@ -258,6 +262,9 @@ export default function Home() {
   }, [address, selectedToken, activeChain, isMainnet]);
 
   useEffect(() => {
+    // ⚡ PREVENT NIGERIAN API CALLS IF FOREIGN COUNTRY IS SELECTED ⚡
+    if (activeCountry.code !== "NG") return;
+
     if (activeService.id === "CABLE") {
       const fetchVariations = async () => {
         try {
@@ -282,9 +289,10 @@ export default function Home() {
       };
       fetchDataVariations();
     }
-  }, [activeService.id, cableProvider, telecomProvider]);
+  }, [activeService.id, cableProvider, telecomProvider, activeCountry]);
 
   useEffect(() => {
+    if (activeCountry.code !== "NG") return;
     if ((activeService.id === "AIRTIME" || activeService.id === "DATA") && accountNumber.length >= 4) {
       const prefix = accountNumber.substring(0, 4);
       if (["0803","0806","0810","0813","0814","0816","0903","0906","0913","0916","0703","0706"].includes(prefix)) setTelecomProvider("mtn");
@@ -292,9 +300,11 @@ export default function Home() {
       else if (["0805","0807","0811","0905","0705","0915"].includes(prefix)) setTelecomProvider("glo");
       else if (["0809","0817","0818","0908","0909"].includes(prefix)) setTelecomProvider("9mobile");
     }
-  }, [accountNumber, activeService]);
+  }, [accountNumber, activeService, activeCountry]);
 
   const verifyMerchant = async () => {
+    if (activeCountry.code !== "NG") return;
+
     setIsVerifying(true);
     setCustomerName(null);
     setCableCurrentBouquet(null);
@@ -336,6 +346,8 @@ export default function Home() {
   };
 
   useEffect(() => {
+    if (activeCountry.code !== "NG") return;
+
     if (activeService.id === "ELECTRICITY" && accountNumber.length >= 10) {
       verifyMerchant();
     } else if (activeService.id === "CABLE" && cableProvider !== "showmax" && accountNumber.length >= 10) {
@@ -343,7 +355,7 @@ export default function Home() {
     } else {
       setCustomerName(null);
     }
-  }, [accountNumber, elecProvider, cableProvider, activeService, meterType]);
+  }, [accountNumber, elecProvider, cableProvider, activeService, meterType, activeCountry]);
 
   const { cryptoToCharge, currentFee } = useMemo(() => {
     const bill = parseFloat(nairaAmount) || 0;
@@ -381,6 +393,9 @@ export default function Home() {
   }, [dataVariations, activeDataCategory]);
 
   const isFormValid = useMemo(() => {
+    // ⚡ LOCK SUBMISSION IF NOT NIGERIA UNTIL FOREIGN API IS BUILT ⚡
+    if (activeCountry.code !== "NG") return false;
+
     const amount = parseFloat(nairaAmount);
     if (!nairaAmount || isNaN(amount) || amount < dynamicMinAmount || amount > dynamicMaxAmount) return false;
 
@@ -407,7 +422,7 @@ export default function Home() {
       }
     }
     return false;
-  }, [accountNumber, nairaAmount, activeService, customerName, dynamicMinAmount, dynamicMaxAmount, cableSubscriptionType, selectedCablePlan, selectedDataPlan, cableProvider]);
+  }, [accountNumber, nairaAmount, activeService, customerName, dynamicMinAmount, dynamicMaxAmount, cableSubscriptionType, selectedCablePlan, selectedDataPlan, cableProvider, activeCountry]);
 
   const handlePayment = async () => {
     if (!address || !client) return setStatus("Connect Wallet First");
@@ -433,7 +448,6 @@ export default function Home() {
       const valueInWei = parseUnits(cryptoToCharge, selectedToken.decimals);
       const tokenAddress = isMainnet ? selectedToken.mainnet : selectedToken.sepolia;
 
-      // ⚡ RACE CONDITION FIX: Wait for the blockchain to mine the approval!
       const publicClient = createPublicClient({ chain: activeChain, transport: http() });
 
       setStatus("Awaiting token approval...");
@@ -448,7 +462,6 @@ export default function Home() {
 
       setStatus("Mining approval on Celo Mainnet... Please wait.");
 
-      // Wait for the approval block to actually confirm before moving to payBill
       await publicClient.waitForTransactionReceipt({ hash: approvalHash });
 
       setStatus("Approval confirmed! Please sign the final payment...");
@@ -573,7 +586,16 @@ export default function Home() {
     setCableSubscriptionType("renew");
   };
 
-  const openSelectionModal = (type: 'standard' | 'token' | 'provider', title: string, options: any[], callback: (value: string) => void) => {
+  // ⚡ NEW: HANDLE COUNTRY CHANGE ⚡
+  const handleCountryChange = (countryCode: string) => {
+    const country = SUPPORTED_COUNTRIES.find(c => c.code === countryCode);
+    if (country) {
+      setActiveCountry(country);
+      handleResetService(SERVICES[0]); // Reset to Airtime tab automatically
+    }
+  };
+
+  const openSelectionModal = (type: 'standard' | 'token' | 'provider' | 'country', title: string, options: any[], callback: (value: string) => void) => {
     setModalType(type);
     setModalTitle(title);
     setModalOptions(options);
@@ -711,7 +733,6 @@ export default function Home() {
                     <span className={`font-black text-xs uppercase ${selectedReceipt.status === 'SUCCESS' ? 'text-emerald-600' : selectedReceipt.status === 'REFUNDED' ? 'text-blue-600' : 'text-orange-500'}`}>{selectedReceipt.status}</span>
                  </div>
 
-                 {/* ⚡ NEW: DATE AND TIME DISPLAY ⚡ */}
                  <div className="flex justify-between border-b border-slate-100 pb-3">
                     <span className="text-slate-400 text-[10px] font-bold uppercase tracking-wider">Date & Time</span>
                     <span className="text-slate-800 font-bold text-xs">{selectedReceipt.date}</span>
@@ -736,7 +757,6 @@ export default function Home() {
                    </div>
                  )}
 
-                 {/* ⚡ ISOLATED UNITS SECTION ⚡ */}
                  {selectedReceipt.units && selectedReceipt.units !== "N/A" && (selectedReceipt.service?.toUpperCase() === 'ELECTRICITY' || selectedReceipt.service === 'Electricity') && (
                    <div className="flex justify-between border-b border-slate-100 pb-3">
                       <span className="text-slate-400 text-[10px] font-bold uppercase tracking-wider">Purchased Units</span>
@@ -752,7 +772,6 @@ export default function Home() {
                     </div>
                  </div>
 
-                 {/* ⚡ ISOLATED TOKEN SECTION ⚡ */}
                  {selectedReceipt.status === 'SUCCESS' && selectedReceipt.purchased_code && selectedReceipt.purchased_code !== "Vended Successfully" && (selectedReceipt.service?.toUpperCase() === 'ELECTRICITY' || selectedReceipt.service === 'Electricity') && (
                    <div className="mt-4 bg-orange-50 border-2 border-orange-200 rounded-xl p-4 text-center">
                       <p className="text-[10px] font-black text-orange-600 uppercase tracking-widest mb-1">Meter Token PIN</p>
@@ -804,6 +823,7 @@ export default function Home() {
         </div>
       )}
 
+      {/* MODALS FOR TERMS/PRIVACY */}
       {isTermsOpen && (
         <div className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-sm flex justify-center items-center p-4 animate-in fade-in" onClick={() => setIsTermsOpen(false)}>
            <div className="bg-white w-full max-w-md rounded-[2rem] shadow-2xl p-6 flex flex-col max-h-[80vh] animate-in zoom-in-95 duration-200" onClick={(e) => e.stopPropagation()}>
@@ -842,6 +862,7 @@ export default function Home() {
         </div>
       )}
 
+      {/* UNIVERSAL SELECTION MODAL */}
       {isSelectionModalOpen && (
         <div className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-sm flex justify-center items-center p-4 animate-in fade-in" onClick={() => setIsSelectionModalOpen(false)}>
            <div className="bg-white w-full max-w-sm rounded-[2rem] shadow-2xl p-6 animate-in zoom-in-95 duration-200" onClick={(e) => e.stopPropagation()}>
@@ -850,6 +871,22 @@ export default function Home() {
                 <button onClick={() => setIsSelectionModalOpen(false)} className="p-2 bg-slate-100 rounded-full hover:bg-slate-200 transition-colors"><XCircle size={20} className="text-slate-500" /></button>
               </div>
               <div className="space-y-2.5 max-h-[50vh] overflow-y-auto pr-1">
+                 
+                 {/* ⚡ NEW: COUNTRY SELECTOR UI ⚡ */}
+                 {modalType === 'country' && SUPPORTED_COUNTRIES.map(country => (
+                   <button 
+                     key={country.code} 
+                     onClick={() => { modalCallback?.(country.code); setIsSelectionModalOpen(false); }}
+                     className="w-full text-left p-4 rounded-xl font-bold text-slate-700 bg-slate-50 border border-slate-100 text-sm hover:border-emerald-300 hover:bg-emerald-50/50 transition-all flex justify-between items-center"
+                   >
+                     <div className="flex items-center gap-3">
+                       <span className="text-2xl">{country.flag}</span>
+                       <span className="font-black text-slate-800">{country.name}</span>
+                     </div>
+                     {activeCountry.code === country.code && <CheckCircle2 size={18} className="text-emerald-500"/>}
+                   </button>
+                 ))}
+
                  {modalType === 'token' && SUPPORTED_TOKENS.map(token => (
                    <button 
                      key={token.symbol} 
@@ -926,6 +963,8 @@ export default function Home() {
       )}
 
       <div className="w-full max-w-md">
+        
+        {/* ⚡ NEW: HEADER WITH COUNTRY SELECTOR ⚡ */}
         <div className="flex justify-between items-center bg-white p-4 rounded-3xl shadow-sm border border-slate-100 mb-6">
           <div className="flex items-center gap-3">
             <img src="/logo.png" alt="AbaPay" className="h-10 w-auto object-contain" />
@@ -935,34 +974,14 @@ export default function Home() {
             </div>
           </div>
           <div>
-            {isMiniPay ? (
-              <div className="bg-emerald-50 border border-emerald-200 px-3 py-1.5 rounded-xl flex items-center gap-2">
-                <div className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
-                <span className="text-[9px] font-black text-emerald-700 uppercase tracking-tight">MiniPay Active</span>
-              </div>
-            ) : address ? (
-              <div className="bg-emerald-50 border border-emerald-100 px-3 py-1.5 rounded-xl flex items-center gap-2">
-                <div className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
-                <span className="text-[10px] font-black text-emerald-700 font-mono tracking-tighter">
-                  {address.slice(0, 5)}...{address.slice(-4)}
-                </span>
-              </div>
-            ) : (
-              <button 
-                onClick={async () => {
-                  if (typeof window !== "undefined" && (window as any).ethereum) {
-                    const eth = (window as any).ethereum;
-                    const walletClient = createWalletClient({ chain: activeChain, transport: custom(eth) });
-                    const [acc] = await walletClient.requestAddresses();
-                    setAddress(acc);
-                    setClient(walletClient);
-                  }
-                }}
-                className="bg-slate-900 text-white text-[10px] font-black uppercase px-4 py-2 rounded-xl active:scale-95 hover:bg-black transition-all shadow-lg shadow-slate-900/20"
-              >
-                Connect
-              </button>
-            )}
+            <button 
+              onClick={() => openSelectionModal('country', "Select Region", SUPPORTED_COUNTRIES, handleCountryChange)}
+              className="bg-slate-50 border border-slate-100 hover:border-emerald-200 px-3 py-1.5 rounded-xl flex items-center gap-2 transition-all shadow-sm active:scale-95"
+            >
+              <span className="text-lg leading-none">{activeCountry.flag}</span>
+              <span className="text-[10px] font-black text-slate-700 uppercase tracking-widest">{activeCountry.code}</span>
+              <ChevronDown size={14} className="text-slate-400" />
+            </button>
           </div>
         </div>
 
@@ -974,16 +993,23 @@ export default function Home() {
         {activeTab === 'pay' ? (
           <div className="bg-white border border-slate-100 rounded-[2.5rem] p-8 shadow-2xl shadow-emerald-900/10 animate-in fade-in zoom-in-95">
             <div className="grid grid-cols-4 gap-3 mb-6">
-                {SERVICES.map(s => (
-                    <button 
-                        key={s.id} 
-                        onClick={() => handleResetService(s)}
-                        className={`p-4 rounded-2xl border-2 transition-all flex flex-col items-center gap-2 ${activeService.id === s.id ? 'border-emerald-500 bg-emerald-50/50 scale-105' : 'border-slate-50 bg-slate-50/50 hover:bg-slate-100'}`}
-                    >
-                        <s.icon size={20} className={s.color} />
-                        <span className="text-[8px] font-black uppercase tracking-widest">{s.id.slice(0,4)}</span>
-                    </button>
-                ))}
+                {/* ⚡ NEW: DISABLE ELECTRICITY AND CABLE FOR FOREIGN COUNTRIES ⚡ */}
+                {SERVICES.map(s => {
+                    const isDisabled = activeCountry.code !== 'NG' && (s.id === 'ELECTRICITY' || s.id === 'CABLE');
+                    return (
+                        <button 
+                            key={s.id} 
+                            onClick={() => !isDisabled && handleResetService(s)}
+                            className={`p-4 rounded-2xl border-2 transition-all flex flex-col items-center gap-2 ${
+                                isDisabled ? 'opacity-30 cursor-not-allowed border-slate-50 bg-slate-50' :
+                                activeService.id === s.id ? 'border-emerald-500 bg-emerald-50/50 scale-105' : 'border-slate-50 bg-slate-50/50 hover:bg-slate-100'
+                            }`}
+                        >
+                            <s.icon size={20} className={isDisabled ? 'text-slate-400' : s.color} />
+                            <span className="text-[8px] font-black uppercase tracking-widest">{s.id.slice(0,4)}</span>
+                        </button>
+                    )
+                })}
             </div>
 
             <div className="space-y-5">
@@ -1010,7 +1036,13 @@ export default function Home() {
                         {activeService.id === "AIRTIME" || activeService.id === "DATA" ? "Select Network" : "Choose Provider"}
                     </label>
 
-                    {activeService.id === "AIRTIME" || activeService.id === "DATA" ? (
+                    {/* ⚡ NEW: PLACEHOLDER FOR INTERNATIONAL PROVIDERS ⚡ */}
+                    {activeCountry.code !== 'NG' && (activeService.id === "AIRTIME" || activeService.id === "DATA") ? (
+                        <div className="bg-blue-50 border border-blue-100 p-5 rounded-2xl flex items-center justify-center gap-3 text-blue-700 text-xs font-black uppercase tracking-widest shadow-inner">
+                            <Globe className="animate-spin-slow text-blue-500" size={18}/> 
+                            Fetching {activeCountry.name} Providers...
+                        </div>
+                    ) : activeService.id === "AIRTIME" || activeService.id === "DATA" ? (
                       <div className="flex justify-between items-center gap-2">
                         {TELECOM_PROVIDERS.map((provider) => (
                           <button
