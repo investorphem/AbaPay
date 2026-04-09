@@ -149,7 +149,6 @@ export default function Home() {
 
   useEffect(() => {
     async function initSystem() {
-      // Still load local storage initially for instant UI rendering
       const savedHistory = localStorage.getItem("abapay_history");
       if (savedHistory) setTransactions(JSON.parse(savedHistory));
 
@@ -175,7 +174,6 @@ export default function Home() {
     initSystem();
   }, [activeChain]);
 
-  // UPGRADED: Cloud-Sync User History with 6-Month Filter, Code & Units
   useEffect(() => {
     if (!address) return;
 
@@ -424,15 +422,25 @@ export default function Home() {
       const valueInWei = parseUnits(cryptoToCharge, selectedToken.decimals);
       const tokenAddress = isMainnet ? selectedToken.mainnet : selectedToken.sepolia;
 
+      // ⚡ RACE CONDITION FIX: Wait for the blockchain to mine the approval!
+      const publicClient = createPublicClient({ chain: activeChain, transport: http() });
+
       setStatus("Awaiting token approval...");
 
-      await client.writeContract({
+      const approvalHash = await client.writeContract({
         address: tokenAddress as `0x${string}`,
         abi: ERC20_ABI,
         functionName: 'approve',
         args: [ABAPAY_CONTRACT, valueInWei],
         account: address,
       });
+
+      setStatus("Mining approval on Celo Mainnet... Please wait.");
+      
+      // Wait for the approval block to actually confirm before moving to payBill
+      await publicClient.waitForTransactionReceipt({ hash: approvalHash });
+
+      setStatus("Approval confirmed! Please sign the final payment...");
 
       let vtpassServiceID = "";
       let displayNetwork = "";
@@ -531,7 +539,6 @@ export default function Home() {
 
       setCurrentPage(1);
 
-      const publicClient = createPublicClient({ chain: activeChain, transport: http() });
       const balanceWei = await publicClient.readContract({ address: tokenAddress as `0x${string}`, abi: ERC20_ABI, functionName: 'balanceOf', args: [address] });
       setWalletBalance(parseFloat(formatUnits(balanceWei as bigint, selectedToken.decimals)).toFixed(4));
 
@@ -564,7 +571,7 @@ export default function Home() {
   };
 
   const handleShareReceipt = async () => {
-    const receiptText = `🧾 AbaPay Receipt\n\nStatus: ${selectedReceipt.status}\nProduct: ${selectedReceipt.network} ${selectedReceipt.service}\nRecipient: ${selectedReceipt.account}\nAmount Paid: ₦${selectedReceipt.amountNaira}\nCrypto Used: ${selectedReceipt.amountCrypto} ${selectedReceipt.tokenUsed}\nTx Hash: ${selectedReceipt.txHash}\n\nSecured by Celo Network`;
+    const receiptText = `🧾 AbaPay Receipt\n\nDate: ${selectedReceipt.date}\nStatus: ${selectedReceipt.status}\nProduct: ${selectedReceipt.network} ${selectedReceipt.service}\nRecipient: ${selectedReceipt.account}\nAmount Paid: ₦${selectedReceipt.amountNaira}\nCrypto Used: ${selectedReceipt.amountCrypto} ${selectedReceipt.tokenUsed}\nTx Hash: ${selectedReceipt.txHash}\n\nSecured by Celo Network`;
 
     if (navigator.share) {
       try { await navigator.share({ title: 'Receipt', text: receiptText }); } 
@@ -693,6 +700,12 @@ export default function Home() {
                     <span className={`font-black text-xs uppercase ${selectedReceipt.status === 'SUCCESS' ? 'text-emerald-600' : selectedReceipt.status === 'REFUNDED' ? 'text-blue-600' : 'text-orange-500'}`}>{selectedReceipt.status}</span>
                  </div>
 
+                 {/* ⚡ NEW: DATE AND TIME DISPLAY ⚡ */}
+                 <div className="flex justify-between border-b border-slate-100 pb-3">
+                    <span className="text-slate-400 text-[10px] font-bold uppercase tracking-wider">Date & Time</span>
+                    <span className="text-slate-800 font-bold text-xs">{selectedReceipt.date}</span>
+                 </div>
+
                  <div className="flex justify-between border-b border-slate-100 pb-3">
                     <span className="text-slate-400 text-[10px] font-bold uppercase tracking-wider">Service</span>
                     <span className="text-slate-800 font-black text-xs text-right w-2/3 uppercase">{selectedReceipt.network} {selectedReceipt.service}</span>
@@ -712,7 +725,6 @@ export default function Home() {
                    </div>
                  )}
 
-                 {/* ⚡ ISOLATED UNITS SECTION ⚡ */}
                  {selectedReceipt.units && selectedReceipt.units !== "N/A" && (selectedReceipt.service?.toUpperCase() === 'ELECTRICITY' || selectedReceipt.service === 'Electricity') && (
                    <div className="flex justify-between border-b border-slate-100 pb-3">
                       <span className="text-slate-400 text-[10px] font-bold uppercase tracking-wider">Purchased Units</span>
@@ -728,7 +740,6 @@ export default function Home() {
                     </div>
                  </div>
 
-                 {/* ⚡ ISOLATED TOKEN SECTION ⚡ */}
                  {selectedReceipt.status === 'SUCCESS' && selectedReceipt.purchased_code && selectedReceipt.purchased_code !== "Vended Successfully" && (selectedReceipt.service?.toUpperCase() === 'ELECTRICITY' || selectedReceipt.service === 'Electricity') && (
                    <div className="mt-4 bg-orange-50 border-2 border-orange-200 rounded-xl p-4 text-center">
                       <p className="text-[10px] font-black text-orange-600 uppercase tracking-widest mb-1">Meter Token PIN</p>
@@ -1328,7 +1339,7 @@ export default function Home() {
 
                 {status && (
                     <div className={`p-5 rounded-2xl border flex items-center gap-4 animate-in fade-in slide-in-from-top-2 shadow-sm ${status.includes('Success') || status.includes('Secured') || status.includes('Initiating') ? 'bg-emerald-50 border-emerald-100 text-emerald-800' : status.includes('Verifying') ? 'bg-blue-50 border-blue-100 text-blue-800' : 'bg-red-50 border-red-100 text-red-800'}`}>
-                        {status.includes('Success') ? <CheckCircle2 size={24} className="text-emerald-600"/> : status.includes('Verifying') || status.includes('Blockchain') ? <Loader2 size={24} className="animate-spin text-blue-600"/> : <AlertTriangle size={24} className="text-red-600"/>}
+                        {status.includes('Success') ? <CheckCircle2 size={24} className="text-emerald-600"/> : status.includes('Verifying') || status.includes('Blockchain') || status.includes('confirmed') || status.includes('Mining') ? <Loader2 size={24} className="animate-spin text-blue-600"/> : <AlertTriangle size={24} className="text-red-600"/>}
                         <p className="text-sm font-black tracking-tight">{status}</p>
                     </div>
                 )}
