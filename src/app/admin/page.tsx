@@ -6,7 +6,7 @@ import {
   Lock, ArrowDownToLine, Wallet, ShieldAlert, Activity, 
   Database, RefreshCcw, Globe, Zap, ExternalLink, 
   Search, Download, Users, BarChart3, Banknote,
-  ChevronLeft, ChevronRight, Loader2
+  ChevronLeft, ChevronRight, Loader2, Save, Gauge
 } from "lucide-react";
 import { supabase } from "@/utils/supabase";
 
@@ -67,6 +67,11 @@ export default function AdminDashboard() {
   const [currentPage, setCurrentPage] = useState(1);
   const [processingRefundId, setProcessingRefundId] = useState<string | null>(null);
 
+  // ⚡ NEW: PRICING ENGINE STATE ⚡
+  const [currentExchangeRate, setCurrentExchangeRate] = useState<string>("Loading...");
+  const [newExchangeRate, setNewExchangeRate] = useState<string>("");
+  const [isUpdatingRate, setIsUpdatingRate] = useState(false);
+
   const isMainnet = process.env.NEXT_PUBLIC_NETWORK === "celo";
   const isLive = process.env.NEXT_PUBLIC_APP_MODE === "live";
   const activeChain = isMainnet ? celoMainnet : celoSepolia;
@@ -102,8 +107,45 @@ export default function AdminDashboard() {
 
   const refreshAllData = async () => {
     setIsFetching(true);
-    await Promise.all([fetchCloudLedger(), fetchOnChainBalances(), fetchVtPassHealth()]);
+    await Promise.all([fetchCloudLedger(), fetchOnChainBalances(), fetchVtPassHealth(), fetchExchangeRate()]);
     setIsFetching(false);
+  };
+
+  // ⚡ NEW: FETCH DYNAMIC RATE FROM DB ⚡
+  const fetchExchangeRate = async () => {
+    const { data, error } = await supabase
+      .from('platform_settings')
+      .select('exchange_rate')
+      .eq('id', 1)
+      .single();
+    
+    if (data) {
+      setCurrentExchangeRate(data.exchange_rate.toString());
+      setNewExchangeRate(data.exchange_rate.toString());
+    } else if (error) {
+      console.error("Error fetching rate", error);
+      setCurrentExchangeRate("Error");
+    }
+  };
+
+  // ⚡ NEW: UPDATE DYNAMIC RATE IN DB ⚡
+  const updateExchangeRate = async () => {
+    if (!newExchangeRate || isNaN(Number(newExchangeRate))) return alert("Invalid rate");
+    
+    setIsUpdatingRate(true);
+    const { error } = await supabase
+      .from('platform_settings')
+      .update({ exchange_rate: Number(newExchangeRate) })
+      .eq('id', 1);
+
+    setIsUpdatingRate(false);
+
+    if (error) {
+      alert(`Failed to update rate: ${error.message}`);
+    } else {
+      alert("Rate successfully updated globally!");
+      setCurrentExchangeRate(newExchangeRate);
+    }
   };
 
   const fetchOnChainBalances = async () => {
@@ -156,14 +198,12 @@ export default function AdminDashboard() {
     } catch (error) { setStatus("Rejected or Insufficient Gas."); }
   };
 
-  // UPGRADED: Admin calls the Smart Contract to refund the user from the vault, with safe token fallback
   const handleRefund = async (tx: any) => {
     try {
       if (!client || !address) return alert("Connect your Admin Wallet first.");
 
       setProcessingRefundId(tx.id);
 
-      // Safely grab the crypto amount regardless of which database column it sits in
       const rawAmount = tx.amount_usdt || tx.amount_crypto || tx.amountCrypto;
       if (!rawAmount) throw new Error("Could not locate the crypto amount for this transaction.");
 
@@ -175,7 +215,6 @@ export default function AdminDashboard() {
       const decimals = tokenData.decimals;
       const valueInWei = parseUnits(rawAmount.toString(), decimals);
 
-      // 1. Call the Contract's refundUser function
       const refundHash = await client.writeContract({
         address: ABAPAY_CONTRACT as `0x${string}`,
         abi: ABAPAY_ADMIN_ABI,
@@ -184,7 +223,6 @@ export default function AdminDashboard() {
         account: address,
       });
 
-      // 2. WAIT for the blockchain to confirm the block!
       const publicClient = createPublicClient({ chain: activeChain, transport: http() });
       const receipt = await publicClient.waitForTransactionReceipt({ hash: refundHash });
 
@@ -192,7 +230,6 @@ export default function AdminDashboard() {
           throw new Error("Transaction reverted. Does the Vault have enough balance?");
       }
 
-      // 3. Call the secure backend API route to bypass Supabase RLS
       const dbRes = await fetch('/api/admin/refund', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -202,7 +239,7 @@ export default function AdminDashboard() {
       if (dbRes.ok) {
         alert(`Refund confirmed on-chain! Hash: ${refundHash}`);
         fetchCloudLedger(); 
-        fetchOnChainBalances(); // Refresh Vault Balances
+        fetchOnChainBalances(); 
       } else {
         alert("Crypto refunded successfully, but backend failed to secure the database update.");
       }
@@ -230,7 +267,8 @@ export default function AdminDashboard() {
       const searchLower = searchTerm.toLowerCase();
       const matchesSearch = (tx.account_number || "").includes(searchTerm) || 
                             (tx.network || "").toLowerCase().includes(searchLower) ||
-                            (tx.wallet_address || "").toLowerCase().includes(searchLower);
+                            (tx.wallet_address || "").toLowerCase().includes(searchLower) ||
+                            (tx.request_id || "").toLowerCase().includes(searchLower); // Added search by request_id
       const matchesStatus = filterStatus === "ALL" || tx.status === filterStatus;
       return matchesSearch && matchesStatus;
     });
@@ -247,8 +285,9 @@ export default function AdminDashboard() {
   );
 
   const exportCSV = () => {
-    const headers = "Date,Status,Network,Service,Account,Naira,USDT,Hash\n";
-    const rows = filteredTx.map(tx => `${tx.created_at},${tx.status},${tx.network},${tx.service_category},${tx.account_number},${tx.amount_naira},${tx.amount_usdt},${tx.tx_hash}`).join("\n");
+    // Upgraded CSV Export to include Units and Purchased Code
+    const headers = "Date,Status,Network,Service,Account,Naira,USDT,Transaction ID,Units,Token PIN,Hash\n";
+    const rows = filteredTx.map(tx => `${tx.created_at},${tx.status},${tx.network},${tx.service_category},${tx.account_number},${tx.amount_naira},${tx.amount_usdt},${tx.request_id || 'N/A'},${tx.units || 'N/A'},${tx.purchased_code || 'N/A'},${tx.tx_hash}`).join("\n");
     const blob = new Blob([headers + rows], { type: 'text/csv' });
     const url = window.URL.createObjectURL(blob);
     const a = document.createElement('a'); a.href = url; a.download = `AbaPay_Report.csv`; a.click();
@@ -293,11 +332,55 @@ export default function AdminDashboard() {
               <StatBox label="SMS Health" value={`${smsBalance} Units`} sub="Messaging Units" color="text-orange-400" icon={<Activity size={16}/>} />
             </div>
 
-            <div className="bg-[#111114] p-1.5 rounded-2xl border border-slate-800 inline-flex gap-1">
-              {['analytics', 'ledger', 'vault'].map((t) => (
+            <div className="bg-[#111114] p-1.5 rounded-2xl border border-slate-800 inline-flex gap-1 overflow-x-auto max-w-full">
+              {['analytics', 'pricing', 'ledger', 'vault'].map((t) => (
                 <button key={t} onClick={() => setActiveTab(t)} className={`px-6 py-2 rounded-xl text-xs font-black uppercase transition-all ${activeTab === t ? 'bg-slate-800 text-emerald-400' : 'text-slate-500'}`}>{t}</button>
               ))}
             </div>
+
+            {/* ⚡ NEW: PRICING ENGINE TAB ⚡ */}
+            {activeTab === 'pricing' && (
+              <div className="bg-[#111114] border border-slate-800 rounded-3xl p-8 animate-in fade-in">
+                 <div className="flex items-center gap-3 mb-6">
+                    <div className="bg-blue-500/10 p-3 rounded-full"><Gauge className="text-blue-400" size={24}/></div>
+                    <div>
+                      <h2 className="text-xl font-black text-white">Dynamic Pricing Engine</h2>
+                      <p className="text-xs font-bold text-slate-500 uppercase tracking-widest mt-1">Global Rate Controller</p>
+                    </div>
+                 </div>
+
+                 <div className="grid grid-cols-1 md:grid-cols-2 gap-8 bg-slate-900 border border-slate-800 rounded-2xl p-6">
+                    <div className="border-r border-slate-800 pr-0 md:pr-6">
+                       <p className="text-slate-400 text-xs font-bold uppercase tracking-wider mb-2">Live Exchange Rate</p>
+                       <p className="text-5xl font-black text-emerald-400 font-mono tracking-tighter">₦{currentExchangeRate}</p>
+                       <p className="text-xs text-slate-500 mt-2">This is the exact rate currently driving both the frontend App UI and the secure Backend smart contract checks.</p>
+                    </div>
+                    
+                    <div>
+                       <label className="text-slate-400 text-xs font-bold uppercase tracking-wider mb-2 block">Update Rate</label>
+                       <div className="flex flex-col gap-3">
+                          <div className="relative">
+                            <span className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-500 font-black">₦</span>
+                            <input 
+                              type="number" 
+                              value={newExchangeRate} 
+                              onChange={(e) => setNewExchangeRate(e.target.value)} 
+                              className="w-full bg-slate-950 border border-slate-700 text-white font-black text-2xl py-4 pl-10 pr-4 rounded-xl outline-none focus:border-blue-500 transition-all"
+                            />
+                          </div>
+                          <button 
+                            onClick={updateExchangeRate}
+                            disabled={isUpdatingRate || newExchangeRate === currentExchangeRate}
+                            className="bg-blue-600 hover:bg-blue-500 text-white font-black py-4 rounded-xl flex items-center justify-center gap-2 transition-all disabled:opacity-50 active:scale-95"
+                          >
+                            {isUpdatingRate ? <Loader2 size={18} className="animate-spin"/> : <Save size={18}/>} 
+                            PUBLISH NEW RATE GLOBALLY
+                          </button>
+                       </div>
+                    </div>
+                 </div>
+              </div>
+            )}
 
             {/* LEDGER TAB */}
             {activeTab === 'ledger' && (
@@ -305,66 +388,79 @@ export default function AdminDashboard() {
                 <div className="flex flex-col lg:flex-row gap-4 mb-6">
                   <div className="flex-1 relative">
                     <Search className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-600" size={16} />
-                    <input type="text" placeholder="Search by Network, Account or Wallet..." className="w-full bg-slate-950 border border-slate-800 rounded-xl pl-12 pr-4 py-3 text-sm focus:border-emerald-500 outline-none" value={searchTerm} onChange={(e) => setSearchTerm(e.target.value)} />
+                    <input type="text" placeholder="Search by ID, Account or Wallet..." className="w-full bg-slate-950 border border-slate-800 rounded-xl pl-12 pr-4 py-3 text-sm focus:border-emerald-500 outline-none" value={searchTerm} onChange={(e) => setSearchTerm(e.target.value)} />
                   </div>
                   <select value={filterStatus} onChange={(e) => setFilterStatus(e.target.value)} className="bg-slate-950 border border-slate-800 rounded-xl px-4 py-3 text-sm text-slate-300">
                     <option value="ALL">All Status</option>
                     <option value="SUCCESS">Success</option>
                     <option value="FAILED_VENDING">Failed</option>
                     <option value="REFUNDED">Refunded</option>
+                    <option value="FAILED_FUNDS_MISMATCH">Rate Mismatch</option> 
                   </select>
                   <button onClick={exportCSV} className="flex items-center gap-2 bg-slate-800 border border-slate-700 px-6 py-3 rounded-xl text-sm font-bold hover:bg-slate-700"><Download size={16} /> Export</button>
                 </div>
 
                 <div className="overflow-x-auto min-h-[400px] flex flex-col justify-between">
+                  {/* ⚡ UPGRADED ADMIN TABLE FOR NEW COLUMNS ⚡ */}
                   <table className="w-full text-left text-sm">
                     <thead>
                       <tr className="text-slate-500 border-b border-slate-800 text-[10px] uppercase">
-                        <th className="pb-4 px-2">Timestamp</th>
-                        <th className="pb-4 px-2">Product & Service</th>
+                        <th className="pb-4 px-2">Details</th>
+                        <th className="pb-4 px-2">Utility Vended</th>
+                        <th className="pb-4 px-2">Provider Data</th>
                         <th className="pb-4 px-2">Financials</th>
                         <th className="pb-4 px-2">Status & Actions</th>
-                        <th className="pb-4 px-2 text-right">On-Chain</th>
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-slate-800">
                       {currentTransactions.map((tx) => (
                         <tr key={tx.id} className="hover:bg-slate-900/40">
-                          <td className="py-4 px-2">
-                            <p className="text-white font-medium">{new Date(tx.created_at).toLocaleTimeString()}</p>
-                            <p className="text-[10px] text-slate-600">{new Date(tx.created_at).toLocaleDateString()}</p>
+                          <td className="py-4 px-2 min-w-[150px]">
+                            <p className="text-white font-medium text-xs">{new Date(tx.created_at).toLocaleString()}</p>
+                            <a href={`https://${isMainnet ? '' : 'sepolia.'}celoscan.io/tx/${tx.tx_hash}`} target="_blank" className="text-[9px] text-emerald-400 hover:underline flex items-center gap-1 mt-1 font-mono tracking-wider">{tx.tx_hash.slice(0, 14)}... <ExternalLink size={8} /></a>
                           </td>
-                          <td className="py-4 px-2">
+                          <td className="py-4 px-2 min-w-[180px]">
                             <p className="text-slate-200 font-bold uppercase">{tx.network || 'N/A'}</p>
-                            <p className="text-[10px] text-slate-500 uppercase tracking-wider">{tx.service_category} • {tx.account_number}</p>
+                            <p className="text-[10px] text-slate-500 uppercase tracking-wider mt-0.5">{tx.service_category} • {tx.account_number}</p>
                           </td>
-                          <td className="py-4 px-2">
+                          {/* ⚡ NEW: PROVIDER DATA COLUMN ⚡ */}
+                          <td className="py-4 px-2 min-w-[180px]">
+                            <p className="text-slate-300 font-mono text-[10px] tracking-wider mb-0.5">ID: {tx.request_id || 'N/A'}</p>
+                            {tx.service_category === 'ELECTRICITY' && tx.status === 'SUCCESS' ? (
+                                <div className="text-[9px]">
+                                    <p className="text-orange-400 font-bold tracking-widest">{tx.purchased_code ? tx.purchased_code.replace(/token\s*[:\-]*\s*/gi, '').trim() : 'N/A'}</p>
+                                    <p className="text-slate-500">{tx.units || 'N/A'} kWh</p>
+                                </div>
+                            ) : (
+                                <p className="text-[9px] text-slate-600 italic">No Token Generated</p>
+                            )}
+                          </td>
+                          <td className="py-4 px-2 min-w-[120px]">
                             <p className="text-white font-black">₦{tx.amount_naira.toLocaleString()}</p>
-                            <p className="text-[10px] text-emerald-500">${(tx.amount_usdt || tx.amount_crypto || 0).toString()} Paid</p>
+                            <p className="text-[10px] text-emerald-500 font-mono">${(tx.amount_usdt || tx.amount_crypto || 0).toString()} Paid</p>
                           </td>
                           <td className="py-4 px-2">
                             <div className="flex flex-col items-start gap-2">
-                              <span className={`text-[10px] font-black px-2 py-1 rounded ${
+                              <span className={`text-[9px] font-black px-2 py-1 rounded tracking-widest uppercase ${
                                 tx.status === 'SUCCESS' ? 'bg-emerald-500/10 text-emerald-500' : 
                                 tx.status === 'REFUNDED' ? 'bg-blue-500/10 text-blue-400' :
+                                tx.status === 'FAILED_FUNDS_MISMATCH' ? 'bg-purple-500/10 text-purple-400' :
                                 'bg-red-500/10 text-red-500'
                               }`}>
                                 {tx.status}
                               </span>
-                              {tx.status === 'FAILED_VENDING' && (
+                              {/* ⚡ ALLOW REFUNDS FOR MISMATCHES TOO ⚡ */}
+                              {(tx.status === 'FAILED_VENDING' || tx.status === 'FAILED_FUNDS_MISMATCH') && (
                                 <button 
                                   onClick={() => handleRefund(tx)}
                                   disabled={processingRefundId === tx.id}
-                                  className="bg-slate-800 hover:bg-slate-700 border border-slate-700 text-white text-[9px] font-bold uppercase tracking-widest px-2 py-1.5 rounded-lg flex items-center gap-1.5 transition-colors disabled:opacity-50"
+                                  className="bg-slate-800 hover:bg-slate-700 border border-slate-700 text-white text-[9px] font-bold uppercase tracking-widest px-3 py-1.5 rounded-lg flex items-center gap-1.5 transition-colors disabled:opacity-50"
                                 >
                                   {processingRefundId === tx.id ? <Loader2 size={10} className="animate-spin text-emerald-400" /> : <Zap size={10} className="text-emerald-400" />}
                                   {processingRefundId === tx.id ? 'Refunding...' : 'Refund'}
                                 </button>
                               )}
                             </div>
-                          </td>
-                          <td className="py-4 px-2 text-right">
-                             <a href={`https://${isMainnet ? '' : 'sepolia.'}celoscan.io/tx/${tx.tx_hash}`} target="_blank" className="text-slate-600 hover:text-emerald-400"><ExternalLink size={14} className="ml-auto" /></a>
                           </td>
                         </tr>
                       ))}
