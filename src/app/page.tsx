@@ -20,7 +20,6 @@ const ERC20_ABI = [
   {"inputs":[{"internalType":"address","name":"account","type":"address"}],"name":"balanceOf","outputs":[{"internalType":"uint256","name":"","type":"uint256"}],"stateMutability":"view","type":"function"}
 ];
 
-// ⚡ MERGED DATA & INTERNET INTO ONE TAB ⚡
 const SERVICES = [
   { id: "AIRTIME", name: "Buy Airtime", icon: Phone, color: "text-[#34d399]", bg: "bg-emerald-500/10" },
   { id: "INTERNET", name: "Internet", icon: Globe, color: "text-[#0ea5e9]", bg: "bg-sky-500/10" },
@@ -38,7 +37,6 @@ const CABLE_PROVIDERS_LIST = [
 
 const TELECOM_PROVIDERS = ["mtn", "glo", "9mobile", "airtel"]; 
 
-// ⚡ UNIFIED INTERNET PROVIDERS LIST ⚡
 const INTERNET_PROVIDERS = [
   { serviceID: "mtn-data", displayName: "MTN Data", logo: "/mtn.png" },
   { serviceID: "glo-data", displayName: "Glo Data", logo: "/glo.png" },
@@ -64,7 +62,6 @@ const ELEC_PRE_SELECT_AMOUNTS = ["1000", "2000", "5000", "10000", "20000"];
 const DATA_CATEGORIES = ["Daily", "Weekly", "Monthly", "Social", "Mega", "Broadband"];
 const ITEMS_PER_PAGE = 5;
 
-// ⚡ BULLETPROOF EXTRACTOR ⚡
 const extractVtpassArray = (data: any): any[] => {
   if (!data) return [];
   if (Array.isArray(data)) return data;
@@ -72,12 +69,16 @@ const extractVtpassArray = (data: any): any[] => {
   if (data.content && Array.isArray(data.content.variations)) return data.content.variations;
   if (data.content && Array.isArray(data.content)) return data.content;
   if (data.data && Array.isArray(data.data)) return data.data;
+  if (data.content && typeof data.content === 'object') {
+    const nestedArrays = Object.values(data.content).filter(v => Array.isArray(v as any));
+    if (nestedArrays.length > 0) return nestedArrays[0] as any[];
+    return Object.values(data.content); 
+  }
   return [];
 };
 
 export default function Home() {
   const [isInitiallyLoading, setIsInitiallyLoading] = useState(true);
-
   const [address, setAddress] = useState<string | null>(null);
   const [client, setClient] = useState<any>(null);
   const [nairaAmount, setNairaAmount] = useState(""); 
@@ -85,7 +86,6 @@ export default function Home() {
   const [customerPhone, setCustomerPhone] = useState("");
   const [status, setStatus] = useState("");
   
-  // ⚡ UPDATED: MAIN TABS (pay, bank, history) ⚡
   const [activeTab, setActiveTab] = useState<"pay" | "bank" | "history">("pay");
   const [isMiniPay, setIsMiniPay] = useState(false);
   const [isProcessing, setIsProcessing] = useState(false); 
@@ -121,7 +121,6 @@ export default function Home() {
   const [selectedReceipt, setSelectedReceipt] = useState<any>(null); 
   const [isTermsOpen, setIsTermsOpen] = useState(false); 
   const [isPrivacyOpen, setIsPrivacyOpen] = useState(false); 
-
   const [isSupportOpen, setIsSupportOpen] = useState(false);
   const [supportMessage, setSupportMessage] = useState("");
   const [supportTxHash, setSupportTxHash] = useState<string | null>(null);
@@ -133,9 +132,7 @@ export default function Home() {
   const [modalTitle, setModalTitle] = useState("");
   const [modalOptions, setModalOptions] = useState<any[]>([]); 
   const [modalCallback, setModalCallback] = useState<((value: string) => void) | null>(null);
-  
   const [modalType, setModalType] = useState<'standard' | 'token' | 'provider' | 'country' | 'bank'>('standard'); 
-  
   const [toast, setToast] = useState<{title: string, message: string, type: 'success' | 'error'} | null>(null);
   const [currentPage, setCurrentPage] = useState(1);
 
@@ -175,7 +172,7 @@ export default function Home() {
 
   useEffect(() => {
     if (status && !isProcessing) setStatus("");
-  }, [accountNumber, nairaAmount, activeService, cableSubscriptionType, selectedInternetPlan, selectedCablePlan, selectedBank, activeTab]);
+  }, [accountNumber, nairaAmount, activeService, cableSubscriptionType, selectedCablePlan, selectedBank, selectedInternetPlan, activeTab]);
 
   useEffect(() => {
     if (status && !isProcessing) {
@@ -197,7 +194,6 @@ export default function Home() {
       if (typeof window !== "undefined" && (window as any).ethereum) {
         const eth = (window as any).ethereum;
         if (eth.isMiniPay) setIsMiniPay(true);
-
         const walletClient = createWalletClient({ chain: activeChain, transport: custom(eth) });
         walletClient.requestAddresses().then(([acc]) => {
           setAddress(acc); setClient(walletClient);
@@ -304,7 +300,6 @@ export default function Home() {
         else if (["0805","0807","0811","0905","0705","0915"].includes(prefix)) setTelecomProvider("glo");
         else if (["0809","0817","0818","0908","0909"].includes(prefix)) setTelecomProvider("9mobile");
       }
-      // Also check if INTERNET is selected and it's a mobile data provider
       if (activeService.id === "INTERNET" && internetProvider.includes("-data") && accountNumber.length >= 4) {
         const prefix = accountNumber.substring(0, 4);
         if (["0803","0806","0810","0813","0814","0816","0903","0906","0913","0916","0703","0706"].includes(prefix)) setInternetProvider("mtn-data");
@@ -390,12 +385,10 @@ export default function Home() {
   const filteredInternetDataPlans = useMemo(() => {
     if (!internetVariations || internetVariations.length === 0) return [];
     
-    // If it's Smile or Spectranet, don't filter by categories, just return all
     if (internetProvider === 'smile-direct' || internetProvider === 'spectranet') {
         return internetVariations;
     }
 
-    // Otherwise, filter mobile data by category
     return internetVariations.filter(plan => {
       const name = (plan.name || "").toLowerCase();
       let category = "Monthly";
@@ -427,7 +420,7 @@ export default function Home() {
           return internetAccountId !== null && selectedInternetPlan !== null && customerPhone.length >= 10;
         } else if (internetProvider === 'spectranet') {
           return accountNumber.length >= 5 && selectedInternetPlan !== null && customerPhone.length >= 10;
-        } else { // Mobile Data
+        } else {
           return accountNumber.length === 11 && accountNumber.startsWith("0") && selectedInternetPlan !== null;
         }
       }
@@ -525,9 +518,8 @@ export default function Home() {
         network: displayNetwork.toUpperCase(), txHash: hash, account: accountNumber
       };
 
-      // Reset Form State
       setAccountNumber(""); setNairaAmount(""); setCustomerPhone(""); setCustomerName(null);
-      setSelectedDataPlan(null); setSelectedCablePlan(null); setCableCurrentBouquet(null);
+      setSelectedCablePlan(null); setCableCurrentBouquet(null);
       setSelectedBank(null); setSelectedInternetPlan(null); setInternetAccountId(null);
 
       const res = await fetch('/api/pay', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(backendPayload) });
@@ -554,12 +546,17 @@ export default function Home() {
 
   const handleResetService = (s: any) => {
     setActiveService(s); setAccountNumber(""); setCustomerName(null); setNairaAmount(""); 
-    setSelectedDataPlan(null); setCableCurrentBouquet(null); setCableRenewAmount(null); setSelectedCablePlan(null);
+    setCableCurrentBouquet(null); setCableRenewAmount(null); setSelectedCablePlan(null);
     setCableSubscriptionType("renew"); setSelectedBank(null); setSelectedInternetPlan(null); setInternetAccountId(null);
   };
 
   const openSelectionModal = (type: 'standard' | 'token' | 'provider' | 'country' | 'bank', title: string, options: any[], callback: (value: string) => void) => {
     setModalType(type as any); setModalTitle(title); setModalOptions(options); setModalCallback(() => callback); setIsSelectionModalOpen(true);
+  };
+
+  const handleCountryChange = (countryCode: string) => {
+    const country = SUPPORTED_COUNTRIES.find(c => c.code === countryCode);
+    if (country && !country.disabled) { setActiveCountry(country); handleResetService(SERVICES[0]); }
   };
 
   const handleShareReceipt = async () => {
@@ -755,11 +752,23 @@ export default function Home() {
                  {modalType === 'country' && SUPPORTED_COUNTRIES.map(country => (
                    <button 
                      key={country.code} 
-                     onClick={() => { if (!country.disabled) { modalCallback?.(country.code); setIsSelectionModalOpen(false); } }}
+                     onClick={() => { 
+                        if (!country.disabled) {
+                            modalCallback?.(country.code); 
+                            setIsSelectionModalOpen(false); 
+                        }
+                     }}
                      disabled={country.disabled}
-                     className={`w-full text-left p-4 rounded-xl font-bold text-sm transition-all flex justify-between items-center ${country.disabled ? 'bg-slate-50 border border-slate-100 text-slate-400 cursor-not-allowed' : 'text-slate-700 bg-slate-50 border border-slate-100 hover:border-emerald-300 hover:bg-emerald-50/50'}`}
+                     className={`w-full text-left p-4 rounded-xl font-bold text-sm transition-all flex justify-between items-center ${
+                         country.disabled 
+                         ? 'bg-slate-50 border border-slate-100 text-slate-400 cursor-not-allowed' 
+                         : 'text-slate-700 bg-slate-50 border border-slate-100 hover:border-emerald-300 hover:bg-emerald-50/50'
+                     }`}
                    >
-                     <div className="flex items-center gap-3"><span className="text-2xl">{country.flag}</span><span className={`font-black ${country.disabled ? 'text-slate-400' : 'text-slate-800'}`}>{country.name}</span></div>
+                     <div className="flex items-center gap-3">
+                       <span className="text-2xl">{country.flag}</span>
+                       <span className={`font-black ${country.disabled ? 'text-slate-400' : 'text-slate-800'}`}>{country.name}</span>
+                     </div>
                      {activeCountry.code === country.code && <CheckCircle2 size={18} className="text-emerald-500"/>}
                    </button>
                  ))}
@@ -790,7 +799,10 @@ export default function Home() {
                      onClick={() => { modalCallback?.(token.symbol); setIsSelectionModalOpen(false); }}
                      className="w-full text-left p-4 rounded-xl font-bold text-slate-700 bg-slate-50 border border-slate-100 uppercase text-xs hover:border-emerald-300 hover:bg-emerald-50/50 transition-all flex justify-between items-center"
                    >
-                     <div className="flex items-center gap-3"><img src={token.logo} alt={token.symbol} className="w-6 h-6 object-contain rounded-full shadow-sm bg-white" /><span className="text-sm font-black text-slate-800 tracking-tight">{token.symbol}</span></div>
+                     <div className="flex items-center gap-3">
+                       <img src={token.logo} alt={token.symbol} className="w-6 h-6 object-contain rounded-full shadow-sm bg-white" />
+                       <span className="text-sm font-black text-slate-800 tracking-tight">{token.symbol}</span>
+                     </div>
                      {selectedToken.symbol === token.symbol && <CheckCircle2 size={18} className="text-emerald-500"/>}
                    </button>
                  ))}
@@ -805,7 +817,9 @@ export default function Home() {
                             <div className="w-12 h-12 shrink-0 rounded-full border border-slate-100 bg-white p-0.5 flex items-center justify-center shadow-sm overflow-hidden group-hover:shadow-md transition-shadow">
                                 <img src={provider.logo} alt={provider.displayName} className="w-full h-full object-contain" onError={(e) => { e.currentTarget.style.display = 'none'; e.currentTarget.parentElement!.innerHTML = `<span class="text-[9px] font-black uppercase text-slate-400">${provider.displayName.slice(0,3)}</span>`; }} />
                             </div>
-                            <div><span className="text-sm font-black text-slate-900 tracking-tight">{provider.displayName}</span></div>
+                            <div>
+                                <span className="text-sm font-black text-slate-900 tracking-tight">{provider.displayName}</span>
+                            </div>
                         </div>
                         {(activeService.id === 'ELECTRICITY' ? elecProvider === provider.serviceID : activeService.id === 'INTERNET' ? internetProvider === provider.serviceID : cableProvider === provider.serviceID) && (
                           <CheckCircle2 size={20} className={activeService.id === 'ELECTRICITY' ? "text-orange-500" : activeService.id === 'INTERNET' ? "text-sky-500" : "text-pink-500"}/>
@@ -827,7 +841,10 @@ export default function Home() {
             </div>
           </div>
           <div>
-            <button className="bg-slate-50 border border-slate-100 hover:border-emerald-200 px-3 py-1.5 rounded-xl flex items-center gap-2 transition-all shadow-sm active:scale-95">
+            <button 
+              onClick={() => openSelectionModal('country', "Select Region", SUPPORTED_COUNTRIES, handleCountryChange)}
+              className="bg-slate-50 border border-slate-100 hover:border-emerald-200 px-3 py-1.5 rounded-xl flex items-center gap-2 transition-all shadow-sm active:scale-95"
+            >
               <span className="text-lg leading-none">{activeCountry.flag}</span>
               <span className="text-[10px] font-black text-slate-700 uppercase tracking-widest">{activeCountry.code}</span>
               <ChevronDown size={14} className="text-slate-400" />
