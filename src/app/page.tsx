@@ -44,6 +44,12 @@ const SUPPORTED_TOKENS = [
   { symbol: "USDm", decimals: 18, mainnet: "0x765DE816845861e75A25fCA122bb6898B8B1282a", sepolia: "0xdE9e4C3ce781b4bA68120d6261cbad65ce0aB00b", logo: "/cusd.png" },
 ];
 
+// ⚡ STATIC COUNTRIES CONFIG ⚡
+const SUPPORTED_COUNTRIES = [
+  { code: "NG", name: "Nigeria", flag: "🇳🇬", disabled: false },
+  { code: "SOON", name: "Other countries coming soon", flag: "🌍", disabled: true }
+];
+
 const PRE_SELECT_AMOUNTS = ["100", "200", "500", "1000", "2000"];
 const ELEC_PRE_SELECT_AMOUNTS = ["1000", "2000", "5000", "10000", "20000"];
 const DATA_CATEGORIES = ["Daily", "Weekly", "Monthly", "Social", "Mega", "Broadband"];
@@ -72,6 +78,9 @@ export default function Home() {
   const [selectedCablePlan, setSelectedCablePlan] = useState<any>(null);
 
   const [dataVariations, setDataVariations] = useState<any[]>([]);
+  
+  // ⚡ COUNTRY STATE ⚡
+  const [activeCountry, setActiveCountry] = useState(SUPPORTED_COUNTRIES[0]);
 
   const [activeService, setActiveService] = useState(SERVICES[0]);
   const [elecProvider, setElecProvider] = useState(ELECTRICITY_PROVIDER_IDS[0]);
@@ -96,7 +105,7 @@ export default function Home() {
   const [modalTitle, setModalTitle] = useState("");
   const [modalOptions, setModalOptions] = useState<any[]>([]); 
   const [modalCallback, setModalCallback] = useState<((value: string) => void) | null>(null);
-  const [modalType, setModalType] = useState<'standard' | 'token' | 'provider'>('standard'); 
+  const [modalType, setModalType] = useState<'standard' | 'token' | 'provider' | 'country'>('standard'); 
   const [toast, setToast] = useState<{title: string, message: string, type: 'success' | 'error'} | null>(null);
   const [currentPage, setCurrentPage] = useState(1);
 
@@ -133,12 +142,16 @@ export default function Home() {
   const totalPages = Math.ceil(transactions.length / ITEMS_PER_PAGE);
 
   useEffect(() => {
-    if (status && !isProcessing) setStatus("");
+    if (status && !isProcessing) {
+      setStatus("");
+    }
   }, [accountNumber, nairaAmount, activeService, cableSubscriptionType, selectedDataPlan, selectedCablePlan]);
 
   useEffect(() => {
     if (status && !isProcessing) {
-      const timer = setTimeout(() => setStatus(""), 5000); 
+      const timer = setTimeout(() => {
+        setStatus("");
+      }, 5000); 
       return () => clearTimeout(timer);
     }
   }, [status, isProcessing]);
@@ -148,7 +161,6 @@ export default function Home() {
       const savedHistory = localStorage.getItem("abapay_history");
       if (savedHistory) setTransactions(JSON.parse(savedHistory));
 
-      // ⚡ UNIFIED ENGINE: Fetch rate directly from Supabase ⚡
       try {
         const { data: settingsData } = await supabase
           .from('platform_settings')
@@ -179,7 +191,6 @@ export default function Home() {
     initSystem();
   }, [activeChain]);
 
-  // UPGRADED: Cloud-Sync User History
   useEffect(() => {
     if (!address) return;
 
@@ -547,7 +558,14 @@ export default function Home() {
     setCableSubscriptionType("renew");
   };
 
-  const openSelectionModal = (type: 'standard' | 'token' | 'provider', title: string, options: any[], callback: (value: string) => void) => {
+  const handleCountryChange = (countryCode: string) => {
+    const country = SUPPORTED_COUNTRIES.find(c => c.code === countryCode);
+    if (country && !country.disabled) {
+      setActiveCountry(country);
+    }
+  };
+
+  const openSelectionModal = (type: 'standard' | 'token' | 'provider' | 'country', title: string, options: any[], callback: (value: string) => void) => {
     setModalType(type);
     setModalTitle(title);
     setModalOptions(options);
@@ -727,7 +745,9 @@ export default function Home() {
                  {selectedReceipt.status === 'SUCCESS' && selectedReceipt.purchased_code && selectedReceipt.purchased_code !== "Vended Successfully" && (selectedReceipt.service?.toUpperCase() === 'ELECTRICITY' || selectedReceipt.service === 'Electricity') && (
                    <div className="mt-4 bg-orange-50 border-2 border-orange-200 rounded-xl p-4 text-center">
                       <p className="text-[10px] font-black text-orange-600 uppercase tracking-widest mb-1">Meter Token PIN</p>
-                      <p className="font-mono text-xl font-black text-slate-900 tracking-[0.2em] break-all">{selectedReceipt.purchased_code.replace(/token\s*[:\-]*\s*/gi, '').trim()}</p>
+                      <p className="font-mono text-xl font-black text-slate-900 tracking-[0.2em] break-all">
+                        {selectedReceipt.purchased_code.replace(/token\s*[:\-]*\s*/gi, '').trim()}
+                      </p>
                       <p className="text-[9px] font-bold text-orange-500 mt-2">Enter this exactly as shown into your meter.</p>
                    </div>
                  )}
@@ -819,6 +839,32 @@ export default function Home() {
                 <button onClick={() => setIsSelectionModalOpen(false)} className="p-2 bg-slate-100 rounded-full hover:bg-slate-200 transition-colors"><XCircle size={20} className="text-slate-500" /></button>
               </div>
               <div className="space-y-2.5 max-h-[50vh] overflow-y-auto pr-1">
+                 
+                 {/* ⚡ COUNTRY SELECTOR UI ⚡ */}
+                 {modalType === 'country' && SUPPORTED_COUNTRIES.map(country => (
+                   <button 
+                     key={country.code} 
+                     onClick={() => { 
+                        if (!country.disabled) {
+                            modalCallback?.(country.code); 
+                            setIsSelectionModalOpen(false); 
+                        }
+                     }}
+                     disabled={country.disabled}
+                     className={`w-full text-left p-4 rounded-xl font-bold text-sm transition-all flex justify-between items-center ${
+                         country.disabled 
+                         ? 'bg-slate-50 border border-slate-100 text-slate-400 cursor-not-allowed' 
+                         : 'text-slate-700 bg-slate-50 border border-slate-100 hover:border-emerald-300 hover:bg-emerald-50/50'
+                     }`}
+                   >
+                     <div className="flex items-center gap-3">
+                       <span className="text-2xl">{country.flag}</span>
+                       <span className={`font-black ${country.disabled ? 'text-slate-400' : 'text-slate-800'}`}>{country.name}</span>
+                     </div>
+                     {activeCountry.code === country.code && <CheckCircle2 size={18} className="text-emerald-500"/>}
+                   </button>
+                 ))}
+
                  {modalType === 'token' && SUPPORTED_TOKENS.map(token => (
                    <button 
                      key={token.symbol} 
@@ -869,33 +915,9 @@ export default function Home() {
         </div>
       )}
 
-      {isSupportOpen && (
-        <div className="fixed inset-0 z-[70] bg-slate-900/60 backdrop-blur-sm flex justify-center items-center p-4 animate-in fade-in">
-          <div className="bg-white w-full max-w-md rounded-[2rem] shadow-2xl p-6 animate-in zoom-in-95 duration-200">
-            <div className="flex justify-between items-center mb-4 shrink-0 border-b border-slate-100 pb-4">
-              <h2 className="text-2xl font-black flex items-center gap-2.5 tracking-tight text-slate-900"><Mail className="text-emerald-500" size={24}/> AbaPay Support</h2>
-              <button onClick={() => { setIsSupportOpen(false); setSupportTxHash(null); }} className="p-2 bg-slate-100 rounded-full hover:bg-slate-200"><XCircle size={20} className="text-slate-500" /></button>
-            </div>
-            <textarea 
-              className="w-full bg-slate-50 border border-slate-200 rounded-xl p-5 mb-4 text-sm font-medium outline-none focus:border-emerald-500 transition-colors leading-relaxed"
-              rows={4} placeholder="Describe your issue in detail. Support typically responds within 30 minutes."
-              value={supportMessage} onChange={(e) => setSupportMessage(e.target.value)}
-            />
-            <div className="flex gap-2 mb-6">
-              <input type="file" ref={fileInputRef} className="hidden" onChange={(e) => setSupportFile(e.target.files?.[0] || null)} />
-              <button onClick={() => fileInputRef.current?.click()} className="flex-1 py-4 bg-slate-100 hover:bg-slate-200 rounded-xl text-[11px] font-black uppercase tracking-wider flex items-center justify-center gap-2 text-slate-600">
-                <Paperclip size={16} /> {supportFile ? supportFile.name.slice(0, 10) + '...' : "Attach Receipt/Screenshot"}
-              </button>
-            </div>
-            <button onClick={submitSupportTicket} disabled={isSendingSupport} className="w-full bg-slate-900 hover:bg-black text-white font-black py-5 rounded-2xl flex items-center justify-center gap-2 transition-all active:scale-95 disabled:opacity-50">
-              {isSendingSupport ? <Loader2 className="animate-spin" size={18}/> : <><Send size={18} className="text-emerald-400"/> SUBMIT SUPPORT TICKET</>}
-            </button>
-          </div>
-        </div>
-      )}
-
       <div className="w-full max-w-md">
         
+        {/* ⚡ HEADER WITH COUNTRY SELECTOR ⚡ */}
         <div className="flex justify-between items-center bg-white p-4 rounded-3xl shadow-sm border border-slate-100 mb-6">
           <div className="flex items-center gap-3">
             <img src="/logo.png" alt="AbaPay" className="h-10 w-auto object-contain" />
@@ -905,34 +927,14 @@ export default function Home() {
             </div>
           </div>
           <div>
-            {isMiniPay ? (
-              <div className="bg-emerald-50 border border-emerald-200 px-3 py-1.5 rounded-xl flex items-center gap-2">
-                <div className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
-                <span className="text-[9px] font-black text-emerald-700 uppercase tracking-tight">MiniPay Active</span>
-              </div>
-            ) : address ? (
-              <div className="bg-emerald-50 border border-emerald-100 px-3 py-1.5 rounded-xl flex items-center gap-2">
-                <div className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
-                <span className="text-[10px] font-black text-emerald-700 font-mono tracking-tighter">
-                  {address.slice(0, 5)}...{address.slice(-4)}
-                </span>
-              </div>
-            ) : (
-              <button 
-                onClick={async () => {
-                  if (typeof window !== "undefined" && (window as any).ethereum) {
-                    const eth = (window as any).ethereum;
-                    const walletClient = createWalletClient({ chain: activeChain, transport: custom(eth) });
-                    const [acc] = await walletClient.requestAddresses();
-                    setAddress(acc);
-                    setClient(walletClient);
-                  }
-                }}
-                className="bg-slate-900 text-white text-[10px] font-black uppercase px-4 py-2 rounded-xl active:scale-95 hover:bg-black transition-all shadow-lg shadow-slate-900/20"
-              >
-                Connect
-              </button>
-            )}
+            <button 
+              onClick={() => openSelectionModal('country', "Select Region", SUPPORTED_COUNTRIES, handleCountryChange)}
+              className="bg-slate-50 border border-slate-100 hover:border-emerald-200 px-3 py-1.5 rounded-xl flex items-center gap-2 transition-all shadow-sm active:scale-95"
+            >
+              <span className="text-lg leading-none">{activeCountry.flag}</span>
+              <span className="text-[10px] font-black text-slate-700 uppercase tracking-widest">{activeCountry.code}</span>
+              <ChevronDown size={14} className="text-slate-400" />
+            </button>
           </div>
         </div>
 
