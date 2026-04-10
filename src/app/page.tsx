@@ -49,12 +49,26 @@ const ELEC_PRE_SELECT_AMOUNTS = ["1000", "2000", "5000", "10000", "20000"];
 const DATA_CATEGORIES = ["Daily", "Weekly", "Monthly", "Social", "Mega", "Broadband"];
 const ITEMS_PER_PAGE = 5;
 
-// Auto-generates flag emojis dynamically from standard 2-letter country codes
+// ⚡ UI HELPERS ⚡
 const getFlagEmoji = (countryCode: string) => {
   if (!countryCode || typeof countryCode !== 'string' || countryCode.length < 2) return "🌐";
   const code = countryCode.toUpperCase().slice(0,2);
   const codePoints = code.split('').map(char => 127397 + char.charCodeAt(0));
   return String.fromCodePoint(...codePoints);
+};
+
+// ⚡ VTPASS PAYLOAD EXTRACTOR ⚡ (Finds arrays no matter how deeply VTPass nests them)
+const extractVtpassArray = (data: any): any[] => {
+  if (!data) return [];
+  if (Array.isArray(data)) return data;
+  if (data.content && Array.isArray(data.content)) return data.content;
+  if (data.data && Array.isArray(data.data)) return data.data;
+  if (data.content && typeof data.content === 'object') {
+    const nestedArrays = Object.values(data.content).filter(v => Array.isArray(v));
+    if (nestedArrays.length > 0) return nestedArrays[0] as any[];
+    return Object.values(data.content); 
+  }
+  return [];
 };
 
 export default function Home() {
@@ -81,13 +95,13 @@ export default function Home() {
 
   const [dataVariations, setDataVariations] = useState<any[]>([]);
   
-  // ⚡ COMPLETELY DYNAMIC COUNTRIES STATE ⚡
+  // ⚡ DYNAMIC COUNTRIES STATE ⚡
   const [supportedCountries, setSupportedCountries] = useState<any[]>([{ code: "NG", name: "Nigeria", flag: "🇳🇬" }]);
   const [activeCountry, setActiveCountry] = useState({ code: "NG", name: "Nigeria", flag: "🇳🇬" });
 
-  // ⚡ DYNAMIC FOREIGN TABS & API STATES ⚡
+  // ⚡ FOREIGN API STATES ⚡
   const [foreignProductTypes, setForeignProductTypes] = useState<any[]>([]);
-  const [activeForeignProductType, setActiveForeignProductType] = useState<any>(null); // Replaces activeService for foreign
+  const [activeForeignProductType, setActiveForeignProductType] = useState<any>(null); 
   const [foreignOperators, setForeignOperators] = useState<any[]>([]);
   const [selectedForeignOperator, setSelectedForeignOperator] = useState<any>(null);
   const [foreignVariations, setForeignVariations] = useState<any[]>([]);
@@ -95,7 +109,7 @@ export default function Home() {
   const [foreignAmount, setForeignAmount] = useState("");
   const [isFetchingForeign, setIsFetchingForeign] = useState(false);
 
-  const [activeService, setActiveService] = useState(SERVICES[0]); // Only used for NG
+  const [activeService, setActiveService] = useState(SERVICES[0]); 
   const [elecProvider, setElecProvider] = useState(ELECTRICITY_PROVIDER_IDS[0]);
   const [cableProvider, setCableProvider] = useState(CABLE_PROVIDERS_LIST[0].serviceID);
   const [telecomProvider, setTelecomProvider] = useState(TELECOM_PROVIDERS[0]);
@@ -155,16 +169,12 @@ export default function Home() {
   const totalPages = Math.ceil(transactions.length / ITEMS_PER_PAGE);
 
   useEffect(() => {
-    if (status && !isProcessing) {
-      setStatus("");
-    }
+    if (status && !isProcessing) setStatus("");
   }, [accountNumber, nairaAmount, activeService, cableSubscriptionType, selectedDataPlan, selectedCablePlan, activeCountry]);
 
   useEffect(() => {
     if (status && !isProcessing) {
-      const timer = setTimeout(() => {
-        setStatus("");
-      }, 5000); 
+      const timer = setTimeout(() => setStatus(""), 5000); 
       return () => clearTimeout(timer);
     }
   }, [status, isProcessing]);
@@ -174,32 +184,22 @@ export default function Home() {
       const savedHistory = localStorage.getItem("abapay_history");
       if (savedHistory) setTransactions(JSON.parse(savedHistory));
 
-      // ⚡ FETCH DYNAMIC COUNTRIES FROM VTPASS ON LOAD ⚡
+      // ⚡ FETCH COUNTRIES (Using Bulletproof Extractor) ⚡
       try {
         const res = await fetch('/api/foreign?action=countries');
         const data = await res.json();
         
-        if (data && data.content) {
-           let dynamicArray: any[] = [];
-           if (Array.isArray(data.content)) {
-               dynamicArray = data.content;
-           } else if (typeof data.content === 'object') {
-               dynamicArray = Object.values(data.content);
-           }
-           
-           const parsed = dynamicArray.map((c: any) => ({
-               code: c.code || c.country_code || c.id,
-               name: c.name || c.country_name || c.title || c.code,
-               flag: getFlagEmoji(c.code || c.country_code || "🌐")
-           })).filter(c => c.code && c.code.toUpperCase() !== 'NG');
+        const extractedArray = extractVtpassArray(data);
+        const parsed = extractedArray.map((c: any) => ({
+            code: c.code || c.country_code || c.id,
+            name: c.name || c.country_name || c.title || c.code,
+            flag: getFlagEmoji(c.code || c.country_code || "🌐")
+        })).filter((c: any) => c.code && c.code.toUpperCase() !== 'NG');
 
-           if (parsed.length > 0) {
-              setSupportedCountries([{ code: "NG", name: "Nigeria", flag: "🇳🇬" }, ...parsed]);
-           }
+        if (parsed.length > 0) {
+            setSupportedCountries([{ code: "NG", name: "Nigeria", flag: "🇳🇬" }, ...parsed]);
         }
-      } catch (e) {
-        console.error("Failed to load dynamic countries");
-      }
+      } catch (e) { console.error("Failed to load dynamic countries"); }
 
       try {
         const { data: settingsData } = await supabase
@@ -208,19 +208,15 @@ export default function Home() {
           .eq('id', 1)
           .single();
           
-        if (settingsData && settingsData.exchange_rate) {
-          setExchangeRate(Number(settingsData.exchange_rate));
-        }
+        if (settingsData && settingsData.exchange_rate) setExchangeRate(Number(settingsData.exchange_rate));
       } catch (consoleError) {}
 
       if (typeof window !== "undefined" && (window as any).ethereum) {
         const eth = (window as any).ethereum;
         if (eth.isMiniPay) setIsMiniPay(true);
-
         const walletClient = createWalletClient({ chain: activeChain, transport: custom(eth) });
         walletClient.requestAddresses().then(([acc]) => {
-          setAddress(acc);
-          setClient(walletClient);
+          setAddress(acc); setClient(walletClient);
         }).catch((e) => console.log("Connection deferred"));
       }
 
@@ -231,44 +227,29 @@ export default function Home() {
 
   useEffect(() => {
     if (!address) return;
-
     async function fetchCloudHistory() {
       try {
         const sixMonthsAgo = new Date();
         sixMonthsAgo.setMonth(sixMonthsAgo.getMonth() - 6);
-        const isoDate = sixMonthsAgo.toISOString();
-
         const { data, error } = await supabase
           .from('transactions')
           .select('*')
           .eq('wallet_address', address)
-          .gte('created_at', isoDate)
+          .gte('created_at', sixMonthsAgo.toISOString())
           .order('created_at', { ascending: false });
 
         if (data && data.length > 0) {
           const cloudHistory = data.map((tx: any) => ({
-            id: tx.tx_hash.slice(0, 8),
-            date: new Date(tx.created_at).toLocaleString(),
-            status: tx.status,
-            amountNaira: tx.amount_naira.toString(),
-            amountCrypto: tx.amount_usdt.toString(),
-            tokenUsed: "USD₮", 
-            service: tx.service_category,
-            network: tx.network,
-            txHash: tx.tx_hash,
-            account: tx.account_number,
-            refund_hash: tx.refund_hash,
-            purchased_code: tx.purchased_code, 
-            request_id: tx.request_id, 
-            units: tx.units 
+            id: tx.tx_hash.slice(0, 8), date: new Date(tx.created_at).toLocaleString(), status: tx.status,
+            amountNaira: tx.amount_naira.toString(), amountCrypto: tx.amount_usdt.toString(), tokenUsed: "USD₮", 
+            service: tx.service_category, network: tx.network, txHash: tx.tx_hash, account: tx.account_number,
+            refund_hash: tx.refund_hash, purchased_code: tx.purchased_code, request_id: tx.request_id, units: tx.units 
           }));
-
           setTransactions(cloudHistory);
           localStorage.setItem("abapay_history", JSON.stringify(cloudHistory));
         }
       } catch (e) {}
     }
-
     fetchCloudHistory();
   }, [address]);
 
@@ -280,21 +261,16 @@ export default function Home() {
         const publicClient = createPublicClient({ chain: activeChain, transport: http() });
         const tokenAddress = isMainnet ? selectedToken.mainnet : selectedToken.sepolia;
         const balanceWei = await publicClient.readContract({
-          address: tokenAddress as `0x${string}`,
-          abi: ERC20_ABI,
-          functionName: 'balanceOf',
-          args: [address],
+          address: tokenAddress as `0x${string}`, abi: ERC20_ABI, functionName: 'balanceOf', args: [address],
         });
         setWalletBalance(parseFloat(formatUnits(balanceWei as bigint, selectedToken.decimals)).toFixed(4));
-      } catch (error) {
-        setWalletBalance("0.00");
-      }
+      } catch (error) { setWalletBalance("0.00"); }
       setIsFetchingBalance(false);
     }
     fetchBalance();
   }, [address, selectedToken, activeChain, isMainnet]);
 
-  // ⚡ STRICT FOREIGN API: 1. FETCH TABS (PRODUCT TYPES) FOR SELECTED COUNTRY ⚡
+  // ⚡ 1. FETCH FOREIGN PRODUCT TYPES ⚡
   useEffect(() => {
     if (activeCountry.code === 'NG') {
        setForeignProductTypes([]);
@@ -306,18 +282,16 @@ export default function Home() {
       try {
         const res = await fetch(`/api/foreign?action=product-types&code=${activeCountry.code}`);
         const data = await res.json();
-        if (data && data.content) {
-           const pts = Array.isArray(data.content) ? data.content : Object.values(data.content);
-           setForeignProductTypes(pts);
-           setActiveForeignProductType(pts[0] || null); // Auto-select the first tab
-        }
+        const extractedPts = extractVtpassArray(data);
+        setForeignProductTypes(extractedPts);
+        setActiveForeignProductType(extractedPts[0] || null); 
       } catch (e) {}
       setIsFetchingForeign(false);
     };
     fetchForeignProductTypes();
   }, [activeCountry.code]);
 
-  // ⚡ STRICT FOREIGN API: 2. FETCH OPERATORS BASED ON THE SELECTED TAB ⚡
+  // ⚡ 2. FETCH FOREIGN OPERATORS ⚡
   useEffect(() => {
     if (activeCountry.code === 'NG' || !activeForeignProductType) {
       setForeignOperators([]);
@@ -329,19 +303,17 @@ export default function Home() {
       setSelectedForeignOperator(null);
       setForeignVariations([]);
       try {
-        const res = await fetch(`/api/foreign?action=operators&code=${activeCountry.code}&product_type_id=${activeForeignProductType.product_type_id || activeForeignProductType.id}`);
+        const productTypeId = activeForeignProductType.product_type_id || activeForeignProductType.id;
+        const res = await fetch(`/api/foreign?action=operators&code=${activeCountry.code}&product_type_id=${productTypeId}`);
         const data = await res.json();
-        if (data && data.content) {
-            const ops = Array.isArray(data.content) ? data.content : Object.values(data.content);
-            setForeignOperators(ops);
-        }
+        setForeignOperators(extractVtpassArray(data));
       } catch (e) {}
       setIsFetchingForeign(false);
     };
     fetchOperators();
   }, [activeCountry.code, activeForeignProductType]);
 
-  // ⚡ STRICT FOREIGN API: 3. FETCH VARIATIONS BASED ON SELECTED OPERATOR ⚡
+  // ⚡ 3. FETCH FOREIGN VARIATIONS ⚡
   useEffect(() => {
     if (activeCountry.code === 'NG' || !selectedForeignOperator || !activeForeignProductType) return;
     const fetchVariations = async () => {
@@ -351,16 +323,20 @@ export default function Home() {
       setNairaAmount("");
       setSelectedForeignVariation(null);
       try {
-        const res = await fetch(`/api/foreign?action=variations&operator_id=${selectedForeignOperator.operator_id}&product_type_id=${activeForeignProductType.product_type_id || activeForeignProductType.id}`);
+        const productTypeId = activeForeignProductType.product_type_id || activeForeignProductType.id;
+        const res = await fetch(`/api/foreign?action=variations&operator_id=${selectedForeignOperator.operator_id}&product_type_id=${productTypeId}`);
         const data = await res.json();
+        
+        let varArray: any[] = [];
         if (data.content && data.content.varations) {
-           const varArray = Array.isArray(data.content.varations) ? data.content.varations : Object.values(data.content.varations);
-           setForeignVariations(varArray);
-           
-           // Auto-select if it's a flexible TopUp with only 1 variation
-           if (varArray.length === 1 && varArray[0].fixedPrice === "No") {
-             setSelectedForeignVariation(varArray[0]);
-           }
+            varArray = Array.isArray(data.content.varations) ? data.content.varations : Object.values(data.content.varations);
+        } else {
+            varArray = extractVtpassArray(data); // Ultimate fallback
+        }
+
+        setForeignVariations(varArray);
+        if (varArray.length === 1 && varArray[0].fixedPrice === "No") {
+            setSelectedForeignVariation(varArray[0]);
         }
       } catch(e) {}
       setIsFetchingForeign(false);
@@ -368,7 +344,7 @@ export default function Home() {
     fetchVariations();
   }, [selectedForeignOperator, activeForeignProductType, activeCountry.code]);
 
-  // ⚡ NIGERIA API LOGIC ⚡
+  // ⚡ NG SPECIFIC: AUTO-DETECT TELECOM ⚡
   useEffect(() => {
     if (activeCountry.code !== "NG") return;
     if ((activeService.id === "AIRTIME" || activeService.id === "DATA") && accountNumber.length >= 4) {
@@ -380,6 +356,7 @@ export default function Home() {
     }
   }, [accountNumber, activeService, activeCountry]);
 
+  // ⚡ NG SPECIFIC: FETCH DATA/CABLE ⚡
   useEffect(() => {
     if (activeCountry.code !== "NG") return;
     if (activeService.id === "CABLE") {
@@ -407,20 +384,14 @@ export default function Home() {
   const verifyMerchant = async () => {
     if (activeCountry.code !== "NG") return;
     setIsVerifying(true);
-    setCustomerName(null);
-    setCableCurrentBouquet(null);
-    setCableRenewAmount(null);
+    setCustomerName(null); setCableCurrentBouquet(null); setCableRenewAmount(null);
 
     try {
         const serviceID = activeService.id === "ELECTRICITY" ? elecProvider : cableProvider;
         const res = await fetch(`/api/verify`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ 
-              billersCode: accountNumber, 
-              serviceID: serviceID, 
-              type: activeService.id === "ELECTRICITY" ? meterType : undefined 
-            }) 
+            body: JSON.stringify({ billersCode: accountNumber, serviceID: serviceID, type: activeService.id === "ELECTRICITY" ? meterType : undefined }) 
         });
 
         const data = await res.json();
@@ -433,22 +404,16 @@ export default function Home() {
               if (cableSubscriptionType === "renew") setNairaAmount(data.content.Renewal_Amount.toString());
             }
           }
-        } else {
-            setStatus("Meter/Account number could not be verified.");
-        }
+        } else setStatus("Meter/Account number could not be verified.");
     } catch (e) {}
     setIsVerifying(false);
   };
 
   useEffect(() => {
     if (activeCountry.code !== "NG") return;
-    if (activeService.id === "ELECTRICITY" && accountNumber.length >= 10) {
-      verifyMerchant();
-    } else if (activeService.id === "CABLE" && cableProvider !== "showmax" && accountNumber.length >= 10) {
-      verifyMerchant();
-    } else {
-      setCustomerName(null);
-    }
+    if (activeService.id === "ELECTRICITY" && accountNumber.length >= 10) verifyMerchant();
+    else if (activeService.id === "CABLE" && cableProvider !== "showmax" && accountNumber.length >= 10) verifyMerchant();
+    else setCustomerName(null);
   }, [accountNumber, elecProvider, cableProvider, activeService, meterType, activeCountry]);
 
   const { cryptoToCharge, currentFee } = useMemo(() => {
@@ -477,12 +442,10 @@ export default function Home() {
     const amount = parseFloat(nairaAmount);
     if (!nairaAmount || isNaN(amount) || amount <= 0) return false;
 
-    // FOREIGN VALIDATION
     if (activeCountry.code !== 'NG') {
       return accountNumber.length >= 7 && selectedForeignOperator && selectedForeignVariation;
     }
 
-    // NIGERIA VALIDATION
     if (amount < dynamicMinAmount || amount > dynamicMaxAmount) return false;
     if (activeService.id === "AIRTIME") return accountNumber.length === 11 && accountNumber.startsWith("0");
     if (activeService.id === "DATA") return accountNumber.length === 11 && accountNumber.startsWith("0") && selectedDataPlan !== null;
@@ -536,24 +499,17 @@ export default function Home() {
       let displayNetwork = "";
       let finalVariationCode = 'prepaid';
 
-      // SET NIGERIAN VS FOREIGN PARAMS
       if (activeCountry.code === 'NG') {
         if (activeService.id === "ELECTRICITY") {
-          vtpassServiceID = elecProvider;
-          displayNetwork = elecProvider;
-          finalVariationCode = meterType;
+          vtpassServiceID = elecProvider; displayNetwork = elecProvider; finalVariationCode = meterType;
         } else if (activeService.id === "CABLE") {
-          vtpassServiceID = cableProvider;
-          displayNetwork = cableProvider;
+          vtpassServiceID = cableProvider; displayNetwork = cableProvider;
           if (['dstv', 'gotv'].includes(cableProvider)) finalVariationCode = cableSubscriptionType === 'change' ? selectedCablePlan?.variation_code : 'none'; 
           else finalVariationCode = selectedCablePlan?.variation_code || 'none';
         } else if (activeService.id === "DATA") {
-          vtpassServiceID = `${telecomProvider}-data`; 
-          displayNetwork = telecomProvider;
-          finalVariationCode = selectedDataPlan?.variation_code || 'none'; 
+          vtpassServiceID = `${telecomProvider}-data`; displayNetwork = telecomProvider; finalVariationCode = selectedDataPlan?.variation_code || 'none'; 
         } else {
-          vtpassServiceID = telecomProvider; 
-          displayNetwork = telecomProvider;
+          vtpassServiceID = telecomProvider; displayNetwork = telecomProvider;
         }
       } else {
         vtpassServiceID = 'foreign-airtime';
@@ -584,52 +540,30 @@ export default function Home() {
         phone: customerPhone || accountNumber,
         wallet_address: address,
         subscription_type: activeCountry.code === 'NG' && activeService.id === "CABLE" && ['dstv', 'gotv'].includes(cableProvider) ? cableSubscriptionType : undefined,
-        
-        // ⚡ FOREIGN PARAMS INJECTED ⚡
         isForeign: activeCountry.code !== 'NG',
         operator_id: selectedForeignOperator?.operator_id,
         country_code: activeCountry.code,
         product_type_id: activeForeignProductType?.product_type_id || activeForeignProductType?.id,
-        email: "support@abapay.com" // VTPass fallback
+        email: "support@abapay.com"
       };
 
       const newTx: any = { 
-        id: hash.slice(0,8), 
-        date: new Date().toLocaleString(), 
-        status: "PENDING", 
-        amountNaira: nairaAmount,
-        amountCrypto: cryptoToCharge,
-        tokenUsed: selectedToken.symbol, 
+        id: hash.slice(0,8), date: new Date().toLocaleString(), status: "PENDING", 
+        amountNaira: nairaAmount, amountCrypto: cryptoToCharge, tokenUsed: selectedToken.symbol, 
         service: activeCountry.code === 'NG' ? activeService.name : `${activeCountry.code} ${activeForeignProductType?.name || 'Utility'}`, 
-        network: displayNetwork.toUpperCase(), 
-        txHash: hash,
-        account: accountNumber
+        network: displayNetwork.toUpperCase(), txHash: hash, account: accountNumber
       };
 
-      setAccountNumber("");
-      setNairaAmount("");
-      setCustomerPhone("");
-      setCustomerName(null);
-      setSelectedDataPlan(null);
-      setSelectedCablePlan(null);
-      setCableCurrentBouquet(null);
-      setSelectedForeignVariation(null);
-      setForeignAmount("");
+      setAccountNumber(""); setNairaAmount(""); setCustomerPhone(""); setCustomerName(null);
+      setSelectedDataPlan(null); setSelectedCablePlan(null); setCableCurrentBouquet(null);
+      setSelectedForeignVariation(null); setForeignAmount("");
 
-      const res = await fetch('/api/pay', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(backendPayload)
-      });
-
+      const res = await fetch('/api/pay', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(backendPayload) });
       const result = await res.json();
 
       if (result.success) {
         setStatus("Success! Token/Ref Dispatched.");
-        newTx.status = "SUCCESS";
-        newTx.purchased_code = result.purchased_code; 
-        newTx.units = result.units; 
-        newTx.request_id = result.data?.requestId; 
+        newTx.status = "SUCCESS"; newTx.purchased_code = result.purchased_code; newTx.units = result.units; newTx.request_id = result.data?.requestId; 
         showToast("Vending Successful", "Your utility has been successfully delivered.", "success");
       } else {
         setStatus(`Error: ${result.message || 'Transaction Failed'}`);
@@ -644,82 +578,40 @@ export default function Home() {
       const balanceWei = await publicClient.readContract({ address: tokenAddress as `0x${string}`, abi: ERC20_ABI, functionName: 'balanceOf', args: [address] });
       setWalletBalance(parseFloat(formatUnits(balanceWei as bigint, selectedToken.decimals)).toFixed(4));
 
-    } catch (e) { 
-      setStatus("Transaction Cancelled."); 
-    } finally {
-      setIsProcessing(false);
-    }
+    } catch (e) { setStatus("Transaction Cancelled."); } finally { setIsProcessing(false); }
   };
 
   const handleResetService = (s: any) => {
-    setActiveService(s); 
-    setAccountNumber(""); 
-    setCustomerName(null); 
-    setNairaAmount(""); 
-    setSelectedDataPlan(null);
-    setCableCurrentBouquet(null);
-    setCableRenewAmount(null);
-    setSelectedCablePlan(null);
-    setCableSubscriptionType("renew");
-    
-    // Reset Foreign States
-    setSelectedForeignOperator(null);
-    setSelectedForeignVariation(null);
-    setForeignAmount("");
+    setActiveService(s); setAccountNumber(""); setCustomerName(null); setNairaAmount(""); 
+    setSelectedDataPlan(null); setCableCurrentBouquet(null); setCableRenewAmount(null); setSelectedCablePlan(null);
+    setCableSubscriptionType("renew"); setSelectedForeignOperator(null); setSelectedForeignVariation(null); setForeignAmount("");
   };
 
   const handleCountryChange = (countryCode: string) => {
     const country = supportedCountries.find(c => c.code === countryCode);
-    if (country) {
-      setActiveCountry(country);
-      handleResetService(SERVICES[0]); 
-    }
+    if (country) { setActiveCountry(country); handleResetService(SERVICES[0]); }
   };
 
   const openSelectionModal = (type: 'standard' | 'token' | 'provider' | 'country', title: string, options: any[], callback: (value: string) => void) => {
-    setModalType(type);
-    setModalTitle(title);
-    setModalOptions(options);
-    setModalCallback(() => callback);
-    setIsSelectionModalOpen(true);
+    setModalType(type); setModalTitle(title); setModalOptions(options); setModalCallback(() => callback); setIsSelectionModalOpen(true);
   };
 
   const handleShareReceipt = async () => {
     const receiptText = `🧾 AbaPay Receipt\n\nDate: ${selectedReceipt.date}\nStatus: ${selectedReceipt.status}\nProduct: ${selectedReceipt.network} ${selectedReceipt.service}\nRecipient: ${selectedReceipt.account}\nAmount Paid: ₦${selectedReceipt.amountNaira}\nCrypto Used: ${selectedReceipt.amountCrypto} ${selectedReceipt.tokenUsed}\nTx Hash: ${selectedReceipt.txHash}\n\nSecured by Celo Network`;
-
-    if (navigator.share) {
-      try { await navigator.share({ title: 'Receipt', text: receiptText }); } 
-      catch (err) { console.log("Share cancelled or failed.", err); }
-    } else {
-      try {
-        await navigator.clipboard.writeText(receiptText);
-        showToast("Copied!", "Receipt details copied to clipboard.", "success");
-      } catch (err) { showToast("Error", "Could not copy receipt.", "error"); }
-    }
+    if (navigator.share) { try { await navigator.share({ title: 'Receipt', text: receiptText }); } catch (err) {} } 
+    else { try { await navigator.clipboard.writeText(receiptText); showToast("Copied!", "Receipt details copied to clipboard.", "success"); } catch (err) {} }
   };
 
   const submitSupportTicket = async () => {
     if (!supportMessage.trim()) return;
     setIsSendingSupport(true);
     try {
-      const formData = new FormData();
-      formData.append("message", supportMessage);
-      if (address) formData.append("userAddress", address);
-      if (supportTxHash) formData.append("txHash", supportTxHash); 
-      if (supportFile) formData.append("file", supportFile);
-
+      const formData = new FormData(); formData.append("message", supportMessage);
+      if (address) formData.append("userAddress", address); if (supportTxHash) formData.append("txHash", supportTxHash); if (supportFile) formData.append("file", supportFile);
       await fetch('/api/support', { method: 'POST', body: formData });
-
-      setIsSupportOpen(false);
-      setSupportMessage("");
-      setSupportFile(null);
-      setSupportTxHash(null); 
+      setIsSupportOpen(false); setSupportMessage(""); setSupportFile(null); setSupportTxHash(null); 
       showToast("Ticket Submitted", "Support has received your request.", "success");
-    } catch (error) {
-      showToast("Connection Error", "Failed to send the ticket.", "error");
-    } finally {
-      setIsSendingSupport(false);
-    }
+    } catch (error) { showToast("Connection Error", "Failed to send the ticket.", "error"); } finally { setIsSendingSupport(false); }
   };
 
   useEffect(() => {
@@ -727,27 +619,16 @@ export default function Home() {
       if (activeTab === "history" && transactions.length > 0) {
         const failedHashes = transactions.filter(tx => tx.status !== 'SUCCESS').map(tx => tx.txHash);
         if (failedHashes.length === 0) return;
-
         try {
-          const { data, error } = await supabase
-            .from('transactions')
-            .select('tx_hash, status, refund_hash')
-            .in('tx_hash', failedHashes);
-
+          const { data, error } = await supabase.from('transactions').select('tx_hash, status, refund_hash').in('tx_hash', failedHashes);
           if (data && data.length > 0) {
             let updated = false;
             const newHistory = transactions.map(tx => {
               const dbRecord = data.find(r => r.tx_hash === tx.txHash);
-              if (dbRecord && dbRecord.status === 'REFUNDED' && tx.status !== 'REFUNDED') {
-                updated = true;
-                return { ...tx, status: 'REFUNDED', refund_hash: dbRecord.refund_hash };
-              }
+              if (dbRecord && dbRecord.status === 'REFUNDED' && tx.status !== 'REFUNDED') { updated = true; return { ...tx, status: 'REFUNDED', refund_hash: dbRecord.refund_hash }; }
               return tx;
             });
-            if (updated) {
-              setTransactions(newHistory);
-              localStorage.setItem("abapay_history", JSON.stringify(newHistory));
-            }
+            if (updated) { setTransactions(newHistory); localStorage.setItem("abapay_history", JSON.stringify(newHistory)); }
           }
         } catch(e) {}
       }
@@ -755,13 +636,8 @@ export default function Home() {
     checkRefunds();
   }, [activeTab]);
 
-  const currentDisco = useMemo(() => {
-    return ELECTRICITY_DISCOS.find(d => d.serviceID === elecProvider);
-  }, [elecProvider]);
-
-  const currentCable = useMemo(() => {
-    return CABLE_PROVIDERS_LIST.find(c => c.serviceID === cableProvider);
-  }, [cableProvider]);
+  const currentDisco = useMemo(() => { return ELECTRICITY_DISCOS.find(d => d.serviceID === elecProvider); }, [elecProvider]);
+  const currentCable = useMemo(() => { return CABLE_PROVIDERS_LIST.find(c => c.serviceID === cableProvider); }, [cableProvider]);
 
   return (
     <main className="min-h-screen bg-slate-50 text-slate-900 font-sans p-4 flex flex-col items-center pb-20 relative">
@@ -913,7 +789,7 @@ export default function Home() {
               </div>
               <div className="space-y-2.5 max-h-[50vh] overflow-y-auto pr-1">
                  
-                 {/* ⚡ DYNAMIC COUNTRY SELECTOR UI ⚡ */}
+                 {/* ⚡ COUNTRY SELECTOR UI ⚡ */}
                  {modalType === 'country' && supportedCountries.map(country => (
                    <button 
                      key={country.code} 
