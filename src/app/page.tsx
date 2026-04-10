@@ -60,9 +60,12 @@ const ELEC_PRE_SELECT_AMOUNTS = ["1000", "2000", "5000", "10000", "20000"];
 const DATA_CATEGORIES = ["Daily", "Weekly", "Monthly", "Social", "Mega", "Broadband"];
 const ITEMS_PER_PAGE = 5;
 
+// ⚡ BULLETPROOF VTPASS EXTRACTOR ⚡
 const extractVtpassArray = (data: any): any[] => {
   if (!data) return [];
   if (Array.isArray(data)) return data;
+  if (data.content && Array.isArray(data.content.varations)) return data.content.varations;
+  if (data.content && Array.isArray(data.content.variations)) return data.content.variations;
   if (data.content && Array.isArray(data.content)) return data.content;
   if (data.data && Array.isArray(data.data)) return data.data;
   if (data.content && typeof data.content === 'object') {
@@ -75,6 +78,7 @@ const extractVtpassArray = (data: any): any[] => {
 
 export default function Home() {
   const [isInitiallyLoading, setIsInitiallyLoading] = useState(true);
+
   const [address, setAddress] = useState<string | null>(null);
   const [client, setClient] = useState<any>(null);
   const [nairaAmount, setNairaAmount] = useState(""); 
@@ -95,10 +99,13 @@ export default function Home() {
   const [selectedCablePlan, setSelectedCablePlan] = useState<any>(null);
 
   const [dataVariations, setDataVariations] = useState<any[]>([]);
+  
+  // ⚡ BANK TRANSFER STATES ⚡
   const [bankVariations, setBankVariations] = useState<any[]>([]);
   const [selectedBank, setSelectedBank] = useState<any>(null);
   const [isFetchingBanks, setIsFetchingBanks] = useState(false);
 
+  // ⚡ INTERNET STATES ⚡
   const [internetVariations, setInternetVariations] = useState<any[]>([]);
   const [selectedInternetPlan, setSelectedInternetPlan] = useState<any>(null);
   const [internetAccountId, setInternetAccountId] = useState<string | null>(null);
@@ -116,6 +123,7 @@ export default function Home() {
   const [selectedReceipt, setSelectedReceipt] = useState<any>(null); 
   const [isTermsOpen, setIsTermsOpen] = useState(false); 
   const [isPrivacyOpen, setIsPrivacyOpen] = useState(false); 
+
   const [isSupportOpen, setIsSupportOpen] = useState(false);
   const [supportMessage, setSupportMessage] = useState("");
   const [supportTxHash, setSupportTxHash] = useState<string | null>(null);
@@ -166,6 +174,10 @@ export default function Home() {
   const totalPages = Math.ceil(transactions.length / ITEMS_PER_PAGE);
 
   useEffect(() => {
+    if (status && !isProcessing) setStatus("");
+  }, [accountNumber, nairaAmount, activeService, cableSubscriptionType, selectedDataPlan, selectedCablePlan, selectedBank, selectedInternetPlan]);
+
+  useEffect(() => {
     if (status && !isProcessing) {
       const timer = setTimeout(() => setStatus(""), 5000); 
       return () => clearTimeout(timer);
@@ -176,18 +188,30 @@ export default function Home() {
     async function initSystem() {
       const savedHistory = localStorage.getItem("abapay_history");
       if (savedHistory) setTransactions(JSON.parse(savedHistory));
+
       try {
-        const { data: settingsData } = await supabase.from('platform_settings').select('exchange_rate').eq('id', 1).single();
-        if (settingsData && settingsData.exchange_rate) setExchangeRate(Number(settingsData.exchange_rate));
+        const { data: settingsData } = await supabase
+          .from('platform_settings')
+          .select('exchange_rate')
+          .eq('id', 1)
+          .single();
+          
+        if (settingsData && settingsData.exchange_rate) {
+          setExchangeRate(Number(settingsData.exchange_rate));
+        }
       } catch (consoleError) {}
+
       if (typeof window !== "undefined" && (window as any).ethereum) {
         const eth = (window as any).ethereum;
         if (eth.isMiniPay) setIsMiniPay(true);
+
         const walletClient = createWalletClient({ chain: activeChain, transport: custom(eth) });
         walletClient.requestAddresses().then(([acc]) => {
-          setAddress(acc); setClient(walletClient);
+          setAddress(acc);
+          setClient(walletClient);
         }).catch((e) => console.log("Connection deferred"));
       }
+
       setTimeout(() => setIsInitiallyLoading(false), 2000);
     }
     initSystem();
@@ -195,23 +219,44 @@ export default function Home() {
 
   useEffect(() => {
     if (!address) return;
+
     async function fetchCloudHistory() {
       try {
         const sixMonthsAgo = new Date();
         sixMonthsAgo.setMonth(sixMonthsAgo.getMonth() - 6);
-        const { data } = await supabase.from('transactions').select('*').eq('wallet_address', address).gte('created_at', sixMonthsAgo.toISOString()).order('created_at', { ascending: false });
+        const isoDate = sixMonthsAgo.toISOString();
+
+        const { data } = await supabase
+          .from('transactions')
+          .select('*')
+          .eq('wallet_address', address)
+          .gte('created_at', isoDate)
+          .order('created_at', { ascending: false });
+
         if (data && data.length > 0) {
           const cloudHistory = data.map((tx: any) => ({
-            id: tx.tx_hash.slice(0, 8), date: new Date(tx.created_at).toLocaleString(), status: tx.status,
-            amountNaira: tx.amount_naira.toString(), amountCrypto: tx.amount_usdt.toString(), tokenUsed: "USD₮", 
-            service: tx.service_category, network: tx.network, txHash: tx.tx_hash, account: tx.account_number,
-            refund_hash: tx.refund_hash, purchased_code: tx.purchased_code, request_id: tx.request_id, units: tx.units 
+            id: tx.tx_hash.slice(0, 8),
+            date: new Date(tx.created_at).toLocaleString(),
+            status: tx.status,
+            amountNaira: tx.amount_naira.toString(),
+            amountCrypto: tx.amount_usdt.toString(),
+            tokenUsed: "USD₮", 
+            service: tx.service_category,
+            network: tx.network,
+            txHash: tx.tx_hash,
+            account: tx.account_number,
+            refund_hash: tx.refund_hash,
+            purchased_code: tx.purchased_code,
+            request_id: tx.request_id, 
+            units: tx.units 
           }));
+
           setTransactions(cloudHistory);
           localStorage.setItem("abapay_history", JSON.stringify(cloudHistory));
         }
       } catch (e) {}
     }
+
     fetchCloudHistory();
   }, [address]);
 
@@ -222,7 +267,12 @@ export default function Home() {
       try {
         const publicClient = createPublicClient({ chain: activeChain, transport: http() });
         const tokenAddress = isMainnet ? selectedToken.mainnet : selectedToken.sepolia;
-        const balanceWei = await publicClient.readContract({ address: tokenAddress as `0x${string}`, abi: ERC20_ABI, functionName: 'balanceOf', args: [address] });
+        const balanceWei = await publicClient.readContract({
+          address: tokenAddress as `0x${string}`,
+          abi: ERC20_ABI,
+          functionName: 'balanceOf',
+          args: [address],
+        });
         setWalletBalance(parseFloat(formatUnits(balanceWei as bigint, selectedToken.decimals)).toFixed(4));
       } catch (error) { setWalletBalance("0.00"); }
       setIsFetchingBalance(false);
@@ -230,7 +280,7 @@ export default function Home() {
     fetchBalance();
   }, [address, selectedToken, activeChain, isMainnet]);
 
-  // ⚡ UNIFIED VARIATION FETCHER (NO DUPLICATES) ⚡
+  // ⚡ UNIFIED CENTRAL FETCHER (NO DUPLICATES) ⚡
   useEffect(() => {
     const fetchVariations = async () => {
       if (activeService.id === "BANK") {
@@ -238,9 +288,11 @@ export default function Home() {
         try {
           const res = await fetch(`/api/variations?serviceID=bank-deposit`);
           const data = await res.json();
-          let banksArr = data?.content?.varations || data?.content?.variations || extractVtpassArray(data);
-          if (Array.isArray(banksArr)) {
-             setBankVariations(banksArr.sort((a: any, b: any) => (a.name || "").localeCompare(b.name || "")));
+          let banksArr = extractVtpassArray(data);
+          
+          if (banksArr && banksArr.length > 0) {
+            const sortedBanks = banksArr.sort((a: any, b: any) => (a.name || "").localeCompare(b.name || ""));
+            setBankVariations(sortedBanks);
           }
         } catch (e) {}
         setIsFetchingBanks(false);
@@ -248,23 +300,20 @@ export default function Home() {
         try {
           const res = await fetch(`/api/variations?serviceID=${cableProvider}`);
           const data = await res.json();
-          let arr = data?.content?.varations || data?.content?.variations || extractVtpassArray(data);
-          if (Array.isArray(arr)) setCableVariations(arr);
+          setCableVariations(extractVtpassArray(data));
         } catch (e) {}
       } else if (activeService.id === "DATA") {
         try {
           const res = await fetch(`/api/variations?serviceID=${telecomProvider}-data`);
           const data = await res.json();
-          let arr = data?.content?.varations || data?.content?.variations || extractVtpassArray(data);
-          if (Array.isArray(arr)) setDataVariations(arr);
+          setDataVariations(extractVtpassArray(data));
         } catch (e) {}
       } else if (activeService.id === "INTERNET") {
         setInternetVariations([]);
         try {
           const res = await fetch(`/api/variations?serviceID=${internetProvider}`);
           const data = await res.json();
-          let arr = data?.content?.varations || data?.content?.variations || extractVtpassArray(data);
-          if (Array.isArray(arr)) setInternetVariations(arr);
+          setInternetVariations(extractVtpassArray(data));
         } catch (e) {}
       }
     };
@@ -295,16 +344,22 @@ export default function Home() {
         const res = await fetch(`/api/verify`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ billersCode: accountNumber, serviceID: serviceID, type: reqType }) 
+            body: JSON.stringify({ 
+              billersCode: accountNumber, 
+              serviceID: serviceID, 
+              type: reqType 
+            }) 
         });
 
         const data = await res.json();
 
         if (data.code === '000') {
           setCustomerName(data.content.Customer_Name || data.content.account_name || data.content.name);
+
           if (activeService.id === "INTERNET" && internetProvider === "smile-direct") {
              setInternetAccountId(data.content.AccountId || data.content.account_id);
           }
+
           if (activeService.id === "CABLE") {
             setCableCurrentBouquet(data.content.Current_Bouquet || "Unknown Package");
             if (data.content.Renewal_Amount && ['dstv', 'gotv'].includes(cableProvider)) {
@@ -343,43 +398,69 @@ export default function Home() {
 
   const filteredLiveDataPlans = useMemo(() => {
     if (!dataVariations || dataVariations.length === 0) return [];
+
     return dataVariations.filter(plan => {
       const name = plan.name.toLowerCase();
       let category = "Monthly";
+
       if (name.includes('broadband') || name.includes('router') || name.includes('5g') || name.includes('hynet')) category = "Broadband";
       else if (name.includes('social') || name.includes('whatsapp') || name.includes('ig') || name.includes('instagram') || name.includes('tiktok') || name.includes('youtube') || name.includes('facebook') || name.includes('opera') || name.includes('xot')) category = "Social";
       else if (name.includes('60 day') || name.includes('90 day') || name.includes('120 day') || name.includes('year') || name.includes('mega') || name.includes('3 month') || name.includes('2 month')) category = "Mega";
       else if (name.includes('month') || name.includes('30 day')) category = "Monthly";
       else if (name.includes('week') || name.includes('7 day') || name.includes('14 day') || name.includes('weekend')) category = "Weekly";
       else if (name.includes('1 day') || name.includes('2 day') || name.includes('3 day') || name.includes('daily') || name.includes('24 hrs') || name.includes('24hrs') || name.includes('night') || name.includes('hourly')) category = "Daily";
+
       return category === activeDataCategory;
     }).sort((a, b) => parseFloat(a.variation_amount) - parseFloat(b.variation_amount));
+
   }, [dataVariations, activeDataCategory]);
 
   const isFormValid = useMemo(() => {
     const amount = parseFloat(nairaAmount);
     if (!nairaAmount || isNaN(amount) || amount < dynamicMinAmount || amount > dynamicMaxAmount) return false;
-    if (activeService.id === "AIRTIME") return accountNumber.length === 11 && accountNumber.startsWith("0");
-    if (activeService.id === "DATA") return accountNumber.length === 11 && accountNumber.startsWith("0") && selectedDataPlan !== null;
-    if (activeService.id === "INTERNET") {
-      if (internetProvider === 'smile-direct') return internetAccountId !== null && selectedInternetPlan !== null && customerPhone.length >= 10;
-      else return accountNumber.length >= 5 && selectedInternetPlan !== null && customerPhone.length >= 10;
+
+    if (activeService.id === "AIRTIME") {
+      return accountNumber.length === 11 && accountNumber.startsWith("0");
     }
-    if (activeService.id === "ELECTRICITY") return accountNumber.length >= 10 && customerName !== null;
-    if (activeService.id === "BANK") return accountNumber.length === 10 && customerName !== null && selectedBank !== null && customerPhone.length >= 10;
+    if (activeService.id === "DATA") {
+      return accountNumber.length === 11 && accountNumber.startsWith("0") && selectedDataPlan !== null;
+    }
+    if (activeService.id === "INTERNET") {
+      if (internetProvider === 'smile-direct') {
+        return internetAccountId !== null && selectedInternetPlan !== null && customerPhone.length >= 10;
+      } else { 
+        return accountNumber.length >= 5 && selectedInternetPlan !== null && customerPhone.length >= 10;
+      }
+    }
+    if (activeService.id === "ELECTRICITY") {
+      return accountNumber.length >= 10 && customerName !== null;
+    }
+    if (activeService.id === "BANK") {
+      return accountNumber.length === 10 && customerName !== null && selectedBank !== null && customerPhone.length >= 10;
+    }
     if (activeService.id === "CABLE") {
-      if (cableProvider === "showmax") return accountNumber.length >= 11 && selectedCablePlan !== null;
-      if (accountNumber.length < 10 || customerName === null) return false;
-      if (['dstv', 'gotv'].includes(cableProvider) && cableSubscriptionType === 'change' && !selectedCablePlan) return false;
-      if (!['dstv', 'gotv'].includes(cableProvider) && !selectedCablePlan) return false;
-      return true;
+      if (cableProvider === "showmax") {
+        return accountNumber.length >= 11 && selectedCablePlan !== null;
+      } else {
+        if (accountNumber.length < 10 || customerName === null) return false;
+        if (['dstv', 'gotv'].includes(cableProvider)) {
+          if (cableSubscriptionType === 'change' && !selectedCablePlan) return false;
+        } else {
+          if (!selectedCablePlan) return false;
+        }
+        return true;
+      }
     }
     return false;
   }, [accountNumber, nairaAmount, activeService, customerName, dynamicMinAmount, dynamicMaxAmount, cableSubscriptionType, selectedCablePlan, selectedDataPlan, cableProvider, selectedBank, selectedInternetPlan, internetAccountId, customerPhone, internetProvider]);
 
   const handlePayment = async () => {
     if (!address || !client) return setStatus("Connect Wallet First");
-    if (parseFloat(cryptoToCharge) > parseFloat(walletBalance)) return setStatus(`Insufficient ${selectedToken.symbol} Balance.`);
+
+    if (parseFloat(cryptoToCharge) > parseFloat(walletBalance)) {
+      return setStatus(`Insufficient ${selectedToken.symbol} Balance.`);
+    }
+
     setIsProcessing(true);
     setStatus("Initiating Blockchain Escrow...");
 
@@ -390,95 +471,213 @@ export default function Home() {
           setStatus("Switching wallet to Celo network...");
           await client.switchChain({ id: activeChain.id });
         }
-      } catch (switchError) { await client.addChain({ chain: activeChain }); }
+      } catch (switchError) {
+        await client.addChain({ chain: activeChain });
+      }
 
       const valueInWei = parseUnits(cryptoToCharge, selectedToken.decimals);
       const tokenAddress = isMainnet ? selectedToken.mainnet : selectedToken.sepolia;
       const publicClient = createPublicClient({ chain: activeChain, transport: http() });
 
       setStatus("Awaiting token approval...");
-      const approvalHash = await client.writeContract({ address: tokenAddress as `0x${string}`, abi: ERC20_ABI, functionName: 'approve', args: [ABAPAY_CONTRACT, valueInWei], account: address });
+
+      const approvalHash = await client.writeContract({
+        address: tokenAddress as `0x${string}`,
+        abi: ERC20_ABI,
+        functionName: 'approve',
+        args: [ABAPAY_CONTRACT, valueInWei],
+        account: address,
+      });
+
       setStatus("Mining approval on Celo Mainnet... Please wait.");
       await publicClient.waitForTransactionReceipt({ hash: approvalHash });
       setStatus("Approval confirmed! Please sign the final payment...");
 
-      let vtpassServiceID = ""; let displayNetwork = ""; let finalVariationCode = 'prepaid'; let payloadBillersCode = accountNumber;
+      let vtpassServiceID = "";
+      let displayNetwork = "";
+      let finalVariationCode = 'prepaid';
+      let payloadBillersCode = accountNumber;
 
-      if (activeService.id === "ELECTRICITY") { vtpassServiceID = elecProvider; displayNetwork = elecProvider; finalVariationCode = meterType; } 
-      else if (activeService.id === "CABLE") {
-        vtpassServiceID = cableProvider; displayNetwork = cableProvider;
-        if (['dstv', 'gotv'].includes(cableProvider)) finalVariationCode = cableSubscriptionType === 'change' ? selectedCablePlan?.variation_code : 'none'; 
-        else finalVariationCode = selectedCablePlan?.variation_code || 'none';
-      } 
-      else if (activeService.id === "DATA") { vtpassServiceID = `${telecomProvider}-data`; displayNetwork = telecomProvider; finalVariationCode = selectedDataPlan?.variation_code || 'none'; } 
-      else if (activeService.id === "BANK") { vtpassServiceID = "bank-deposit"; displayNetwork = selectedBank.name; finalVariationCode = selectedBank.variation_code; } 
-      else if (activeService.id === "INTERNET") {
-        vtpassServiceID = internetProvider; displayNetwork = internetProvider === 'smile-direct' ? "Smile Network" : "Spectranet";
-        finalVariationCode = selectedInternetPlan?.variation_code || 'none'; payloadBillersCode = internetProvider === 'smile-direct' ? (internetAccountId || accountNumber) : accountNumber; 
-      } 
-      else { vtpassServiceID = telecomProvider; displayNetwork = telecomProvider; }
+      if (activeService.id === "ELECTRICITY") {
+        vtpassServiceID = elecProvider;
+        displayNetwork = elecProvider;
+        finalVariationCode = meterType;
+      } else if (activeService.id === "CABLE") {
+        vtpassServiceID = cableProvider;
+        displayNetwork = cableProvider;
+        if (['dstv', 'gotv'].includes(cableProvider)) {
+          finalVariationCode = cableSubscriptionType === 'change' ? selectedCablePlan?.variation_code : 'none'; 
+        } else {
+          finalVariationCode = selectedCablePlan?.variation_code || 'none';
+        }
+      } else if (activeService.id === "DATA") {
+        vtpassServiceID = `${telecomProvider}-data`; 
+        displayNetwork = telecomProvider;
+        finalVariationCode = selectedDataPlan?.variation_code || 'none'; 
+      } else if (activeService.id === "BANK") {
+        vtpassServiceID = "bank-deposit"; 
+        displayNetwork = selectedBank.name;
+        finalVariationCode = selectedBank.variation_code; 
+      } else if (activeService.id === "INTERNET") {
+        vtpassServiceID = internetProvider; 
+        displayNetwork = internetProvider === 'smile-direct' ? "Smile Network" : "Spectranet";
+        finalVariationCode = selectedInternetPlan?.variation_code || 'none'; 
+        payloadBillersCode = internetProvider === 'smile-direct' ? (internetAccountId || accountNumber) : accountNumber; 
+      } else {
+        vtpassServiceID = telecomProvider; 
+        displayNetwork = telecomProvider;
+      }
 
-      const hash = await client.writeContract({ address: ABAPAY_CONTRACT, abi: ABAPAY_ABI, functionName: 'payBill', args: [tokenAddress, vtpassServiceID, payloadBillersCode, valueInWei], account: address });
+      const hash = await client.writeContract({
+        address: ABAPAY_CONTRACT,
+        abi: ABAPAY_ABI,
+        functionName: 'payBill',
+        args: [tokenAddress, vtpassServiceID, payloadBillersCode, valueInWei],
+        account: address,
+      });
+
       setStatus(`${selectedToken.symbol} Secured. Processing Transfer...`);
 
       const backendPayload = {
-        serviceID: vtpassServiceID, serviceCategory: activeService.id, network: displayNetwork.toUpperCase(), 
-        billersCode: payloadBillersCode, amount: cryptoToCharge, nairaAmount: nairaAmount, token: selectedToken.symbol,
-        txHash: hash, variation_code: finalVariationCode, phone: customerPhone || accountNumber, wallet_address: address,
+        serviceID: vtpassServiceID, 
+        serviceCategory: activeService.id, 
+        network: displayNetwork.toUpperCase(), 
+        billersCode: payloadBillersCode,
+        amount: cryptoToCharge,
+        nairaAmount: nairaAmount, 
+        token: selectedToken.symbol,
+        txHash: hash,
+        variation_code: finalVariationCode,
+        phone: customerPhone || accountNumber,
+        wallet_address: address,
         subscription_type: activeService.id === "CABLE" && ['dstv', 'gotv'].includes(cableProvider) ? cableSubscriptionType : undefined
       };
 
-      const newTx: any = { id: hash.slice(0,8), date: new Date().toLocaleString(), status: "PENDING", amountNaira: nairaAmount, amountCrypto: cryptoToCharge, tokenUsed: selectedToken.symbol, service: activeService.name, network: displayNetwork.toUpperCase(), txHash: hash, account: accountNumber };
-      handleResetService(SERVICES[0]); 
+      const newTx: any = { 
+        id: hash.slice(0,8), 
+        date: new Date().toLocaleString(), 
+        status: "PENDING", 
+        amountNaira: nairaAmount,
+        amountCrypto: cryptoToCharge,
+        tokenUsed: selectedToken.symbol, 
+        service: activeService.name, 
+        network: displayNetwork.toUpperCase(), 
+        txHash: hash,
+        account: accountNumber
+      };
 
-      const res = await fetch('/api/pay', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(backendPayload) });
+      setAccountNumber("");
+      setNairaAmount("");
+      setCustomerPhone("");
+      setCustomerName(null);
+      setSelectedDataPlan(null);
+      setSelectedCablePlan(null);
+      setCableCurrentBouquet(null);
+      setSelectedBank(null);
+      setSelectedInternetPlan(null); 
+      setInternetAccountId(null);
+
+      const res = await fetch('/api/pay', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(backendPayload)
+      });
+
       const result = await res.json();
 
       if (result.success) {
-        setStatus("Success! Token/Ref Dispatched."); newTx.status = "SUCCESS"; newTx.purchased_code = result.purchased_code; newTx.units = result.units; newTx.request_id = result.data?.requestId; 
+        setStatus("Success! Token/Ref Dispatched.");
+        newTx.status = "SUCCESS";
+        newTx.purchased_code = result.purchased_code; 
+        newTx.units = result.units; 
+        newTx.request_id = result.data?.requestId; 
         showToast("Transaction Successful", "Your transaction has been successfully processed.", "success");
       } else {
-        setStatus(`Error: ${result.message || 'Transaction Failed'}`); newTx.status = "FAILED_VENDING";
+        setStatus(`Error: ${result.message || 'Transaction Failed'}`);
+        newTx.status = "FAILED_VENDING";
       }
 
       const updatedHistory = [newTx, ...transactions];
-      setTransactions(updatedHistory); localStorage.setItem("abapay_history", JSON.stringify(updatedHistory)); setCurrentPage(1);
+      setTransactions(updatedHistory);
+      localStorage.setItem("abapay_history", JSON.stringify(updatedHistory));
+      setCurrentPage(1);
+
       const balanceWei = await publicClient.readContract({ address: tokenAddress as `0x${string}`, abi: ERC20_ABI, functionName: 'balanceOf', args: [address] });
       setWalletBalance(parseFloat(formatUnits(balanceWei as bigint, selectedToken.decimals)).toFixed(4));
-    } catch (e) { setStatus("Transaction Cancelled."); } finally { setIsProcessing(false); }
+
+    } catch (e) { 
+      setStatus("Transaction Cancelled."); 
+    } finally {
+      setIsProcessing(false);
+    }
   };
 
   const handleResetService = (s: any) => {
-    setActiveService(s); setAccountNumber(""); setCustomerName(null); setNairaAmount(""); 
-    setSelectedDataPlan(null); setCableCurrentBouquet(null); setCableRenewAmount(null); setSelectedCablePlan(null);
-    setCableSubscriptionType("renew"); setSelectedBank(null); setSelectedInternetPlan(null); setInternetAccountId(null); setCustomerPhone("");
-  };
-
-  const openSelectionModal = (type: 'standard' | 'token' | 'provider' | 'country' | 'bank', title: string, options: any[], callback: (value: string) => void) => {
-    setModalType(type); setModalTitle(title); setModalOptions(options); setModalCallback(() => callback); setIsSelectionModalOpen(true);
+    setActiveService(s); 
+    setAccountNumber(""); 
+    setCustomerName(null); 
+    setNairaAmount(""); 
+    setSelectedDataPlan(null);
+    setCableCurrentBouquet(null);
+    setCableRenewAmount(null);
+    setSelectedCablePlan(null);
+    setCableSubscriptionType("renew");
+    setSelectedBank(null);
+    setSelectedInternetPlan(null);
+    setInternetAccountId(null);
   };
 
   const handleCountryChange = (countryCode: string) => {
     const country = SUPPORTED_COUNTRIES.find(c => c.code === countryCode);
-    if (country && !country.disabled) { setActiveCountry(country); handleResetService(SERVICES[0]); }
+    if (country && !country.disabled) {
+      setActiveCountry(country);
+    }
+  };
+
+  const openSelectionModal = (type: 'standard' | 'token' | 'provider' | 'country' | 'bank', title: string, options: any[], callback: (value: string) => void) => {
+    setModalType(type as any);
+    setModalTitle(title);
+    setModalOptions(options);
+    setModalCallback(() => callback);
+    setIsSelectionModalOpen(true);
   };
 
   const handleShareReceipt = async () => {
     const receiptText = `🧾 AbaPay Receipt\n\nDate: ${selectedReceipt.date}\nStatus: ${selectedReceipt.status}\nProduct: ${selectedReceipt.network} ${selectedReceipt.service}\nRecipient: ${selectedReceipt.account}\nAmount Paid: ₦${selectedReceipt.amountNaira}\nCrypto Used: ${selectedReceipt.amountCrypto} ${selectedReceipt.tokenUsed}\nTx Hash: ${selectedReceipt.txHash}\n\nSecured by Celo Network`;
-    if (navigator.share) { try { await navigator.share({ title: 'Receipt', text: receiptText }); } catch (err) {} } 
-    else { try { await navigator.clipboard.writeText(receiptText); showToast("Copied!", "Receipt details copied to clipboard.", "success"); } catch (err) {} }
+
+    if (navigator.share) {
+      try { await navigator.share({ title: 'Receipt', text: receiptText }); } 
+      catch (err) {}
+    } else {
+      try {
+        await navigator.clipboard.writeText(receiptText);
+        showToast("Copied!", "Receipt details copied to clipboard.", "success");
+      } catch (err) {}
+    }
   };
 
   const submitSupportTicket = async () => {
     if (!supportMessage.trim()) return;
     setIsSendingSupport(true);
     try {
-      const formData = new FormData(); formData.append("message", supportMessage);
-      if (address) formData.append("userAddress", address); if (supportTxHash) formData.append("txHash", supportTxHash); if (supportFile) formData.append("file", supportFile);
+      const formData = new FormData();
+      formData.append("message", supportMessage);
+      if (address) formData.append("userAddress", address);
+      if (supportTxHash) formData.append("txHash", supportTxHash); 
+      if (supportFile) formData.append("file", supportFile);
+
       await fetch('/api/support', { method: 'POST', body: formData });
-      setIsSupportOpen(false); setSupportMessage(""); setSupportFile(null); setSupportTxHash(null); 
+
+      setIsSupportOpen(false);
+      setSupportMessage("");
+      setSupportFile(null);
+      setSupportTxHash(null); 
       showToast("Ticket Submitted", "Support has received your request.", "success");
-    } catch (error) { showToast("Connection Error", "Failed to send the ticket.", "error"); } finally { setIsSendingSupport(false); }
+    } catch (error) {
+      showToast("Connection Error", "Failed to send the ticket.", "error");
+    } finally {
+      setIsSendingSupport(false);
+    }
   };
 
   useEffect(() => {
@@ -486,16 +685,27 @@ export default function Home() {
       if (activeTab === "history" && transactions.length > 0) {
         const failedHashes = transactions.filter(tx => tx.status !== 'SUCCESS').map(tx => tx.txHash);
         if (failedHashes.length === 0) return;
+
         try {
-          const { data } = await supabase.from('transactions').select('tx_hash, status, refund_hash').in('tx_hash', failedHashes);
+          const { data } = await supabase
+            .from('transactions')
+            .select('tx_hash, status, refund_hash')
+            .in('tx_hash', failedHashes);
+
           if (data && data.length > 0) {
             let updated = false;
             const newHistory = transactions.map(tx => {
               const dbRecord = data.find(r => r.tx_hash === tx.txHash);
-              if (dbRecord && dbRecord.status === 'REFUNDED' && tx.status !== 'REFUNDED') { updated = true; return { ...tx, status: 'REFUNDED', refund_hash: dbRecord.refund_hash }; }
+              if (dbRecord && dbRecord.status === 'REFUNDED' && tx.status !== 'REFUNDED') {
+                updated = true;
+                return { ...tx, status: 'REFUNDED', refund_hash: dbRecord.refund_hash };
+              }
               return tx;
             });
-            if (updated) { setTransactions(newHistory); localStorage.setItem("abapay_history", JSON.stringify(newHistory)); }
+            if (updated) {
+              setTransactions(newHistory);
+              localStorage.setItem("abapay_history", JSON.stringify(newHistory));
+            }
           }
         } catch(e) {}
       }
@@ -503,14 +713,31 @@ export default function Home() {
     checkRefunds();
   }, [activeTab]);
 
-  const currentDisco = useMemo(() => { return ELECTRICITY_DISCOS.find(d => d.serviceID === elecProvider); }, [elecProvider]);
-  const currentCable = useMemo(() => { return CABLE_PROVIDERS_LIST.find(c => c.serviceID === cableProvider); }, [cableProvider]);
-  const currentInternet = useMemo(() => { return INTERNET_PROVIDERS.find(c => c.serviceID === internetProvider); }, [internetProvider]);
+  const currentDisco = useMemo(() => {
+    return ELECTRICITY_DISCOS.find(d => d.serviceID === elecProvider);
+  }, [elecProvider]);
+
+  const currentCable = useMemo(() => {
+    return CABLE_PROVIDERS_LIST.find(c => c.serviceID === cableProvider);
+  }, [cableProvider]);
+
+  const currentInternet = useMemo(() => {
+    return INTERNET_PROVIDERS.find(c => c.serviceID === internetProvider);
+  }, [internetProvider]);
 
   return (
     <main className="min-h-screen bg-slate-50 text-slate-900 font-sans p-4 flex flex-col items-center pb-20 relative">
-      <style>{`@keyframes logoScale { 0%, 100% { transform: scale(1); opacity: 0.9; } 50% { transform: scale(1.1); opacity: 1; } } .animate-logo-scale { animation: logoScale 1.5s ease-in-out infinite; } .no-scrollbar::-webkit-scrollbar { display: none; } .no-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }`}</style>
-      
+
+      <style>{`
+        @keyframes logoScale {
+          0%, 100% { transform: scale(1); opacity: 0.9; }
+          50% { transform: scale(1.1); opacity: 1; }
+        }
+        .animate-logo-scale { animation: logoScale 1.5s ease-in-out infinite; }
+        .no-scrollbar::-webkit-scrollbar { display: none; }
+        .no-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
+      `}</style>
+
       {isInitiallyLoading && (
         <div className="fixed inset-0 z-[100] bg-white flex flex-col items-center justify-center animate-in fade-out duration-500 fill-mode-forwards" style={{ animationDelay: '1.5s' }}>
           <img src="/logo.png" alt="AbaPay" className="h-28 w-auto object-contain animate-logo-scale mb-10" />
@@ -550,30 +777,38 @@ export default function Home() {
                     <span className="text-slate-400 text-[10px] font-bold uppercase tracking-wider">Status</span>
                     <span className={`font-black text-xs uppercase ${selectedReceipt.status === 'SUCCESS' ? 'text-emerald-600' : selectedReceipt.status === 'REFUNDED' ? 'text-blue-600' : 'text-orange-500'}`}>{selectedReceipt.status}</span>
                  </div>
+
                  <div className="flex justify-between border-b border-slate-100 pb-3">
                     <span className="text-slate-400 text-[10px] font-bold uppercase tracking-wider">Date & Time</span>
                     <span className="text-slate-800 font-bold text-xs">{selectedReceipt.date}</span>
                  </div>
+
                  <div className="flex justify-between border-b border-slate-100 pb-3">
                     <span className="text-slate-400 text-[10px] font-bold uppercase tracking-wider">Service</span>
                     <span className="text-slate-800 font-black text-xs text-right w-2/3 uppercase">{selectedReceipt.network} {selectedReceipt.service}</span>
                  </div>
+
                  <div className="flex justify-between border-b border-slate-100 pb-3">
-                    <span className="text-slate-400 text-[10px] font-bold uppercase tracking-wider">{selectedReceipt.service === 'Electricity' ? 'Meter Number' : selectedReceipt.service === 'Send Money' ? 'Account No' : 'Recipient'}</span>
+                    <span className="text-slate-400 text-[10px] font-bold uppercase tracking-wider">
+                      {selectedReceipt.service === 'Electricity' ? 'Meter Number' : selectedReceipt.service === 'Send Money' ? 'Account No' : 'Recipient'}
+                    </span>
                     <span className="text-slate-800 font-mono font-bold text-xs">{selectedReceipt.account}</span>
                  </div>
+
                  {selectedReceipt.request_id && (
                    <div className="flex justify-between border-b border-slate-100 pb-3">
                       <span className="text-slate-400 text-[10px] font-bold uppercase tracking-wider">Transaction ID</span>
                       <span className="text-slate-800 font-mono font-bold text-[10px]">{selectedReceipt.request_id}</span>
                    </div>
                  )}
+
                  {selectedReceipt.units && selectedReceipt.units !== "N/A" && (selectedReceipt.service?.toUpperCase() === 'ELECTRICITY' || selectedReceipt.service === 'Electricity') && (
                    <div className="flex justify-between border-b border-slate-100 pb-3">
                       <span className="text-slate-400 text-[10px] font-bold uppercase tracking-wider">Purchased Units</span>
                       <span className="text-slate-800 font-black text-xs">{selectedReceipt.units} kWh</span>
                    </div>
                  )}
+
                  <div className="flex justify-between border-b border-slate-100 pb-3">
                     <span className="text-slate-400 text-[10px] font-bold uppercase tracking-wider">Amount Paid</span>
                     <div className="text-right">
@@ -581,24 +816,51 @@ export default function Home() {
                        <p className="text-slate-400 text-[9px] font-bold">{selectedReceipt.amountCrypto} {selectedReceipt.tokenUsed || 'USD₮'}</p>
                     </div>
                  </div>
+
                  {selectedReceipt.status === 'SUCCESS' && selectedReceipt.purchased_code && selectedReceipt.purchased_code !== "Vended Successfully" && (selectedReceipt.service?.toUpperCase() === 'ELECTRICITY' || selectedReceipt.service === 'Electricity') && (
                    <div className="mt-4 bg-orange-50 border-2 border-orange-200 rounded-xl p-4 text-center">
                       <p className="text-[10px] font-black text-orange-600 uppercase tracking-widest mb-1">Meter Token PIN</p>
-                      <p className="font-mono text-xl font-black text-slate-900 tracking-[0.2em] break-all">{selectedReceipt.purchased_code.replace(/token\s*[:\-]*\s*/gi, '').trim()}</p>
+                      <p className="font-mono text-xl font-black text-slate-900 tracking-[0.2em] break-all">
+                        {selectedReceipt.purchased_code.replace(/token\s*[:\-]*\s*/gi, '').trim()}
+                      </p>
                       <p className="text-[9px] font-bold text-orange-500 mt-2">Enter this exactly as shown into your meter.</p>
                    </div>
                  )}
+
                  {selectedReceipt.status === 'REFUNDED' && selectedReceipt.refund_hash && (
                    <div className="flex justify-between border-b border-slate-100 pb-3">
                       <span className="text-slate-400 text-[10px] font-bold uppercase tracking-wider">Refund Hash</span>
-                      <a href={`https://${isMainnet?'':'sepolia.'}celoscan.io/tx/${selectedReceipt.refund_hash}`} target="_blank" className="text-blue-600 font-mono font-bold text-xs flex items-center justify-end gap-1 hover:underline">View Transfer <ExternalLink size={10}/></a>
+                      <a href={`https://${isMainnet?'':'sepolia.'}celoscan.io/tx/${selectedReceipt.refund_hash}`} target="_blank" className="text-blue-600 font-mono font-bold text-xs flex items-center justify-end gap-1 hover:underline">
+                         View Transfer <ExternalLink size={10}/>
+                      </a>
                    </div>
                  )}
-                 <button onClick={() => window.open(`https://${isMainnet?'':'sepolia.'}celoscan.io/tx/${selectedReceipt.txHash}`)} className="w-full py-3 bg-slate-50 hover:bg-slate-100 rounded-xl text-[10px] font-black uppercase tracking-widest text-slate-500 flex items-center justify-center gap-2 transition-colors">Verify on Celoscan <ExternalLink size={12}/></button>
+
+                 <button 
+                  onClick={() => window.open(`https://${isMainnet?'':'sepolia.'}celoscan.io/tx/${selectedReceipt.txHash}`)}
+                  className="w-full py-3 bg-slate-50 hover:bg-slate-100 rounded-xl text-[10px] font-black uppercase tracking-widest text-slate-500 flex items-center justify-center gap-2 transition-colors"
+                 >
+                   Verify on Celoscan <ExternalLink size={12}/>
+                 </button>
                  <div className="flex gap-2">
-                    <button onClick={handleShareReceipt} className="flex-1 py-4 bg-slate-900 hover:bg-slate-800 text-white rounded-2xl text-xs font-black uppercase tracking-widest flex items-center justify-center gap-2 transition-colors active:scale-95 shadow-xl shadow-slate-900/20"><Share2 size={16}/> Share</button>
+                    <button 
+                      onClick={handleShareReceipt} 
+                      className="flex-1 py-4 bg-slate-900 hover:bg-slate-800 text-white rounded-2xl text-xs font-black uppercase tracking-widest flex items-center justify-center gap-2 transition-colors active:scale-95 shadow-xl shadow-slate-900/20"
+                    >
+                      <Share2 size={16}/> Share
+                    </button>
                     {selectedReceipt.status !== 'SUCCESS' && selectedReceipt.status !== 'REFUNDED' && (
-                       <button onClick={() => { setSupportTxHash(selectedReceipt.txHash); setSupportMessage(""); setSelectedReceipt(null); setIsSupportOpen(true); }} className="flex-1 py-4 bg-orange-100 hover:bg-orange-200 text-orange-700 rounded-2xl text-xs font-black uppercase tracking-widest flex items-center justify-center gap-2 transition-colors active:scale-95"><HelpCircle size={16}/> Support</button>
+                       <button 
+                         onClick={() => { 
+                           setSupportTxHash(selectedReceipt.txHash);
+                           setSupportMessage(""); 
+                           setSelectedReceipt(null); 
+                           setIsSupportOpen(true); 
+                         }}
+                         className="flex-1 py-4 bg-orange-100 hover:bg-orange-200 text-orange-700 rounded-2xl text-xs font-black uppercase tracking-widest flex items-center justify-center gap-2 transition-colors active:scale-95"
+                       >
+                         <HelpCircle size={16}/> Support
+                       </button>
                     )}
                  </div>
               </div>
@@ -652,23 +914,44 @@ export default function Home() {
                 <button onClick={() => setIsSelectionModalOpen(false)} className="p-2 bg-slate-100 rounded-full hover:bg-slate-200 transition-colors"><XCircle size={20} className="text-slate-500" /></button>
               </div>
               <div className="space-y-2.5 max-h-[50vh] overflow-y-auto pr-1">
+                 
                  {modalType === 'country' && SUPPORTED_COUNTRIES.map(country => (
                    <button 
                      key={country.code} 
-                     onClick={() => { if (!country.disabled) { modalCallback?.(country.code); setIsSelectionModalOpen(false); } }}
+                     onClick={() => { 
+                        if (!country.disabled) {
+                            modalCallback?.(country.code); 
+                            setIsSelectionModalOpen(false); 
+                        }
+                     }}
                      disabled={country.disabled}
-                     className={`w-full text-left p-4 rounded-xl font-bold text-sm transition-all flex justify-between items-center ${country.disabled ? 'bg-slate-50 border border-slate-100 text-slate-400 cursor-not-allowed' : 'text-slate-700 bg-slate-50 border border-slate-100 hover:border-emerald-300 hover:bg-emerald-50/50'}`}
+                     className={`w-full text-left p-4 rounded-xl font-bold text-sm transition-all flex justify-between items-center ${
+                         country.disabled 
+                         ? 'bg-slate-50 border border-slate-100 text-slate-400 cursor-not-allowed' 
+                         : 'text-slate-700 bg-slate-50 border border-slate-100 hover:border-emerald-300 hover:bg-emerald-50/50'
+                     }`}
                    >
-                     <div className="flex items-center gap-3"><span className="text-2xl">{country.flag}</span><span className={`font-black ${country.disabled ? 'text-slate-400' : 'text-slate-800'}`}>{country.name}</span></div>
+                     <div className="flex items-center gap-3">
+                       <span className="text-2xl">{country.flag}</span>
+                       <span className={`font-black ${country.disabled ? 'text-slate-400' : 'text-slate-800'}`}>{country.name}</span>
+                     </div>
                      {activeCountry.code === country.code && <CheckCircle2 size={18} className="text-emerald-500"/>}
                    </button>
                  ))}
+
                  {modalType === 'bank' && isFetchingBanks && (
                    <div className="flex flex-col items-center justify-center p-6 gap-3 text-slate-400">
                      <Loader2 className="animate-spin text-blue-500" size={24} />
                      <span className="text-xs font-bold uppercase tracking-widest">Connecting to NIBSS...</span>
                    </div>
                  )}
+
+                 {modalType === 'bank' && !isFetchingBanks && bankVariations.length === 0 && (
+                   <div className="p-6 text-center text-slate-500 font-bold text-xs">
+                     No banks available.
+                   </div>
+                 )}
+
                  {modalType === 'bank' && !isFetchingBanks && bankVariations.map(bank => (
                    <button 
                      key={bank.variation_code} 
@@ -679,16 +962,21 @@ export default function Home() {
                      {selectedBank?.variation_code === bank.variation_code && <CheckCircle2 size={18} className="text-blue-500"/>}
                    </button>
                  ))}
+
                  {modalType === 'token' && SUPPORTED_TOKENS.map(token => (
                    <button 
                      key={token.symbol} 
                      onClick={() => { modalCallback?.(token.symbol); setIsSelectionModalOpen(false); }}
                      className="w-full text-left p-4 rounded-xl font-bold text-slate-700 bg-slate-50 border border-slate-100 uppercase text-xs hover:border-emerald-300 hover:bg-emerald-50/50 transition-all flex justify-between items-center"
                    >
-                     <div className="flex items-center gap-3"><img src={token.logo} alt={token.symbol} className="w-6 h-6 object-contain rounded-full shadow-sm bg-white" /><span className="text-sm font-black text-slate-800 tracking-tight">{token.symbol}</span></div>
+                     <div className="flex items-center gap-3">
+                       <img src={token.logo} alt={token.symbol} className="w-6 h-6 object-contain rounded-full shadow-sm bg-white" />
+                       <span className="text-sm font-black text-slate-800 tracking-tight">{token.symbol}</span>
+                     </div>
                      {selectedToken.symbol === token.symbol && <CheckCircle2 size={18} className="text-emerald-500"/>}
                    </button>
                  ))}
+
                  {modalType === 'provider' && (modalOptions as any[]).map(provider => (
                     <button 
                         key={provider.serviceID} 
@@ -699,13 +987,16 @@ export default function Home() {
                             <div className="w-12 h-12 shrink-0 rounded-full border border-slate-100 bg-white p-0.5 flex items-center justify-center shadow-sm overflow-hidden group-hover:shadow-md transition-shadow">
                                 <img src={provider.logo} alt={provider.displayName} className="w-full h-full object-contain" onError={(e) => { e.currentTarget.style.display = 'none'; e.currentTarget.parentElement!.innerHTML = `<span class="text-[9px] font-black uppercase text-slate-400">${provider.displayName.slice(0,3)}</span>`; }} />
                             </div>
-                            <div><span className="text-sm font-black text-slate-900 tracking-tight">{provider.displayName}</span></div>
+                            <div>
+                                <span className="text-sm font-black text-slate-900 tracking-tight">{provider.displayName}</span>
+                            </div>
                         </div>
                         {(activeService.id === 'ELECTRICITY' ? elecProvider === provider.serviceID : activeService.id === 'INTERNET' ? internetProvider === provider.serviceID : cableProvider === provider.serviceID) && (
                           <CheckCircle2 size={20} className={activeService.id === 'ELECTRICITY' ? "text-orange-500" : activeService.id === 'INTERNET' ? "text-sky-500" : "text-pink-500"}/>
                         )}
                     </button>
                  ))}
+
                  {modalType === 'standard' && (modalOptions as string[]).map(option => (
                      <button 
                        key={option} 
@@ -722,6 +1013,7 @@ export default function Home() {
       )}
 
       <div className="w-full max-w-md">
+        
         <div className="flex justify-between items-center bg-white p-4 rounded-3xl shadow-sm border border-slate-100 mb-6">
           <div className="flex items-center gap-3">
             <img src="/logo.png" alt="AbaPay" className="h-10 w-auto object-contain" />
@@ -832,7 +1124,15 @@ export default function Home() {
                             }`}
                           >
                             <div className="w-12 h-12 rounded-full bg-white shadow-sm border border-slate-100 flex items-center justify-center p-0.5 overflow-hidden">
-                              <img src={`/${provider}.png`} alt={provider} className="w-full h-full object-contain" onError={(e) => { e.currentTarget.style.display = 'none'; e.currentTarget.parentElement!.innerHTML = `<span class="text-[9px] font-black uppercase text-slate-400">${provider.slice(0,3)}</span>`; }} />
+                              <img 
+                                src={`/${provider}.png`} 
+                                alt={provider} 
+                                className="w-full h-full object-contain" 
+                                onError={(e) => { 
+                                  e.currentTarget.style.display = 'none'; 
+                                  e.currentTarget.parentElement!.innerHTML = `<span class="text-[9px] font-black uppercase text-slate-400">${provider.slice(0,3)}</span>`;
+                                }}
+                              />
                             </div>
                             <span className={`text-[9px] font-black uppercase tracking-wider ${telecomProvider === provider ? 'text-emerald-700' : 'text-slate-500'}`}>{provider}</span>
                           </button>
@@ -847,7 +1147,9 @@ export default function Home() {
                                 <div className="w-12 h-12 shrink-0 rounded-full border border-slate-100 bg-white p-0.5 flex items-center justify-center shadow-inner overflow-hidden">
                                     <img src={currentDisco?.logo} alt={currentDisco?.displayName} className="w-full h-full object-contain" />
                                 </div>
-                                <div><span className="text-sm font-black text-slate-900 tracking-tight">{currentDisco?.displayName}</span></div>
+                                <div>
+                                    <span className="text-sm font-black text-slate-900 tracking-tight">{currentDisco?.displayName}</span>
+                                </div>
                             </div>
                             <ChevronDown size={18} className="text-slate-400"/>
                         </button>
@@ -860,7 +1162,9 @@ export default function Home() {
                             <div className="w-12 h-12 shrink-0 rounded-full border border-slate-100 bg-white p-0.5 flex items-center justify-center shadow-inner overflow-hidden">
                                 <img src={currentCable?.logo} alt={currentCable?.displayName} className="w-full h-full object-contain" />
                             </div>
-                            <div><span className="text-sm font-black text-slate-900 tracking-tight">{currentCable?.displayName}</span></div>
+                            <div>
+                                <span className="text-sm font-black text-slate-900 tracking-tight">{currentCable?.displayName}</span>
+                            </div>
                         </div>
                         <ChevronDown size={18} className="text-slate-400"/>
                       </button>
@@ -892,8 +1196,11 @@ export default function Home() {
                         }`}
                         value={accountNumber}
                         onChange={(e) => {
-                            if (activeService.id === "INTERNET" && internetProvider === 'smile-direct') setAccountNumber(e.target.value);
-                            else setAccountNumber(e.target.value.replace(/[^0-9]/g, ''));
+                            if (activeService.id === "INTERNET" && internetProvider === 'smile-direct') {
+                                setAccountNumber(e.target.value);
+                            } else {
+                                setAccountNumber(e.target.value.replace(/[^0-9]/g, ''));
+                            }
                         }}
                     />
                     {isVerifying && <p className="text-[10px] text-blue-500 font-bold mt-2 animate-pulse flex items-center gap-1.5"><Loader2 size={12} className="animate-spin"/> Verifying Account Details...</p>}
@@ -910,7 +1217,7 @@ export default function Home() {
                 </div>
 
                 {/* ⚡ INTERNET PACKAGES ⚡ */}
-                {activeService.id === "INTERNET" && (internetProvider === 'spectranet' || internetAccountId) && (
+                {activeService.id === "INTERNET" && (
                   <div className="bg-slate-50 border border-slate-200 rounded-2xl p-4 shadow-sm animate-in fade-in slide-in-from-top-4">
                      <p className="text-[10px] font-black uppercase tracking-widest text-slate-400 mb-2">Select {internetProvider === 'smile-direct' ? 'Smile' : 'Spectranet'} Plan</p>
                      
@@ -923,8 +1230,8 @@ export default function Home() {
                               <p className="font-black text-slate-900 text-lg tracking-tight">{selectedInternetPlan.name}</p>
                               <p className="text-[10px] text-sky-500 font-bold uppercase tracking-wider mb-2">Selected Package</p>
                               <div className="pt-2 border-t border-sky-200/50 flex justify-between items-end">
-                                  <p className="font-black text-sky-600 text-xl leading-none">₦{parseFloat(selectedInternetPlan.variation_amount).toLocaleString()}</p>
-                                  <p className="text-[10px] text-slate-500 font-bold">{(parseFloat(selectedInternetPlan.variation_amount) / exchangeRate).toFixed(4)} {selectedToken.symbol}</p>
+                                  <p className="font-black text-sky-600 text-xl leading-none">₦{parseFloat(selectedInternetPlan.variation_amount || "0").toLocaleString()}</p>
+                                  <p className="text-[10px] text-slate-500 font-bold">{(parseFloat(selectedInternetPlan.variation_amount || "0") / exchangeRate).toFixed(4)} {selectedToken.symbol}</p>
                                </div>
                            </div>
                         </div>
@@ -934,18 +1241,18 @@ export default function Home() {
                             <p className="text-center text-xs font-bold text-slate-400 py-4"><Loader2 className="animate-spin inline-block mr-2" size={14}/> Fetching Packages...</p>
                           ) : (
                             internetVariations.map((plan) => {
-                              const cryptoPlanCost = (parseFloat(plan.variation_amount) / exchangeRate).toFixed(4);
+                              const cryptoPlanCost = (parseFloat(plan.variation_amount || "0") / exchangeRate).toFixed(4);
                               return (
                                 <button 
                                   key={plan.variation_code} 
-                                  onClick={() => { setSelectedInternetPlan(plan); setNairaAmount(plan.variation_amount); }} 
+                                  onClick={() => { setSelectedInternetPlan(plan); setNairaAmount(plan.variation_amount ? plan.variation_amount.toString() : "0"); }} 
                                   className="p-3 rounded-xl border border-slate-200 bg-white hover:border-sky-300 transition-all text-left flex justify-between items-center group"
                                 >
                                   <div>
                                     <p className="font-black text-slate-800 text-xs">{plan.name}</p>
                                     <p className="text-[9px] text-slate-400 font-bold mt-0.5">{cryptoPlanCost} {selectedToken.symbol}</p>
                                   </div>
-                                  <p className="font-black text-sky-600 text-sm group-hover:scale-110 transition-transform">₦{parseFloat(plan.variation_amount).toLocaleString()}</p>
+                                  <p className="font-black text-sky-600 text-sm group-hover:scale-110 transition-transform">₦{parseFloat(plan.variation_amount || "0").toLocaleString()}</p>
                                 </button>
                               );
                             })
@@ -1208,7 +1515,7 @@ export default function Home() {
                     {isProcessing ? (
                       <><Loader2 size={24} className="animate-spin text-emerald-400"/> SECURING PROTOCOL...</>
                     ) : (
-                      <><ShieldCheck size={24} className="text-emerald-400" /> CONFIRM & PAY {isFormValid ? cryptoToCharge : "0.0000"} {selectedToken.symbol}</>
+                      <><ShieldCheck size={24} className="text-emerald-400" /> CONFIRM & PAY {cryptoToCharge} {selectedToken.symbol}</>
                     )}
                 </button>
             </div>
