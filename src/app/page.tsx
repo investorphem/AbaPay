@@ -44,18 +44,17 @@ const SUPPORTED_TOKENS = [
   { symbol: "USDm", decimals: 18, mainnet: "0x765DE816845861e75A25fCA122bb6898B8B1282a", sepolia: "0xdE9e4C3ce781b4bA68120d6261cbad65ce0aB00b", logo: "/cusd.png" },
 ];
 
-const SUPPORTED_COUNTRIES = [
-  { code: "NG", name: "Nigeria", flag: "🇳🇬" },
-  { code: "GH", name: "Ghana", flag: "🇬🇭" },
-  { code: "KE", name: "Kenya", flag: "🇰🇪" },
-  { code: "ZA", name: "South Africa", flag: "🇿🇦" },
-  { code: "UG", name: "Uganda", flag: "🇺🇬" },
-];
-
 const PRE_SELECT_AMOUNTS = ["100", "200", "500", "1000", "2000"];
 const ELEC_PRE_SELECT_AMOUNTS = ["1000", "2000", "5000", "10000", "20000"];
 const DATA_CATEGORIES = ["Daily", "Weekly", "Monthly", "Social", "Mega", "Broadband"];
 const ITEMS_PER_PAGE = 5;
+
+// Helper to convert country code (e.g. "GH") into a flag emoji (🇬🇭)
+const getFlagEmoji = (countryCode: string) => {
+  if (!countryCode || countryCode.length !== 2) return "🌐";
+  const codePoints = countryCode.toUpperCase().split('').map(char => 127397 + char.charCodeAt(0));
+  return String.fromCodePoint(...codePoints);
+};
 
 export default function Home() {
   const [isInitiallyLoading, setIsInitiallyLoading] = useState(true);
@@ -80,7 +79,10 @@ export default function Home() {
   const [selectedCablePlan, setSelectedCablePlan] = useState<any>(null);
 
   const [dataVariations, setDataVariations] = useState<any[]>([]);
-  const [activeCountry, setActiveCountry] = useState(SUPPORTED_COUNTRIES[0]);
+  
+  // ⚡ DYNAMIC COUNTRIES STATE ⚡
+  const [supportedCountries, setSupportedCountries] = useState<any[]>([{ code: "NG", name: "Nigeria", flag: "🇳🇬" }]);
+  const [activeCountry, setActiveCountry] = useState(supportedCountries[0]);
 
   // ⚡ FOREIGN API STATES ⚡
   const [foreignProductTypes, setForeignProductTypes] = useState<any[]>([]);
@@ -169,6 +171,22 @@ export default function Home() {
     async function initSystem() {
       const savedHistory = localStorage.getItem("abapay_history");
       if (savedHistory) setTransactions(JSON.parse(savedHistory));
+
+      // ⚡ FETCH DYNAMIC COUNTRIES ON LOAD ⚡
+      try {
+        const res = await fetch('/api/foreign?action=countries');
+        const data = await res.json();
+        if (data.content && Array.isArray(data.content)) {
+          const dynamicCountries = data.content.map((c: any) => ({
+            code: c.code,
+            name: c.name,
+            flag: getFlagEmoji(c.code)
+          }));
+          setSupportedCountries([{ code: "NG", name: "Nigeria", flag: "🇳🇬" }, ...dynamicCountries]);
+        }
+      } catch (e) {
+        console.error("Failed to load dynamic countries");
+      }
 
       try {
         const { data: settingsData } = await supabase
@@ -280,17 +298,30 @@ export default function Home() {
     fetchForeignProductTypes();
   }, [activeCountry.code]);
 
-  // ⚡ FOREIGN API: 2. MATCH SERVICE (Airtime/Data) TO FOREIGN ID ⚡
+  // ⚡ STRICT FILTERING: MATCH SERVICE TO FOREIGN PRODUCT TYPE ⚡
   const currentForeignProductTypeId = useMemo(() => {
     if (activeCountry.code === 'NG' || !foreignProductTypes.length) return null;
-    const keyword = activeService.id === 'AIRTIME' ? 'topup' : 'data'; 
-    const pt = foreignProductTypes.find(p => p.name.toLowerCase().includes(keyword) || p.name.toLowerCase().includes(activeService.id.toLowerCase()));
+    
+    const isData = activeService.id === 'DATA';
+    
+    const pt = foreignProductTypes.find(p => {
+      const name = p.name.toLowerCase();
+      if (isData) {
+        return name.includes('data') || name.includes('bundle') || name.includes('internet');
+      } else {
+        return name.includes('top up') || name.includes('airtime') || name.includes('recharge') || name.includes('mobile');
+      }
+    });
+
     return pt?.product_type_id || null;
   }, [activeCountry.code, activeService.id, foreignProductTypes]);
 
   // ⚡ FOREIGN API: 3. FETCH OPERATORS WHEN PRODUCT TYPE IS FOUND ⚡
   useEffect(() => {
-    if (activeCountry.code === 'NG' || !currentForeignProductTypeId) return;
+    if (activeCountry.code === 'NG' || !currentForeignProductTypeId) {
+      setForeignOperators([]);
+      return;
+    }
     const fetchOperators = async () => {
       setIsFetchingForeign(true);
       setForeignOperators([]);
@@ -630,7 +661,7 @@ export default function Home() {
   };
 
   const handleCountryChange = (countryCode: string) => {
-    const country = SUPPORTED_COUNTRIES.find(c => c.code === countryCode);
+    const country = supportedCountries.find(c => c.code === countryCode);
     if (country) {
       setActiveCountry(country);
       handleResetService(SERVICES[0]); 
@@ -683,7 +714,6 @@ export default function Home() {
     }
   };
 
-  // ⚡ ADDED MISSING checkRefunds useEffect ⚡
   useEffect(() => {
     const checkRefunds = async () => {
       if (activeTab === "history" && transactions.length > 0) {
@@ -717,7 +747,6 @@ export default function Home() {
     checkRefunds();
   }, [activeTab]);
 
-  // ⚡ ADDED MISSING useMemos THAT BROKE THE VERCEL BUILD ⚡
   const currentDisco = useMemo(() => {
     return ELECTRICITY_DISCOS.find(d => d.serviceID === elecProvider);
   }, [elecProvider]);
@@ -876,8 +905,8 @@ export default function Home() {
               </div>
               <div className="space-y-2.5 max-h-[50vh] overflow-y-auto pr-1">
                  
-                 {/* ⚡ NEW: COUNTRY SELECTOR UI ⚡ */}
-                 {modalType === 'country' && SUPPORTED_COUNTRIES.map(country => (
+                 {/* ⚡ COUNTRY SELECTOR UI ⚡ */}
+                 {modalType === 'country' && supportedCountries.map(country => (
                    <button 
                      key={country.code} 
                      onClick={() => { modalCallback?.(country.code); setIsSelectionModalOpen(false); }}
@@ -941,31 +970,6 @@ export default function Home() {
         </div>
       )}
 
-      {isSupportOpen && (
-        <div className="fixed inset-0 z-[70] bg-slate-900/60 backdrop-blur-sm flex justify-center items-center p-4 animate-in fade-in">
-          <div className="bg-white w-full max-w-md rounded-[2rem] shadow-2xl p-6 animate-in zoom-in-95 duration-200">
-            <div className="flex justify-between items-center mb-4 shrink-0 border-b border-slate-100 pb-4">
-              <h2 className="text-2xl font-black flex items-center gap-2.5 tracking-tight text-slate-900"><Mail className="text-emerald-500" size={24}/> AbaPay Support</h2>
-              <button onClick={() => { setIsSupportOpen(false); setSupportTxHash(null); }} className="p-2 bg-slate-100 rounded-full hover:bg-slate-200"><XCircle size={20} className="text-slate-500" /></button>
-            </div>
-            <textarea 
-              className="w-full bg-slate-50 border border-slate-200 rounded-xl p-5 mb-4 text-sm font-medium outline-none focus:border-emerald-500 transition-colors leading-relaxed"
-              rows={4} placeholder="Describe your issue in detail. Support typically responds within 30 minutes."
-              value={supportMessage} onChange={(e) => setSupportMessage(e.target.value)}
-            />
-            <div className="flex gap-2 mb-6">
-              <input type="file" ref={fileInputRef} className="hidden" onChange={(e) => setSupportFile(e.target.files?.[0] || null)} />
-              <button onClick={() => fileInputRef.current?.click()} className="flex-1 py-4 bg-slate-100 hover:bg-slate-200 rounded-xl text-[11px] font-black uppercase tracking-wider flex items-center justify-center gap-2 text-slate-600">
-                <Paperclip size={16} /> {supportFile ? supportFile.name.slice(0, 10) + '...' : "Attach Receipt/Screenshot"}
-              </button>
-            </div>
-            <button onClick={submitSupportTicket} disabled={isSendingSupport} className="w-full bg-slate-900 hover:bg-black text-white font-black py-5 rounded-2xl flex items-center justify-center gap-2 transition-all active:scale-95 disabled:opacity-50">
-              {isSendingSupport ? <Loader2 className="animate-spin" size={18}/> : <><Send size={18} className="text-emerald-400"/> SUBMIT SUPPORT TICKET</>}
-            </button>
-          </div>
-        </div>
-      )}
-
       <div className="w-full max-w-md">
         
         {/* ⚡ HEADER WITH COUNTRY SELECTOR ⚡ */}
@@ -979,7 +983,7 @@ export default function Home() {
           </div>
           <div>
             <button 
-              onClick={() => openSelectionModal('country', "Select Region", SUPPORTED_COUNTRIES, handleCountryChange)}
+              onClick={() => openSelectionModal('country', "Select Region", supportedCountries, handleCountryChange)}
               className="bg-slate-50 border border-slate-100 hover:border-emerald-200 px-3 py-1.5 rounded-xl flex items-center gap-2 transition-all shadow-sm active:scale-95"
             >
               <span className="text-lg leading-none">{activeCountry.flag}</span>
@@ -997,7 +1001,6 @@ export default function Home() {
         {activeTab === 'pay' ? (
           <div className="bg-white border border-slate-100 rounded-[2.5rem] p-8 shadow-2xl shadow-emerald-900/10 animate-in fade-in zoom-in-95">
             <div className="grid grid-cols-4 gap-3 mb-6">
-                {/* ⚡ DISABLE ELECTRICITY AND CABLE FOR FOREIGN COUNTRIES ⚡ */}
                 {SERVICES.map(s => {
                     const isDisabled = activeCountry.code !== 'NG' && (s.id === 'ELECTRICITY' || s.id === 'CABLE');
                     return (
@@ -1043,7 +1046,12 @@ export default function Home() {
                     {/* ⚡ MULTI-STEP FOREIGN UI ⚡ */}
                     {activeCountry.code !== 'NG' && (activeService.id === "AIRTIME" || activeService.id === "DATA") ? (
                       <div className="flex flex-col gap-4">
-                         {isFetchingForeign && foreignOperators.length === 0 ? (
+                         {!isFetchingForeign && !currentForeignProductTypeId && foreignProductTypes.length > 0 ? (
+                           <div className="bg-red-50 border border-red-100 p-5 rounded-2xl flex items-center justify-center gap-3 text-red-700 text-xs font-black uppercase tracking-widest shadow-inner">
+                              <AlertTriangle size={18}/> 
+                              {activeService.name} is not supported in {activeCountry.name}
+                           </div>
+                         ) : isFetchingForeign && foreignOperators.length === 0 ? (
                            <div className="bg-blue-50 border border-blue-100 p-5 rounded-2xl flex items-center justify-center gap-3 text-blue-700 text-xs font-black uppercase tracking-widest shadow-inner">
                               <Globe className="animate-spin-slow text-blue-500" size={18}/> 
                               Fetching {activeCountry.name} Providers...
