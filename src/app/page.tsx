@@ -57,7 +57,7 @@ const getFlagEmoji = (countryCode: string) => {
   return String.fromCodePoint(...codePoints);
 };
 
-// ⚡ VTPASS PAYLOAD EXTRACTOR ⚡ (Finds arrays no matter how deeply VTPass nests them)
+// ⚡ VTPASS PAYLOAD EXTRACTOR ⚡
 const extractVtpassArray = (data: any): any[] => {
   if (!data) return [];
   if (Array.isArray(data)) return data;
@@ -184,7 +184,7 @@ export default function Home() {
       const savedHistory = localStorage.getItem("abapay_history");
       if (savedHistory) setTransactions(JSON.parse(savedHistory));
 
-      // ⚡ FETCH COUNTRIES (Using Bulletproof Extractor) ⚡
+      // ⚡ FETCH COUNTRIES DYNAMICALLY ⚡
       try {
         const res = await fetch('/api/foreign?action=countries');
         const data = await res.json();
@@ -291,7 +291,7 @@ export default function Home() {
     fetchForeignProductTypes();
   }, [activeCountry.code]);
 
-  // ⚡ 2. FETCH FOREIGN OPERATORS ⚡
+  // ⚡ 2. STRICT OPERATOR FETCHING BASED ON TAB ⚡
   useEffect(() => {
     if (activeCountry.code === 'NG' || !activeForeignProductType) {
       setForeignOperators([]);
@@ -313,7 +313,7 @@ export default function Home() {
     fetchOperators();
   }, [activeCountry.code, activeForeignProductType]);
 
-  // ⚡ 3. FETCH FOREIGN VARIATIONS ⚡
+  // ⚡ 3. STRICT VARIATIONS FETCHING BASED ON OPERATOR ⚡
   useEffect(() => {
     if (activeCountry.code === 'NG' || !selectedForeignOperator || !activeForeignProductType) return;
     const fetchVariations = async () => {
@@ -327,11 +327,10 @@ export default function Home() {
         const res = await fetch(`/api/foreign?action=variations&operator_id=${selectedForeignOperator.operator_id}&product_type_id=${productTypeId}`);
         const data = await res.json();
         
-        let varArray: any[] = [];
+        let varArray = extractVtpassArray(data);
+        // VTPass sometimes wraps variations inside a `varations` key
         if (data.content && data.content.varations) {
-            varArray = Array.isArray(data.content.varations) ? data.content.varations : Object.values(data.content.varations);
-        } else {
-            varArray = extractVtpassArray(data); // Ultimate fallback
+           varArray = Array.isArray(data.content.varations) ? data.content.varations : Object.values(data.content.varations);
         }
 
         setForeignVariations(varArray);
@@ -344,7 +343,7 @@ export default function Home() {
     fetchVariations();
   }, [selectedForeignOperator, activeForeignProductType, activeCountry.code]);
 
-  // ⚡ NG SPECIFIC: AUTO-DETECT TELECOM ⚡
+  // ⚡ NIGERIAN API EFFECTS ⚡
   useEffect(() => {
     if (activeCountry.code !== "NG") return;
     if ((activeService.id === "AIRTIME" || activeService.id === "DATA") && accountNumber.length >= 4) {
@@ -356,7 +355,6 @@ export default function Home() {
     }
   }, [accountNumber, activeService, activeCountry]);
 
-  // ⚡ NG SPECIFIC: FETCH DATA/CABLE ⚡
   useEffect(() => {
     if (activeCountry.code !== "NG") return;
     if (activeService.id === "CABLE") {
@@ -442,10 +440,12 @@ export default function Home() {
     const amount = parseFloat(nairaAmount);
     if (!nairaAmount || isNaN(amount) || amount <= 0) return false;
 
+    // FOREIGN VALIDATION
     if (activeCountry.code !== 'NG') {
       return accountNumber.length >= 7 && selectedForeignOperator && selectedForeignVariation;
     }
 
+    // NIGERIA VALIDATION
     if (amount < dynamicMinAmount || amount > dynamicMaxAmount) return false;
     if (activeService.id === "AIRTIME") return accountNumber.length === 11 && accountNumber.startsWith("0");
     if (activeService.id === "DATA") return accountNumber.length === 11 && accountNumber.startsWith("0") && selectedDataPlan !== null;
@@ -540,6 +540,7 @@ export default function Home() {
         phone: customerPhone || accountNumber,
         wallet_address: address,
         subscription_type: activeCountry.code === 'NG' && activeService.id === "CABLE" && ['dstv', 'gotv'].includes(cableProvider) ? cableSubscriptionType : undefined,
+        
         isForeign: activeCountry.code !== 'NG',
         operator_id: selectedForeignOperator?.operator_id,
         country_code: activeCountry.code,
@@ -902,14 +903,19 @@ export default function Home() {
                   ))
                 ) : foreignProductTypes.length > 0 ? (
                   foreignProductTypes.map(pt => {
-                     const isSelected = activeForeignProductType?.product_type_id === pt.product_type_id || activeForeignProductType?.id === pt.id;
+                     const ptId = pt.product_type_id || pt.id || pt.name;
+                     const activePtId = activeForeignProductType?.product_type_id || activeForeignProductType?.id || activeForeignProductType?.name;
+                     
+                     // Strict Match to prevent both tabs from highlighting
+                     const isSelected = ptId === activePtId;
+                     
                      const isData = (pt.name || "").toLowerCase().includes('data') || (pt.name || "").toLowerCase().includes('bundle');
                      const Icon = isData ? Wifi : Phone;
                      const color = isData ? "text-[#a855f7]" : "text-[#34d399]";
                      
                      return (
                         <button 
-                            key={pt.product_type_id || pt.id} 
+                            key={ptId} 
                             onClick={() => { setActiveForeignProductType(pt); setSelectedForeignOperator(null); setForeignVariations([]); setForeignAmount(""); setNairaAmount(""); }}
                             className={`p-4 rounded-2xl border-2 transition-all flex flex-col items-center gap-2 ${
                                 isSelected ? 'border-emerald-500 bg-emerald-50/50 scale-105' : 'border-slate-50 bg-slate-50/50 hover:bg-slate-100'
