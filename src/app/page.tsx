@@ -49,10 +49,11 @@ const ELEC_PRE_SELECT_AMOUNTS = ["1000", "2000", "5000", "10000", "20000"];
 const DATA_CATEGORIES = ["Daily", "Weekly", "Monthly", "Social", "Mega", "Broadband"];
 const ITEMS_PER_PAGE = 5;
 
-// Helper to convert country code (e.g. "GH") into a flag emoji (🇬🇭)
+// Auto-generates flag emojis dynamically from standard 2-letter country codes
 const getFlagEmoji = (countryCode: string) => {
-  if (!countryCode || countryCode.length !== 2) return "🌐";
-  const codePoints = countryCode.toUpperCase().split('').map(char => 127397 + char.charCodeAt(0));
+  if (!countryCode || typeof countryCode !== 'string' || countryCode.length < 2) return "🌐";
+  const code = countryCode.toUpperCase().slice(0,2);
+  const codePoints = code.split('').map(char => 127397 + char.charCodeAt(0));
   return String.fromCodePoint(...codePoints);
 };
 
@@ -80,9 +81,9 @@ export default function Home() {
 
   const [dataVariations, setDataVariations] = useState<any[]>([]);
   
-  // ⚡ DYNAMIC COUNTRIES STATE ⚡
+  // ⚡ COMPLETELY DYNAMIC COUNTRIES STATE ⚡
   const [supportedCountries, setSupportedCountries] = useState<any[]>([{ code: "NG", name: "Nigeria", flag: "🇳🇬" }]);
-  const [activeCountry, setActiveCountry] = useState(supportedCountries[0]);
+  const [activeCountry, setActiveCountry] = useState({ code: "NG", name: "Nigeria", flag: "🇳🇬" });
 
   // ⚡ FOREIGN API STATES ⚡
   const [foreignProductTypes, setForeignProductTypes] = useState<any[]>([]);
@@ -172,17 +173,37 @@ export default function Home() {
       const savedHistory = localStorage.getItem("abapay_history");
       if (savedHistory) setTransactions(JSON.parse(savedHistory));
 
-      // ⚡ FETCH DYNAMIC COUNTRIES ON LOAD ⚡
+      // ⚡ FETCH DYNAMIC COUNTRIES FROM VTPASS ON LOAD ⚡
       try {
         const res = await fetch('/api/foreign?action=countries');
         const data = await res.json();
-        if (data.content && Array.isArray(data.content)) {
-          const dynamicCountries = data.content.map((c: any) => ({
-            code: c.code,
-            name: c.name,
-            flag: getFlagEmoji(c.code)
-          }));
-          setSupportedCountries([{ code: "NG", name: "Nigeria", flag: "🇳🇬" }, ...dynamicCountries]);
+        
+        let dynamicCountries: any[] = [];
+        
+        if (data.content) {
+          // If VTPass returns an Array
+          if (Array.isArray(data.content)) {
+             dynamicCountries = data.content.map((c: any) => ({
+                code: c.code,
+                name: c.name || c.country_name,
+                flag: getFlagEmoji(c.code)
+             }));
+          } 
+          // If VTPass returns an Object mapping
+          else if (typeof data.content === 'object' && data.content !== null) {
+             dynamicCountries = Object.entries(data.content).map(([code, name]: any) => {
+                // Safely handle nested objects if VTPass changes structure
+                if (typeof name === 'object') {
+                   return { code: name.code || code, name: name.name || code, flag: getFlagEmoji(name.code || code) };
+                }
+                return { code, name, flag: getFlagEmoji(code) };
+             });
+          }
+        }
+
+        if (dynamicCountries.length > 0) {
+          const filtered = dynamicCountries.filter(c => c.code !== 'NG');
+          setSupportedCountries([{ code: "NG", name: "Nigeria", flag: "🇳🇬" }, ...filtered]);
         }
       } catch (e) {
         console.error("Failed to load dynamic countries");
@@ -291,7 +312,11 @@ export default function Home() {
       try {
         const res = await fetch(`/api/foreign?action=product-types&code=${activeCountry.code}`);
         const data = await res.json();
-        if (data.content) setForeignProductTypes(data.content);
+        if (data.content) {
+           // Ensure it is always an array
+           const ptArray = Array.isArray(data.content) ? data.content : Object.values(data.content);
+           setForeignProductTypes(ptArray);
+        }
       } catch (e) {}
       setIsFetchingForeign(false);
     };
@@ -305,11 +330,13 @@ export default function Home() {
     const isData = activeService.id === 'DATA';
     
     const pt = foreignProductTypes.find(p => {
-      const name = p.name.toLowerCase();
+      const name = (p.name || "").toLowerCase();
       if (isData) {
+        // Must contain data-related keywords
         return name.includes('data') || name.includes('bundle') || name.includes('internet');
       } else {
-        return name.includes('top up') || name.includes('airtime') || name.includes('recharge') || name.includes('mobile');
+        // STRICT AIRTIME MATCH: Must contain airtime keywords AND absolutely CANNOT contain the word 'data'
+        return (name.includes('top up') || name.includes('top-up') || name.includes('airtime') || name.includes('recharge')) && !name.includes('data');
       }
     });
 
@@ -330,7 +357,10 @@ export default function Home() {
       try {
         const res = await fetch(`/api/foreign?action=operators&code=${activeCountry.code}&product_type_id=${currentForeignProductTypeId}`);
         const data = await res.json();
-        if (data.content) setForeignOperators(data.content);
+        if (data.content) {
+            const opArray = Array.isArray(data.content) ? data.content : Object.values(data.content);
+            setForeignOperators(opArray);
+        }
       } catch (e) {}
       setIsFetchingForeign(false);
     };
@@ -350,10 +380,12 @@ export default function Home() {
         const res = await fetch(`/api/foreign?action=variations&operator_id=${selectedForeignOperator.operator_id}&product_type_id=${currentForeignProductTypeId}`);
         const data = await res.json();
         if (data.content && data.content.varations) {
-           setForeignVariations(data.content.varations);
+           const varArray = Array.isArray(data.content.varations) ? data.content.varations : Object.values(data.content.varations);
+           setForeignVariations(varArray);
+           
            // Auto-select if it's a flexible TopUp with only 1 variation
-           if (data.content.varations.length === 1 && data.content.varations[0].fixedPrice === "No") {
-             setSelectedForeignVariation(data.content.varations[0]);
+           if (varArray.length === 1 && varArray[0].fixedPrice === "No") {
+             setSelectedForeignVariation(varArray[0]);
            }
         }
       } catch(e) {}
@@ -1001,6 +1033,7 @@ export default function Home() {
         {activeTab === 'pay' ? (
           <div className="bg-white border border-slate-100 rounded-[2.5rem] p-8 shadow-2xl shadow-emerald-900/10 animate-in fade-in zoom-in-95">
             <div className="grid grid-cols-4 gap-3 mb-6">
+                {/* ⚡ DISABLE ELECTRICITY AND CABLE FOR FOREIGN COUNTRIES ⚡ */}
                 {SERVICES.map(s => {
                     const isDisabled = activeCountry.code !== 'NG' && (s.id === 'ELECTRICITY' || s.id === 'CABLE');
                     return (
