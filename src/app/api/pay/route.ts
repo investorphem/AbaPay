@@ -57,7 +57,6 @@ export async function POST(req: Request) {
       serviceID, serviceCategory, network, billersCode, amount, 
       token: tokenSymbol, txHash, variation_code, phone, 
       nairaAmount, wallet_address, subscription_type = 'change',
-      // ⚡ NEW: FOREIGN API PARAMS ⚡
       isForeign, operator_id, country_code, product_type_id, email
     } = body;
 
@@ -66,13 +65,12 @@ export async function POST(req: Request) {
     }
 
     const requestedNaira = parseFloat(nairaAmount);
-    // ⚡ FIX: Skip verification for foreign transactions
-    const needsVerification = !isForeign && (serviceCategory === 'ELECTRICITY' || (serviceCategory === 'CABLE' && network !== 'SHOWMAX'));
+    
+    const needsVerification = !isForeign && (serviceCategory === 'ELECTRICITY' || serviceCategory === 'BANK' || (serviceCategory === 'CABLE' && network !== 'SHOWMAX'));
     const serviceFee = needsVerification ? 100 : 0;
     const vendAmount = requestedNaira; 
     const vtRequestId = getStrictRequestId();
 
-    // 1. SAVE TO DB FIRST
     const dbPayload = {
       tx_hash: txHash,
       request_id: vtRequestId,
@@ -89,11 +87,9 @@ export async function POST(req: Request) {
     const { error: dbError } = await supabase.from('transactions').insert([dbPayload]);
 
     if (dbError) {
-      console.error("SUPABASE ERROR:", dbError.message);
       return NextResponse.json({ success: false, code: "DB_REJECTED", message: `DB Error: ${dbError.message}` }, { status: 400 });
     }
 
-    // ⚡ UNIFIED ENGINE: FETCH RATE FROM DB ⚡
     const { data: settingsData, error: settingsError } = await supabase
       .from('platform_settings')
       .select('exchange_rate')
@@ -109,14 +105,12 @@ export async function POST(req: Request) {
     const expectedTotalNaira = vendAmount + serviceFee;
     const requiredCrypto = expectedTotalNaira / baseRate;
 
-    // We keep the 0.99 (1%) slippage tolerance in case the user clicked pay exactly when you changed the rate
     if (parseFloat(amount) < (requiredCrypto * 0.99)) {
         await supabase.from('transactions').update({ status: 'FAILED_FUNDS_MISMATCH' }).eq('tx_hash', txHash);
         try { await sendTelegramAlert(`🚨 *RATE MISMATCH / UNDERPAYMENT*\nUser: ${wallet_address}\nHash: \`${txHash}\`\nThey paid: ${amount} ${tokenSymbol}. We expected: ${requiredCrypto.toFixed(4)} based on rate ₦${baseRate}.`); } catch (e) {}
         return NextResponse.json({ success: false, code: "FUNDS", message: "Insufficient crypto paid. Admin has been notified." }, { status: 400 });
     }
 
-    // 2. MERCHANT VERIFICATION (NIGERIA ONLY)
     if (needsVerification) {
       const verifyRes = await fetch(`${BASE_URL}/merchant-verify`, {
         method: 'POST',
@@ -124,7 +118,7 @@ export async function POST(req: Request) {
         body: JSON.stringify({ 
           billersCode, 
           serviceID, 
-          type: serviceCategory === 'ELECTRICITY' ? (variation_code.includes('postpaid') ? 'postpaid' : 'prepaid') : undefined 
+          type: serviceCategory === 'ELECTRICITY' ? (variation_code.includes('postpaid') ? 'postpaid' : 'prepaid') : serviceCategory === 'BANK' ? variation_code : undefined 
         })
       });
 
@@ -135,7 +129,6 @@ export async function POST(req: Request) {
       }
     }
 
-    // 3. BUILD THE VTPASS PAYLOAD
     let vtpassPayload: any = {
       request_id: vtRequestId,
       serviceID: serviceID, 
@@ -143,7 +136,6 @@ export async function POST(req: Request) {
       phone: phone || billersCode
     };
 
-    // ⚡ NEW: INJECT FOREIGN SPECIFIC PAYLOAD REQUIREMENTS ⚡
     if (isForeign) {
       vtpassPayload.billersCode = billersCode;
       vtpassPayload.variation_code = variation_code;
@@ -152,8 +144,8 @@ export async function POST(req: Request) {
       vtpassPayload.product_type_id = product_type_id;
       vtpassPayload.email = email || "support@abapay.com";
     } else {
-      // STANDARD NIGERIAN PAYLOAD LOGIC
-      if (serviceCategory === 'DATA' || serviceCategory === 'ELECTRICITY') {
+      // ⚡ UPGRADED: Add INTERNET to data mapping ⚡
+      if (serviceCategory === 'DATA' || serviceCategory === 'ELECTRICITY' || serviceCategory === 'BANK' || serviceCategory === 'INTERNET') {
         vtpassPayload.billersCode = billersCode;
         vtpassPayload.variation_code = variation_code;
       }
@@ -172,7 +164,6 @@ export async function POST(req: Request) {
       }
     }
 
-    // 4. FIRE THE VENDING REQUEST
     let payRes, payData;
     try {
       payRes = await fetch(`${BASE_URL}/pay`, {
@@ -186,7 +177,6 @@ export async function POST(req: Request) {
       return NextResponse.json({ success: false, code: "VTPASS_CRASH", message: "Network timeout while contacting provider." }, { status: 502 });
     }
 
-    // 5. HANDLE VTPASS RESPONSE
     if (payData.code === '000' || payData.code === '099') {
       processedTransactions.add(txHash);
 
