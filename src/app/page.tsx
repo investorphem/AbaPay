@@ -683,6 +683,49 @@ export default function Home() {
     }
   };
 
+  // ⚡ ADDED MISSING checkRefunds useEffect ⚡
+  useEffect(() => {
+    const checkRefunds = async () => {
+      if (activeTab === "history" && transactions.length > 0) {
+        const failedHashes = transactions.filter(tx => tx.status !== 'SUCCESS').map(tx => tx.txHash);
+        if (failedHashes.length === 0) return;
+
+        try {
+          const { data, error } = await supabase
+            .from('transactions')
+            .select('tx_hash, status, refund_hash')
+            .in('tx_hash', failedHashes);
+
+          if (data && data.length > 0) {
+            let updated = false;
+            const newHistory = transactions.map(tx => {
+              const dbRecord = data.find(r => r.tx_hash === tx.txHash);
+              if (dbRecord && dbRecord.status === 'REFUNDED' && tx.status !== 'REFUNDED') {
+                updated = true;
+                return { ...tx, status: 'REFUNDED', refund_hash: dbRecord.refund_hash };
+              }
+              return tx;
+            });
+            if (updated) {
+              setTransactions(newHistory);
+              localStorage.setItem("abapay_history", JSON.stringify(newHistory));
+            }
+          }
+        } catch(e) {}
+      }
+    };
+    checkRefunds();
+  }, [activeTab]);
+
+  // ⚡ ADDED MISSING useMemos THAT BROKE THE VERCEL BUILD ⚡
+  const currentDisco = useMemo(() => {
+    return ELECTRICITY_DISCOS.find(d => d.serviceID === elecProvider);
+  }, [elecProvider]);
+
+  const currentCable = useMemo(() => {
+    return CABLE_PROVIDERS_LIST.find(c => c.serviceID === cableProvider);
+  }, [cableProvider]);
+
   return (
     <main className="min-h-screen bg-slate-50 text-slate-900 font-sans p-4 flex flex-col items-center pb-20 relative">
       <style>{`
@@ -784,6 +827,45 @@ export default function Home() {
         </div>
       )}
 
+      {/* MODALS FOR TERMS/PRIVACY */}
+      {isTermsOpen && (
+        <div className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-sm flex justify-center items-center p-4 animate-in fade-in" onClick={() => setIsTermsOpen(false)}>
+           <div className="bg-white w-full max-w-md rounded-[2rem] shadow-2xl p-6 flex flex-col max-h-[80vh] animate-in zoom-in-95 duration-200" onClick={(e) => e.stopPropagation()}>
+              <div className="flex justify-between items-center mb-4 shrink-0 border-b border-slate-100 pb-4">
+                <h2 className="text-xl font-black tracking-tight text-slate-900">Terms of Service</h2>
+                <button onClick={() => setIsTermsOpen(false)} className="p-2 bg-slate-100 rounded-full hover:bg-slate-200 transition-colors"><XCircle size={20} className="text-slate-500" /></button>
+              </div>
+              <div className="overflow-y-auto text-sm text-slate-600 space-y-4 pr-2 leading-relaxed">
+                 <p className="font-bold text-slate-800">1. Acceptance of Terms</p>
+                 <p>By connecting your wallet and using the AbaPay Protocol, you agree to execute blockchain transactions via smart contracts. You acknowledge that blockchain transactions are immutable.</p>
+                 <p className="font-bold text-slate-800 mt-4">2. Service Delivery</p>
+                 <p>AbaPay acts as a decentralized bridge to fiat utility providers. While we strive for instant vending, delays caused by third-party telecom or electricity providers are beyond our direct control.</p>
+                 <p className="font-bold text-slate-800 mt-4">3. Supported Assets</p>
+                 <p>You are responsible for ensuring you send the correct supported asset on the Celo Network. AbaPay is not liable for funds lost due to incorrect network transfers.</p>
+              </div>
+           </div>
+        </div>
+      )}
+
+      {isPrivacyOpen && (
+        <div className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-sm flex justify-center items-center p-4 animate-in fade-in" onClick={() => setIsPrivacyOpen(false)}>
+           <div className="bg-white w-full max-w-md rounded-[2rem] shadow-2xl p-6 flex flex-col max-h-[80vh] animate-in zoom-in-95 duration-200" onClick={(e) => e.stopPropagation()}>
+              <div className="flex justify-between items-center mb-4 shrink-0 border-b border-slate-100 pb-4">
+                <h2 className="text-xl font-black tracking-tight text-slate-900">Privacy Policy</h2>
+                <button onClick={() => setIsPrivacyOpen(false)} className="p-2 bg-slate-100 rounded-full hover:bg-slate-200 transition-colors"><XCircle size={20} className="text-slate-500" /></button>
+              </div>
+              <div className="overflow-y-auto text-sm text-slate-600 space-y-4 pr-2 leading-relaxed">
+                 <p className="font-bold text-slate-800">1. Data Collection</p>
+                 <p>As a decentralized application, AbaPay does not require you to create an account or provide personal KYC information. We only collect the data necessary to fulfill your utility order (e.g., Meter Number, Phone Number).</p>
+                 <p className="font-bold text-slate-800 mt-4">2. Wallet Addresses</p>
+                 <p>Your connected Celo wallet address is recorded on the public blockchain when executing a transaction. This is a fundamental property of Web3 and is not hidden.</p>
+                 <p className="font-bold text-slate-800 mt-4">3. Third-Party Services</p>
+                 <p>Utility numbers provided (like phone or meter numbers) are securely passed to our fiat vending partners solely for the purpose of delivering your purchased service.</p>
+              </div>
+           </div>
+        </div>
+      )}
+
       {/* UNIVERSAL SELECTION MODAL */}
       {isSelectionModalOpen && (
         <div className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-sm flex justify-center items-center p-4 animate-in fade-in" onClick={() => setIsSelectionModalOpen(false)}>
@@ -794,6 +876,7 @@ export default function Home() {
               </div>
               <div className="space-y-2.5 max-h-[50vh] overflow-y-auto pr-1">
                  
+                 {/* ⚡ NEW: COUNTRY SELECTOR UI ⚡ */}
                  {modalType === 'country' && SUPPORTED_COUNTRIES.map(country => (
                    <button 
                      key={country.code} 
@@ -858,6 +941,31 @@ export default function Home() {
         </div>
       )}
 
+      {isSupportOpen && (
+        <div className="fixed inset-0 z-[70] bg-slate-900/60 backdrop-blur-sm flex justify-center items-center p-4 animate-in fade-in">
+          <div className="bg-white w-full max-w-md rounded-[2rem] shadow-2xl p-6 animate-in zoom-in-95 duration-200">
+            <div className="flex justify-between items-center mb-4 shrink-0 border-b border-slate-100 pb-4">
+              <h2 className="text-2xl font-black flex items-center gap-2.5 tracking-tight text-slate-900"><Mail className="text-emerald-500" size={24}/> AbaPay Support</h2>
+              <button onClick={() => { setIsSupportOpen(false); setSupportTxHash(null); }} className="p-2 bg-slate-100 rounded-full hover:bg-slate-200"><XCircle size={20} className="text-slate-500" /></button>
+            </div>
+            <textarea 
+              className="w-full bg-slate-50 border border-slate-200 rounded-xl p-5 mb-4 text-sm font-medium outline-none focus:border-emerald-500 transition-colors leading-relaxed"
+              rows={4} placeholder="Describe your issue in detail. Support typically responds within 30 minutes."
+              value={supportMessage} onChange={(e) => setSupportMessage(e.target.value)}
+            />
+            <div className="flex gap-2 mb-6">
+              <input type="file" ref={fileInputRef} className="hidden" onChange={(e) => setSupportFile(e.target.files?.[0] || null)} />
+              <button onClick={() => fileInputRef.current?.click()} className="flex-1 py-4 bg-slate-100 hover:bg-slate-200 rounded-xl text-[11px] font-black uppercase tracking-wider flex items-center justify-center gap-2 text-slate-600">
+                <Paperclip size={16} /> {supportFile ? supportFile.name.slice(0, 10) + '...' : "Attach Receipt/Screenshot"}
+              </button>
+            </div>
+            <button onClick={submitSupportTicket} disabled={isSendingSupport} className="w-full bg-slate-900 hover:bg-black text-white font-black py-5 rounded-2xl flex items-center justify-center gap-2 transition-all active:scale-95 disabled:opacity-50">
+              {isSendingSupport ? <Loader2 className="animate-spin" size={18}/> : <><Send size={18} className="text-emerald-400"/> SUBMIT SUPPORT TICKET</>}
+            </button>
+          </div>
+        </div>
+      )}
+
       <div className="w-full max-w-md">
         
         {/* ⚡ HEADER WITH COUNTRY SELECTOR ⚡ */}
@@ -889,6 +997,7 @@ export default function Home() {
         {activeTab === 'pay' ? (
           <div className="bg-white border border-slate-100 rounded-[2.5rem] p-8 shadow-2xl shadow-emerald-900/10 animate-in fade-in zoom-in-95">
             <div className="grid grid-cols-4 gap-3 mb-6">
+                {/* ⚡ DISABLE ELECTRICITY AND CABLE FOR FOREIGN COUNTRIES ⚡ */}
                 {SERVICES.map(s => {
                     const isDisabled = activeCountry.code !== 'NG' && (s.id === 'ELECTRICITY' || s.id === 'CABLE');
                     return (
