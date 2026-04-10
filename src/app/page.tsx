@@ -20,7 +20,6 @@ const ERC20_ABI = [
   {"inputs":[{"internalType":"address","name":"account","type":"address"}],"name":"balanceOf","outputs":[{"internalType":"uint256","name":"","type":"uint256"}],"stateMutability":"view","type":"function"}
 ];
 
-// ⚡ UPGRADED: Added INTERNET (Smile) ⚡
 const SERVICES = [
   { id: "AIRTIME", name: "Buy Airtime", icon: Phone, color: "text-[#34d399]", bg: "bg-emerald-500/10" },
   { id: "DATA", name: "Buy Data", icon: Wifi, color: "text-[#a855f7]", bg: "bg-purple-500/10" },
@@ -86,7 +85,6 @@ export default function Home() {
   const [bankVariations, setBankVariations] = useState<any[]>([]);
   const [selectedBank, setSelectedBank] = useState<any>(null);
 
-  // ⚡ SMILE NETWORK STATES ⚡
   const [smileVariations, setSmileVariations] = useState<any[]>([]);
   const [selectedSmilePlan, setSelectedSmilePlan] = useState<any>(null);
   const [smileAccountId, setSmileAccountId] = useState<string | null>(null);
@@ -116,7 +114,10 @@ export default function Home() {
   const [modalTitle, setModalTitle] = useState("");
   const [modalOptions, setModalOptions] = useState<any[]>([]); 
   const [modalCallback, setModalCallback] = useState<((value: string) => void) | null>(null);
-  const [modalType, setModalType] = useState<'standard' | 'token' | 'provider' | 'country'>('standard'); 
+  
+  // ⚡ FIXED: Added 'bank' to the generic type signature here ⚡
+  const [modalType, setModalType] = useState<'standard' | 'token' | 'provider' | 'country' | 'bank'>('standard'); 
+  
   const [toast, setToast] = useState<{title: string, message: string, type: 'success' | 'error'} | null>(null);
   const [currentPage, setCurrentPage] = useState(1);
 
@@ -342,7 +343,6 @@ export default function Home() {
         if (data.code === '000') {
           setCustomerName(data.content.Customer_Name || data.content.account_name || data.content.name);
 
-          // ⚡ STORE SMILE ACCOUNT ID ⚡
           if (activeService.id === "INTERNET") {
              setSmileAccountId(data.content.AccountId || data.content.account_id);
           }
@@ -369,7 +369,6 @@ export default function Home() {
     } else if (activeService.id === "BANK" && accountNumber.length === 10 && selectedBank) {
       verifyMerchant();
     } else if (activeService.id === "INTERNET" && accountNumber.includes('@') && accountNumber.includes('.')) {
-      // Debounce email verification so it doesn't spam the API while typing
       const timeoutId = setTimeout(() => verifyMerchant(), 1000);
       return () => clearTimeout(timeoutId);
     } else {
@@ -480,7 +479,7 @@ export default function Home() {
       let vtpassServiceID = "";
       let displayNetwork = "";
       let finalVariationCode = 'prepaid';
-      let payloadBillersCode = accountNumber; // Default to standard account number
+      let payloadBillersCode = accountNumber;
 
       if (activeService.id === "ELECTRICITY") {
         vtpassServiceID = elecProvider;
@@ -506,7 +505,7 @@ export default function Home() {
         vtpassServiceID = internetProvider; 
         displayNetwork = "Smile Network";
         finalVariationCode = selectedSmilePlan?.variation_code || 'none'; 
-        payloadBillersCode = smileAccountId || accountNumber; // ⚡ VTPASS REQUIRES THE ACCOUNT ID HERE ⚡
+        payloadBillersCode = smileAccountId || accountNumber; 
       } else {
         vtpassServiceID = telecomProvider; 
         displayNetwork = telecomProvider;
@@ -520,7 +519,7 @@ export default function Home() {
         account: address,
       });
 
-      setStatus(`${selectedToken.symbol} Secured. Processing...`);
+      setStatus(`${selectedToken.symbol} Secured. Processing Transfer...`);
 
       const backendPayload = {
         serviceID: vtpassServiceID, 
@@ -547,12 +546,19 @@ export default function Home() {
         service: activeService.name, 
         network: displayNetwork.toUpperCase(), 
         txHash: hash,
-        account: accountNumber // Keep the email/phone for UI display history
+        account: accountNumber
       };
 
-      setAccountNumber(""); setNairaAmount(""); setCustomerPhone(""); setCustomerName(null);
-      setSelectedDataPlan(null); setSelectedCablePlan(null); setCableCurrentBouquet(null);
-      setSelectedBank(null); setSelectedSmilePlan(null); setSmileAccountId(null);
+      setAccountNumber("");
+      setNairaAmount("");
+      setCustomerPhone("");
+      setCustomerName(null);
+      setSelectedDataPlan(null);
+      setSelectedCablePlan(null);
+      setCableCurrentBouquet(null);
+      setSelectedBank(null);
+      setSelectedSmilePlan(null); 
+      setSmileAccountId(null);
 
       const res = await fetch('/api/pay', {
         method: 'POST',
