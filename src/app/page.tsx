@@ -39,7 +39,6 @@ const CABLE_PROVIDERS_LIST = [
 
 const TELECOM_PROVIDERS = ["mtn", "glo", "9mobile", "airtel"]; 
 
-// ⚡ UPGRADED: Added Spectranet ⚡
 const INTERNET_PROVIDERS = [
   { serviceID: "smile-direct", displayName: "Smile Network", logo: "/smile.png" },
   { serviceID: "spectranet", displayName: "Spectranet", logo: "/spectranet.png" }
@@ -345,7 +344,7 @@ export default function Home() {
         if (data.code === '000') {
           setCustomerName(data.content.Customer_Name || data.content.account_name || data.content.name);
 
-          // ⚡ STORE SMILE ACCOUNT ID ⚡
+          // ⚡ STORE INTERNET ACCOUNT ID (FOR SMILE) ⚡
           if (activeService.id === "INTERNET" && internetProvider === "smile-direct") {
              setInternetAccountId(data.content.AccountId || data.content.account_id);
           }
@@ -956,7 +955,7 @@ export default function Home() {
                     <button 
                         key={provider.serviceID} 
                         onClick={() => { modalCallback?.(provider.serviceID); setIsSelectionModalOpen(false); }}
-                        className={`w-full text-left p-4 rounded-2xl font-bold text-slate-700 bg-white border hover:bg-slate-50 transition-all flex justify-between items-center group ${activeService.id === 'ELECTRICITY' ? 'hover:border-orange-300' : 'hover:border-pink-300'}`}
+                        className={`w-full text-left p-4 rounded-2xl font-bold text-slate-700 bg-white border hover:bg-slate-50 transition-all flex justify-between items-center group ${activeService.id === 'ELECTRICITY' ? 'hover:border-orange-300' : activeService.id === 'INTERNET' ? 'hover:border-sky-300' : 'hover:border-pink-300'}`}
                     >
                         <div className="flex items-center gap-4">
                             <div className="w-12 h-12 shrink-0 rounded-full border border-slate-100 bg-white p-0.5 flex items-center justify-center shadow-sm overflow-hidden group-hover:shadow-md transition-shadow">
@@ -1192,7 +1191,7 @@ export default function Home() {
                 </div>
 
                 {/* ⚡ INTERNET PACKAGES ⚡ */}
-                {activeService.id === "INTERNET" && (internetProvider === 'spectranet' || smileAccountId) && (
+                {activeService.id === "INTERNET" && (internetProvider === 'spectranet' || internetAccountId) && (
                   <div className="bg-slate-50 border border-slate-200 rounded-2xl p-4 shadow-sm animate-in fade-in slide-in-from-top-4">
                      <p className="text-[10px] font-black uppercase tracking-widest text-slate-400 mb-2">Select {internetProvider === 'smile-direct' ? 'Smile' : 'Spectranet'} Plan</p>
                      
