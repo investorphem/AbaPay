@@ -6,6 +6,15 @@ export async function GET(req: Request) {
   const action = searchParams.get('action');
 
   try {
+    // ⚡ NEW: 0. Fetch Supported Countries Dynamically
+    if (action === 'countries') {
+      const res = await fetch(`${BASE_URL}/get-international-airtime-countries`, { 
+        method: 'GET', 
+        headers: getHeaders('GET') 
+      });
+      return NextResponse.json(await res.json());
+    }
+
     // 1. Fetch Product Types (Finds out the ID for Airtime vs Data for that specific country)
     if (action === 'product-types') {
       const code = searchParams.get('code');
