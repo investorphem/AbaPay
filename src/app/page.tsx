@@ -62,6 +62,7 @@ const ELEC_PRE_SELECT_AMOUNTS = ["1000", "2000", "5000", "10000", "20000"];
 const DATA_CATEGORIES = ["Daily", "Weekly", "Monthly", "Social", "Mega", "Broadband"];
 const ITEMS_PER_PAGE = 5;
 
+// ⚡ VTPASS BULLETPROOF EXTRACTOR ⚡
 const extractVtpassArray = (data: any): any[] => {
   if (!data) return [];
   if (Array.isArray(data)) return data;
@@ -69,16 +70,12 @@ const extractVtpassArray = (data: any): any[] => {
   if (data.content && Array.isArray(data.content.variations)) return data.content.variations;
   if (data.content && Array.isArray(data.content)) return data.content;
   if (data.data && Array.isArray(data.data)) return data.data;
-  if (data.content && typeof data.content === 'object') {
-    const nestedArrays = Object.values(data.content).filter(v => Array.isArray(v as any));
-    if (nestedArrays.length > 0) return nestedArrays[0] as any[];
-    return Object.values(data.content); 
-  }
   return [];
 };
 
 export default function Home() {
   const [isInitiallyLoading, setIsInitiallyLoading] = useState(true);
+
   const [address, setAddress] = useState<string | null>(null);
   const [client, setClient] = useState<any>(null);
   const [nairaAmount, setNairaAmount] = useState(""); 
@@ -87,7 +84,6 @@ export default function Home() {
   const [status, setStatus] = useState("");
   
   const [activeTab, setActiveTab] = useState<"pay" | "bank" | "history">("pay");
-  const [isMiniPay, setIsMiniPay] = useState(false);
   const [isProcessing, setIsProcessing] = useState(false); 
 
   const [customerName, setCustomerName] = useState<string | null>(null);
@@ -104,7 +100,7 @@ export default function Home() {
   const [selectedInternetPlan, setSelectedInternetPlan] = useState<any>(null);
   const [internetAccountId, setInternetAccountId] = useState<string | null>(null);
 
-  // ⚡ BANK TRANSFER STATES ⚡
+  // ⚡ BANK STATES ⚡
   const [bankVariations, setBankVariations] = useState<any[]>([]);
   const [selectedBank, setSelectedBank] = useState<any>(null);
   const [isFetchingBanks, setIsFetchingBanks] = useState(false);
@@ -171,10 +167,6 @@ export default function Home() {
   const totalPages = Math.ceil(transactions.length / ITEMS_PER_PAGE);
 
   useEffect(() => {
-    if (status && !isProcessing) setStatus("");
-  }, [accountNumber, nairaAmount, activeService, cableSubscriptionType, selectedCablePlan, selectedBank, selectedInternetPlan, activeTab]);
-
-  useEffect(() => {
     if (status && !isProcessing) {
       const timer = setTimeout(() => setStatus(""), 5000); 
       return () => clearTimeout(timer);
@@ -193,13 +185,11 @@ export default function Home() {
 
       if (typeof window !== "undefined" && (window as any).ethereum) {
         const eth = (window as any).ethereum;
-        if (eth.isMiniPay) setIsMiniPay(true);
         const walletClient = createWalletClient({ chain: activeChain, transport: custom(eth) });
         walletClient.requestAddresses().then(([acc]) => {
           setAddress(acc); setClient(walletClient);
         }).catch((e) => console.log("Connection deferred"));
       }
-
       setTimeout(() => setIsInitiallyLoading(false), 2000);
     }
     initSystem();
@@ -243,31 +233,26 @@ export default function Home() {
     fetchBalance();
   }, [address, selectedToken, activeChain, isMainnet]);
 
-  // ⚡ DEDICATED BANK FETCHER (Crash Proof) ⚡
+  // ⚡ DEDICATED BANK FETCHER ⚡
   useEffect(() => {
-    if (activeTab === "bank" && bankVariations.length === 0) {
-      const fetchBanks = async () => {
-        setIsFetchingBanks(true);
-        try {
-          const res = await fetch(`/api/variations?serviceID=bank-deposit`);
-          const data = await res.json();
-          let banksArr = extractVtpassArray(data);
-          
-          if (banksArr && Array.isArray(banksArr) && banksArr.length > 0) {
-            const sortedBanks = banksArr.sort((a: any, b: any) => (a.name || "").localeCompare(b.name || ""));
-            setBankVariations(sortedBanks);
-          }
-        } catch (e) {}
-        setIsFetchingBanks(false);
-      };
-      fetchBanks();
-    }
-  }, [activeTab]);
+    const fetchBanks = async () => {
+      setIsFetchingBanks(true);
+      try {
+        const res = await fetch(`/api/variations?serviceID=bank-deposit`);
+        const data = await res.json();
+        let banksArr = extractVtpassArray(data);
+        if (banksArr.length > 0) {
+          setBankVariations(banksArr.sort((a: any, b: any) => (a.name || "").localeCompare(b.name || "")));
+        }
+      } catch (e) {}
+      setIsFetchingBanks(false);
+    };
+    if (bankVariations.length === 0) fetchBanks();
+  }, [bankVariations.length]);
 
-  // ⚡ DEDICATED UTILITY VARIATION FETCHER ⚡
+  // ⚡ DEDICATED UTILITY FETCHER ⚡
   useEffect(() => {
     if (activeTab !== "pay") return;
-
     if (activeService.id === "CABLE") {
       const fetchVariations = async () => {
         try {
@@ -373,22 +358,11 @@ export default function Home() {
           setCustomerName(null);
        }
     }
-  }, [accountNumber, elecProvider, cableProvider, activeService, meterType, selectedBank, internetProvider, activeTab]);
-
-  const { cryptoToCharge, currentFee } = useMemo(() => {
-    const bill = parseFloat(nairaAmount) || 0;
-    const fee = (activeTab === "bank" || activeService.id === "ELECTRICITY" || activeService.id === "CABLE") ? 100 : 0;
-    const crypto = (bill + fee) / exchangeRate;
-    return { cryptoToCharge: crypto.toFixed(4), currentFee: fee };
-  }, [nairaAmount, exchangeRate, activeService, activeTab]);
+  }, [accountNumber, elecProvider, cableProvider, activeService.id, meterType, selectedBank, internetProvider, activeTab]);
 
   const filteredInternetDataPlans = useMemo(() => {
     if (!internetVariations || internetVariations.length === 0) return [];
     
-    if (internetProvider === 'smile-direct' || internetProvider === 'spectranet') {
-        return internetVariations;
-    }
-
     return internetVariations.filter(plan => {
       const name = (plan.name || "").toLowerCase();
       let category = "Monthly";
@@ -437,14 +411,11 @@ export default function Home() {
       }
     }
     return false;
-  }, [accountNumber, nairaAmount, activeService, customerName, dynamicMinAmount, dynamicMaxAmount, cableSubscriptionType, selectedCablePlan, selectedBank, selectedInternetPlan, internetAccountId, customerPhone, internetProvider, activeTab]);
+  }, [accountNumber, nairaAmount, activeService.id, customerName, dynamicMinAmount, dynamicMaxAmount, cableSubscriptionType, selectedCablePlan, selectedBank, selectedInternetPlan, internetAccountId, customerPhone, internetProvider, activeTab, cableProvider]);
 
   const handlePayment = async () => {
     if (!address || !client) return setStatus("Connect Wallet First");
-
-    if (parseFloat(cryptoToCharge) > parseFloat(walletBalance)) {
-      return setStatus(`Insufficient ${selectedToken.symbol} Balance.`);
-    }
+    if (parseFloat(cryptoToCharge) > parseFloat(walletBalance)) return setStatus(`Insufficient ${selectedToken.symbol} Balance.`);
 
     setIsProcessing(true);
     setStatus("Initiating Blockchain Escrow...");
@@ -551,7 +522,7 @@ export default function Home() {
   };
 
   const openSelectionModal = (type: 'standard' | 'token' | 'provider' | 'country' | 'bank', title: string, options: any[], callback: (value: string) => void) => {
-    setModalType(type as any); setModalTitle(title); setModalOptions(options); setModalCallback(() => callback); setIsSelectionModalOpen(true);
+    setModalType(type); setModalTitle(title); setModalOptions(options); setModalCallback(() => callback); setIsSelectionModalOpen(true);
   };
 
   const handleCountryChange = (countryCode: string) => {
@@ -655,7 +626,7 @@ export default function Home() {
                     <span className="text-slate-800 font-black text-xs text-right w-2/3 uppercase">{selectedReceipt.network} {selectedReceipt.service}</span>
                  </div>
                  <div className="flex justify-between border-b border-slate-100 pb-3">
-                    <span className="text-slate-400 text-[10px] font-bold uppercase tracking-wider">{selectedReceipt.service === 'Electricity' ? 'Meter Number' : selectedReceipt.service === 'Send Money' ? 'Account No' : 'Recipient'}</span>
+                    <span className="text-slate-400 text-[10px] font-bold uppercase tracking-wider">{selectedReceipt.service === 'Electricity' ? 'Meter Number' : selectedReceipt.service === 'Bank Transfer' ? 'Account No' : 'Recipient'}</span>
                     <span className="text-slate-800 font-mono font-bold text-xs">{selectedReceipt.account}</span>
                  </div>
                  {selectedReceipt.request_id && (
@@ -748,27 +719,14 @@ export default function Home() {
                 <button onClick={() => setIsSelectionModalOpen(false)} className="p-2 bg-slate-100 rounded-full hover:bg-slate-200 transition-colors"><XCircle size={20} className="text-slate-500" /></button>
               </div>
               <div className="space-y-2.5 max-h-[50vh] overflow-y-auto pr-1">
-                 
                  {modalType === 'country' && SUPPORTED_COUNTRIES.map(country => (
                    <button 
                      key={country.code} 
-                     onClick={() => { 
-                        if (!country.disabled) {
-                            modalCallback?.(country.code); 
-                            setIsSelectionModalOpen(false); 
-                        }
-                     }}
+                     onClick={() => { if (!country.disabled) { modalCallback?.(country.code); setIsSelectionModalOpen(false); } }}
                      disabled={country.disabled}
-                     className={`w-full text-left p-4 rounded-xl font-bold text-sm transition-all flex justify-between items-center ${
-                         country.disabled 
-                         ? 'bg-slate-50 border border-slate-100 text-slate-400 cursor-not-allowed' 
-                         : 'text-slate-700 bg-slate-50 border border-slate-100 hover:border-emerald-300 hover:bg-emerald-50/50'
-                     }`}
+                     className={`w-full text-left p-4 rounded-xl font-bold text-sm transition-all flex justify-between items-center ${country.disabled ? 'bg-slate-50 border border-slate-100 text-slate-400 cursor-not-allowed' : 'text-slate-700 bg-slate-50 border border-slate-100 hover:border-emerald-300 hover:bg-emerald-50/50'}`}
                    >
-                     <div className="flex items-center gap-3">
-                       <span className="text-2xl">{country.flag}</span>
-                       <span className={`font-black ${country.disabled ? 'text-slate-400' : 'text-slate-800'}`}>{country.name}</span>
-                     </div>
+                     <div className="flex items-center gap-3"><span className="text-2xl">{country.flag}</span><span className={`font-black ${country.disabled ? 'text-slate-400' : 'text-slate-800'}`}>{country.name}</span></div>
                      {activeCountry.code === country.code && <CheckCircle2 size={18} className="text-emerald-500"/>}
                    </button>
                  ))}
@@ -799,10 +757,7 @@ export default function Home() {
                      onClick={() => { modalCallback?.(token.symbol); setIsSelectionModalOpen(false); }}
                      className="w-full text-left p-4 rounded-xl font-bold text-slate-700 bg-slate-50 border border-slate-100 uppercase text-xs hover:border-emerald-300 hover:bg-emerald-50/50 transition-all flex justify-between items-center"
                    >
-                     <div className="flex items-center gap-3">
-                       <img src={token.logo} alt={token.symbol} className="w-6 h-6 object-contain rounded-full shadow-sm bg-white" />
-                       <span className="text-sm font-black text-slate-800 tracking-tight">{token.symbol}</span>
-                     </div>
+                     <div className="flex items-center gap-3"><img src={token.logo} alt={token.symbol} className="w-6 h-6 object-contain rounded-full shadow-sm bg-white" /><span className="text-sm font-black text-slate-800 tracking-tight">{token.symbol}</span></div>
                      {selectedToken.symbol === token.symbol && <CheckCircle2 size={18} className="text-emerald-500"/>}
                    </button>
                  ))}
@@ -817,14 +772,23 @@ export default function Home() {
                             <div className="w-12 h-12 shrink-0 rounded-full border border-slate-100 bg-white p-0.5 flex items-center justify-center shadow-sm overflow-hidden group-hover:shadow-md transition-shadow">
                                 <img src={provider.logo} alt={provider.displayName} className="w-full h-full object-contain" onError={(e) => { e.currentTarget.style.display = 'none'; e.currentTarget.parentElement!.innerHTML = `<span class="text-[9px] font-black uppercase text-slate-400">${provider.displayName.slice(0,3)}</span>`; }} />
                             </div>
-                            <div>
-                                <span className="text-sm font-black text-slate-900 tracking-tight">{provider.displayName}</span>
-                            </div>
+                            <div><span className="text-sm font-black text-slate-900 tracking-tight">{provider.displayName}</span></div>
                         </div>
                         {(activeService.id === 'ELECTRICITY' ? elecProvider === provider.serviceID : activeService.id === 'INTERNET' ? internetProvider === provider.serviceID : cableProvider === provider.serviceID) && (
                           <CheckCircle2 size={20} className={activeService.id === 'ELECTRICITY' ? "text-orange-500" : activeService.id === 'INTERNET' ? "text-sky-500" : "text-pink-500"}/>
                         )}
                     </button>
+                 ))}
+
+                 {modalType === 'standard' && (modalOptions as string[]).map(option => (
+                     <button 
+                       key={option} 
+                       onClick={() => { modalCallback?.(option); setIsSelectionModalOpen(false); }}
+                       className="w-full text-left p-4 rounded-xl font-black text-slate-700 bg-slate-50 border border-slate-100 uppercase text-xs hover:border-emerald-300 hover:bg-emerald-50/50 transition-all flex justify-between items-center"
+                     >
+                       <span>{option}</span>
+                       {(telecomProvider === option || cableProvider === option) && <CheckCircle2 size={16} className="text-emerald-500"/>}
+                     </button>
                  ))}
               </div>
            </div>
@@ -832,6 +796,7 @@ export default function Home() {
       )}
 
       <div className="w-full max-w-md">
+        
         <div className="flex justify-between items-center bg-white p-4 rounded-3xl shadow-sm border border-slate-100 mb-6">
           <div className="flex items-center gap-3">
             <img src="/logo.png" alt="AbaPay" className="h-10 w-auto object-contain" />
@@ -854,11 +819,11 @@ export default function Home() {
 
         <div className="flex gap-2 bg-slate-200/50 p-1.5 rounded-2xl mb-6 shadow-inner">
             <button onClick={() => setActiveTab("pay")} className={`flex-1 py-3 rounded-xl text-xs font-black transition-all ${activeTab === 'pay' ? 'bg-white text-emerald-600 shadow-xl' : 'text-slate-500 hover:text-slate-700'}`}>PAY BILLS</button>
-            <button onClick={() => { setActiveTab("bank"); handleResetService(SERVICES[0]); }} className={`flex-1 py-3 rounded-xl text-xs font-black transition-all ${activeTab === 'bank' ? 'bg-white text-emerald-600 shadow-xl' : 'text-slate-500 hover:text-slate-700'}`}>SEND MONEY</button>
+            <button onClick={() => setActiveTab("bank")} className={`flex-1 py-3 rounded-xl text-xs font-black transition-all ${activeTab === 'bank' ? 'bg-white text-emerald-600 shadow-xl' : 'text-slate-500 hover:text-slate-700'}`}>SEND MONEY</button>
             <button onClick={() => setActiveTab("history")} className={`flex-1 py-3 rounded-xl text-xs font-black transition-all ${activeTab === 'history' ? 'bg-white text-emerald-600 shadow-xl' : 'text-slate-500 hover:text-slate-700'}`}>HISTORY</button>
         </div>
 
-        {activeTab === 'bank' ? (
+        {activeTab === 'bank' && (
           <div className="bg-white border border-slate-100 rounded-[2.5rem] p-8 shadow-2xl shadow-emerald-900/10 animate-in fade-in zoom-in-95">
             <div className="space-y-5">
                 <div className="bg-slate-50 border border-slate-100 p-4 rounded-2xl flex justify-between items-center animate-in fade-in">
@@ -978,21 +943,26 @@ export default function Home() {
                 </button>
             </div>
           </div>
-        ) : activeTab === 'pay' ? (
+        )}
+
+        {activeTab === 'pay' && (
           <div className="bg-white border border-slate-100 rounded-[2.5rem] p-8 shadow-2xl shadow-emerald-900/10 animate-in fade-in zoom-in-95">
             <div className="flex overflow-x-auto gap-3 pb-2 mb-4 no-scrollbar">
-                {SERVICES.map(s => (
-                    <button 
-                        key={s.id} 
-                        onClick={() => handleResetService(s)}
-                        className={`min-w-[80px] p-4 rounded-2xl border-2 transition-all flex flex-col items-center justify-center gap-2 shrink-0 ${
-                            activeService.id === s.id ? 'border-emerald-500 bg-emerald-50/50 scale-105' : 'border-slate-50 bg-slate-50/50 hover:bg-slate-100'
-                        }`}
-                    >
-                        <s.icon size={20} className={s.color} />
-                        <span className="text-[8px] font-black uppercase tracking-widest">{s.name}</span>
-                    </button>
-                ))}
+                {SERVICES.map(s => {
+                    if (s.id === 'BANK') return null; // Hide Bank from utilities
+                    return (
+                        <button 
+                            key={s.id} 
+                            onClick={() => handleResetService(s)}
+                            className={`min-w-[80px] p-4 rounded-2xl border-2 transition-all flex flex-col items-center justify-center gap-2 shrink-0 ${
+                                activeService.id === s.id ? 'border-emerald-500 bg-emerald-50/50 scale-105' : 'border-slate-50 bg-slate-50/50 hover:bg-slate-100'
+                            }`}
+                        >
+                            <s.icon size={20} className={s.color} />
+                            <span className="text-[8px] font-black uppercase tracking-widest">{s.name}</span>
+                        </button>
+                    )
+                })}
             </div>
 
             <div className="space-y-5">
@@ -1156,8 +1126,8 @@ export default function Home() {
                               <p className="font-black text-slate-900 text-lg tracking-tight">{selectedInternetPlan.name}</p>
                               <p className="text-[10px] text-sky-500 font-bold uppercase tracking-wider mb-2">Selected Package</p>
                               <div className="pt-2 border-t border-sky-200/50 flex justify-between items-end">
-                                  <p className="font-black text-sky-600 text-xl leading-none">₦{parseFloat(selectedInternetPlan.variation_amount).toLocaleString()}</p>
-                                  <p className="text-[10px] text-slate-500 font-bold">{(parseFloat(selectedInternetPlan.variation_amount) / exchangeRate).toFixed(4)} {selectedToken.symbol}</p>
+                                  <p className="font-black text-sky-600 text-xl leading-none">₦{parseFloat(selectedInternetPlan.variation_amount || "0").toLocaleString()}</p>
+                                  <p className="text-[10px] text-slate-500 font-bold">{(parseFloat(selectedInternetPlan.variation_amount || "0") / exchangeRate).toFixed(4)} {selectedToken.symbol}</p>
                                </div>
                            </div>
                         </div>
@@ -1169,18 +1139,18 @@ export default function Home() {
                             <p className="text-center text-xs font-bold text-slate-400 py-4">No packages available for this selection.</p>
                           ) : (
                             filteredInternetDataPlans.map((plan) => {
-                              const cryptoPlanCost = (parseFloat(plan.variation_amount) / exchangeRate).toFixed(4);
+                              const cryptoPlanCost = (parseFloat(plan.variation_amount || "0") / exchangeRate).toFixed(4);
                               return (
                                 <button 
                                   key={plan.variation_code} 
-                                  onClick={() => { setSelectedInternetPlan(plan); setNairaAmount(plan.variation_amount); }} 
+                                  onClick={() => { setSelectedInternetPlan(plan); setNairaAmount(plan.variation_amount ? plan.variation_amount.toString() : "0"); }} 
                                   className="p-3 rounded-xl border border-slate-200 bg-white hover:border-sky-300 transition-all text-left flex justify-between items-center group"
                                 >
                                   <div>
                                     <p className="font-black text-slate-800 text-xs">{plan.name}</p>
                                     <p className="text-[9px] text-slate-400 font-bold mt-0.5">{cryptoPlanCost} {selectedToken.symbol}</p>
                                   </div>
-                                  <p className="font-black text-sky-600 text-sm group-hover:scale-110 transition-transform">₦{parseFloat(plan.variation_amount).toLocaleString()}</p>
+                                  <p className="font-black text-sky-600 text-sm group-hover:scale-110 transition-transform">₦{parseFloat(plan.variation_amount || "0").toLocaleString()}</p>
                                 </button>
                               );
                             })
