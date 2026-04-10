@@ -22,7 +22,7 @@ const ERC20_ABI = [
 
 const SERVICES = [
   { id: "AIRTIME", name: "Buy Airtime", icon: Phone, color: "text-[#34d399]", bg: "bg-emerald-500/10" },
-  { id: "DATA", name: "Buy Data", icon: Wifi, color: "text-[#a855f7]", bg: "bg-purple-500/10" },
+  { id: "DATA", name: "Buy Data", icon Wifi, color: "text-[#a855f7]", bg: "bg-purple-500/10" },
   { id: "ELECTRICITY", name: "Electricity", icon: Lightbulb, color: "text-[#f97316]", bg: "bg-orange-500/10" },
   { id: "CABLE", name: "Cable TV", icon: Tv, color: "text-[#ec4899]", bg: "bg-pink-500/10" },
 ];
@@ -282,16 +282,26 @@ export default function Home() {
       try {
         const res = await fetch(`/api/foreign?action=product-types&code=${activeCountry.code}`);
         const data = await res.json();
-        const extractedPts = extractVtpassArray(data);
+        
+        let extractedPts = extractVtpassArray(data);
+        
+        // ⚡ SMART FILTER: If VTPass Sandbox only returns 1 product type, artificially split it for testing UI
+        if (extractedPts.length === 1 && !isMainnet) {
+            extractedPts = [
+                { product_type_id: extractedPts[0].product_type_id || 1, name: "Mobile Top Up" },
+                { product_type_id: 2, name: "Data Bundle" }
+            ];
+        }
+
         setForeignProductTypes(extractedPts);
         setActiveForeignProductType(extractedPts[0] || null); 
       } catch (e) {}
       setIsFetchingForeign(false);
     };
     fetchForeignProductTypes();
-  }, [activeCountry.code]);
+  }, [activeCountry.code, isMainnet]);
 
-  // ⚡ 2. STRICT OPERATOR FETCHING BASED ON TAB ⚡
+  // ⚡ 2. FETCH FOREIGN OPERATORS ⚡
   useEffect(() => {
     if (activeCountry.code === 'NG' || !activeForeignProductType) {
       setForeignOperators([]);
@@ -313,7 +323,7 @@ export default function Home() {
     fetchOperators();
   }, [activeCountry.code, activeForeignProductType]);
 
-  // ⚡ 3. STRICT VARIATIONS FETCHING BASED ON OPERATOR ⚡
+  // ⚡ 3. FETCH FOREIGN VARIATIONS ⚡
   useEffect(() => {
     if (activeCountry.code === 'NG' || !selectedForeignOperator || !activeForeignProductType) return;
     const fetchVariations = async () => {
@@ -328,22 +338,32 @@ export default function Home() {
         const data = await res.json();
         
         let varArray = extractVtpassArray(data);
-        // VTPass sometimes wraps variations inside a `varations` key
         if (data.content && data.content.varations) {
            varArray = Array.isArray(data.content.varations) ? data.content.varations : Object.values(data.content.varations);
         }
-
         setForeignVariations(varArray);
-        if (varArray.length === 1 && varArray[0].fixedPrice === "No") {
-            setSelectedForeignVariation(varArray[0]);
-        }
       } catch(e) {}
       setIsFetchingForeign(false);
     };
     fetchVariations();
   }, [selectedForeignOperator, activeForeignProductType, activeCountry.code]);
 
-  // ⚡ NIGERIAN API EFFECTS ⚡
+  // ⚡ SMART SANDBOX FILTER FOR VARIATIONS ⚡
+  const filteredForeignVariations = useMemo(() => {
+     if (!foreignVariations) return [];
+     const tabName = (activeForeignProductType?.name || "").toLowerCase();
+     const isDataTab = tabName.includes("data") || tabName.includes("bundle");
+
+     return foreignVariations.filter(v => {
+        const vName = (v.name || "").toLowerCase();
+        const isVariationData = vName.includes("data") || vName.includes("gb") || vName.includes("mb") || vName.includes("bundle") || vName.includes("internet");
+        
+        if (isDataTab) return isVariationData; 
+        return !isVariationData; // If Airtime tab, hide Data packages
+     });
+  }, [foreignVariations, activeForeignProductType]);
+
+  // ⚡ NIGERIAN API LOGIC ⚡
   useEffect(() => {
     if (activeCountry.code !== "NG") return;
     if ((activeService.id === "AIRTIME" || activeService.id === "DATA") && accountNumber.length >= 4) {
@@ -917,12 +937,12 @@ export default function Home() {
                         <button 
                             key={ptId} 
                             onClick={() => { setActiveForeignProductType(pt); setSelectedForeignOperator(null); setForeignVariations([]); setForeignAmount(""); setNairaAmount(""); }}
-                            className={`p-4 rounded-2xl border-2 transition-all flex flex-col items-center gap-2 ${
+                            className={`px-2 py-4 rounded-2xl border-2 transition-all flex flex-col items-center gap-2 ${
                                 isSelected ? 'border-emerald-500 bg-emerald-50/50 scale-105' : 'border-slate-50 bg-slate-50/50 hover:bg-slate-100'
                             }`}
                         >
                             <Icon size={20} className={color} />
-                            <span className="text-[8px] font-black uppercase tracking-widest text-center leading-tight line-clamp-1">{pt.name}</span>
+                            <span className="text-[9px] font-black uppercase tracking-tight text-center leading-tight whitespace-nowrap">{pt.name}</span>
                         </button>
                      );
                   })
@@ -990,52 +1010,75 @@ export default function Home() {
                            </div>
                          )}
 
-                         {/* DYNAMIC FOREIGN PRICING/VARIATION ENGINE */}
+                         {/* ⚡ DYNAMIC FOREIGN PRICING/VARIATION ENGINE ⚡ */}
                          {selectedForeignOperator && (
                             <div className="mt-2 p-4 bg-slate-50 border border-slate-100 rounded-2xl animate-in fade-in zoom-in-95">
                                {isFetchingForeign ? (
                                   <p className="text-[10px] font-bold text-slate-400 text-center animate-pulse">Loading packages...</p>
-                               ) : foreignVariations.length > 0 && foreignVariations[0].fixedPrice === "No" ? (
-                                  <div>
-                                     <label className="text-[10px] font-black text-slate-400 uppercase mb-2 block">Enter Topup Amount (Local Currency)</label>
-                                     <input
-                                       type="number"
-                                       placeholder={`Amount (Rate: ₦${foreignVariations[0].variation_rate})`}
-                                       value={foreignAmount}
-                                       onChange={(e) => {
-                                         setForeignAmount(e.target.value);
-                                         setSelectedForeignVariation(foreignVariations[0]);
-                                         const nairaCost = parseFloat(e.target.value) * parseFloat(foreignVariations[0].variation_rate);
-                                         setNairaAmount(isNaN(nairaCost) ? "" : nairaCost.toString());
-                                       }}
-                                       className="w-full bg-white border border-slate-200 p-4 rounded-xl font-black text-lg text-slate-800 outline-none focus:border-emerald-500 transition-colors"
-                                     />
+                               ) : selectedForeignVariation && selectedForeignVariation.fixedPrice === "No" ? (
+                                  
+                                  /* FLEXIBLE AMOUNT INPUT VIEW */
+                                  <div className="animate-in fade-in">
+                                     <button 
+                                       onClick={() => { setSelectedForeignVariation(null); setNairaAmount(""); setForeignAmount(""); }}
+                                       className="text-[10px] font-black text-slate-400 hover:text-emerald-500 uppercase tracking-widest mb-3 flex items-center gap-1 transition-colors"
+                                     >
+                                        <ChevronLeft size={12}/> View All Packages
+                                     </button>
+                                     <label className="text-[10px] font-black text-emerald-600 uppercase mb-2 block tracking-widest">Enter Topup Amount (Local Currency)</label>
+                                     <div className="relative">
+                                       <input
+                                         type="number"
+                                         placeholder={`Minimum amount allowed...`}
+                                         value={foreignAmount}
+                                         onChange={(e) => {
+                                           setForeignAmount(e.target.value);
+                                           const nairaCost = parseFloat(e.target.value) * parseFloat(selectedForeignVariation.variation_rate);
+                                           setNairaAmount(isNaN(nairaCost) ? "" : nairaCost.toString());
+                                         }}
+                                         className="w-full bg-white border-2 border-emerald-500/30 p-5 rounded-xl font-black text-xl text-slate-800 outline-none focus:border-emerald-500 transition-colors shadow-sm"
+                                       />
+                                       <span className="absolute right-4 top-1/2 -translate-y-1/2 text-xs font-black text-slate-400 uppercase tracking-widest bg-slate-100 px-2 py-1 rounded">
+                                          Rate: ₦{selectedForeignVariation.variation_rate}
+                                       </span>
+                                     </div>
                                   </div>
+
                                ) : (
-                                  <div className="grid grid-cols-1 gap-2 max-h-[30vh] overflow-y-auto pr-1">
-                                     {foreignVariations.map(variation => {
-                                       const cryptoCost = (parseFloat(variation.charged_amount || variation.variation_amount) / exchangeRate).toFixed(4);
-                                       return (
-                                         <button
-                                           key={variation.variation_code}
-                                           onClick={() => {
-                                             setSelectedForeignVariation(variation);
-                                             setNairaAmount(variation.charged_amount || variation.variation_amount);
-                                           }}
-                                           className={`p-3 rounded-xl border text-left flex justify-between items-center transition-all ${
-                                             selectedForeignVariation?.variation_code === variation.variation_code
-                                             ? 'border-emerald-500 bg-emerald-50 shadow-sm'
-                                             : 'border-slate-200 bg-white hover:border-slate-300'
-                                           }`}
-                                         >
-                                           <div>
-                                             <p className="font-black text-slate-800 text-xs">{variation.name}</p>
-                                             <p className="text-[9px] text-slate-400 font-bold mt-0.5">{cryptoCost} {selectedToken.symbol}</p>
-                                           </div>
-                                           <p className="font-black text-emerald-600 text-sm">₦{parseFloat(variation.charged_amount || variation.variation_amount).toLocaleString()}</p>
-                                         </button>
-                                       )
-                                     })}
+                                  /* STANDARD PACKAGE LIST VIEW */
+                                  <div className="grid grid-cols-1 gap-2 max-h-[35vh] overflow-y-auto pr-1">
+                                     {filteredForeignVariations.length === 0 ? (
+                                        <p className="text-[10px] font-bold text-slate-400 text-center py-4">No packages found for this selection.</p>
+                                     ) : (
+                                        filteredForeignVariations.map(variation => {
+                                           const isFlexible = variation.fixedPrice === "No";
+                                           
+                                           // Safely parse Crypto & Naira (Show "Flexible" if no fixed amount)
+                                           const cryptoCost = isFlexible ? "Calculated on Entry" : `${(parseFloat(variation.charged_amount || variation.variation_amount) / exchangeRate).toFixed(4)} ${selectedToken.symbol}`;
+                                           const nairaCost = isFlexible ? "Flexible Amount" : `₦${parseFloat(variation.charged_amount || variation.variation_amount).toLocaleString()}`;
+                                           
+                                           return (
+                                             <button
+                                               key={variation.variation_code}
+                                               onClick={() => {
+                                                 setSelectedForeignVariation(variation);
+                                                 if (!isFlexible) setNairaAmount(variation.charged_amount || variation.variation_amount);
+                                               }}
+                                               className={`p-3 rounded-xl border text-left flex justify-between items-center transition-all ${
+                                                 selectedForeignVariation?.variation_code === variation.variation_code
+                                                 ? 'border-emerald-500 bg-emerald-50 shadow-sm'
+                                                 : 'border-slate-200 bg-white hover:border-slate-300'
+                                               }`}
+                                             >
+                                               <div>
+                                                 <p className="font-black text-slate-800 text-xs">{variation.name}</p>
+                                                 <p className={`text-[9px] font-bold mt-0.5 ${isFlexible ? 'text-blue-500 uppercase tracking-widest' : 'text-slate-400'}`}>{cryptoCost}</p>
+                                               </div>
+                                               <p className={`font-black text-sm ${isFlexible ? 'text-blue-600 bg-blue-50 px-2 py-1 rounded' : 'text-emerald-600'}`}>{nairaCost}</p>
+                                             </button>
+                                           )
+                                        })
+                                     )}
                                   </div>
                                )}
                             </div>
