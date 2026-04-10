@@ -144,10 +144,17 @@ export async function POST(req: Request) {
       vtpassPayload.product_type_id = product_type_id;
       vtpassPayload.email = email || "support@abapay.com";
     } else {
-      // ⚡ UPGRADED: Add INTERNET to data mapping ⚡
-      if (serviceCategory === 'DATA' || serviceCategory === 'ELECTRICITY' || serviceCategory === 'BANK' || serviceCategory === 'INTERNET') {
+      if (serviceCategory === 'DATA' || serviceCategory === 'ELECTRICITY' || serviceCategory === 'BANK') {
         vtpassPayload.billersCode = billersCode;
         vtpassPayload.variation_code = variation_code;
+      }
+      else if (serviceCategory === 'INTERNET') {
+        vtpassPayload.billersCode = billersCode;
+        vtpassPayload.variation_code = variation_code;
+        // ⚡ SPECTRANET PAYLOAD OVERRIDE ⚡
+        if (serviceID === 'spectranet') {
+           vtpassPayload.quantity = 1;
+        }
       }
       else if (serviceCategory === 'CABLE') {
         vtpassPayload.billersCode = billersCode;
