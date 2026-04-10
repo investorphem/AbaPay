@@ -3,21 +3,28 @@ import { BASE_URL, getHeaders } from '@/lib/vtpass';
 
 export async function POST(req: Request) {
   try {
-    const body = await req.json();
-    const { billersCode, serviceID, type } = body;
+    const { billersCode, serviceID, type } = await req.json();
 
-    const payload: any = { billersCode, serviceID };
-    if (type) payload.type = type;
+    let url = `${BASE_URL}/merchant-verify`;
+    let bodyPayload: any = { billersCode, serviceID };
 
-    const res = await fetch(`${BASE_URL}/merchant-verify`, {
+    if (type) bodyPayload.type = type;
+
+    // ⚡ VTPASS SMILE NETWORK OVERRIDE ⚡
+    if (serviceID === 'smile-direct') {
+       url = `${BASE_URL}/merchant-verify/smile/email`;
+       bodyPayload = { billersCode, serviceID }; // billersCode here acts as the email
+    }
+
+    const res = await fetch(url, {
       method: 'POST',
       headers: getHeaders('POST'),
-      body: JSON.stringify(payload)
+      body: JSON.stringify(bodyPayload)
     });
 
     const data = await res.json();
     return NextResponse.json(data);
   } catch (error: any) {
-    return NextResponse.json({ success: false, message: error.message }, { status: 500 });
+    return NextResponse.json({ code: "500", message: "Verification Failed" }, { status: 500 });
   }
 }
