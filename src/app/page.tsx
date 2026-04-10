@@ -39,8 +39,10 @@ const CABLE_PROVIDERS_LIST = [
 
 const TELECOM_PROVIDERS = ["mtn", "glo", "9mobile", "airtel"]; 
 
+// ⚡ UPGRADED: Added Spectranet ⚡
 const INTERNET_PROVIDERS = [
-  { serviceID: "smile-direct", displayName: "Smile Network", logo: "/smile.png" }
+  { serviceID: "smile-direct", displayName: "Smile Network", logo: "/smile.png" },
+  { serviceID: "spectranet", displayName: "Spectranet", logo: "/spectranet.png" }
 ];
 
 const SUPPORTED_TOKENS = [
@@ -85,9 +87,10 @@ export default function Home() {
   const [bankVariations, setBankVariations] = useState<any[]>([]);
   const [selectedBank, setSelectedBank] = useState<any>(null);
 
-  const [smileVariations, setSmileVariations] = useState<any[]>([]);
-  const [selectedSmilePlan, setSelectedSmilePlan] = useState<any>(null);
-  const [smileAccountId, setSmileAccountId] = useState<string | null>(null);
+  // ⚡ INTERNET STATES ⚡
+  const [internetVariations, setInternetVariations] = useState<any[]>([]);
+  const [selectedInternetPlan, setSelectedInternetPlan] = useState<any>(null);
+  const [internetAccountId, setInternetAccountId] = useState<string | null>(null);
 
   const [activeCountry, setActiveCountry] = useState(SUPPORTED_COUNTRIES[0]);
   const [activeService, setActiveService] = useState(SERVICES[0]);
@@ -115,7 +118,6 @@ export default function Home() {
   const [modalOptions, setModalOptions] = useState<any[]>([]); 
   const [modalCallback, setModalCallback] = useState<((value: string) => void) | null>(null);
   
-  // ⚡ FIXED: Added 'bank' to the generic type signature here ⚡
   const [modalType, setModalType] = useState<'standard' | 'token' | 'provider' | 'country' | 'bank'>('standard'); 
   
   const [toast, setToast] = useState<{title: string, message: string, type: 'success' | 'error'} | null>(null);
@@ -157,7 +159,7 @@ export default function Home() {
 
   useEffect(() => {
     if (status && !isProcessing) setStatus("");
-  }, [accountNumber, nairaAmount, activeService, cableSubscriptionType, selectedDataPlan, selectedCablePlan, selectedBank, selectedSmilePlan]);
+  }, [accountNumber, nairaAmount, activeService, cableSubscriptionType, selectedDataPlan, selectedCablePlan, selectedBank, selectedInternetPlan]);
 
   useEffect(() => {
     if (status && !isProcessing) {
@@ -295,15 +297,15 @@ export default function Home() {
       };
       fetchDataVariations();
     } else if (activeService.id === "INTERNET") {
-      const fetchSmileVariations = async () => {
-        setSmileVariations([]);
+      const fetchInternetVariations = async () => {
+        setInternetVariations([]);
         try {
           const res = await fetch(`/api/variations?serviceID=${internetProvider}`);
           const data = await res.json();
-          if (data.content && data.content.varations) setSmileVariations(data.content.varations);
+          if (data.content && data.content.varations) setInternetVariations(data.content.varations);
         } catch (e) {}
       };
-      fetchSmileVariations();
+      fetchInternetVariations();
     }
   }, [activeService.id, cableProvider, telecomProvider, internetProvider]);
 
@@ -322,7 +324,7 @@ export default function Home() {
     setCustomerName(null);
     setCableCurrentBouquet(null);
     setCableRenewAmount(null);
-    setSmileAccountId(null);
+    setInternetAccountId(null);
 
     try {
         const serviceID = activeService.id === "ELECTRICITY" ? elecProvider : activeService.id === "BANK" ? "bank-deposit" : activeService.id === "INTERNET" ? internetProvider : cableProvider;
@@ -343,8 +345,9 @@ export default function Home() {
         if (data.code === '000') {
           setCustomerName(data.content.Customer_Name || data.content.account_name || data.content.name);
 
-          if (activeService.id === "INTERNET") {
-             setSmileAccountId(data.content.AccountId || data.content.account_id);
+          // ⚡ STORE SMILE ACCOUNT ID ⚡
+          if (activeService.id === "INTERNET" && internetProvider === "smile-direct") {
+             setInternetAccountId(data.content.AccountId || data.content.account_id);
           }
 
           if (activeService.id === "CABLE") {
@@ -368,7 +371,7 @@ export default function Home() {
       verifyMerchant();
     } else if (activeService.id === "BANK" && accountNumber.length === 10 && selectedBank) {
       verifyMerchant();
-    } else if (activeService.id === "INTERNET" && accountNumber.includes('@') && accountNumber.includes('.')) {
+    } else if (activeService.id === "INTERNET" && internetProvider === "smile-direct" && accountNumber.includes('@') && accountNumber.includes('.')) {
       const timeoutId = setTimeout(() => verifyMerchant(), 1000);
       return () => clearTimeout(timeoutId);
     } else {
@@ -413,7 +416,11 @@ export default function Home() {
       return accountNumber.length === 11 && accountNumber.startsWith("0") && selectedDataPlan !== null;
     }
     if (activeService.id === "INTERNET") {
-      return smileAccountId !== null && selectedSmilePlan !== null && customerPhone.length >= 10;
+      if (internetProvider === 'smile-direct') {
+        return internetAccountId !== null && selectedInternetPlan !== null && customerPhone.length >= 10;
+      } else { // Spectranet
+        return accountNumber.length >= 5 && selectedInternetPlan !== null && customerPhone.length >= 10;
+      }
     }
     if (activeService.id === "ELECTRICITY") {
       return accountNumber.length >= 10 && customerName !== null;
@@ -435,7 +442,7 @@ export default function Home() {
       }
     }
     return false;
-  }, [accountNumber, nairaAmount, activeService, customerName, dynamicMinAmount, dynamicMaxAmount, cableSubscriptionType, selectedCablePlan, selectedDataPlan, cableProvider, selectedBank, selectedSmilePlan, smileAccountId, customerPhone]);
+  }, [accountNumber, nairaAmount, activeService, customerName, dynamicMinAmount, dynamicMaxAmount, cableSubscriptionType, selectedCablePlan, selectedDataPlan, cableProvider, selectedBank, selectedInternetPlan, internetAccountId, customerPhone, internetProvider]);
 
   const handlePayment = async () => {
     if (!address || !client) return setStatus("Connect Wallet First");
@@ -503,9 +510,9 @@ export default function Home() {
         finalVariationCode = selectedBank.variation_code; 
       } else if (activeService.id === "INTERNET") {
         vtpassServiceID = internetProvider; 
-        displayNetwork = "Smile Network";
-        finalVariationCode = selectedSmilePlan?.variation_code || 'none'; 
-        payloadBillersCode = smileAccountId || accountNumber; 
+        displayNetwork = internetProvider === 'smile-direct' ? "Smile Network" : "Spectranet";
+        finalVariationCode = selectedInternetPlan?.variation_code || 'none'; 
+        payloadBillersCode = internetProvider === 'smile-direct' ? (internetAccountId || accountNumber) : accountNumber; 
       } else {
         vtpassServiceID = telecomProvider; 
         displayNetwork = telecomProvider;
@@ -557,8 +564,8 @@ export default function Home() {
       setSelectedCablePlan(null);
       setCableCurrentBouquet(null);
       setSelectedBank(null);
-      setSelectedSmilePlan(null); 
-      setSmileAccountId(null);
+      setSelectedInternetPlan(null); 
+      setInternetAccountId(null);
 
       const res = await fetch('/api/pay', {
         method: 'POST',
@@ -606,8 +613,8 @@ export default function Home() {
     setSelectedCablePlan(null);
     setCableSubscriptionType("renew");
     setSelectedBank(null);
-    setSelectedSmilePlan(null);
-    setSmileAccountId(null);
+    setSelectedInternetPlan(null);
+    setInternetAccountId(null);
   };
 
   const handleCountryChange = (countryCode: string) => {
@@ -703,6 +710,10 @@ export default function Home() {
   const currentCable = useMemo(() => {
     return CABLE_PROVIDERS_LIST.find(c => c.serviceID === cableProvider);
   }, [cableProvider]);
+
+  const currentInternet = useMemo(() => {
+    return INTERNET_PROVIDERS.find(c => c.serviceID === internetProvider);
+  }, [internetProvider]);
 
   return (
     <main className="min-h-screen bg-slate-50 text-slate-900 font-sans p-4 flex flex-col items-center pb-20 relative">
@@ -949,14 +960,14 @@ export default function Home() {
                     >
                         <div className="flex items-center gap-4">
                             <div className="w-12 h-12 shrink-0 rounded-full border border-slate-100 bg-white p-0.5 flex items-center justify-center shadow-sm overflow-hidden group-hover:shadow-md transition-shadow">
-                                <img src={provider.logo} alt={provider.displayName} className="w-full h-full object-contain" />
+                                <img src={provider.logo} alt={provider.displayName} className="w-full h-full object-contain" onError={(e) => { e.currentTarget.style.display = 'none'; e.currentTarget.parentElement!.innerHTML = `<span class="text-[9px] font-black uppercase text-slate-400">${provider.displayName.slice(0,3)}</span>`; }} />
                             </div>
                             <div>
                                 <span className="text-sm font-black text-slate-900 tracking-tight">{provider.displayName}</span>
                             </div>
                         </div>
-                        {(activeService.id === 'ELECTRICITY' ? elecProvider === provider.serviceID : cableProvider === provider.serviceID) && (
-                          <CheckCircle2 size={20} className={activeService.id === 'ELECTRICITY' ? "text-orange-500" : "text-pink-500"}/>
+                        {(activeService.id === 'ELECTRICITY' ? elecProvider === provider.serviceID : activeService.id === 'INTERNET' ? internetProvider === provider.serviceID : cableProvider === provider.serviceID) && (
+                          <CheckCircle2 size={20} className={activeService.id === 'ELECTRICITY' ? "text-orange-500" : activeService.id === 'INTERNET' ? "text-sky-500" : "text-pink-500"}/>
                         )}
                     </button>
                  ))}
@@ -1061,17 +1072,20 @@ export default function Home() {
                             <ChevronDown size={18} className="text-slate-400"/>
                         </button>
                     ) : activeService.id === "INTERNET" ? (
-                        <div className="w-full bg-white border border-slate-200 p-4 rounded-2xl flex justify-between items-center shadow-sm">
+                        <button 
+                            onClick={() => openSelectionModal('provider', "Select Provider", INTERNET_PROVIDERS, setInternetProvider)}
+                            className="w-full bg-white border border-slate-200 p-4 rounded-2xl flex justify-between items-center hover:border-sky-400 transition-colors shadow-sm active:scale-[0.98]"
+                        >
                             <div className="flex items-center gap-4">
                                 <div className="w-12 h-12 shrink-0 rounded-full border border-slate-100 bg-sky-50 flex items-center justify-center shadow-inner overflow-hidden">
-                                    <img src="/smile.png" alt="Smile" className="w-full h-full object-contain" onError={(e) => { e.currentTarget.style.display = 'none'; e.currentTarget.parentElement!.innerHTML = `<span class="text-[9px] font-black uppercase text-sky-500">SMILE</span>`; }} />
+                                    <img src={currentInternet?.logo} alt={currentInternet?.displayName} className="w-full h-full object-contain" onError={(e) => { e.currentTarget.style.display = 'none'; e.currentTarget.parentElement!.innerHTML = `<span class="text-[9px] font-black uppercase text-sky-500">${currentInternet?.displayName.slice(0,3)}</span>`; }} />
                                 </div>
                                 <div>
-                                    <span className="text-sm font-black text-slate-900 tracking-tight">Smile Network</span>
-                                    <p className="text-[10px] font-black uppercase text-sky-600 tracking-wider">Direct Payment</p>
+                                    <span className="text-sm font-black text-slate-900 tracking-tight">{currentInternet?.displayName}</span>
                                 </div>
                             </div>
-                        </div>
+                            <ChevronDown size={18} className="text-slate-400"/>
+                        </button>
                     ) : activeService.id === "AIRTIME" || activeService.id === "DATA" ? (
                       <div className="flex justify-between items-center gap-2">
                         {TELECOM_PROVIDERS.map((provider) => (
@@ -1095,9 +1109,7 @@ export default function Home() {
                                 }}
                               />
                             </div>
-                            <span className={`text-[9px] font-black uppercase tracking-wider ${telecomProvider === provider ? 'text-emerald-700' : 'text-slate-500'}`}>
-                              {provider}
-                            </span>
+                            <span className={`text-[9px] font-black uppercase tracking-wider ${telecomProvider === provider ? 'text-emerald-700' : 'text-slate-500'}`}>{provider}</span>
                           </button>
                         ))}
                       </div>
@@ -1143,15 +1155,15 @@ export default function Home() {
 
                 <div>
                     <label className="text-[10px] font-black text-slate-400 uppercase mb-2 flex justify-between">
-                      <span>{activeService.id === "BANK" ? "Account Number (10 Digits)" : activeService.id === "INTERNET" ? "Enter Smile Email" : activeService.id === "AIRTIME" || activeService.id === "DATA" || (activeService.id === "CABLE" && cableProvider === "showmax") ? "Phone Number (11 Digits)" : "Account / Smartcard No"}</span>
+                      <span>{activeService.id === "BANK" ? "Account Number (10 Digits)" : activeService.id === "INTERNET" ? (internetProvider === 'smile-direct' ? "Enter Smile Email" : "Spectranet ID / Phone") : activeService.id === "AIRTIME" || activeService.id === "DATA" || (activeService.id === "CABLE" && cableProvider === "showmax") ? "Phone Number (11 Digits)" : "Account / Smartcard No"}</span>
                       {(activeService.id === "BANK" || activeService.id === "AIRTIME" || activeService.id === "DATA" || (activeService.id === "CABLE" && cableProvider === "showmax")) && (
                         <span className={accountNumber.length === (activeService.id === "BANK" ? 10 : 11) ? "text-emerald-500" : "text-slate-400"}>{accountNumber.length}/{activeService.id === "BANK" ? 10 : 11}</span>
                       )}
                     </label>
                     <input 
-                        type={activeService.id === "INTERNET" ? "email" : "tel"} 
-                        placeholder={activeService.id === "BANK" ? "Enter Account Number" : activeService.id === "INTERNET" ? "example@email.com" : activeService.id === "AIRTIME" || activeService.id === "DATA" || (activeService.id === "CABLE" && cableProvider === "showmax") ? "08000000000" : "Enter Number"}
-                        maxLength={activeService.id === "BANK" ? 10 : activeService.id === "INTERNET" ? undefined : activeService.id === "AIRTIME" || activeService.id === "DATA" || (activeService.id === "CABLE" && cableProvider === "showmax") ? 11 : 20}
+                        type={activeService.id === "INTERNET" && internetProvider === 'smile-direct' ? "email" : "tel"} 
+                        placeholder={activeService.id === "BANK" ? "Enter Account Number" : activeService.id === "INTERNET" ? (internetProvider === 'smile-direct' ? "example@email.com" : "Enter Spectranet ID") : activeService.id === "AIRTIME" || activeService.id === "DATA" || (activeService.id === "CABLE" && cableProvider === "showmax") ? "08000000000" : "Enter Number"}
+                        maxLength={activeService.id === "BANK" ? 10 : activeService.id === "INTERNET" && internetProvider === 'smile-direct' ? undefined : activeService.id === "AIRTIME" || activeService.id === "DATA" || (activeService.id === "CABLE" && cableProvider === "showmax") ? 11 : 20}
                         className={`w-full bg-slate-50 border p-5 rounded-2xl font-black text-xl text-slate-800 outline-none transition-all ${
                           (activeService.id === "BANK" && accountNumber.length > 0 && accountNumber.length < 10) || ((activeService.id === "AIRTIME" || activeService.id === "DATA" || (activeService.id === "CABLE" && cableProvider === "showmax")) && accountNumber.length > 0 && accountNumber.length < 11) 
                           ? "border-red-300 focus:border-red-500" 
@@ -1159,7 +1171,7 @@ export default function Home() {
                         }`}
                         value={accountNumber}
                         onChange={(e) => {
-                            if (activeService.id === "INTERNET") {
+                            if (activeService.id === "INTERNET" && internetProvider === 'smile-direct') {
                                 setAccountNumber(e.target.value);
                             } else {
                                 setAccountNumber(e.target.value.replace(/[^0-9]/g, ''));
@@ -1168,7 +1180,7 @@ export default function Home() {
                     />
                     {isVerifying && <p className="text-[10px] text-blue-500 font-bold mt-2 animate-pulse flex items-center gap-1.5"><Loader2 size={12} className="animate-spin"/> Verifying Account Details...</p>}
 
-                    {customerName && (activeService.id === "ELECTRICITY" || activeService.id === "BANK" || activeService.id === "INTERNET") && (
+                    {customerName && (activeService.id === "ELECTRICITY" || activeService.id === "BANK" || (activeService.id === "INTERNET" && internetProvider === 'smile-direct')) && (
                         <div className="mt-2 bg-emerald-500/10 p-4 rounded-xl border border-emerald-500/20 flex items-center gap-3 animate-in fade-in">
                             <CheckCircle2 size={18} className="text-emerald-600" />
                             <div className="flex-1">
@@ -1179,36 +1191,36 @@ export default function Home() {
                     )}
                 </div>
 
-                {/* ⚡ SMILE NETWORK PACKAGES ⚡ */}
-                {activeService.id === "INTERNET" && smileAccountId && (
+                {/* ⚡ INTERNET PACKAGES ⚡ */}
+                {activeService.id === "INTERNET" && (internetProvider === 'spectranet' || smileAccountId) && (
                   <div className="bg-slate-50 border border-slate-200 rounded-2xl p-4 shadow-sm animate-in fade-in slide-in-from-top-4">
-                     <p className="text-[10px] font-black uppercase tracking-widest text-slate-400 mb-2">Select Smile Plan</p>
+                     <p className="text-[10px] font-black uppercase tracking-widest text-slate-400 mb-2">Select {internetProvider === 'smile-direct' ? 'Smile' : 'Spectranet'} Plan</p>
                      
-                     {selectedSmilePlan ? (
+                     {selectedInternetPlan ? (
                         <div className="relative animate-in zoom-in-95 duration-200 mt-2">
-                           <button onClick={() => { setSelectedSmilePlan(null); setNairaAmount(""); }} className="absolute -top-3 -right-3 bg-slate-200 text-slate-500 hover:text-slate-800 hover:bg-slate-300 rounded-full p-1 transition-all z-10 shadow-sm border border-white">
+                           <button onClick={() => { setSelectedInternetPlan(null); setNairaAmount(""); }} className="absolute -top-3 -right-3 bg-slate-200 text-slate-500 hover:text-slate-800 hover:bg-slate-300 rounded-full p-1 transition-all z-10 shadow-sm border border-white">
                              <XCircle size={16}/>
                            </button>
                            <div className="p-4 rounded-2xl border-2 border-sky-500 bg-sky-50 shadow-sm text-left">
-                              <p className="font-black text-slate-900 text-lg tracking-tight">{selectedSmilePlan.name}</p>
+                              <p className="font-black text-slate-900 text-lg tracking-tight">{selectedInternetPlan.name}</p>
                               <p className="text-[10px] text-sky-500 font-bold uppercase tracking-wider mb-2">Selected Package</p>
                               <div className="pt-2 border-t border-sky-200/50 flex justify-between items-end">
-                                  <p className="font-black text-sky-600 text-xl leading-none">₦{parseFloat(selectedSmilePlan.variation_amount).toLocaleString()}</p>
-                                  <p className="text-[10px] text-slate-500 font-bold">{(parseFloat(selectedSmilePlan.variation_amount) / exchangeRate).toFixed(4)} {selectedToken.symbol}</p>
+                                  <p className="font-black text-sky-600 text-xl leading-none">₦{parseFloat(selectedInternetPlan.variation_amount).toLocaleString()}</p>
+                                  <p className="text-[10px] text-slate-500 font-bold">{(parseFloat(selectedInternetPlan.variation_amount) / exchangeRate).toFixed(4)} {selectedToken.symbol}</p>
                                </div>
                            </div>
                         </div>
                      ) : (
                         <div className="grid grid-cols-1 gap-2 max-h-[35vh] overflow-y-auto pr-1">
-                          {smileVariations.length === 0 ? (
-                            <p className="text-center text-xs font-bold text-slate-400 py-4"><Loader2 className="animate-spin inline-block mr-2" size={14}/> Fetching Smile Packages...</p>
+                          {internetVariations.length === 0 ? (
+                            <p className="text-center text-xs font-bold text-slate-400 py-4"><Loader2 className="animate-spin inline-block mr-2" size={14}/> Fetching Packages...</p>
                           ) : (
-                            smileVariations.map((plan) => {
+                            internetVariations.map((plan) => {
                               const cryptoPlanCost = (parseFloat(plan.variation_amount) / exchangeRate).toFixed(4);
                               return (
                                 <button 
                                   key={plan.variation_code} 
-                                  onClick={() => { setSelectedSmilePlan(plan); setNairaAmount(plan.variation_amount); }} 
+                                  onClick={() => { setSelectedInternetPlan(plan); setNairaAmount(plan.variation_amount); }} 
                                   className="p-3 rounded-xl border border-slate-200 bg-white hover:border-sky-300 transition-all text-left flex justify-between items-center group"
                                 >
                                   <div>
