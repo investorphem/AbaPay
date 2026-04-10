@@ -78,19 +78,19 @@ const extractVtpassArray = (data: any): any[] => {
 };
 
 export default function Home() {
+  // ==========================================
+  // 1. STATE DEFINITIONS
+  // ==========================================
   const [isInitiallyLoading, setIsInitiallyLoading] = useState(true);
-
   const [address, setAddress] = useState<string | null>(null);
   const [client, setClient] = useState<any>(null);
   const [nairaAmount, setNairaAmount] = useState(""); 
   const [accountNumber, setAccountNumber] = useState("");
   const [customerPhone, setCustomerPhone] = useState("");
   const [status, setStatus] = useState("");
-  
   const [activeTab, setActiveTab] = useState<"pay" | "bank" | "history">("pay");
   const [isMiniPay, setIsMiniPay] = useState(false);
   const [isProcessing, setIsProcessing] = useState(false); 
-
   const [customerName, setCustomerName] = useState<string | null>(null);
   const [isVerifying, setIsVerifying] = useState(false);
 
@@ -100,12 +100,10 @@ export default function Home() {
   const [cableVariations, setCableVariations] = useState<any[]>([]);
   const [selectedCablePlan, setSelectedCablePlan] = useState<any>(null);
 
-  // ⚡ INTERNET STATES ⚡
   const [internetVariations, setInternetVariations] = useState<any[]>([]);
   const [selectedInternetPlan, setSelectedInternetPlan] = useState<any>(null);
   const [internetAccountId, setInternetAccountId] = useState<string | null>(null);
 
-  // ⚡ BANK STATES ⚡
   const [bankVariations, setBankVariations] = useState<any[]>([]);
   const [selectedBank, setSelectedBank] = useState<any>(null);
   const [isFetchingBanks, setIsFetchingBanks] = useState(false);
@@ -122,7 +120,6 @@ export default function Home() {
   const [selectedReceipt, setSelectedReceipt] = useState<any>(null); 
   const [isTermsOpen, setIsTermsOpen] = useState(false); 
   const [isPrivacyOpen, setIsPrivacyOpen] = useState(false); 
-
   const [isSupportOpen, setIsSupportOpen] = useState(false);
   const [supportMessage, setSupportMessage] = useState("");
   const [supportTxHash, setSupportTxHash] = useState<string | null>(null);
@@ -136,22 +133,29 @@ export default function Home() {
   const [modalCallback, setModalCallback] = useState<((value: string) => void) | null>(null);
   const [modalType, setModalType] = useState<'standard' | 'token' | 'provider' | 'country' | 'bank'>('standard'); 
   const [toast, setToast] = useState<{title: string, message: string, type: 'success' | 'error'} | null>(null);
+  
   const [currentPage, setCurrentPage] = useState(1);
-
   const [selectedToken, setSelectedToken] = useState(SUPPORTED_TOKENS[0]);
   const [walletBalance, setWalletBalance] = useState("0.00");
   const [isFetchingBalance, setIsFetchingBalance] = useState(false);
   const [exchangeRate, setExchangeRate] = useState<number>(1550); 
   const [transactions, setTransactions] = useState<any[]>([]);
 
+  // ==========================================
+  // 2. CONSTANTS & MEMOS (HOISTED)
+  // ==========================================
   const isMainnet = process.env.NEXT_PUBLIC_NETWORK === "celo";
   const activeChain = isMainnet ? celo : celoSepolia;
   const ABAPAY_CONTRACT = process.env.NEXT_PUBLIC_ABAPAY_ADDRESS as `0x${string}`;
 
-  const showToast = (title: string, message: string, type: 'success' | 'error' = 'success') => {
-    setToast({ title, message, type });
-    setTimeout(() => setToast(null), 5000);
-  };
+  const indexOfLastItem = currentPage * ITEMS_PER_PAGE;
+  const indexOfFirstItem = indexOfLastItem - ITEMS_PER_PAGE;
+  const currentTransactions = transactions.slice(indexOfFirstItem, indexOfLastItem);
+  const totalPages = Math.ceil(transactions.length / ITEMS_PER_PAGE);
+
+  const currentDisco = useMemo(() => ELECTRICITY_DISCOS.find(d => d.serviceID === elecProvider), [elecProvider]);
+  const currentCable = useMemo(() => CABLE_PROVIDERS_LIST.find(c => c.serviceID === cableProvider), [cableProvider]);
+  const currentInternet = useMemo(() => INTERNET_PROVIDERS.find(c => c.serviceID === internetProvider), [internetProvider]);
 
   const dynamicMinAmount = useMemo(() => {
     if (activeTab === "bank") return 1000;
@@ -167,151 +171,107 @@ export default function Home() {
     return Infinity; 
   }, [activeService, activeTab]);
 
-  const indexOfLastItem = currentPage * ITEMS_PER_PAGE;
-  const indexOfFirstItem = indexOfLastItem - ITEMS_PER_PAGE;
-  const currentTransactions = transactions.slice(indexOfFirstItem, indexOfLastItem);
-  const totalPages = Math.ceil(transactions.length / ITEMS_PER_PAGE);
+  const { cryptoToCharge, currentFee } = useMemo(() => {
+    const bill = parseFloat(nairaAmount) || 0;
+    const fee = (activeTab === "bank" || activeService.id === "ELECTRICITY" || activeService.id === "CABLE") ? 100 : 0;
+    const crypto = (bill + fee) / exchangeRate;
+    return { cryptoToCharge: crypto.toFixed(4), currentFee: fee };
+  }, [nairaAmount, exchangeRate, activeService, activeTab]);
 
-  useEffect(() => {
-    if (status && !isProcessing) setStatus("");
-  }, [accountNumber, nairaAmount, activeService, cableSubscriptionType, selectedCablePlan, selectedBank, selectedInternetPlan, activeTab]);
+  const filteredInternetDataPlans = useMemo(() => {
+    if (!internetVariations || internetVariations.length === 0) return [];
+    if (internetProvider === 'smile-direct' || internetProvider === 'spectranet') return internetVariations;
 
-  useEffect(() => {
-    if (status && !isProcessing) {
-      const timer = setTimeout(() => setStatus(""), 5000); 
-      return () => clearTimeout(timer);
+    return internetVariations.filter(plan => {
+      const name = (plan.name || "").toLowerCase();
+      let category = "Monthly";
+
+      if (name.includes('broadband') || name.includes('router') || name.includes('5g') || name.includes('hynet')) category = "Broadband";
+      else if (name.includes('social') || name.includes('whatsapp') || name.includes('ig') || name.includes('instagram') || name.includes('tiktok') || name.includes('youtube') || name.includes('facebook') || name.includes('opera') || name.includes('xot')) category = "Social";
+      else if (name.includes('60 day') || name.includes('90 day') || name.includes('120 day') || name.includes('year') || name.includes('mega') || name.includes('3 month') || name.includes('2 month')) category = "Mega";
+      else if (name.includes('month') || name.includes('30 day')) category = "Monthly";
+      else if (name.includes('week') || name.includes('7 day') || name.includes('14 day') || name.includes('weekend')) category = "Weekly";
+      else if (name.includes('1 day') || name.includes('2 day') || name.includes('3 day') || name.includes('daily') || name.includes('24 hrs') || name.includes('24hrs') || name.includes('night') || name.includes('hourly')) category = "Daily";
+
+      return category === activeDataCategory;
+    }).sort((a, b) => parseFloat(a.variation_amount) - parseFloat(b.variation_amount));
+  }, [internetVariations, activeDataCategory, internetProvider]);
+
+  const isFormValid = useMemo(() => {
+    const amount = parseFloat(nairaAmount);
+    if (!nairaAmount || isNaN(amount) || amount < dynamicMinAmount || amount > dynamicMaxAmount) return false;
+
+    if (activeTab === "bank") {
+       return accountNumber.length === 10 && customerName !== null && selectedBank !== null && customerPhone.length >= 10;
     }
-  }, [status, isProcessing]);
 
-  useEffect(() => {
-    async function initSystem() {
-      const savedHistory = localStorage.getItem("abapay_history");
-      if (savedHistory) setTransactions(JSON.parse(savedHistory));
-
-      try {
-        const { data: settingsData } = await supabase.from('platform_settings').select('exchange_rate').eq('id', 1).single();
-        if (settingsData && settingsData.exchange_rate) setExchangeRate(Number(settingsData.exchange_rate));
-      } catch (consoleError) {}
-
-      if (typeof window !== "undefined" && (window as any).ethereum) {
-        const eth = (window as any).ethereum;
-        if (eth.isMiniPay) setIsMiniPay(true);
-        const walletClient = createWalletClient({ chain: activeChain, transport: custom(eth) });
-        walletClient.requestAddresses().then(([acc]) => {
-          setAddress(acc); setClient(walletClient);
-        }).catch((e) => console.log("Connection deferred"));
-      }
-
-      setTimeout(() => setIsInitiallyLoading(false), 2000);
-    }
-    initSystem();
-  }, [activeChain]);
-
-  useEffect(() => {
-    if (!address) return;
-    async function fetchCloudHistory() {
-      try {
-        const sixMonthsAgo = new Date();
-        sixMonthsAgo.setMonth(sixMonthsAgo.getMonth() - 6);
-        const { data } = await supabase.from('transactions').select('*').eq('wallet_address', address).gte('created_at', sixMonthsAgo.toISOString()).order('created_at', { ascending: false });
-
-        if (data && data.length > 0) {
-          const cloudHistory = data.map((tx: any) => ({
-            id: tx.tx_hash.slice(0, 8), date: new Date(tx.created_at).toLocaleString(), status: tx.status,
-            amountNaira: tx.amount_naira.toString(), amountCrypto: tx.amount_usdt.toString(), tokenUsed: "USD₮", 
-            service: tx.service_category, network: tx.network, txHash: tx.tx_hash, account: tx.account_number,
-            refund_hash: tx.refund_hash, purchased_code: tx.purchased_code, request_id: tx.request_id, units: tx.units 
-          }));
-          setTransactions(cloudHistory);
-          localStorage.setItem("abapay_history", JSON.stringify(cloudHistory));
-        }
-      } catch (e) {}
-    }
-    fetchCloudHistory();
-  }, [address]);
-
-  useEffect(() => {
-    async function fetchBalance() {
-      if (!address) return;
-      setIsFetchingBalance(true);
-      try {
-        const publicClient = createPublicClient({ chain: activeChain, transport: http() });
-        const tokenAddress = isMainnet ? selectedToken.mainnet : selectedToken.sepolia;
-        const balanceWei = await publicClient.readContract({ address: tokenAddress as `0x${string}`, abi: ERC20_ABI, functionName: 'balanceOf', args: [address] });
-        setWalletBalance(parseFloat(formatUnits(balanceWei as bigint, selectedToken.decimals)).toFixed(4));
-      } catch (error) { setWalletBalance("0.00"); }
-      setIsFetchingBalance(false);
-    }
-    fetchBalance();
-  }, [address, selectedToken, activeChain, isMainnet]);
-
-  // ⚡ DEDICATED BANK FETCHER ⚡
-  useEffect(() => {
-    if (activeTab === "bank" && bankVariations.length === 0) {
-      const fetchBanks = async () => {
-        setIsFetchingBanks(true);
-        try {
-          const res = await fetch(`/api/variations?serviceID=bank-deposit`);
-          const data = await res.json();
-          let banksArr = extractVtpassArray(data);
-          
-          if (banksArr && Array.isArray(banksArr) && banksArr.length > 0) {
-            const sortedBanks = banksArr.sort((a: any, b: any) => (a.name || "").localeCompare(b.name || ""));
-            setBankVariations(sortedBanks);
-          }
-        } catch (e) {}
-        setIsFetchingBanks(false);
-      };
-      fetchBanks();
-    }
-  }, [activeTab]);
-
-  // ⚡ DEDICATED UTILITY FETCHER ⚡
-  useEffect(() => {
-    if (activeTab !== "pay") return;
-    if (activeService.id === "CABLE") {
-      const fetchVariations = async () => {
-        try {
-          const res = await fetch(`/api/variations?serviceID=${cableProvider}`);
-          const data = await res.json();
-          setCableVariations(extractVtpassArray(data));
-        } catch (e) {}
-      };
-      fetchVariations();
-    } else if (activeService.id === "INTERNET") {
-      const fetchInternetVariations = async () => {
-        setInternetVariations([]);
-        try {
-          const res = await fetch(`/api/variations?serviceID=${internetProvider}`);
-          const data = await res.json();
-          setInternetVariations(extractVtpassArray(data));
-        } catch (e) {}
-      };
-      fetchInternetVariations();
-    }
-  }, [activeTab, activeService.id, cableProvider, internetProvider]);
-
-  // ⚡ AUTO NETWORK DETECTION ⚡
-  useEffect(() => {
     if (activeTab === "pay") {
-      if (activeService.id === "AIRTIME" && accountNumber.length >= 4) {
-        const prefix = accountNumber.substring(0, 4);
-        if (["0803","0806","0810","0813","0814","0816","0903","0906","0913","0916","0703","0706"].includes(prefix)) setTelecomProvider("mtn");
-        else if (["0802","0808","0812","0902","0907","0912","0701","0708"].includes(prefix)) setTelecomProvider("airtel");
-        else if (["0805","0807","0811","0905","0705","0915"].includes(prefix)) setTelecomProvider("glo");
-        else if (["0809","0817","0818","0908","0909"].includes(prefix)) setTelecomProvider("9mobile");
+      if (activeService.id === "AIRTIME") return accountNumber.length === 11 && accountNumber.startsWith("0");
+      if (activeService.id === "INTERNET") {
+        if (internetProvider === 'smile-direct') {
+          return internetAccountId !== null && selectedInternetPlan !== null && customerPhone.length >= 10;
+        } else if (internetProvider === 'spectranet') {
+          return accountNumber.length >= 5 && selectedInternetPlan !== null && customerPhone.length >= 10;
+        } else {
+          return accountNumber.length === 11 && accountNumber.startsWith("0") && selectedInternetPlan !== null;
+        }
       }
-      if (activeService.id === "INTERNET" && internetProvider.includes("-data") && accountNumber.length >= 4) {
-        const prefix = accountNumber.substring(0, 4);
-        if (["0803","0806","0810","0813","0814","0816","0903","0906","0913","0916","0703","0706"].includes(prefix)) setInternetProvider("mtn-data");
-        else if (["0802","0808","0812","0902","0907","0912","0701","0708"].includes(prefix)) setInternetProvider("airtel-data");
-        else if (["0805","0807","0811","0905","0705","0915"].includes(prefix)) setInternetProvider("glo-data");
-        else if (["0809","0817","0818","0908","0909"].includes(prefix)) setInternetProvider("9mobile-data");
+      if (activeService.id === "ELECTRICITY") return accountNumber.length >= 10 && customerName !== null;
+      if (activeService.id === "CABLE") {
+        if (cableProvider === "showmax") return accountNumber.length >= 11 && selectedCablePlan !== null;
+        if (accountNumber.length < 10 || customerName === null) return false;
+        if (['dstv', 'gotv'].includes(cableProvider)) {
+          if (cableSubscriptionType === 'change' && !selectedCablePlan) return false;
+        } else {
+          if (!selectedCablePlan) return false;
+        }
+        return true;
       }
     }
-  }, [accountNumber, activeService, activeTab, internetProvider]);
+    return false;
+  }, [accountNumber, nairaAmount, activeService, customerName, dynamicMinAmount, dynamicMaxAmount, cableSubscriptionType, selectedCablePlan, selectedBank, selectedInternetPlan, internetAccountId, customerPhone, internetProvider, activeTab, cableProvider]);
 
-  // ⚡ MERCHANT VERIFICATION ENGINE ⚡
+  // ==========================================
+  // 3. ACTION HANDLERS
+  // ==========================================
+  const showToast = (title: string, message: string, type: 'success' | 'error' = 'success') => {
+    setToast({ title, message, type });
+    setTimeout(() => setToast(null), 5000);
+  };
+
+  const handleResetService = (s: any) => {
+    setActiveService(s); setAccountNumber(""); setCustomerName(null); setNairaAmount(""); 
+    setCableCurrentBouquet(null); setCableRenewAmount(null); setSelectedCablePlan(null);
+    setCableSubscriptionType("renew"); setSelectedBank(null); setSelectedInternetPlan(null); setInternetAccountId(null);
+  };
+
+  const openSelectionModal = (type: 'standard' | 'token' | 'provider' | 'country' | 'bank', title: string, options: any[], callback: (value: string) => void) => {
+    setModalType(type as any); setModalTitle(title); setModalOptions(options); setModalCallback(() => callback); setIsSelectionModalOpen(true);
+  };
+
+  const handleCountryChange = (countryCode: string) => {
+    const country = SUPPORTED_COUNTRIES.find(c => c.code === countryCode);
+    if (country && !country.disabled) { setActiveCountry(country); handleResetService(SERVICES[0]); }
+  };
+
+  const handleShareReceipt = async () => {
+    const receiptText = `🧾 AbaPay Receipt\n\nDate: ${selectedReceipt?.date}\nStatus: ${selectedReceipt?.status}\nProduct: ${selectedReceipt?.network} ${selectedReceipt?.service}\nRecipient: ${selectedReceipt?.account}\nAmount Paid: ₦${selectedReceipt?.amountNaira}\nCrypto Used: ${selectedReceipt?.amountCrypto} ${selectedReceipt?.tokenUsed}\nTx Hash: ${selectedReceipt?.txHash}\n\nSecured by Celo Network`;
+    if (navigator.share) { try { await navigator.share({ title: 'Receipt', text: receiptText }); } catch (err) {} } 
+    else { try { await navigator.clipboard.writeText(receiptText); showToast("Copied!", "Receipt details copied to clipboard.", "success"); } catch (err) {} }
+  };
+
+  const submitSupportTicket = async () => {
+    if (!supportMessage.trim()) return;
+    setIsSendingSupport(true);
+    try {
+      const formData = new FormData(); formData.append("message", supportMessage);
+      if (address) formData.append("userAddress", address); if (supportTxHash) formData.append("txHash", supportTxHash); if (supportFile) formData.append("file", supportFile);
+      await fetch('/api/support', { method: 'POST', body: formData });
+      setIsSupportOpen(false); setSupportMessage(""); setSupportFile(null); setSupportTxHash(null); 
+      showToast("Ticket Submitted", "Support has received your request.", "success");
+    } catch (error) { showToast("Connection Error", "Failed to send the ticket.", "error"); } finally { setIsSendingSupport(false); }
+  };
+
   const verifyMerchant = async () => {
     setIsVerifying(true);
     setCustomerName(null);
@@ -359,79 +319,6 @@ export default function Home() {
     } catch (e) {}
     setIsVerifying(false);
   };
-
-  useEffect(() => {
-    if (activeTab === "bank") {
-       if (accountNumber.length === 10 && selectedBank) verifyMerchant();
-       else setCustomerName(null);
-    } else if (activeTab === "pay") {
-       if (activeService.id === "ELECTRICITY" && accountNumber.length >= 10) verifyMerchant();
-       else if (activeService.id === "CABLE" && cableProvider !== "showmax" && accountNumber.length >= 10) verifyMerchant();
-       else if (activeService.id === "INTERNET" && internetProvider === "smile-direct" && accountNumber.includes('@') && accountNumber.includes('.')) {
-          const timeoutId = setTimeout(() => verifyMerchant(), 1000);
-          return () => clearTimeout(timeoutId);
-       } else {
-          setCustomerName(null);
-       }
-    }
-  }, [accountNumber, elecProvider, cableProvider, activeService.id, meterType, selectedBank, internetProvider, activeTab]);
-
-  const filteredInternetDataPlans = useMemo(() => {
-    if (!internetVariations || internetVariations.length === 0) return [];
-    
-    if (internetProvider === 'smile-direct' || internetProvider === 'spectranet') {
-        return internetVariations;
-    }
-
-    return internetVariations.filter(plan => {
-      const name = (plan.name || "").toLowerCase();
-      let category = "Monthly";
-
-      if (name.includes('broadband') || name.includes('router') || name.includes('5g') || name.includes('hynet')) category = "Broadband";
-      else if (name.includes('social') || name.includes('whatsapp') || name.includes('ig') || name.includes('instagram') || name.includes('tiktok') || name.includes('youtube') || name.includes('facebook') || name.includes('opera') || name.includes('xot')) category = "Social";
-      else if (name.includes('60 day') || name.includes('90 day') || name.includes('120 day') || name.includes('year') || name.includes('mega') || name.includes('3 month') || name.includes('2 month')) category = "Mega";
-      else if (name.includes('month') || name.includes('30 day')) category = "Monthly";
-      else if (name.includes('week') || name.includes('7 day') || name.includes('14 day') || name.includes('weekend')) category = "Weekly";
-      else if (name.includes('1 day') || name.includes('2 day') || name.includes('3 day') || name.includes('daily') || name.includes('24 hrs') || name.includes('24hrs') || name.includes('night') || name.includes('hourly')) category = "Daily";
-
-      return category === activeDataCategory;
-    }).sort((a, b) => parseFloat(a.variation_amount) - parseFloat(b.variation_amount));
-
-  }, [internetVariations, activeDataCategory, internetProvider]);
-
-  const isFormValid = useMemo(() => {
-    const amount = parseFloat(nairaAmount);
-    if (!nairaAmount || isNaN(amount) || amount < dynamicMinAmount || amount > dynamicMaxAmount) return false;
-
-    if (activeTab === "bank") {
-       return accountNumber.length === 10 && customerName !== null && selectedBank !== null && customerPhone.length >= 10;
-    }
-
-    if (activeTab === "pay") {
-      if (activeService.id === "AIRTIME") return accountNumber.length === 11 && accountNumber.startsWith("0");
-      if (activeService.id === "INTERNET") {
-        if (internetProvider === 'smile-direct') {
-          return internetAccountId !== null && selectedInternetPlan !== null && customerPhone.length >= 10;
-        } else if (internetProvider === 'spectranet') {
-          return accountNumber.length >= 5 && selectedInternetPlan !== null && customerPhone.length >= 10;
-        } else {
-          return accountNumber.length === 11 && accountNumber.startsWith("0") && selectedInternetPlan !== null;
-        }
-      }
-      if (activeService.id === "ELECTRICITY") return accountNumber.length >= 10 && customerName !== null;
-      if (activeService.id === "CABLE") {
-        if (cableProvider === "showmax") return accountNumber.length >= 11 && selectedCablePlan !== null;
-        if (accountNumber.length < 10 || customerName === null) return false;
-        if (['dstv', 'gotv'].includes(cableProvider)) {
-          if (cableSubscriptionType === 'change' && !selectedCablePlan) return false;
-        } else {
-          if (!selectedCablePlan) return false;
-        }
-        return true;
-      }
-    }
-    return false;
-  }, [accountNumber, nairaAmount, activeService.id, customerName, dynamicMinAmount, dynamicMaxAmount, cableSubscriptionType, selectedCablePlan, selectedBank, selectedInternetPlan, internetAccountId, customerPhone, internetProvider, activeTab, cableProvider]);
 
   const handlePayment = async () => {
     if (!address || !client) return setStatus("Connect Wallet First");
@@ -535,38 +422,94 @@ export default function Home() {
     } catch (e) { setStatus("Transaction Cancelled."); } finally { setIsProcessing(false); }
   };
 
-  const handleResetService = (s: any) => {
-    setActiveService(s); setAccountNumber(""); setCustomerName(null); setNairaAmount(""); 
-    setCableCurrentBouquet(null); setCableRenewAmount(null); setSelectedCablePlan(null);
-    setCableSubscriptionType("renew"); setSelectedBank(null); setSelectedInternetPlan(null); setInternetAccountId(null);
-  };
+  // ==========================================
+  // 4. USE EFFECTS (BACKGROUND TASKS)
+  // ==========================================
+  useEffect(() => {
+    if (status && !isProcessing) {
+      const timer = setTimeout(() => setStatus(""), 5000); 
+      return () => clearTimeout(timer);
+    }
+  }, [status, isProcessing]);
 
-  const openSelectionModal = (type: 'standard' | 'token' | 'provider' | 'country' | 'bank', title: string, options: any[], callback: (value: string) => void) => {
-    setModalType(type as any); setModalTitle(title); setModalOptions(options); setModalCallback(() => callback); setIsSelectionModalOpen(true);
-  };
+  useEffect(() => {
+    if (activeTab === "bank" && bankVariations.length === 0) {
+      const fetchBanks = async () => {
+        setIsFetchingBanks(true);
+        try {
+          const res = await fetch(`/api/variations?serviceID=bank-deposit`);
+          const data = await res.json();
+          let banksArr = extractVtpassArray(data);
+          
+          if (banksArr && Array.isArray(banksArr) && banksArr.length > 0) {
+            const sortedBanks = banksArr.sort((a: any, b: any) => (a.name || "").localeCompare(b.name || ""));
+            setBankVariations(sortedBanks);
+          }
+        } catch (e) {}
+        setIsFetchingBanks(false);
+      };
+      fetchBanks();
+    }
+  }, [activeTab, bankVariations.length]);
 
-  const handleCountryChange = (countryCode: string) => {
-    const country = SUPPORTED_COUNTRIES.find(c => c.code === countryCode);
-    if (country && !country.disabled) { setActiveCountry(country); handleResetService(SERVICES[0]); }
-  };
+  useEffect(() => {
+    if (activeTab !== "pay") return;
+    if (activeService.id === "CABLE") {
+      const fetchVariations = async () => {
+        try {
+          const res = await fetch(`/api/variations?serviceID=${cableProvider}`);
+          const data = await res.json();
+          setCableVariations(extractVtpassArray(data));
+        } catch (e) {}
+      };
+      fetchVariations();
+    } else if (activeService.id === "INTERNET") {
+      const fetchInternetVariations = async () => {
+        setInternetVariations([]);
+        try {
+          const res = await fetch(`/api/variations?serviceID=${internetProvider}`);
+          const data = await res.json();
+          setInternetVariations(extractVtpassArray(data));
+        } catch (e) {}
+      };
+      fetchInternetVariations();
+    }
+  }, [activeTab, activeService.id, cableProvider, internetProvider]);
 
-  const handleShareReceipt = async () => {
-    const receiptText = `🧾 AbaPay Receipt\n\nDate: ${selectedReceipt.date}\nStatus: ${selectedReceipt.status}\nProduct: ${selectedReceipt.network} ${selectedReceipt.service}\nRecipient: ${selectedReceipt.account}\nAmount Paid: ₦${selectedReceipt.amountNaira}\nCrypto Used: ${selectedReceipt.amountCrypto} ${selectedReceipt.tokenUsed}\nTx Hash: ${selectedReceipt.txHash}\n\nSecured by Celo Network`;
-    if (navigator.share) { try { await navigator.share({ title: 'Receipt', text: receiptText }); } catch (err) {} } 
-    else { try { await navigator.clipboard.writeText(receiptText); showToast("Copied!", "Receipt details copied to clipboard.", "success"); } catch (err) {} }
-  };
+  useEffect(() => {
+    if (activeTab === "pay") {
+      if (activeService.id === "AIRTIME" && accountNumber.length >= 4) {
+        const prefix = accountNumber.substring(0, 4);
+        if (["0803","0806","0810","0813","0814","0816","0903","0906","0913","0916","0703","0706"].includes(prefix)) setTelecomProvider("mtn");
+        else if (["0802","0808","0812","0902","0907","0912","0701","0708"].includes(prefix)) setTelecomProvider("airtel");
+        else if (["0805","0807","0811","0905","0705","0915"].includes(prefix)) setTelecomProvider("glo");
+        else if (["0809","0817","0818","0908","0909"].includes(prefix)) setTelecomProvider("9mobile");
+      }
+      if (activeService.id === "INTERNET" && internetProvider.includes("-data") && accountNumber.length >= 4) {
+        const prefix = accountNumber.substring(0, 4);
+        if (["0803","0806","0810","0813","0814","0816","0903","0906","0913","0916","0703","0706"].includes(prefix)) setInternetProvider("mtn-data");
+        else if (["0802","0808","0812","0902","0907","0912","0701","0708"].includes(prefix)) setInternetProvider("airtel-data");
+        else if (["0805","0807","0811","0905","0705","0915"].includes(prefix)) setInternetProvider("glo-data");
+        else if (["0809","0817","0818","0908","0909"].includes(prefix)) setInternetProvider("9mobile-data");
+      }
+    }
+  }, [accountNumber, activeService.id, activeTab, internetProvider]);
 
-  const submitSupportTicket = async () => {
-    if (!supportMessage.trim()) return;
-    setIsSendingSupport(true);
-    try {
-      const formData = new FormData(); formData.append("message", supportMessage);
-      if (address) formData.append("userAddress", address); if (supportTxHash) formData.append("txHash", supportTxHash); if (supportFile) formData.append("file", supportFile);
-      await fetch('/api/support', { method: 'POST', body: formData });
-      setIsSupportOpen(false); setSupportMessage(""); setSupportFile(null); setSupportTxHash(null); 
-      showToast("Ticket Submitted", "Support has received your request.", "success");
-    } catch (error) { showToast("Connection Error", "Failed to send the ticket.", "error"); } finally { setIsSendingSupport(false); }
-  };
+  useEffect(() => {
+    if (activeTab === "bank") {
+       if (accountNumber.length === 10 && selectedBank) verifyMerchant();
+       else setCustomerName(null);
+    } else if (activeTab === "pay") {
+       if (activeService.id === "ELECTRICITY" && accountNumber.length >= 10) verifyMerchant();
+       else if (activeService.id === "CABLE" && cableProvider !== "showmax" && accountNumber.length >= 10) verifyMerchant();
+       else if (activeService.id === "INTERNET" && internetProvider === "smile-direct" && accountNumber.includes('@') && accountNumber.includes('.')) {
+          const timeoutId = setTimeout(() => verifyMerchant(), 1000);
+          return () => clearTimeout(timeoutId);
+       } else {
+          setCustomerName(null);
+       }
+    }
+  }, [accountNumber, elecProvider, cableProvider, activeService.id, meterType, selectedBank, internetProvider, activeTab]);
 
   useEffect(() => {
     const checkRefunds = async () => {
@@ -590,10 +533,9 @@ export default function Home() {
     checkRefunds();
   }, [activeTab]);
 
-  const currentDisco = useMemo(() => { return ELECTRICITY_DISCOS.find(d => d.serviceID === elecProvider); }, [elecProvider]);
-  const currentCable = useMemo(() => { return CABLE_PROVIDERS_LIST.find(c => c.serviceID === cableProvider); }, [cableProvider]);
-  const currentInternet = useMemo(() => { return INTERNET_PROVIDERS.find(c => c.serviceID === internetProvider); }, [internetProvider]);
-
+  // ==========================================
+  // 5. RENDER UI
+  // ==========================================
   return (
     <main className="min-h-screen bg-slate-50 text-slate-900 font-sans p-4 flex flex-col items-center pb-20 relative">
       <style>{`@keyframes logoScale { 0%, 100% { transform: scale(1); opacity: 0.9; } 50% { transform: scale(1.1); opacity: 1; } } .animate-logo-scale { animation: logoScale 1.5s ease-in-out infinite; } .no-scrollbar::-webkit-scrollbar { display: none; } .no-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }`}</style>
@@ -743,11 +685,23 @@ export default function Home() {
                  {modalType === 'country' && SUPPORTED_COUNTRIES.map(country => (
                    <button 
                      key={country.code} 
-                     onClick={() => { if (!country.disabled) { modalCallback?.(country.code); setIsSelectionModalOpen(false); } }}
+                     onClick={() => { 
+                        if (!country.disabled) {
+                            modalCallback?.(country.code); 
+                            setIsSelectionModalOpen(false); 
+                        }
+                     }}
                      disabled={country.disabled}
-                     className={`w-full text-left p-4 rounded-xl font-bold text-sm transition-all flex justify-between items-center ${country.disabled ? 'bg-slate-50 border border-slate-100 text-slate-400 cursor-not-allowed' : 'text-slate-700 bg-slate-50 border border-slate-100 hover:border-emerald-300 hover:bg-emerald-50/50'}`}
+                     className={`w-full text-left p-4 rounded-xl font-bold text-sm transition-all flex justify-between items-center ${
+                         country.disabled 
+                         ? 'bg-slate-50 border border-slate-100 text-slate-400 cursor-not-allowed' 
+                         : 'text-slate-700 bg-slate-50 border border-slate-100 hover:border-emerald-300 hover:bg-emerald-50/50'
+                     }`}
                    >
-                     <div className="flex items-center gap-3"><span className="text-2xl">{country.flag}</span><span className={`font-black ${country.disabled ? 'text-slate-400' : 'text-slate-800'}`}>{country.name}</span></div>
+                     <div className="flex items-center gap-3">
+                       <span className="text-2xl">{country.flag}</span>
+                       <span className={`font-black ${country.disabled ? 'text-slate-400' : 'text-slate-800'}`}>{country.name}</span>
+                     </div>
                      {activeCountry.code === country.code && <CheckCircle2 size={18} className="text-emerald-500"/>}
                    </button>
                  ))}
@@ -778,7 +732,10 @@ export default function Home() {
                      onClick={() => { modalCallback?.(token.symbol); setIsSelectionModalOpen(false); }}
                      className="w-full text-left p-4 rounded-xl font-bold text-slate-700 bg-slate-50 border border-slate-100 uppercase text-xs hover:border-emerald-300 hover:bg-emerald-50/50 transition-all flex justify-between items-center"
                    >
-                     <div className="flex items-center gap-3"><img src={token.logo} alt={token.symbol} className="w-6 h-6 object-contain rounded-full shadow-sm bg-white" /><span className="text-sm font-black text-slate-800 tracking-tight">{token.symbol}</span></div>
+                     <div className="flex items-center gap-3">
+                       <img src={token.logo} alt={token.symbol} className="w-6 h-6 object-contain rounded-full shadow-sm bg-white" />
+                       <span className="text-sm font-black text-slate-800 tracking-tight">{token.symbol}</span>
+                     </div>
                      {selectedToken.symbol === token.symbol && <CheckCircle2 size={18} className="text-emerald-500"/>}
                    </button>
                  ))}
@@ -828,7 +785,7 @@ export default function Home() {
 
         <div className="flex gap-2 bg-slate-200/50 p-1.5 rounded-2xl mb-6 shadow-inner">
             <button onClick={() => setActiveTab("pay")} className={`flex-1 py-3 rounded-xl text-xs font-black transition-all ${activeTab === 'pay' ? 'bg-white text-emerald-600 shadow-xl' : 'text-slate-500 hover:text-slate-700'}`}>PAY BILLS</button>
-            <button onClick={() => setActiveTab("bank")} className={`flex-1 py-3 rounded-xl text-xs font-black transition-all ${activeTab === 'bank' ? 'bg-white text-emerald-600 shadow-xl' : 'text-slate-500 hover:text-slate-700'}`}>SEND MONEY</button>
+            <button onClick={() => { setActiveTab("bank"); handleResetService(SERVICES[0]); }} className={`flex-1 py-3 rounded-xl text-xs font-black transition-all ${activeTab === 'bank' ? 'bg-white text-emerald-600 shadow-xl' : 'text-slate-500 hover:text-slate-700'}`}>SEND MONEY</button>
             <button onClick={() => setActiveTab("history")} className={`flex-1 py-3 rounded-xl text-xs font-black transition-all ${activeTab === 'history' ? 'bg-white text-emerald-600 shadow-xl' : 'text-slate-500 hover:text-slate-700'}`}>HISTORY</button>
         </div>
 
@@ -1106,6 +1063,7 @@ export default function Home() {
                 {activeService.id === "INTERNET" && (
                   <div className="bg-slate-50 border border-slate-200 rounded-2xl p-4 shadow-sm animate-in fade-in slide-in-from-top-4">
                      
+                     {/* IF TELECOM DATA, SHOW CATEGORY BUTTONS */}
                      {internetProvider.includes("-data") && (
                        <div className="flex gap-2 mb-4 border-b border-slate-200 pb-3 overflow-x-auto no-scrollbar shadow-inner bg-slate-100 p-1.5 rounded-2xl">
                           {DATA_CATEGORIES.map(cat => (
