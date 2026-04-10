@@ -78,19 +78,19 @@ const extractVtpassArray = (data: any): any[] => {
 };
 
 export default function Home() {
-  // ==========================================
-  // 1. STATE DEFINITIONS
-  // ==========================================
   const [isInitiallyLoading, setIsInitiallyLoading] = useState(true);
+
   const [address, setAddress] = useState<string | null>(null);
   const [client, setClient] = useState<any>(null);
   const [nairaAmount, setNairaAmount] = useState(""); 
   const [accountNumber, setAccountNumber] = useState("");
   const [customerPhone, setCustomerPhone] = useState("");
   const [status, setStatus] = useState("");
+  
   const [activeTab, setActiveTab] = useState<"pay" | "bank" | "history">("pay");
   const [isMiniPay, setIsMiniPay] = useState(false);
   const [isProcessing, setIsProcessing] = useState(false); 
+
   const [customerName, setCustomerName] = useState<string | null>(null);
   const [isVerifying, setIsVerifying] = useState(false);
 
@@ -141,9 +141,6 @@ export default function Home() {
   const [exchangeRate, setExchangeRate] = useState<number>(1550); 
   const [transactions, setTransactions] = useState<any[]>([]);
 
-  // ==========================================
-  // 2. CONSTANTS & MEMOS (HOISTED)
-  // ==========================================
   const isMainnet = process.env.NEXT_PUBLIC_NETWORK === "celo";
   const activeChain = isMainnet ? celo : celoSepolia;
   const ABAPAY_CONTRACT = process.env.NEXT_PUBLIC_ABAPAY_ADDRESS as `0x${string}`;
@@ -231,46 +228,151 @@ export default function Home() {
     return false;
   }, [accountNumber, nairaAmount, activeService, customerName, dynamicMinAmount, dynamicMaxAmount, cableSubscriptionType, selectedCablePlan, selectedBank, selectedInternetPlan, internetAccountId, customerPhone, internetProvider, activeTab, cableProvider]);
 
-  // ==========================================
-  // 3. ACTION HANDLERS
-  // ==========================================
-  const showToast = (title: string, message: string, type: 'success' | 'error' = 'success') => {
-    setToast({ title, message, type });
-    setTimeout(() => setToast(null), 5000);
-  };
+  // ⚡ BULLETPROOF STARTUP ENGINE ⚡
+  useEffect(() => {
+    // Failsafe timer: forces the loading screen off no matter what happens
+    const fallbackTimer = setTimeout(() => setIsInitiallyLoading(false), 3000);
 
-  const handleResetService = (s: any) => {
-    setActiveService(s); setAccountNumber(""); setCustomerName(null); setNairaAmount(""); 
-    setCableCurrentBouquet(null); setCableRenewAmount(null); setSelectedCablePlan(null);
-    setCableSubscriptionType("renew"); setSelectedBank(null); setSelectedInternetPlan(null); setInternetAccountId(null);
-  };
+    async function initSystem() {
+      try {
+        const savedHistory = localStorage.getItem("abapay_history");
+        if (savedHistory) {
+          const parsed = JSON.parse(savedHistory);
+          if (Array.isArray(parsed)) setTransactions(parsed);
+        }
+      } catch (e) {}
 
-  const openSelectionModal = (type: 'standard' | 'token' | 'provider' | 'country' | 'bank', title: string, options: any[], callback: (value: string) => void) => {
-    setModalType(type as any); setModalTitle(title); setModalOptions(options); setModalCallback(() => callback); setIsSelectionModalOpen(true);
-  };
+      try {
+        const { data: settingsData } = await supabase.from('platform_settings').select('exchange_rate').eq('id', 1).single();
+        if (settingsData && settingsData.exchange_rate) setExchangeRate(Number(settingsData.exchange_rate));
+      } catch (consoleError) {}
 
-  const handleCountryChange = (countryCode: string) => {
-    const country = SUPPORTED_COUNTRIES.find(c => c.code === countryCode);
-    if (country && !country.disabled) { setActiveCountry(country); handleResetService(SERVICES[0]); }
-  };
+      try {
+        if (typeof window !== "undefined" && (window as any).ethereum) {
+          const eth = (window as any).ethereum;
+          if (eth.isMiniPay) setIsMiniPay(true);
+          const walletClient = createWalletClient({ chain: activeChain, transport: custom(eth) });
+          walletClient.requestAddresses().then(([acc]) => {
+            setAddress(acc); setClient(walletClient);
+          }).catch((e) => console.log("Connection deferred"));
+        }
+      } catch (e) {}
 
-  const handleShareReceipt = async () => {
-    const receiptText = `🧾 AbaPay Receipt\n\nDate: ${selectedReceipt?.date}\nStatus: ${selectedReceipt?.status}\nProduct: ${selectedReceipt?.network} ${selectedReceipt?.service}\nRecipient: ${selectedReceipt?.account}\nAmount Paid: ₦${selectedReceipt?.amountNaira}\nCrypto Used: ${selectedReceipt?.amountCrypto} ${selectedReceipt?.tokenUsed}\nTx Hash: ${selectedReceipt?.txHash}\n\nSecured by Celo Network`;
-    if (navigator.share) { try { await navigator.share({ title: 'Receipt', text: receiptText }); } catch (err) {} } 
-    else { try { await navigator.clipboard.writeText(receiptText); showToast("Copied!", "Receipt details copied to clipboard.", "success"); } catch (err) {} }
-  };
+      clearTimeout(fallbackTimer);
+      setTimeout(() => setIsInitiallyLoading(false), 1500);
+    }
+    
+    initSystem();
+    return () => clearTimeout(fallbackTimer);
+  }, [activeChain]);
 
-  const submitSupportTicket = async () => {
-    if (!supportMessage.trim()) return;
-    setIsSendingSupport(true);
-    try {
-      const formData = new FormData(); formData.append("message", supportMessage);
-      if (address) formData.append("userAddress", address); if (supportTxHash) formData.append("txHash", supportTxHash); if (supportFile) formData.append("file", supportFile);
-      await fetch('/api/support', { method: 'POST', body: formData });
-      setIsSupportOpen(false); setSupportMessage(""); setSupportFile(null); setSupportTxHash(null); 
-      showToast("Ticket Submitted", "Support has received your request.", "success");
-    } catch (error) { showToast("Connection Error", "Failed to send the ticket.", "error"); } finally { setIsSendingSupport(false); }
-  };
+  useEffect(() => {
+    if (status && !isProcessing) {
+      const timer = setTimeout(() => setStatus(""), 5000); 
+      return () => clearTimeout(timer);
+    }
+  }, [status, isProcessing]);
+
+  useEffect(() => {
+    if (!address) return;
+    async function fetchCloudHistory() {
+      try {
+        const sixMonthsAgo = new Date();
+        sixMonthsAgo.setMonth(sixMonthsAgo.getMonth() - 6);
+        const { data } = await supabase.from('transactions').select('*').eq('wallet_address', address).gte('created_at', sixMonthsAgo.toISOString()).order('created_at', { ascending: false });
+
+        if (data && data.length > 0) {
+          const cloudHistory = data.map((tx: any) => ({
+            id: tx.tx_hash.slice(0, 8), date: new Date(tx.created_at).toLocaleString(), status: tx.status,
+            amountNaira: tx.amount_naira.toString(), amountCrypto: tx.amount_usdt.toString(), tokenUsed: "USD₮", 
+            service: tx.service_category, network: tx.network, txHash: tx.tx_hash, account: tx.account_number,
+            refund_hash: tx.refund_hash, purchased_code: tx.purchased_code, request_id: tx.request_id, units: tx.units 
+          }));
+          setTransactions(cloudHistory);
+          localStorage.setItem("abapay_history", JSON.stringify(cloudHistory));
+        }
+      } catch (e) {}
+    }
+    fetchCloudHistory();
+  }, [address]);
+
+  useEffect(() => {
+    async function fetchBalance() {
+      if (!address) return;
+      setIsFetchingBalance(true);
+      try {
+        const publicClient = createPublicClient({ chain: activeChain, transport: http() });
+        const tokenAddress = isMainnet ? selectedToken.mainnet : selectedToken.sepolia;
+        const balanceWei = await publicClient.readContract({ address: tokenAddress as `0x${string}`, abi: ERC20_ABI, functionName: 'balanceOf', args: [address] });
+        setWalletBalance(parseFloat(formatUnits(balanceWei as bigint, selectedToken.decimals)).toFixed(4));
+      } catch (error) { setWalletBalance("0.00"); }
+      setIsFetchingBalance(false);
+    }
+    fetchBalance();
+  }, [address, selectedToken, activeChain, isMainnet]);
+
+  useEffect(() => {
+    if (activeTab === "bank" && bankVariations.length === 0) {
+      const fetchBanks = async () => {
+        setIsFetchingBanks(true);
+        try {
+          const res = await fetch(`/api/variations?serviceID=bank-deposit`);
+          const data = await res.json();
+          let banksArr = extractVtpassArray(data);
+          
+          if (banksArr && Array.isArray(banksArr) && banksArr.length > 0) {
+            const sortedBanks = banksArr.sort((a: any, b: any) => (a.name || "").localeCompare(b.name || ""));
+            setBankVariations(sortedBanks);
+          }
+        } catch (e) {}
+        setIsFetchingBanks(false);
+      };
+      fetchBanks();
+    }
+  }, [activeTab, bankVariations.length]);
+
+  useEffect(() => {
+    if (activeTab !== "pay") return;
+    if (activeService.id === "CABLE") {
+      const fetchVariations = async () => {
+        try {
+          const res = await fetch(`/api/variations?serviceID=${cableProvider}`);
+          const data = await res.json();
+          setCableVariations(extractVtpassArray(data));
+        } catch (e) {}
+      };
+      fetchVariations();
+    } else if (activeService.id === "INTERNET") {
+      const fetchInternetVariations = async () => {
+        setInternetVariations([]);
+        try {
+          const res = await fetch(`/api/variations?serviceID=${internetProvider}`);
+          const data = await res.json();
+          setInternetVariations(extractVtpassArray(data));
+        } catch (e) {}
+      };
+      fetchInternetVariations();
+    }
+  }, [activeTab, activeService.id, cableProvider, internetProvider]);
+
+  useEffect(() => {
+    if (activeTab === "pay") {
+      if (activeService.id === "AIRTIME" && accountNumber.length >= 4) {
+        const prefix = accountNumber.substring(0, 4);
+        if (["0803","0806","0810","0813","0814","0816","0903","0906","0913","0916","0703","0706"].includes(prefix)) setTelecomProvider("mtn");
+        else if (["0802","0808","0812","0902","0907","0912","0701","0708"].includes(prefix)) setTelecomProvider("airtel");
+        else if (["0805","0807","0811","0905","0705","0915"].includes(prefix)) setTelecomProvider("glo");
+        else if (["0809","0817","0818","0908","0909"].includes(prefix)) setTelecomProvider("9mobile");
+      }
+      if (activeService.id === "INTERNET" && internetProvider.includes("-data") && accountNumber.length >= 4) {
+        const prefix = accountNumber.substring(0, 4);
+        if (["0803","0806","0810","0813","0814","0816","0903","0906","0913","0916","0703","0706"].includes(prefix)) setInternetProvider("mtn-data");
+        else if (["0802","0808","0812","0902","0907","0912","0701","0708"].includes(prefix)) setInternetProvider("airtel-data");
+        else if (["0805","0807","0811","0905","0705","0915"].includes(prefix)) setInternetProvider("glo-data");
+        else if (["0809","0817","0818","0908","0909"].includes(prefix)) setInternetProvider("9mobile-data");
+      }
+    }
+  }, [accountNumber, activeService.id, activeTab, internetProvider]);
 
   const verifyMerchant = async () => {
     setIsVerifying(true);
@@ -318,6 +420,27 @@ export default function Home() {
         }
     } catch (e) {}
     setIsVerifying(false);
+  };
+
+  useEffect(() => {
+    if (activeTab === "bank") {
+       if (accountNumber.length === 10 && selectedBank) verifyMerchant();
+       else setCustomerName(null);
+    } else if (activeTab === "pay") {
+       if (activeService.id === "ELECTRICITY" && accountNumber.length >= 10) verifyMerchant();
+       else if (activeService.id === "CABLE" && cableProvider !== "showmax" && accountNumber.length >= 10) verifyMerchant();
+       else if (activeService.id === "INTERNET" && internetProvider === "smile-direct" && accountNumber.includes('@') && accountNumber.includes('.')) {
+          const timeoutId = setTimeout(() => verifyMerchant(), 1000);
+          return () => clearTimeout(timeoutId);
+       } else {
+          setCustomerName(null);
+       }
+    }
+  }, [accountNumber, elecProvider, cableProvider, activeService.id, meterType, selectedBank, internetProvider, activeTab]);
+
+  const showToast = (title: string, message: string, type: 'success' | 'error' = 'success') => {
+    setToast({ title, message, type });
+    setTimeout(() => setToast(null), 5000);
   };
 
   const handlePayment = async () => {
@@ -422,94 +545,38 @@ export default function Home() {
     } catch (e) { setStatus("Transaction Cancelled."); } finally { setIsProcessing(false); }
   };
 
-  // ==========================================
-  // 4. USE EFFECTS (BACKGROUND TASKS)
-  // ==========================================
-  useEffect(() => {
-    if (status && !isProcessing) {
-      const timer = setTimeout(() => setStatus(""), 5000); 
-      return () => clearTimeout(timer);
-    }
-  }, [status, isProcessing]);
+  const handleResetService = (s: any) => {
+    setActiveService(s); setAccountNumber(""); setCustomerName(null); setNairaAmount(""); 
+    setCableCurrentBouquet(null); setCableRenewAmount(null); setSelectedCablePlan(null);
+    setCableSubscriptionType("renew"); setSelectedBank(null); setSelectedInternetPlan(null); setInternetAccountId(null);
+  };
 
-  useEffect(() => {
-    if (activeTab === "bank" && bankVariations.length === 0) {
-      const fetchBanks = async () => {
-        setIsFetchingBanks(true);
-        try {
-          const res = await fetch(`/api/variations?serviceID=bank-deposit`);
-          const data = await res.json();
-          let banksArr = extractVtpassArray(data);
-          
-          if (banksArr && Array.isArray(banksArr) && banksArr.length > 0) {
-            const sortedBanks = banksArr.sort((a: any, b: any) => (a.name || "").localeCompare(b.name || ""));
-            setBankVariations(sortedBanks);
-          }
-        } catch (e) {}
-        setIsFetchingBanks(false);
-      };
-      fetchBanks();
-    }
-  }, [activeTab, bankVariations.length]);
+  const openSelectionModal = (type: 'standard' | 'token' | 'provider' | 'country' | 'bank', title: string, options: any[], callback: (value: string) => void) => {
+    setModalType(type as any); setModalTitle(title); setModalOptions(options); setModalCallback(() => callback); setIsSelectionModalOpen(true);
+  };
 
-  useEffect(() => {
-    if (activeTab !== "pay") return;
-    if (activeService.id === "CABLE") {
-      const fetchVariations = async () => {
-        try {
-          const res = await fetch(`/api/variations?serviceID=${cableProvider}`);
-          const data = await res.json();
-          setCableVariations(extractVtpassArray(data));
-        } catch (e) {}
-      };
-      fetchVariations();
-    } else if (activeService.id === "INTERNET") {
-      const fetchInternetVariations = async () => {
-        setInternetVariations([]);
-        try {
-          const res = await fetch(`/api/variations?serviceID=${internetProvider}`);
-          const data = await res.json();
-          setInternetVariations(extractVtpassArray(data));
-        } catch (e) {}
-      };
-      fetchInternetVariations();
-    }
-  }, [activeTab, activeService.id, cableProvider, internetProvider]);
+  const handleCountryChange = (countryCode: string) => {
+    const country = SUPPORTED_COUNTRIES.find(c => c.code === countryCode);
+    if (country && !country.disabled) { setActiveCountry(country); handleResetService(SERVICES[0]); }
+  };
 
-  useEffect(() => {
-    if (activeTab === "pay") {
-      if (activeService.id === "AIRTIME" && accountNumber.length >= 4) {
-        const prefix = accountNumber.substring(0, 4);
-        if (["0803","0806","0810","0813","0814","0816","0903","0906","0913","0916","0703","0706"].includes(prefix)) setTelecomProvider("mtn");
-        else if (["0802","0808","0812","0902","0907","0912","0701","0708"].includes(prefix)) setTelecomProvider("airtel");
-        else if (["0805","0807","0811","0905","0705","0915"].includes(prefix)) setTelecomProvider("glo");
-        else if (["0809","0817","0818","0908","0909"].includes(prefix)) setTelecomProvider("9mobile");
-      }
-      if (activeService.id === "INTERNET" && internetProvider.includes("-data") && accountNumber.length >= 4) {
-        const prefix = accountNumber.substring(0, 4);
-        if (["0803","0806","0810","0813","0814","0816","0903","0906","0913","0916","0703","0706"].includes(prefix)) setInternetProvider("mtn-data");
-        else if (["0802","0808","0812","0902","0907","0912","0701","0708"].includes(prefix)) setInternetProvider("airtel-data");
-        else if (["0805","0807","0811","0905","0705","0915"].includes(prefix)) setInternetProvider("glo-data");
-        else if (["0809","0817","0818","0908","0909"].includes(prefix)) setInternetProvider("9mobile-data");
-      }
-    }
-  }, [accountNumber, activeService.id, activeTab, internetProvider]);
+  const handleShareReceipt = async () => {
+    const receiptText = `🧾 AbaPay Receipt\n\nDate: ${selectedReceipt?.date}\nStatus: ${selectedReceipt?.status}\nProduct: ${selectedReceipt?.network} ${selectedReceipt?.service}\nRecipient: ${selectedReceipt?.account}\nAmount Paid: ₦${selectedReceipt?.amountNaira}\nCrypto Used: ${selectedReceipt?.amountCrypto} ${selectedReceipt?.tokenUsed}\nTx Hash: ${selectedReceipt?.txHash}\n\nSecured by Celo Network`;
+    if (navigator.share) { try { await navigator.share({ title: 'Receipt', text: receiptText }); } catch (err) {} } 
+    else { try { await navigator.clipboard.writeText(receiptText); showToast("Copied!", "Receipt details copied to clipboard.", "success"); } catch (err) {} }
+  };
 
-  useEffect(() => {
-    if (activeTab === "bank") {
-       if (accountNumber.length === 10 && selectedBank) verifyMerchant();
-       else setCustomerName(null);
-    } else if (activeTab === "pay") {
-       if (activeService.id === "ELECTRICITY" && accountNumber.length >= 10) verifyMerchant();
-       else if (activeService.id === "CABLE" && cableProvider !== "showmax" && accountNumber.length >= 10) verifyMerchant();
-       else if (activeService.id === "INTERNET" && internetProvider === "smile-direct" && accountNumber.includes('@') && accountNumber.includes('.')) {
-          const timeoutId = setTimeout(() => verifyMerchant(), 1000);
-          return () => clearTimeout(timeoutId);
-       } else {
-          setCustomerName(null);
-       }
-    }
-  }, [accountNumber, elecProvider, cableProvider, activeService.id, meterType, selectedBank, internetProvider, activeTab]);
+  const submitSupportTicket = async () => {
+    if (!supportMessage.trim()) return;
+    setIsSendingSupport(true);
+    try {
+      const formData = new FormData(); formData.append("message", supportMessage);
+      if (address) formData.append("userAddress", address); if (supportTxHash) formData.append("txHash", supportTxHash); if (supportFile) formData.append("file", supportFile);
+      await fetch('/api/support', { method: 'POST', body: formData });
+      setIsSupportOpen(false); setSupportMessage(""); setSupportFile(null); setSupportTxHash(null); 
+      showToast("Ticket Submitted", "Support has received your request.", "success");
+    } catch (error) { showToast("Connection Error", "Failed to send the ticket.", "error"); } finally { setIsSendingSupport(false); }
+  };
 
   useEffect(() => {
     const checkRefunds = async () => {
@@ -531,11 +598,8 @@ export default function Home() {
       }
     };
     checkRefunds();
-  }, [activeTab]);
+  }, [activeTab, transactions]);
 
-  // ==========================================
-  // 5. RENDER UI
-  // ==========================================
   return (
     <main className="min-h-screen bg-slate-50 text-slate-900 font-sans p-4 flex flex-col items-center pb-20 relative">
       <style>{`@keyframes logoScale { 0%, 100% { transform: scale(1); opacity: 0.9; } 50% { transform: scale(1.1); opacity: 1; } } .animate-logo-scale { animation: logoScale 1.5s ease-in-out infinite; } .no-scrollbar::-webkit-scrollbar { display: none; } .no-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }`}</style>
@@ -681,31 +745,17 @@ export default function Home() {
                 <button onClick={() => setIsSelectionModalOpen(false)} className="p-2 bg-slate-100 rounded-full hover:bg-slate-200 transition-colors"><XCircle size={20} className="text-slate-500" /></button>
               </div>
               <div className="space-y-2.5 max-h-[50vh] overflow-y-auto pr-1">
-                 
                  {modalType === 'country' && SUPPORTED_COUNTRIES.map(country => (
                    <button 
                      key={country.code} 
-                     onClick={() => { 
-                        if (!country.disabled) {
-                            modalCallback?.(country.code); 
-                            setIsSelectionModalOpen(false); 
-                        }
-                     }}
+                     onClick={() => { if (!country.disabled) { modalCallback?.(country.code); setIsSelectionModalOpen(false); } }}
                      disabled={country.disabled}
-                     className={`w-full text-left p-4 rounded-xl font-bold text-sm transition-all flex justify-between items-center ${
-                         country.disabled 
-                         ? 'bg-slate-50 border border-slate-100 text-slate-400 cursor-not-allowed' 
-                         : 'text-slate-700 bg-slate-50 border border-slate-100 hover:border-emerald-300 hover:bg-emerald-50/50'
-                     }`}
+                     className={`w-full text-left p-4 rounded-xl font-bold text-sm transition-all flex justify-between items-center ${country.disabled ? 'bg-slate-50 border border-slate-100 text-slate-400 cursor-not-allowed' : 'text-slate-700 bg-slate-50 border border-slate-100 hover:border-emerald-300 hover:bg-emerald-50/50'}`}
                    >
-                     <div className="flex items-center gap-3">
-                       <span className="text-2xl">{country.flag}</span>
-                       <span className={`font-black ${country.disabled ? 'text-slate-400' : 'text-slate-800'}`}>{country.name}</span>
-                     </div>
+                     <div className="flex items-center gap-3"><span className="text-2xl">{country.flag}</span><span className={`font-black ${country.disabled ? 'text-slate-400' : 'text-slate-800'}`}>{country.name}</span></div>
                      {activeCountry.code === country.code && <CheckCircle2 size={18} className="text-emerald-500"/>}
                    </button>
                  ))}
-
                  {modalType === 'bank' && isFetchingBanks && (
                    <div className="flex flex-col items-center justify-center p-6 gap-3 text-slate-400">
                      <Loader2 className="animate-spin text-blue-500" size={24} />
@@ -725,21 +775,16 @@ export default function Home() {
                      {selectedBank?.variation_code === bank.variation_code && <CheckCircle2 size={18} className="text-blue-500"/>}
                    </button>
                  ))}
-
                  {modalType === 'token' && SUPPORTED_TOKENS.map(token => (
                    <button 
                      key={token.symbol} 
                      onClick={() => { modalCallback?.(token.symbol); setIsSelectionModalOpen(false); }}
                      className="w-full text-left p-4 rounded-xl font-bold text-slate-700 bg-slate-50 border border-slate-100 uppercase text-xs hover:border-emerald-300 hover:bg-emerald-50/50 transition-all flex justify-between items-center"
                    >
-                     <div className="flex items-center gap-3">
-                       <img src={token.logo} alt={token.symbol} className="w-6 h-6 object-contain rounded-full shadow-sm bg-white" />
-                       <span className="text-sm font-black text-slate-800 tracking-tight">{token.symbol}</span>
-                     </div>
+                     <div className="flex items-center gap-3"><img src={token.logo} alt={token.symbol} className="w-6 h-6 object-contain rounded-full shadow-sm bg-white" /><span className="text-sm font-black text-slate-800 tracking-tight">{token.symbol}</span></div>
                      {selectedToken.symbol === token.symbol && <CheckCircle2 size={18} className="text-emerald-500"/>}
                    </button>
                  ))}
-
                  {modalType === 'provider' && (modalOptions as any[]).map(provider => (
                     <button 
                         key={provider.serviceID} 
@@ -756,6 +801,16 @@ export default function Home() {
                           <CheckCircle2 size={20} className={activeService.id === 'ELECTRICITY' ? "text-orange-500" : activeService.id === 'INTERNET' ? "text-sky-500" : "text-pink-500"}/>
                         )}
                     </button>
+                 ))}
+                 {modalType === 'standard' && (modalOptions as string[]).map(option => (
+                     <button 
+                       key={option} 
+                       onClick={() => { modalCallback?.(option); setIsSelectionModalOpen(false); }}
+                       className="w-full text-left p-4 rounded-xl font-black text-slate-700 bg-slate-50 border border-slate-100 uppercase text-xs hover:border-emerald-300 hover:bg-emerald-50/50 transition-all flex justify-between items-center"
+                     >
+                       <span>{option}</span>
+                       {(telecomProvider === option || cableProvider === option) && <CheckCircle2 size={16} className="text-emerald-500"/>}
+                     </button>
                  ))}
               </div>
            </div>
@@ -785,11 +840,11 @@ export default function Home() {
 
         <div className="flex gap-2 bg-slate-200/50 p-1.5 rounded-2xl mb-6 shadow-inner">
             <button onClick={() => setActiveTab("pay")} className={`flex-1 py-3 rounded-xl text-xs font-black transition-all ${activeTab === 'pay' ? 'bg-white text-emerald-600 shadow-xl' : 'text-slate-500 hover:text-slate-700'}`}>PAY BILLS</button>
-            <button onClick={() => { setActiveTab("bank"); handleResetService(SERVICES[0]); }} className={`flex-1 py-3 rounded-xl text-xs font-black transition-all ${activeTab === 'bank' ? 'bg-white text-emerald-600 shadow-xl' : 'text-slate-500 hover:text-slate-700'}`}>SEND MONEY</button>
+            <button onClick={() => setActiveTab("bank")} className={`flex-1 py-3 rounded-xl text-xs font-black transition-all ${activeTab === 'bank' ? 'bg-white text-emerald-600 shadow-xl' : 'text-slate-500 hover:text-slate-700'}`}>SEND MONEY</button>
             <button onClick={() => setActiveTab("history")} className={`flex-1 py-3 rounded-xl text-xs font-black transition-all ${activeTab === 'history' ? 'bg-white text-emerald-600 shadow-xl' : 'text-slate-500 hover:text-slate-700'}`}>HISTORY</button>
         </div>
 
-        {/* ⚡ BANK TAB ⚡ */}
+        {/* ⚡ BANK TAB UI ⚡ */}
         {activeTab === 'bank' && (
           <div className="bg-white border border-slate-100 rounded-[2.5rem] p-8 shadow-2xl shadow-emerald-900/10 animate-in fade-in zoom-in-95">
             <div className="space-y-5">
@@ -912,11 +967,11 @@ export default function Home() {
           </div>
         )}
 
-        {/* ⚡ PAY UTILITIES TAB ⚡ */}
+        {/* ⚡ PAY UTILITIES TAB UI ⚡ */}
         {activeTab === 'pay' && (
           <div className="bg-white border border-slate-100 rounded-[2.5rem] p-8 shadow-2xl shadow-emerald-900/10 animate-in fade-in zoom-in-95">
             <div className="flex overflow-x-auto gap-3 pb-2 mb-4 no-scrollbar">
-                {SERVICES.filter(s => s.id !== 'BANK').map(s => (
+                {SERVICES.map(s => (
                     <button 
                         key={s.id} 
                         onClick={() => handleResetService(s)}
@@ -1063,7 +1118,6 @@ export default function Home() {
                 {activeService.id === "INTERNET" && (
                   <div className="bg-slate-50 border border-slate-200 rounded-2xl p-4 shadow-sm animate-in fade-in slide-in-from-top-4">
                      
-                     {/* IF TELECOM DATA, SHOW CATEGORY BUTTONS */}
                      {internetProvider.includes("-data") && (
                        <div className="flex gap-2 mb-4 border-b border-slate-200 pb-3 overflow-x-auto no-scrollbar shadow-inner bg-slate-100 p-1.5 rounded-2xl">
                           {DATA_CATEGORIES.map(cat => (
