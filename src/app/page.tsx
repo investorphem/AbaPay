@@ -62,7 +62,6 @@ const ELEC_PRE_SELECT_AMOUNTS = ["1000", "2000", "5000", "10000", "20000"];
 const DATA_CATEGORIES = ["Daily", "Weekly", "Monthly", "Social", "Mega", "Broadband"];
 const ITEMS_PER_PAGE = 5;
 
-// ⚡ VTPASS BULLETPROOF EXTRACTOR ⚡
 const extractVtpassArray = (data: any): any[] => {
   if (!data) return [];
   if (Array.isArray(data)) return data;
@@ -70,6 +69,11 @@ const extractVtpassArray = (data: any): any[] => {
   if (data.content && Array.isArray(data.content.variations)) return data.content.variations;
   if (data.content && Array.isArray(data.content)) return data.content;
   if (data.data && Array.isArray(data.data)) return data.data;
+  if (data.content && typeof data.content === 'object') {
+    const nestedArrays = Object.values(data.content).filter(v => Array.isArray(v as any));
+    if (nestedArrays.length > 0) return nestedArrays[0] as any[];
+    return Object.values(data.content); 
+  }
   return [];
 };
 
@@ -84,6 +88,7 @@ export default function Home() {
   const [status, setStatus] = useState("");
   
   const [activeTab, setActiveTab] = useState<"pay" | "bank" | "history">("pay");
+  const [isMiniPay, setIsMiniPay] = useState(false);
   const [isProcessing, setIsProcessing] = useState(false); 
 
   const [customerName, setCustomerName] = useState<string | null>(null);
@@ -117,6 +122,7 @@ export default function Home() {
   const [selectedReceipt, setSelectedReceipt] = useState<any>(null); 
   const [isTermsOpen, setIsTermsOpen] = useState(false); 
   const [isPrivacyOpen, setIsPrivacyOpen] = useState(false); 
+
   const [isSupportOpen, setIsSupportOpen] = useState(false);
   const [supportMessage, setSupportMessage] = useState("");
   const [supportTxHash, setSupportTxHash] = useState<string | null>(null);
@@ -167,6 +173,10 @@ export default function Home() {
   const totalPages = Math.ceil(transactions.length / ITEMS_PER_PAGE);
 
   useEffect(() => {
+    if (status && !isProcessing) setStatus("");
+  }, [accountNumber, nairaAmount, activeService, cableSubscriptionType, selectedCablePlan, selectedBank, selectedInternetPlan, activeTab]);
+
+  useEffect(() => {
     if (status && !isProcessing) {
       const timer = setTimeout(() => setStatus(""), 5000); 
       return () => clearTimeout(timer);
@@ -185,11 +195,13 @@ export default function Home() {
 
       if (typeof window !== "undefined" && (window as any).ethereum) {
         const eth = (window as any).ethereum;
+        if (eth.isMiniPay) setIsMiniPay(true);
         const walletClient = createWalletClient({ chain: activeChain, transport: custom(eth) });
         walletClient.requestAddresses().then(([acc]) => {
           setAddress(acc); setClient(walletClient);
         }).catch((e) => console.log("Connection deferred"));
       }
+
       setTimeout(() => setIsInitiallyLoading(false), 2000);
     }
     initSystem();
@@ -235,20 +247,24 @@ export default function Home() {
 
   // ⚡ DEDICATED BANK FETCHER ⚡
   useEffect(() => {
-    const fetchBanks = async () => {
-      setIsFetchingBanks(true);
-      try {
-        const res = await fetch(`/api/variations?serviceID=bank-deposit`);
-        const data = await res.json();
-        let banksArr = extractVtpassArray(data);
-        if (banksArr.length > 0) {
-          setBankVariations(banksArr.sort((a: any, b: any) => (a.name || "").localeCompare(b.name || "")));
-        }
-      } catch (e) {}
-      setIsFetchingBanks(false);
-    };
-    if (bankVariations.length === 0) fetchBanks();
-  }, [bankVariations.length]);
+    if (activeTab === "bank" && bankVariations.length === 0) {
+      const fetchBanks = async () => {
+        setIsFetchingBanks(true);
+        try {
+          const res = await fetch(`/api/variations?serviceID=bank-deposit`);
+          const data = await res.json();
+          let banksArr = extractVtpassArray(data);
+          
+          if (banksArr && Array.isArray(banksArr) && banksArr.length > 0) {
+            const sortedBanks = banksArr.sort((a: any, b: any) => (a.name || "").localeCompare(b.name || ""));
+            setBankVariations(sortedBanks);
+          }
+        } catch (e) {}
+        setIsFetchingBanks(false);
+      };
+      fetchBanks();
+    }
+  }, [activeTab]);
 
   // ⚡ DEDICATED UTILITY FETCHER ⚡
   useEffect(() => {
@@ -363,6 +379,10 @@ export default function Home() {
   const filteredInternetDataPlans = useMemo(() => {
     if (!internetVariations || internetVariations.length === 0) return [];
     
+    if (internetProvider === 'smile-direct' || internetProvider === 'spectranet') {
+        return internetVariations;
+    }
+
     return internetVariations.filter(plan => {
       const name = (plan.name || "").toLowerCase();
       let category = "Monthly";
@@ -522,7 +542,7 @@ export default function Home() {
   };
 
   const openSelectionModal = (type: 'standard' | 'token' | 'provider' | 'country' | 'bank', title: string, options: any[], callback: (value: string) => void) => {
-    setModalType(type); setModalTitle(title); setModalOptions(options); setModalCallback(() => callback); setIsSelectionModalOpen(true);
+    setModalType(type as any); setModalTitle(title); setModalOptions(options); setModalCallback(() => callback); setIsSelectionModalOpen(true);
   };
 
   const handleCountryChange = (countryCode: string) => {
@@ -719,6 +739,7 @@ export default function Home() {
                 <button onClick={() => setIsSelectionModalOpen(false)} className="p-2 bg-slate-100 rounded-full hover:bg-slate-200 transition-colors"><XCircle size={20} className="text-slate-500" /></button>
               </div>
               <div className="space-y-2.5 max-h-[50vh] overflow-y-auto pr-1">
+                 
                  {modalType === 'country' && SUPPORTED_COUNTRIES.map(country => (
                    <button 
                      key={country.code} 
@@ -779,24 +800,12 @@ export default function Home() {
                         )}
                     </button>
                  ))}
-
-                 {modalType === 'standard' && (modalOptions as string[]).map(option => (
-                     <button 
-                       key={option} 
-                       onClick={() => { modalCallback?.(option); setIsSelectionModalOpen(false); }}
-                       className="w-full text-left p-4 rounded-xl font-black text-slate-700 bg-slate-50 border border-slate-100 uppercase text-xs hover:border-emerald-300 hover:bg-emerald-50/50 transition-all flex justify-between items-center"
-                     >
-                       <span>{option}</span>
-                       {(telecomProvider === option || cableProvider === option) && <CheckCircle2 size={16} className="text-emerald-500"/>}
-                     </button>
-                 ))}
               </div>
            </div>
         </div>
       )}
 
       <div className="w-full max-w-md">
-        
         <div className="flex justify-between items-center bg-white p-4 rounded-3xl shadow-sm border border-slate-100 mb-6">
           <div className="flex items-center gap-3">
             <img src="/logo.png" alt="AbaPay" className="h-10 w-auto object-contain" />
@@ -823,6 +832,7 @@ export default function Home() {
             <button onClick={() => setActiveTab("history")} className={`flex-1 py-3 rounded-xl text-xs font-black transition-all ${activeTab === 'history' ? 'bg-white text-emerald-600 shadow-xl' : 'text-slate-500 hover:text-slate-700'}`}>HISTORY</button>
         </div>
 
+        {/* ⚡ BANK TAB ⚡ */}
         {activeTab === 'bank' && (
           <div className="bg-white border border-slate-100 rounded-[2.5rem] p-8 shadow-2xl shadow-emerald-900/10 animate-in fade-in zoom-in-95">
             <div className="space-y-5">
@@ -945,24 +955,22 @@ export default function Home() {
           </div>
         )}
 
+        {/* ⚡ PAY UTILITIES TAB ⚡ */}
         {activeTab === 'pay' && (
           <div className="bg-white border border-slate-100 rounded-[2.5rem] p-8 shadow-2xl shadow-emerald-900/10 animate-in fade-in zoom-in-95">
             <div className="flex overflow-x-auto gap-3 pb-2 mb-4 no-scrollbar">
-                {SERVICES.map(s => {
-                    if (s.id === 'BANK') return null; // Hide Bank from utilities
-                    return (
-                        <button 
-                            key={s.id} 
-                            onClick={() => handleResetService(s)}
-                            className={`min-w-[80px] p-4 rounded-2xl border-2 transition-all flex flex-col items-center justify-center gap-2 shrink-0 ${
-                                activeService.id === s.id ? 'border-emerald-500 bg-emerald-50/50 scale-105' : 'border-slate-50 bg-slate-50/50 hover:bg-slate-100'
-                            }`}
-                        >
-                            <s.icon size={20} className={s.color} />
-                            <span className="text-[8px] font-black uppercase tracking-widest">{s.name}</span>
-                        </button>
-                    )
-                })}
+                {SERVICES.filter(s => s.id !== 'BANK').map(s => (
+                    <button 
+                        key={s.id} 
+                        onClick={() => handleResetService(s)}
+                        className={`min-w-[80px] p-4 rounded-2xl border-2 transition-all flex flex-col items-center justify-center gap-2 shrink-0 ${
+                            activeService.id === s.id ? 'border-emerald-500 bg-emerald-50/50 scale-105' : 'border-slate-50 bg-slate-50/50 hover:bg-slate-100'
+                        }`}
+                    >
+                        <s.icon size={20} className={s.color} />
+                        <span className="text-[8px] font-black uppercase tracking-widest">{s.name}</span>
+                    </button>
+                ))}
             </div>
 
             <div className="space-y-5">
@@ -1098,7 +1106,6 @@ export default function Home() {
                 {activeService.id === "INTERNET" && (
                   <div className="bg-slate-50 border border-slate-200 rounded-2xl p-4 shadow-sm animate-in fade-in slide-in-from-top-4">
                      
-                     {/* IF TELECOM DATA, SHOW CATEGORY BUTTONS */}
                      {internetProvider.includes("-data") && (
                        <div className="flex gap-2 mb-4 border-b border-slate-200 pb-3 overflow-x-auto no-scrollbar shadow-inner bg-slate-100 p-1.5 rounded-2xl">
                           {DATA_CATEGORIES.map(cat => (
@@ -1355,7 +1362,10 @@ export default function Home() {
                 </button>
             </div>
           </div>
-        ) : (
+        )}
+
+        {/* ⚡ HISTORY TAB ⚡ */}
+        {activeTab === 'history' && (
           <div className="bg-white border border-slate-100 rounded-[2.5rem] p-6 shadow-2xl animate-in slide-in-from-bottom-4">
              {transactions.length === 0 ? (
                 <div className="py-24 text-center">
