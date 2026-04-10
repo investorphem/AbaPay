@@ -891,7 +891,6 @@ export default function Home() {
                             </div>
                             <div>
                                 <span className="text-sm font-black text-slate-900 tracking-tight">{provider.displayName}</span>
-                                <p className={`text-[10px] font-black uppercase text-slate-400 tracking-wider transition-colors ${activeService.id === 'ELECTRICITY' ? 'group-hover:text-orange-700' : 'group-hover:text-pink-700'}`}>{provider.serviceID}</p>
                             </div>
                         </div>
                         {(activeService.id === 'ELECTRICITY' ? elecProvider === provider.serviceID : cableProvider === provider.serviceID) && (
@@ -1022,7 +1021,6 @@ export default function Home() {
                                 </div>
                                 <div>
                                     <span className="text-sm font-black text-slate-900 tracking-tight">{currentDisco?.displayName}</span>
-                                    <p className="text-[10px] font-black uppercase text-orange-600 tracking-wider">Tap to change Disco</p>
                                 </div>
                             </div>
                             <ChevronDown size={18} className="text-slate-400"/>
@@ -1038,7 +1036,6 @@ export default function Home() {
                             </div>
                             <div>
                                 <span className="text-sm font-black text-slate-900 tracking-tight">{currentCable?.displayName}</span>
-                                <p className="text-[10px] font-black uppercase text-pink-600 tracking-wider">Tap to change Provider</p>
                             </div>
                         </div>
                         <ChevronDown size={18} className="text-slate-400"/>
