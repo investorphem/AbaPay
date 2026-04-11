@@ -33,10 +33,17 @@ export const INTERNET_PROVIDERS = [
   { serviceID: "spectranet", displayName: "Spectranet", logo: "/spectranet.png" }
 ];
 
+// ⚡ ADDED EDUCATION PROVIDERS ⚡
+export const EDUCATION_PROVIDERS = [
+  { serviceID: "waec", displayName: "WAEC Result Checker", logo: "/logo.png" },
+  { serviceID: "waec-registration", displayName: "WAEC Registration", logo: "/logo.png" },
+  { serviceID: "jamb", displayName: "JAMB PIN Vending", logo: "/logo.png" }
+];
+
 export const SUPPORTED_TOKENS = [
   { symbol: "USD₮", decimals: 6, mainnet: "0x48065fbbe25f71c9282ddf5e1cd6d6a887483d5e", sepolia: "0xd077A400968890Eacc75cdc901F0356c943e4fDb", logo: "/usdt.png" },
   { symbol: "USDC", decimals: 6, mainnet: "0xcebA9300f2b948710d2653dD7B07f33A8B32118C", sepolia: "0x01C5C0122039549AD1493B8220cABEdD739BC44E", logo: "/usdc.png" },
-  { symbol: "USDm", decimals: 18, mainnet: "0x765DE816845861e75A25fCA122bb6898B8B1282a", sepolia: "0xdE9e4C3ce781b4bA68120d6261cbad65ce0aB00b", logo: "/cusd.png" },
+  { symbol: "cUSD", decimals: 18, mainnet: "0x765DE816845861e75A25fCA122bb6898B8B1282a", sepolia: "0xdE9e4C3ce781b4bA68120d6261cbad65ce0aB00b", logo: "/cusd.png" }, // ⚡ FIXED to cUSD
 ];
 
 export const SUPPORTED_COUNTRIES = [
