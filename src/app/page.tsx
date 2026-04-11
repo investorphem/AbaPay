@@ -11,13 +11,13 @@ import { supabase } from "@/utils/supabase";
 import { ELECTRICITY_DISCOS } from "./discos"; 
 
 import { TermsModal, PrivacyModal, ReceiptModal, SelectionModal } from "@/components/Modals";
-import { HistoryTab } from "@/components/HistoryTab";
 import { 
   ABAPAY_ABI, ERC20_ABI, SERVICES, CABLE_PROVIDERS_LIST, TELECOM_PROVIDERS, 
   INTERNET_PROVIDERS, SUPPORTED_TOKENS, SUPPORTED_COUNTRIES, PRE_SELECT_AMOUNTS, 
   ELEC_PRE_SELECT_AMOUNTS, DATA_CATEGORIES, ITEMS_PER_PAGE, extractVtpassArray,
-  ELECTRICITY_PROVIDER_IDS
+  ELECTRICITY_PROVIDER_IDS, EDUCATION_PROVIDERS // ⚡ IMPORTED HERE ⚡
 } from "@/constants";
+import { HistoryTab } from "@/components/HistoryTab";
 
 export default function Home() {
   const [isInitiallyLoading, setIsInitiallyLoading] = useState(true);
@@ -28,7 +28,7 @@ export default function Home() {
   const [accountNumber, setAccountNumber] = useState("");
   const [customerPhone, setCustomerPhone] = useState("");
   const [status, setStatus] = useState("");
-  
+
   const [activeTab, setActiveTab] = useState<"pay" | "bank" | "education" | "history">("pay");
   const [isProcessing, setIsProcessing] = useState(false); 
   const [customerName, setCustomerName] = useState<string | null>(null);
@@ -98,12 +98,7 @@ export default function Home() {
   const currentCable = useMemo(() => CABLE_PROVIDERS_LIST.find(c => c.serviceID === cableProvider), [cableProvider]);
   const currentInternet = useMemo(() => INTERNET_PROVIDERS.find(c => c.serviceID === internetProvider), [internetProvider]);
 
-  // ⚡ ADDED JAMB TO EDUCATION PROVIDERS ⚡
-  const EDUCATION_PROVIDERS = [
-    { serviceID: "waec", displayName: "WAEC Result Checker", logo: "/logo.png" },
-    { serviceID: "waec-registration", displayName: "WAEC Registration", logo: "/logo.png" },
-    { serviceID: "jamb", displayName: "JAMB PIN Vending", logo: "/logo.png" }
-  ];
+  // ⚡ HARDCODED LIST REMOVED - NOW USING GLOBAL CONSTANT ⚡
 
   const dynamicMinAmount = useMemo(() => {
     if (activeTab === "bank") return 1000;
@@ -149,9 +144,9 @@ export default function Home() {
   const isFormValid = useMemo(() => {
     const amount = parseFloat(nairaAmount);
     if (!nairaAmount || isNaN(amount) || amount < dynamicMinAmount || amount > dynamicMaxAmount) return false;
-    
+
     if (activeTab === "bank") return accountNumber.length === 10 && customerName !== null && selectedBank !== null && customerPhone.length >= 10;
-    
+
     if (activeTab === "education") {
       if (educationProvider === "jamb") return accountNumber.length >= 10 && customerName !== null && selectedEducationPlan !== null && customerPhone.length >= 10;
       return selectedEducationPlan !== null && customerPhone.length >= 10;
@@ -218,20 +213,31 @@ export default function Home() {
     try {
       const res = await fetch(`/api/variations?serviceID=bank-deposit`);
       const data = await res.json();
+      
+      if (data.code === '011' || data.error) {
+        showToast("API Error", data.content?.errors || "Bank Transfer disabled on this account.", "error");
+        setBankVariations([]);
+        return;
+      }
+
       let banksArr = extractVtpassArray(data);
       if (banksArr && Array.isArray(banksArr) && banksArr.length > 0) {
         setBankVariations(banksArr.sort((a: any, b: any) => (a.name || "").localeCompare(b.name || "")));
-      } else { throw new Error("No banks found from API"); }
+      } else { 
+        setBankVariations([]); 
+      }
     } catch (e) {
-      setBankVariations([{ variation_code: 'access', name: 'ACCESS BANK PLC' }, { variation_code: 'firstbank', name: 'FIRST BANK OF NIGERIA PLC' }, { variation_code: 'gtb', name: 'GTBANK PLC' }, { variation_code: 'opay', name: 'OPAY' }, { variation_code: 'moniepoint', name: 'MONIEPOINT MICROFINANCE BANK' }, { variation_code: 'uba', name: 'UBA - UNITED BANK FOR AFRICA PLC' }, { variation_code: 'zenith', name: 'ZENITH BANK PLC' }]);
-    } finally { setIsFetchingBanks(false); }
+      setBankVariations([]);
+    } finally { 
+      setIsFetchingBanks(false); 
+    }
   };
 
   const verifyMerchant = async () => {
     setIsVerifying(true); setCustomerName(null); setCableCurrentBouquet(null); setCableRenewAmount(null); setInternetAccountId(null);
     try {
         let serviceID = ""; let reqType = undefined;
-        
+
         if (activeTab === "bank") { 
           serviceID = "bank-deposit"; reqType = selectedBank?.variation_code; 
         } else if (activeTab === "education" && educationProvider === "jamb") {
@@ -240,7 +246,7 @@ export default function Home() {
           serviceID = activeService.id === "ELECTRICITY" ? elecProvider : activeService.id === "INTERNET" ? internetProvider : cableProvider; 
           reqType = activeService.id === "ELECTRICITY" ? meterType : undefined; 
         }
-        
+
         const res = await fetch(`/api/verify`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ billersCode: accountNumber, serviceID: serviceID, type: reqType }) });
         const data = await res.json();
 
@@ -281,7 +287,7 @@ export default function Home() {
 
       setStatus("Awaiting token approval...");
       const approvalHash = await client.writeContract({ address: tokenAddress as `0x${string}`, abi: ERC20_ABI, functionName: 'approve', args: [ABAPAY_CONTRACT, valueInWei], account: address });
-      
+
       setStatus("Mining approval on Celo Mainnet... Please wait.");
       await publicClient.waitForTransactionReceipt({ hash: approvalHash });
       setStatus("Approval confirmed! Please sign the final payment...");
@@ -492,7 +498,7 @@ export default function Home() {
   return (
     <main className="min-h-screen bg-slate-50 text-slate-900 font-sans p-4 flex flex-col items-center pb-20 relative">
       <style>{`@keyframes logoScale { 0%, 100% { transform: scale(1); opacity: 0.9; } 50% { transform: scale(1.1); opacity: 1; } } .animate-logo-scale { animation: logoScale 1.5s ease-in-out infinite; } .no-scrollbar::-webkit-scrollbar { display: none; } .no-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }`}</style>
-      
+
       {isInitiallyLoading && (
         <div className="fixed inset-0 z-[100] bg-white flex flex-col items-center justify-center animate-in fade-out duration-500 fill-mode-forwards" style={{ animationDelay: '1.5s' }}>
           <img src="/logo.png" alt="AbaPay" className="h-28 w-auto object-contain animate-logo-scale mb-10" />
@@ -637,7 +643,7 @@ export default function Home() {
 
                 <div className="bg-slate-50 border border-slate-200 rounded-2xl p-4 shadow-sm animate-in fade-in slide-in-from-top-4">
                   <p className="text-[10px] font-black uppercase tracking-widest text-slate-400 mb-2">Select PIN Type</p>
-                  
+
                   {selectedEducationPlan ? (
                       <div className="relative animate-in zoom-in-95 duration-200 mt-2">
                           <button onClick={() => { setSelectedEducationPlan(null); setNairaAmount(""); }} className="absolute -top-3 -right-3 bg-slate-200 text-slate-500 hover:text-slate-800 hover:bg-slate-300 rounded-full p-1 transition-all z-10 shadow-sm border border-white">
@@ -767,7 +773,7 @@ export default function Home() {
                 <div>
                     <label className="text-[10px] font-black text-slate-400 uppercase mb-2 flex justify-between">
                       <span>Account Number (10 Digits)</span>
-                      <span className={accountNumber.length === 10 ? "text-emerald-500" : "text-slate-400"}>{accountNumber.length}/10</span>
+                      <span className={accountNumber.length === 10 ? "textemerald-500" : "text-slate-400"}>{accountNumber.length}/10</span>
                     </label>
                     <input 
                         type="tel" placeholder="Enter Account Number"
@@ -995,7 +1001,7 @@ export default function Home() {
                 {/* ⚡ INTERNET PACKAGES ⚡ */}
                 {activeService.id === "INTERNET" && (
                   <div className="bg-slate-50 border border-slate-200 rounded-2xl p-4 shadow-sm animate-in fade-in slide-in-from-top-4">
-                     
+
                      {/* ⚡ HIDE TABS FOR SPECTRANET ⚡ */}
                      {internetProvider !== 'spectranet' && (
                        <div className="flex gap-2 mb-4 border-b border-slate-200 pb-3 overflow-x-auto no-scrollbar shadow-inner bg-slate-100 p-1.5 rounded-2xl">
@@ -1010,7 +1016,7 @@ export default function Home() {
                           ))}
                         </div>
                      )}
-                     
+
                      {selectedInternetPlan ? (
                         <div className="relative animate-in zoom-in-95 duration-200 mt-2">
                            <button onClick={() => { setSelectedInternetPlan(null); setNairaAmount(""); }} className="absolute -top-3 -right-3 bg-slate-200 text-slate-500 hover:text-slate-800 hover:bg-slate-300 rounded-full p-1 transition-all z-10 shadow-sm border border-white">
