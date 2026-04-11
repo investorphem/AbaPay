@@ -116,7 +116,7 @@ export default function Home() {
 
   const filteredInternetDataPlans = useMemo(() => {
     if (!internetVariations || !Array.isArray(internetVariations) || internetVariations.length === 0) return [];
-    
+
     let strictVariations = internetVariations;
     if (internetProvider.includes('mtn')) strictVariations = internetVariations.filter(p => p.variation_code.toLowerCase().includes('mtn'));
     else if (internetProvider.includes('airtel')) strictVariations = internetVariations.filter(p => p.variation_code.toLowerCase().includes('airtel'));
@@ -219,7 +219,7 @@ export default function Home() {
     try {
       const res = await fetch(`/api/variations?serviceID=bank-deposit`);
       const data = await res.json();
-      
+
       if (data.code === '011' || !data.content || !data.content.variations) {
         setBankVariations([
             { variation_code: 'access', name: 'ACCESS BANK PLC' },
@@ -1125,6 +1125,25 @@ export default function Home() {
                                 {parseFloat(nairaAmount) < dynamicMinAmount ? `Amount is below the minimum of ₦${dynamicMinAmount.toLocaleString()}` : `Amount exceeds the maximum of ₦${dynamicMaxAmount.toLocaleString()}`}
                             </p>
                         </div>
+                    )}
+
+                    {/* ⚡ RESTORED PRE-SELECTION BUTTONS FOR AIRTIME & ELECTRICITY ⚡ */}
+                    {(activeService.id === "AIRTIME" || activeService.id === "ELECTRICITY") && (
+                       <div className="flex gap-2.5 overflow-x-auto py-1.5 mt-3 no-scrollbar bg-slate-100 p-2 rounded-2xl shadow-inner">
+                          {(activeService.id === "AIRTIME" ? PRE_SELECT_AMOUNTS : ELEC_PRE_SELECT_AMOUNTS).map(amount => {
+                            const cryptoAmtCost = (parseInt(amount) / exchangeRate).toFixed(4);
+                            return (
+                              <button 
+                                 key={amount} 
+                                 onClick={() => setNairaAmount(amount)} 
+                                 className={`flex-1 min-w-[70px] py-4 rounded-xl font-black transition-all whitespace-nowrap ${nairaAmount === amount ? 'bg-white shadow-lg text-emerald-700 scale-105' : 'bg-slate-50 hover:bg-slate-200 text-slate-700'}`}
+                              >
+                                 ₦{parseInt(amount).toLocaleString()}
+                                 <p className="text-[8px] mt-0.5 text-slate-400 font-bold">{cryptoAmtCost} {selectedToken.symbol}</p>
+                              </button>
+                            );
+                          })}
+                       </div>
                     )}
                 </div>
 
