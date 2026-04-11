@@ -1,11 +1,5 @@
 import { NextResponse } from 'next/server';
-import { createClient } from '@supabase/supabase-js';
-
-// 🛡️ Initialize Supabase with the SERVICE ROLE KEY to bypass Row Level Security (RLS)
-const supabaseAdmin = createClient(
-  process.env.NEXT_PUBLIC_SUPABASE_URL!,
-  process.env.SUPABASE_SERVICE_ROLE_KEY!
-);
+import { supabaseAdmin } from '@/utils/supabase'; // ⚡ Imported your centralized master client
 
 export async function POST(req: Request) {
   try {
@@ -15,7 +9,7 @@ export async function POST(req: Request) {
       return NextResponse.json({ success: false, message: "Missing transaction ID or refund hash" }, { status: 400 });
     }
 
-    // Force the database update using the master admin client
+    // Force the database update using the master admin client (bypasses RLS)
     const { error } = await supabaseAdmin
       .from('transactions')
       .update({ status: 'REFUNDED', refund_hash: refundHash })
