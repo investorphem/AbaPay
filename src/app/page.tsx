@@ -5,7 +5,7 @@ import { createWalletClient, createPublicClient, custom, http, parseUnits, forma
 import { celo, celoSepolia } from "viem/chains";
 import { 
   ShieldCheck, Zap, AlertTriangle, CheckCircle2, ChevronDown, 
-  Loader2, Coins, Briefcase, ListPlus, Users, Landmark, RefreshCw, Tv
+  Loader2, Coins, Briefcase, ListPlus, Users, Landmark, XCircle, RefreshCw, Tv
 } from "lucide-react";
 import { supabase } from "@/utils/supabase";
 import { ELECTRICITY_DISCOS } from "./discos"; // <-- ADD THIS LINE BACK!
