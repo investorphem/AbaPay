@@ -113,9 +113,12 @@ export default function Home() {
     return { cryptoToCharge: crypto.toFixed(4), currentFee: fee };
   }, [nairaAmount, exchangeRate, activeService, activeTab]);
 
-    // ⚡ FIXED: ENHANCED FILTER FOR ALL INTERNET PROVIDERS INCLUDING SMILE ⚡
+      // ⚡ FIXED: ENHANCED FILTER WITH SPECTRANET EXCEPTION ⚡
   const filteredInternetDataPlans = useMemo(() => {
     if (!internetVariations || internetVariations.length === 0) return [];
+
+    // Bypass category filters entirely for Spectranet so it shows everything at once
+    if (internetProvider === 'spectranet') return internetVariations;
 
     return internetVariations.filter(plan => {
       const name = (plan.name || "").toLowerCase();
@@ -131,6 +134,7 @@ export default function Home() {
       return category === activeDataCategory;
     }).sort((a, b) => parseFloat(a.variation_amount || "0") - parseFloat(b.variation_amount || "0"));
   }, [internetVariations, activeDataCategory, internetProvider]);
+
 
 
   const isFormValid = useMemo(() => {
