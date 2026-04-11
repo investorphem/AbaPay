@@ -4,7 +4,8 @@ import 'server-only';
  * sendTelegramAlert
  * Sends a high-priority message to the Admin's Telegram
  */
-export const sendTelegramAlert = async (message: string) => {
+// ⚡ REMOVED TypeScript type (: string)
+export const sendTelegramAlert = async (message) => {
   const token = process.env.TELEGRAM_BOT_TOKEN;
   const chatId = process.env.TELEGRAM_ADMIN_CHAT_ID;
 
