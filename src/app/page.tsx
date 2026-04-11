@@ -62,7 +62,6 @@ const ELEC_PRE_SELECT_AMOUNTS = ["1000", "2000", "5000", "10000", "20000"];
 const DATA_CATEGORIES = ["Daily", "Weekly", "Monthly", "Social", "Mega", "Broadband"];
 const ITEMS_PER_PAGE = 5;
 
-// ⚡ BULLETPROOF VTPASS EXTRACTOR ⚡
 const extractVtpassArray = (data: any): any[] => {
   if (!data) return [];
   if (Array.isArray(data)) return data;
@@ -101,12 +100,10 @@ export default function Home() {
   const [cableVariations, setCableVariations] = useState<any[]>([]);
   const [selectedCablePlan, setSelectedCablePlan] = useState<any>(null);
 
-  // ⚡ INTERNET STATES ⚡
   const [internetVariations, setInternetVariations] = useState<any[]>([]);
   const [selectedInternetPlan, setSelectedInternetPlan] = useState<any>(null);
   const [internetAccountId, setInternetAccountId] = useState<string | null>(null);
 
-  // ⚡ BANK STATES ⚡
   const [bankVariations, setBankVariations] = useState<any[]>([]);
   const [selectedBank, setSelectedBank] = useState<any>(null);
   const [isFetchingBanks, setIsFetchingBanks] = useState(false);
@@ -178,17 +175,13 @@ export default function Home() {
     return { cryptoToCharge: crypto.toFixed(4), currentFee: fee };
   }, [nairaAmount, exchangeRate, activeService, activeTab]);
 
-  // ⚡ STRICT FILTER FOR INTERNET ⚡
+  // ⚡ FIXED: Unified filtering for ALL Internet Providers ⚡
   const filteredInternetDataPlans = useMemo(() => {
     if (!internetVariations || internetVariations.length === 0) return [];
-    
-    // Smile and Spectranet bypass the Daily/Weekly category filters entirely
-    if (internetProvider === 'smile-direct' || internetProvider === 'spectranet') return internetVariations;
 
-    // Standard Telecom Data applies categories
     return internetVariations.filter(plan => {
       const name = (plan.name || "").toLowerCase();
-      let category = "Monthly";
+      let category = "Monthly"; // Default fallback
 
       if (name.includes('broadband') || name.includes('router') || name.includes('5g') || name.includes('hynet')) category = "Broadband";
       else if (name.includes('social') || name.includes('whatsapp') || name.includes('ig') || name.includes('instagram') || name.includes('tiktok') || name.includes('youtube') || name.includes('facebook') || name.includes('opera') || name.includes('xot')) category = "Social";
@@ -235,141 +228,71 @@ export default function Home() {
     return false;
   }, [accountNumber, nairaAmount, activeService, customerName, dynamicMinAmount, dynamicMaxAmount, cableSubscriptionType, selectedCablePlan, selectedBank, selectedInternetPlan, internetAccountId, customerPhone, internetProvider, activeTab, cableProvider]);
 
-  // ⚡ BACKGROUND FETCHERS ⚡
-  useEffect(() => {
-    if (status && !isProcessing) {
-      const timer = setTimeout(() => setStatus(""), 5000); 
-      return () => clearTimeout(timer);
+  // ⚡ ACTION HANDLERS ⚡
+  const showToast = (title: string, message: string, type: 'success' | 'error' = 'success') => {
+    setToast({ title, message, type });
+    setTimeout(() => setToast(null), 5000);
+  };
+
+  // ⚡ FIXED: This properly resets memory when you change a provider! ⚡
+  const handleProviderChange = (newProvider: string, type: 'internet' | 'telecom' | 'cable' | 'elec' | 'bank') => {
+    setNairaAmount("");
+    setAccountNumber("");
+    setCustomerName(null);
+    setCustomerPhone("");
+    
+    if (type === 'internet') {
+      setInternetProvider(newProvider);
+      setSelectedInternetPlan(null);
+      setInternetAccountId(null);
+    } else if (type === 'telecom') {
+      setTelecomProvider(newProvider);
+    } else if (type === 'cable') {
+      setCableProvider(newProvider);
+      setSelectedCablePlan(null);
+      setCableCurrentBouquet(null);
+      setCableRenewAmount(null);
+      setCableSubscriptionType("renew");
+    } else if (type === 'elec') {
+      setElecProvider(newProvider);
+    } else if (type === 'bank') {
+      setSelectedBank(newProvider);
     }
-  }, [status, isProcessing]);
+  };
 
-  useEffect(() => {
-    async function initSystem() {
-      const savedHistory = localStorage.getItem("abapay_history");
-      if (savedHistory) setTransactions(JSON.parse(savedHistory));
+  const handleResetService = (s: any) => {
+    setActiveService(s); setAccountNumber(""); setCustomerName(null); setNairaAmount(""); 
+    setCableCurrentBouquet(null); setCableRenewAmount(null); setSelectedCablePlan(null);
+    setCableSubscriptionType("renew"); setSelectedBank(null); setSelectedInternetPlan(null); setInternetAccountId(null);
+  };
 
-      try {
-        const { data: settingsData } = await supabase.from('platform_settings').select('exchange_rate').eq('id', 1).single();
-        if (settingsData && settingsData.exchange_rate) setExchangeRate(Number(settingsData.exchange_rate));
-      } catch (consoleError) {}
+  const openSelectionModal = (type: 'standard' | 'token' | 'provider' | 'country' | 'bank', title: string, options: any[], callback: (value: string) => void) => {
+    setModalType(type as any); setModalTitle(title); setModalOptions(options); setModalCallback(() => callback); setIsSelectionModalOpen(true);
+  };
 
-      if (typeof window !== "undefined" && (window as any).ethereum) {
-        const eth = (window as any).ethereum;
-        if (eth.isMiniPay) setIsMiniPay(true);
-        const walletClient = createWalletClient({ chain: activeChain, transport: custom(eth) });
-        walletClient.requestAddresses().then(([acc]) => {
-          setAddress(acc); setClient(walletClient);
-        }).catch((e) => console.log("Connection deferred"));
-      }
+  const handleCountryChange = (countryCode: string) => {
+    const country = SUPPORTED_COUNTRIES.find(c => c.code === countryCode);
+    if (country && !country.disabled) { setActiveCountry(country); handleResetService(SERVICES[0]); }
+  };
 
-      setTimeout(() => setIsInitiallyLoading(false), 2000);
-    }
-    initSystem();
-  }, [activeChain]);
+  const handleShareReceipt = async () => {
+    const receiptText = `🧾 AbaPay Receipt\n\nDate: ${selectedReceipt?.date}\nStatus: ${selectedReceipt?.status}\nProduct: ${selectedReceipt?.network} ${selectedReceipt?.service}\nRecipient: ${selectedReceipt?.account}\nAmount Paid: ₦${selectedReceipt?.amountNaira}\nCrypto Used: ${selectedReceipt?.amountCrypto} ${selectedReceipt?.tokenUsed}\nTx Hash: ${selectedReceipt?.txHash}\n\nSecured by Celo Network`;
+    if (navigator.share) { try { await navigator.share({ title: 'Receipt', text: receiptText }); } catch (err) {} } 
+    else { try { await navigator.clipboard.writeText(receiptText); showToast("Copied!", "Receipt details copied to clipboard.", "success"); } catch (err) {} }
+  };
 
-  // GUARANTEED BANK FETCH ON MOUNT
-  useEffect(() => {
-    const fetchBanks = async () => {
-      setIsFetchingBanks(true);
-      try {
-        const res = await fetch(`/api/variations?serviceID=bank-deposit`);
-        const data = await res.json();
-        let banksArr = extractVtpassArray(data);
-        
-        if (banksArr && Array.isArray(banksArr) && banksArr.length > 0) {
-          const sortedBanks = banksArr.sort((a: any, b: any) => (a.name || "").localeCompare(b.name || ""));
-          setBankVariations(sortedBanks);
-        }
-      } catch (e) {}
-      setIsFetchingBanks(false);
-    };
-    fetchBanks();
-  }, []); // Empty dependency array ensures it loads banks once on app launch
+  const submitSupportTicket = async () => {
+    if (!supportMessage.trim()) return;
+    setIsSendingSupport(true);
+    try {
+      const formData = new FormData(); formData.append("message", supportMessage);
+      if (address) formData.append("userAddress", address); if (supportTxHash) formData.append("txHash", supportTxHash); if (supportFile) formData.append("file", supportFile);
+      await fetch('/api/support', { method: 'POST', body: formData });
+      setIsSupportOpen(false); setSupportMessage(""); setSupportFile(null); setSupportTxHash(null); 
+      showToast("Ticket Submitted", "Support has received your request.", "success");
+    } catch (error) { showToast("Connection Error", "Failed to send the ticket.", "error"); } finally { setIsSendingSupport(false); }
+  };
 
-  useEffect(() => {
-    if (!address) return;
-    async function fetchCloudHistory() {
-      try {
-        const sixMonthsAgo = new Date();
-        sixMonthsAgo.setMonth(sixMonthsAgo.getMonth() - 6);
-        const { data } = await supabase.from('transactions').select('*').eq('wallet_address', address).gte('created_at', sixMonthsAgo.toISOString()).order('created_at', { ascending: false });
-
-        if (data && data.length > 0) {
-          const cloudHistory = data.map((tx: any) => ({
-            id: tx.tx_hash.slice(0, 8), date: new Date(tx.created_at).toLocaleString(), status: tx.status,
-            amountNaira: tx.amount_naira.toString(), amountCrypto: tx.amount_usdt.toString(), tokenUsed: "USD₮", 
-            service: tx.service_category, network: tx.network, txHash: tx.tx_hash, account: tx.account_number,
-            refund_hash: tx.refund_hash, purchased_code: tx.purchased_code, request_id: tx.request_id, units: tx.units 
-          }));
-          setTransactions(cloudHistory);
-          localStorage.setItem("abapay_history", JSON.stringify(cloudHistory));
-        }
-      } catch (e) {}
-    }
-    fetchCloudHistory();
-  }, [address]);
-
-  useEffect(() => {
-    async function fetchBalance() {
-      if (!address) return;
-      setIsFetchingBalance(true);
-      try {
-        const publicClient = createPublicClient({ chain: activeChain, transport: http() });
-        const tokenAddress = isMainnet ? selectedToken.mainnet : selectedToken.sepolia;
-        const balanceWei = await publicClient.readContract({ address: tokenAddress as `0x${string}`, abi: ERC20_ABI, functionName: 'balanceOf', args: [address] });
-        setWalletBalance(parseFloat(formatUnits(balanceWei as bigint, selectedToken.decimals)).toFixed(4));
-      } catch (error) { setWalletBalance("0.00"); }
-      setIsFetchingBalance(false);
-    }
-    fetchBalance();
-  }, [address, selectedToken, activeChain, isMainnet]);
-
-  // DEDICATED UTILITY FETCHER
-  useEffect(() => {
-    if (activeTab !== "pay") return;
-    if (activeService.id === "CABLE") {
-      const fetchVariations = async () => {
-        try {
-          const res = await fetch(`/api/variations?serviceID=${cableProvider}`);
-          const data = await res.json();
-          setCableVariations(extractVtpassArray(data));
-        } catch (e) {}
-      };
-      fetchVariations();
-    } else if (activeService.id === "INTERNET") {
-      const fetchInternetVariations = async () => {
-        setInternetVariations([]);
-        try {
-          const res = await fetch(`/api/variations?serviceID=${internetProvider}`);
-          const data = await res.json();
-          setInternetVariations(extractVtpassArray(data));
-        } catch (e) {}
-      };
-      fetchInternetVariations();
-    }
-  }, [activeTab, activeService.id, cableProvider, internetProvider]);
-
-  // AUTO TELECOM NETWORK DETECTION
-  useEffect(() => {
-    if (activeTab === "pay") {
-      if (activeService.id === "AIRTIME" && accountNumber.length >= 4) {
-        const prefix = accountNumber.substring(0, 4);
-        if (["0803","0806","0810","0813","0814","0816","0903","0906","0913","0916","0703","0706"].includes(prefix)) setTelecomProvider("mtn");
-        else if (["0802","0808","0812","0902","0907","0912","0701","0708"].includes(prefix)) setTelecomProvider("airtel");
-        else if (["0805","0807","0811","0905","0705","0915"].includes(prefix)) setTelecomProvider("glo");
-        else if (["0809","0817","0818","0908","0909"].includes(prefix)) setTelecomProvider("9mobile");
-      }
-      if (activeService.id === "INTERNET" && internetProvider.includes("-data") && accountNumber.length >= 4) {
-        const prefix = accountNumber.substring(0, 4);
-        if (["0803","0806","0810","0813","0814","0816","0903","0906","0913","0916","0703","0706"].includes(prefix)) setInternetProvider("mtn-data");
-        else if (["0802","0808","0812","0902","0907","0912","0701","0708"].includes(prefix)) setInternetProvider("airtel-data");
-        else if (["0805","0807","0811","0905","0705","0915"].includes(prefix)) setInternetProvider("glo-data");
-        else if (["0809","0817","0818","0908","0909"].includes(prefix)) setInternetProvider("9mobile-data");
-      }
-    }
-  }, [accountNumber, activeService.id, activeTab, internetProvider]);
-
-  // ⚡ UNIFIED VERIFICATION ENGINE ⚡
   const verifyMerchant = async () => {
     setIsVerifying(true);
     setCustomerName(null);
@@ -416,73 +339,6 @@ export default function Home() {
         }
     } catch (e) {}
     setIsVerifying(false);
-  };
-
-  useEffect(() => {
-    if (activeTab === "bank") {
-       if (accountNumber.length === 10 && selectedBank) verifyMerchant();
-       else setCustomerName(null);
-    } else if (activeTab === "pay") {
-       if (activeService.id === "ELECTRICITY" && accountNumber.length >= 10) verifyMerchant();
-       else if (activeService.id === "CABLE" && cableProvider !== "showmax" && accountNumber.length >= 10) verifyMerchant();
-       else if (activeService.id === "INTERNET" && internetProvider === "smile-direct" && accountNumber.includes('@') && accountNumber.includes('.')) {
-          const timeoutId = setTimeout(() => verifyMerchant(), 1000);
-          return () => clearTimeout(timeoutId);
-       } else {
-          setCustomerName(null);
-       }
-    }
-  }, [accountNumber, elecProvider, cableProvider, activeService.id, meterType, selectedBank, internetProvider, activeTab]);
-
-  // ⚡ ACTION HANDLERS ⚡
-  const showToast = (title: string, message: string, type: 'success' | 'error' = 'success') => {
-    setToast({ title, message, type });
-    setTimeout(() => setToast(null), 5000);
-  };
-
-  const handleProviderChange = (newProvider: string, type: 'telecom' | 'cable' | 'elec' | 'internet' | 'bank') => {
-    setNairaAmount("");
-    setAccountNumber("");
-    setCustomerName(null);
-    
-    if (type === 'telecom') { setTelecomProvider(newProvider); }
-    if (type === 'cable') { setCableProvider(newProvider); setSelectedCablePlan(null); setCableCurrentBouquet(null); setCableRenewAmount(null); }
-    if (type === 'elec') { setElecProvider(newProvider); }
-    if (type === 'internet') { setInternetProvider(newProvider); setSelectedInternetPlan(null); setInternetAccountId(null); }
-    if (type === 'bank') { setSelectedBank(newProvider); }
-  };
-
-  const handleResetService = (s: any) => {
-    setActiveService(s); setAccountNumber(""); setCustomerName(null); setNairaAmount(""); 
-    setCableCurrentBouquet(null); setCableRenewAmount(null); setSelectedCablePlan(null);
-    setCableSubscriptionType("renew"); setSelectedBank(null); setSelectedInternetPlan(null); setInternetAccountId(null);
-  };
-
-  const openSelectionModal = (type: 'standard' | 'token' | 'provider' | 'country' | 'bank', title: string, options: any[], callback: (value: string) => void) => {
-    setModalType(type as any); setModalTitle(title); setModalOptions(options); setModalCallback(() => callback); setIsSelectionModalOpen(true);
-  };
-
-  const handleCountryChange = (countryCode: string) => {
-    const country = SUPPORTED_COUNTRIES.find(c => c.code === countryCode);
-    if (country && !country.disabled) { setActiveCountry(country); handleResetService(SERVICES[0]); }
-  };
-
-  const handleShareReceipt = async () => {
-    const receiptText = `🧾 AbaPay Receipt\n\nDate: ${selectedReceipt?.date}\nStatus: ${selectedReceipt?.status}\nProduct: ${selectedReceipt?.network} ${selectedReceipt?.service}\nRecipient: ${selectedReceipt?.account}\nAmount Paid: ₦${selectedReceipt?.amountNaira}\nCrypto Used: ${selectedReceipt?.amountCrypto} ${selectedReceipt?.tokenUsed}\nTx Hash: ${selectedReceipt?.txHash}\n\nSecured by Celo Network`;
-    if (navigator.share) { try { await navigator.share({ title: 'Receipt', text: receiptText }); } catch (err) {} } 
-    else { try { await navigator.clipboard.writeText(receiptText); showToast("Copied!", "Receipt details copied to clipboard.", "success"); } catch (err) {} }
-  };
-
-  const submitSupportTicket = async () => {
-    if (!supportMessage.trim()) return;
-    setIsSendingSupport(true);
-    try {
-      const formData = new FormData(); formData.append("message", supportMessage);
-      if (address) formData.append("userAddress", address); if (supportTxHash) formData.append("txHash", supportTxHash); if (supportFile) formData.append("file", supportFile);
-      await fetch('/api/support', { method: 'POST', body: formData });
-      setIsSupportOpen(false); setSupportMessage(""); setSupportFile(null); setSupportTxHash(null); 
-      showToast("Ticket Submitted", "Support has received your request.", "success");
-    } catch (error) { showToast("Connection Error", "Failed to send the ticket.", "error"); } finally { setIsSendingSupport(false); }
   };
 
   const handlePayment = async () => {
@@ -587,6 +443,65 @@ export default function Home() {
     } catch (e) { setStatus("Transaction Cancelled."); } finally { setIsProcessing(false); }
   };
 
+  // ==========================================
+  // 4. USE EFFECTS (BACKGROUND TASKS)
+  // ==========================================
+  useEffect(() => {
+    // ⚡ FIXED: Ensure Bank API fetches ON MOUNT to be ready when tab is clicked ⚡
+    const fetchBanksOnMount = async () => {
+      setIsFetchingBanks(true);
+      try {
+        const res = await fetch(`/api/variations?serviceID=bank-deposit`);
+        const data = await res.json();
+        let banksArr = data?.content?.varations || data?.content?.variations || [];
+        if (banksArr && Array.isArray(banksArr) && banksArr.length > 0) {
+          setBankVariations(banksArr.sort((a: any, b: any) => (a.name || "").localeCompare(b.name || "")));
+        }
+      } catch (e) {} finally { setIsFetchingBanks(false); }
+    };
+    fetchBanksOnMount();
+  }, []);
+
+  useEffect(() => {
+    if (activeTab !== "pay") return;
+    if (activeService.id === "CABLE") {
+      const fetchVariations = async () => {
+        try {
+          const res = await fetch(`/api/variations?serviceID=${cableProvider}`);
+          const data = await res.json();
+          setCableVariations(extractVtpassArray(data));
+        } catch (e) {}
+      };
+      fetchVariations();
+    } else if (activeService.id === "INTERNET") {
+      const fetchInternetVariations = async () => {
+        setInternetVariations([]);
+        try {
+          const res = await fetch(`/api/variations?serviceID=${internetProvider}`);
+          const data = await res.json();
+          setInternetVariations(extractVtpassArray(data));
+        } catch (e) {}
+      };
+      fetchInternetVariations();
+    }
+  }, [activeTab, activeService.id, cableProvider, internetProvider]);
+
+  useEffect(() => {
+    if (activeTab === "bank") {
+       if (accountNumber.length === 10 && selectedBank) verifyMerchant();
+       else setCustomerName(null);
+    } else if (activeTab === "pay") {
+       if (activeService.id === "ELECTRICITY" && accountNumber.length >= 10) verifyMerchant();
+       else if (activeService.id === "CABLE" && cableProvider !== "showmax" && accountNumber.length >= 10) verifyMerchant();
+       else if (activeService.id === "INTERNET" && internetProvider === "smile-direct" && accountNumber.includes('@') && accountNumber.includes('.')) {
+          const timeoutId = setTimeout(() => verifyMerchant(), 1000);
+          return () => clearTimeout(timeoutId);
+       } else {
+          setCustomerName(null);
+       }
+    }
+  }, [accountNumber, elecProvider, cableProvider, activeService.id, meterType, selectedBank, internetProvider, activeTab]);
+
   useEffect(() => {
     const checkRefunds = async () => {
       if (activeTab === "history" && transactions.length > 0) {
@@ -610,7 +525,7 @@ export default function Home() {
   }, [activeTab, transactions]);
 
   // ==========================================
-  // RENDER UI
+  // 5. RENDER UI
   // ==========================================
   return (
     <main className="min-h-screen bg-slate-50 text-slate-900 font-sans p-4 flex flex-col items-center pb-20 relative">
@@ -664,7 +579,7 @@ export default function Home() {
                     <span className="text-slate-800 font-black text-xs text-right w-2/3 uppercase">{selectedReceipt.network} {selectedReceipt.service}</span>
                  </div>
                  <div className="flex justify-between border-b border-slate-100 pb-3">
-                    <span className="text-slate-400 text-[10px] font-bold uppercase tracking-wider">{selectedReceipt.service === 'Electricity' ? 'Meter Number' : selectedReceipt.service === 'Bank Transfer' ? 'Account No' : 'Recipient'}</span>
+                    <span className="text-slate-400 text-[10px] font-bold uppercase tracking-wider">{selectedReceipt.service === 'Electricity' ? 'Meter Number' : selectedReceipt.service === 'Send Money' || selectedReceipt.service === 'Bank Transfer' ? 'Account No' : 'Recipient'}</span>
                     <span className="text-slate-800 font-mono font-bold text-xs">{selectedReceipt.account}</span>
                  </div>
                  {selectedReceipt.request_id && (
@@ -757,14 +672,27 @@ export default function Home() {
                 <button onClick={() => setIsSelectionModalOpen(false)} className="p-2 bg-slate-100 rounded-full hover:bg-slate-200 transition-colors"><XCircle size={20} className="text-slate-500" /></button>
               </div>
               <div className="space-y-2.5 max-h-[50vh] overflow-y-auto pr-1">
+                 
                  {modalType === 'country' && SUPPORTED_COUNTRIES.map(country => (
                    <button 
                      key={country.code} 
-                     onClick={() => { if (!country.disabled) { modalCallback?.(country.code); setIsSelectionModalOpen(false); } }}
+                     onClick={() => { 
+                        if (!country.disabled) {
+                            modalCallback?.(country.code); 
+                            setIsSelectionModalOpen(false); 
+                        }
+                     }}
                      disabled={country.disabled}
-                     className={`w-full text-left p-4 rounded-xl font-bold text-sm transition-all flex justify-between items-center ${country.disabled ? 'bg-slate-50 border border-slate-100 text-slate-400 cursor-not-allowed' : 'text-slate-700 bg-slate-50 border border-slate-100 hover:border-emerald-300 hover:bg-emerald-50/50'}`}
+                     className={`w-full text-left p-4 rounded-xl font-bold text-sm transition-all flex justify-between items-center ${
+                         country.disabled 
+                         ? 'bg-slate-50 border border-slate-100 text-slate-400 cursor-not-allowed' 
+                         : 'text-slate-700 bg-slate-50 border border-slate-100 hover:border-emerald-300 hover:bg-emerald-50/50'
+                     }`}
                    >
-                     <div className="flex items-center gap-3"><span className="text-2xl">{country.flag}</span><span className={`font-black ${country.disabled ? 'text-slate-400' : 'text-slate-800'}`}>{country.name}</span></div>
+                     <div className="flex items-center gap-3">
+                       <span className="text-2xl">{country.flag}</span>
+                       <span className={`font-black ${country.disabled ? 'text-slate-400' : 'text-slate-800'}`}>{country.name}</span>
+                     </div>
                      {activeCountry.code === country.code && <CheckCircle2 size={18} className="text-emerald-500"/>}
                    </button>
                  ))}
@@ -795,7 +723,10 @@ export default function Home() {
                      onClick={() => { modalCallback?.(token.symbol); setIsSelectionModalOpen(false); }}
                      className="w-full text-left p-4 rounded-xl font-bold text-slate-700 bg-slate-50 border border-slate-100 uppercase text-xs hover:border-emerald-300 hover:bg-emerald-50/50 transition-all flex justify-between items-center"
                    >
-                     <div className="flex items-center gap-3"><img src={token.logo} alt={token.symbol} className="w-6 h-6 object-contain rounded-full shadow-sm bg-white" /><span className="text-sm font-black text-slate-800 tracking-tight">{token.symbol}</span></div>
+                     <div className="flex items-center gap-3">
+                       <img src={token.logo} alt={token.symbol} className="w-6 h-6 object-contain rounded-full shadow-sm bg-white" />
+                       <span className="text-sm font-black text-slate-800 tracking-tight">{token.symbol}</span>
+                     </div>
                      {selectedToken.symbol === token.symbol && <CheckCircle2 size={18} className="text-emerald-500"/>}
                    </button>
                  ))}
@@ -808,30 +739,17 @@ export default function Home() {
                     >
                         <div className="flex items-center gap-4">
                             <div className="w-12 h-12 shrink-0 rounded-full border border-slate-100 bg-white p-0.5 flex items-center justify-center shadow-sm overflow-hidden group-hover:shadow-md transition-shadow">
-                                <img src={provider.logo} alt={provider.displayName} className="w-full h-full object-contain" onError={(e) => { e.currentTarget.style.display = 'none'; e.currentTarget.parentElement!.innerHTML = `<span class="text-[9px] font-black uppercase text-slate-400">${provider.displayName.slice(0,3)}</span>`; }} />
+                                {/* ⚡ FIXED: Safe Fallback Image if Logo is Missing ⚡ */}
+                                <img src={provider.logo} alt={provider.displayName} className="w-full h-full object-contain" onError={(e) => { e.currentTarget.src = '/logo.png'; }} />
                             </div>
-                            <div><span className="text-sm font-black text-slate-900 tracking-tight">{provider.displayName}</span></div>
+                            <div>
+                                <span className="text-sm font-black text-slate-900 tracking-tight">{provider.displayName}</span>
+                            </div>
                         </div>
                         {(activeService.id === 'ELECTRICITY' ? elecProvider === provider.serviceID : activeService.id === 'INTERNET' ? internetProvider === provider.serviceID : cableProvider === provider.serviceID) && (
                           <CheckCircle2 size={20} className={activeService.id === 'ELECTRICITY' ? "text-orange-500" : activeService.id === 'INTERNET' ? "text-sky-500" : "text-pink-500"}/>
                         )}
                     </button>
-                 ))}
-
-                 {modalType === 'standard' && (modalOptions as string[]).map(option => (
-                     <button 
-                       key={option} 
-                       onClick={() => { modalCallback?.(option); setIsSelectionModalOpen(false); }}
-                       className="w-full text-left p-4 rounded-xl font-black text-slate-700 bg-slate-50 border border-slate-100 uppercase text-xs hover:border-emerald-300 hover:bg-emerald-50/50 transition-all flex justify-between items-center"
-                     >
-                       <div className="flex items-center gap-3">
-                           <div className="w-8 h-8 rounded-full border border-slate-100 bg-white p-0.5 flex items-center justify-center shadow-sm overflow-hidden group-hover:shadow-md transition-shadow">
-                                <img src={`/${option}.png`} alt={option} className="w-full h-full object-contain" onError={(e) => { e.currentTarget.style.display = 'none'; e.currentTarget.parentElement!.innerHTML = `<span class="text-[9px] font-black uppercase text-slate-400">${option.slice(0,3)}</span>`; }} />
-                           </div>
-                           <span>{option}</span>
-                       </div>
-                       {(telecomProvider === option) && <CheckCircle2 size={16} className="text-emerald-500"/>}
-                     </button>
                  ))}
               </div>
            </div>
@@ -1041,7 +959,7 @@ export default function Home() {
                         >
                             <div className="flex items-center gap-4">
                                 <div className="w-12 h-12 shrink-0 rounded-full border border-slate-100 bg-sky-50 flex items-center justify-center shadow-inner overflow-hidden">
-                                    <img src={currentInternet?.logo || '/wifi.png'} alt={currentInternet?.displayName} className="w-full h-full object-contain" onError={(e) => { e.currentTarget.style.display = 'none'; e.currentTarget.parentElement!.innerHTML = `<span class="text-[9px] font-black uppercase text-sky-500">${currentInternet?.displayName.slice(0,3) || 'NET'}</span>`; }} />
+                                    <img src={currentInternet?.logo || '/wifi.png'} alt={currentInternet?.displayName} className="w-full h-full object-contain" onError={(e) => { e.currentTarget.src = '/logo.png'; }} />
                                 </div>
                                 <div>
                                     <span className="text-sm font-black text-slate-900 tracking-tight">{currentInternet?.displayName || 'Select Internet Provider'}</span>
@@ -1050,13 +968,14 @@ export default function Home() {
                             <ChevronDown size={18} className="text-slate-400"/>
                         </button>
                     ) : activeService.id === "AIRTIME" ? (
+                        // ⚡ FIXED: Beautiful Single Dropdown for Airtime (No more duplicated logos) ⚡
                         <button 
-                            onClick={() => openSelectionModal('standard', "Select Network", TELECOM_PROVIDERS, (val) => handleProviderChange(val, 'telecom'))}
+                            onClick={() => openSelectionModal('provider', "Select Network", TELECOM_PROVIDERS.map(p => ({ serviceID: p, displayName: p.toUpperCase(), logo: `/${p}.png` })), (val) => handleProviderChange(val, 'telecom'))}
                             className="w-full bg-white border border-slate-200 p-4 rounded-2xl flex justify-between items-center hover:border-emerald-400 transition-colors shadow-sm active:scale-[0.98]"
                         >
                             <div className="flex items-center gap-4">
                                 <div className="w-12 h-12 shrink-0 rounded-full border border-slate-100 bg-emerald-50 flex items-center justify-center shadow-inner overflow-hidden">
-                                    <img src={`/${telecomProvider}.png`} alt={telecomProvider} className="w-full h-full object-contain" onError={(e) => { e.currentTarget.style.display = 'none'; e.currentTarget.parentElement!.innerHTML = `<span class="text-[9px] font-black uppercase text-emerald-500">${telecomProvider.slice(0,3)}</span>`; }} />
+                                    <img src={`/${telecomProvider}.png`} alt={telecomProvider} className="w-full h-full object-contain" onError={(e) => { e.currentTarget.src = '/logo.png'; }} />
                                 </div>
                                 <div>
                                     <span className="text-sm font-black text-slate-900 tracking-tight uppercase">{telecomProvider}</span>
@@ -1139,26 +1058,19 @@ export default function Home() {
                 {activeService.id === "INTERNET" && (
                   <div className="bg-slate-50 border border-slate-200 rounded-2xl p-4 shadow-sm animate-in fade-in slide-in-from-top-4">
                      
-                     {/* IF TELECOM DATA, SHOW CATEGORY BUTTONS */}
-                     {internetProvider.includes("-data") && (
-                       <div className="flex gap-2 mb-4 border-b border-slate-200 pb-3 overflow-x-auto no-scrollbar shadow-inner bg-slate-100 p-1.5 rounded-2xl">
-                          {DATA_CATEGORIES.map(cat => (
-                            <button 
-                               key={cat} 
-                               onClick={() => { setActiveDataCategory(cat); setSelectedInternetPlan(null); setNairaAmount(""); }} 
-                               className={`px-4 py-2.5 rounded-xl text-[11px] font-black uppercase transition-all whitespace-nowrap ${activeDataCategory === cat ? (cat === 'Broadband' ? 'bg-white shadow-lg text-orange-600' : cat === 'Social' ? 'bg-white shadow-lg text-blue-500' : 'bg-white shadow-lg text-purple-600') : 'text-slate-500 hover:text-slate-700'}`}
-                            >
-                              {cat === 'Broadband' ? <span className="flex items-center gap-1.5"><Briefcase size={14}/> {cat}</span> : cat === 'Social' ? <span className="flex items-center gap-1.5"><Users size={14}/> {cat}</span> : cat}
-                            </button>
-                          ))}
-                        </div>
-                     )}
-
-                     {!internetProvider.includes("-data") && (
-                        <p className="text-[10px] font-black uppercase tracking-widest text-slate-400 mb-2">Select {internetProvider === 'smile-direct' ? 'Smile' : 'Spectranet'} Plan</p>
-                     )}
+                     <div className="flex gap-2 mb-4 border-b border-slate-200 pb-3 overflow-x-auto no-scrollbar shadow-inner bg-slate-100 p-1.5 rounded-2xl">
+                        {DATA_CATEGORIES.map(cat => (
+                          <button 
+                             key={cat} 
+                             onClick={() => { setActiveDataCategory(cat); setSelectedInternetPlan(null); setNairaAmount(""); }} 
+                             className={`px-4 py-2.5 rounded-xl text-[11px] font-black uppercase transition-all whitespace-nowrap ${activeDataCategory === cat ? (cat === 'Broadband' ? 'bg-white shadow-lg text-orange-600' : cat === 'Social' ? 'bg-white shadow-lg text-blue-500' : 'bg-white shadow-lg text-purple-600') : 'text-slate-500 hover:text-slate-700'}`}
+                          >
+                            {cat === 'Broadband' ? <span className="flex items-center gap-1.5"><Briefcase size={14}/> {cat}</span> : cat === 'Social' ? <span className="flex items-center gap-1.5"><Users size={14}/> {cat}</span> : cat}
+                          </button>
+                        ))}
+                      </div>
                      
-                     {/* STRICT TERNARY: SHOW EITHER SELECTED CARD OR FULL LIST, NEVER BOTH */}
+                     {/* ⚡ STRICT TERNARY: ONLY SHOW CARD *OR* LIST ⚡ */}
                      {selectedInternetPlan ? (
                         <div className="relative animate-in zoom-in-95 duration-200 mt-2">
                            <button onClick={() => { setSelectedInternetPlan(null); setNairaAmount(""); }} className="absolute -top-3 -right-3 bg-slate-200 text-slate-500 hover:text-slate-800 hover:bg-slate-300 rounded-full p-1 transition-all z-10 shadow-sm border border-white">
@@ -1239,7 +1151,7 @@ export default function Home() {
                                <p className="text-2xl font-black text-emerald-600">₦{cableRenewAmount?.toLocaleString() || "0.00"}</p>
                             </div>
                          ) : (
-                            // STRICT TERNARY FOR CABLE
+                            // ⚡ STRICT TERNARY: ONLY SHOW CARD *OR* LIST ⚡
                             selectedCablePlan ? (
                                <div className="relative animate-in zoom-in-95 duration-200 mt-2">
                                   <button onClick={() => { setSelectedCablePlan(null); setNairaAmount(""); }} className="absolute -top-3 -right-3 bg-slate-200 text-slate-500 hover:text-slate-800 hover:bg-slate-300 rounded-full p-1 transition-all z-10 shadow-sm border border-white">
@@ -1281,6 +1193,7 @@ export default function Home() {
                          )}
                        </>
                      ) : (
+                       // ⚡ STRICT TERNARY: ONLY SHOW CARD *OR* LIST ⚡
                        selectedCablePlan ? (
                           <div className="relative animate-in zoom-in-95 duration-200 mt-2">
                              <button onClick={() => { setSelectedCablePlan(null); setNairaAmount(""); }} className="absolute -top-3 -right-3 bg-slate-200 text-slate-500 hover:text-slate-800 hover:bg-slate-300 rounded-full p-1 transition-all z-10 shadow-sm border border-white">
