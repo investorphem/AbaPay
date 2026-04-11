@@ -23,13 +23,13 @@ export async function POST(req: Request) {
 
     const res = await fetch(url, {
       method: 'POST',
-      headers: getHeaders('POST'),
+      headers: getHeaders(), // ⚡ FIXED: Removed 'POST' argument
       body: JSON.stringify(bodyPayload)
     });
 
     const data = await res.json();
     return NextResponse.json(data);
-    
+
   } catch (error: any) {
     console.error("Verification Engine Failure:", error.message);
     return NextResponse.json({ code: "500", message: "Verification Failed" }, { status: 500 });
