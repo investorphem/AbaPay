@@ -4,16 +4,13 @@ import { useState, useEffect, useMemo, useRef } from "react";
 import { createWalletClient, createPublicClient, custom, http, parseUnits, formatUnits } from "viem";
 import { celo, celoSepolia } from "viem/chains";
 import { 
-  Receipt, ShieldCheck, Zap, AlertTriangle, CheckCircle2, ExternalLink,
-  ChevronDown, Loader2, XCircle, Coins, Briefcase, Share2, ChevronLeft, 
-  ChevronRight, RefreshCw, ListPlus, Users, Landmark, Tv 
+  ShieldCheck, Zap, AlertTriangle, CheckCircle2, ChevronDown, 
+  Loader2, Coins, Briefcase, ListPlus, Users, Landmark, RefreshCw, Tv
 } from "lucide-react";
 import { supabase } from "@/utils/supabase";
-import { ELECTRICITY_DISCOS } from "./discos";
 
-// ⚡ IMPORTING OUR CLEANED-UP CONSTANTS ⚡
-import { TermsModal, PrivacyModal } from "@/components/InfoModals";
-import ReceiptModal from "@/components/ReceiptModal";
+import { TermsModal, PrivacyModal, ReceiptModal, SelectionModal } from "@/components/Modals";
+import { HistoryTab } from "@/components/HistoryTab";
 import { 
   ABAPAY_ABI, ERC20_ABI, SERVICES, CABLE_PROVIDERS_LIST, TELECOM_PROVIDERS, 
   INTERNET_PROVIDERS, SUPPORTED_TOKENS, SUPPORTED_COUNTRIES, PRE_SELECT_AMOUNTS, 
@@ -30,11 +27,8 @@ export default function Home() {
   const [accountNumber, setAccountNumber] = useState("");
   const [customerPhone, setCustomerPhone] = useState("");
   const [status, setStatus] = useState("");
-  
   const [activeTab, setActiveTab] = useState<"pay" | "bank" | "history">("pay");
-  const [isMiniPay, setIsMiniPay] = useState(false);
   const [isProcessing, setIsProcessing] = useState(false); 
-
   const [customerName, setCustomerName] = useState<string | null>(null);
   const [isVerifying, setIsVerifying] = useState(false);
 
@@ -121,18 +115,15 @@ export default function Home() {
   const filteredInternetDataPlans = useMemo(() => {
     if (!internetVariations || internetVariations.length === 0) return [];
     if (internetProvider === 'smile-direct' || internetProvider === 'spectranet') return internetVariations;
-
     return internetVariations.filter(plan => {
       const name = (plan.name || "").toLowerCase();
       let category = "Monthly"; 
-
       if (name.includes('broadband') || name.includes('router') || name.includes('5g') || name.includes('hynet')) category = "Broadband";
       else if (name.includes('social') || name.includes('whatsapp') || name.includes('ig') || name.includes('instagram') || name.includes('tiktok') || name.includes('youtube') || name.includes('facebook') || name.includes('opera') || name.includes('xot')) category = "Social";
       else if (name.includes('60 day') || name.includes('90 day') || name.includes('120 day') || name.includes('year') || name.includes('mega') || name.includes('3 month') || name.includes('2 month')) category = "Mega";
       else if (name.includes('month') || name.includes('30 day')) category = "Monthly";
       else if (name.includes('week') || name.includes('7 day') || name.includes('14 day') || name.includes('weekend')) category = "Weekly";
       else if (name.includes('1 day') || name.includes('2 day') || name.includes('3 day') || name.includes('daily') || name.includes('24 hrs') || name.includes('24hrs') || name.includes('night') || name.includes('hourly')) category = "Daily";
-
       return category === activeDataCategory;
     }).sort((a, b) => parseFloat(a.variation_amount) - parseFloat(b.variation_amount));
   }, [internetVariations, activeDataCategory, internetProvider]);
@@ -140,31 +131,20 @@ export default function Home() {
   const isFormValid = useMemo(() => {
     const amount = parseFloat(nairaAmount);
     if (!nairaAmount || isNaN(amount) || amount < dynamicMinAmount || amount > dynamicMaxAmount) return false;
-
-    if (activeTab === "bank") {
-       return accountNumber.length === 10 && customerName !== null && selectedBank !== null && customerPhone.length >= 10;
-    }
-
+    if (activeTab === "bank") return accountNumber.length === 10 && customerName !== null && selectedBank !== null && customerPhone.length >= 10;
     if (activeTab === "pay") {
       if (activeService.id === "AIRTIME") return accountNumber.length === 11 && accountNumber.startsWith("0");
       if (activeService.id === "INTERNET") {
-        if (internetProvider === 'smile-direct') {
-          return internetAccountId !== null && selectedInternetPlan !== null && customerPhone.length >= 10;
-        } else if (internetProvider === 'spectranet') {
-          return accountNumber.length >= 5 && selectedInternetPlan !== null && customerPhone.length >= 10;
-        } else {
-          return accountNumber.length === 11 && accountNumber.startsWith("0") && selectedInternetPlan !== null;
-        }
+        if (internetProvider === 'smile-direct') return internetAccountId !== null && selectedInternetPlan !== null && customerPhone.length >= 10;
+        else if (internetProvider === 'spectranet') return accountNumber.length >= 5 && selectedInternetPlan !== null && customerPhone.length >= 10;
+        else return accountNumber.length === 11 && accountNumber.startsWith("0") && selectedInternetPlan !== null;
       }
       if (activeService.id === "ELECTRICITY") return accountNumber.length >= 10 && customerName !== null;
       if (activeService.id === "CABLE") {
         if (cableProvider === "showmax") return accountNumber.length >= 11 && selectedCablePlan !== null;
         if (accountNumber.length < 10 || customerName === null) return false;
-        if (['dstv', 'gotv'].includes(cableProvider)) {
-          if (cableSubscriptionType === 'change' && !selectedCablePlan) return false;
-        } else {
-          if (!selectedCablePlan) return false;
-        }
+        if (['dstv', 'gotv'].includes(cableProvider) && cableSubscriptionType === 'change' && !selectedCablePlan) return false;
+        if (!['dstv', 'gotv'].includes(cableProvider) && !selectedCablePlan) return false;
         return true;
       }
     }
@@ -216,13 +196,7 @@ export default function Home() {
         setBankVariations(banksArr.sort((a: any, b: any) => (a.name || "").localeCompare(b.name || "")));
       } else { throw new Error("No banks found from API"); }
     } catch (e) {
-      setBankVariations([
-        { variation_code: 'access', name: 'ACCESS BANK PLC' }, { variation_code: 'firstbank', name: 'FIRST BANK OF NIGERIA PLC' },
-        { variation_code: 'gtb', name: 'GTBANK PLC' }, { variation_code: 'kuda', name: 'KUDA MICROFINANCE BANK' },
-        { variation_code: 'moniepoint', name: 'MONIEPOINT MICROFINANCE BANK' }, { variation_code: 'opay', name: 'OPAY' },
-        { variation_code: 'palmpay', name: 'PALMPAY' }, { variation_code: 'providus', name: 'PROVIDUS BANK' },
-        { variation_code: 'uba', name: 'UBA - UNITED BANK FOR AFRICA PLC' }, { variation_code: 'zenith', name: 'ZENITH BANK PLC' }
-      ]);
+      setBankVariations([{ variation_code: 'access', name: 'ACCESS BANK PLC' }, { variation_code: 'firstbank', name: 'FIRST BANK OF NIGERIA PLC' }, { variation_code: 'gtb', name: 'GTBANK PLC' }, { variation_code: 'opay', name: 'OPAY' }, { variation_code: 'moniepoint', name: 'MONIEPOINT MICROFINANCE BANK' }, { variation_code: 'uba', name: 'UBA - UNITED BANK FOR AFRICA PLC' }, { variation_code: 'zenith', name: 'ZENITH BANK PLC' }]);
     } finally { setIsFetchingBanks(false); }
   };
 
@@ -298,7 +272,6 @@ export default function Home() {
       }
 
       const hash = await client.writeContract({ address: ABAPAY_CONTRACT, abi: ABAPAY_ABI, functionName: 'payBill', args: [tokenAddress, vtpassServiceID, payloadBillersCode, valueInWei], account: address });
-
       setStatus(`${selectedToken.symbol} Secured. Processing...`);
 
       const backendPayload = {
@@ -341,7 +314,7 @@ export default function Home() {
       try { const { data: settingsData } = await supabase.from('platform_settings').select('exchange_rate').eq('id', 1).single(); if (settingsData && settingsData.exchange_rate) setExchangeRate(Number(settingsData.exchange_rate)); } catch (consoleError) {}
       try {
         if (typeof window !== "undefined" && (window as any).ethereum) {
-          const eth = (window as any).ethereum; if (eth.isMiniPay) setIsMiniPay(true);
+          const eth = (window as any).ethereum;
           const walletClient = createWalletClient({ chain: activeChain, transport: custom(eth) });
           walletClient.requestAddresses().then(([acc]) => { setAddress(acc); setClient(walletClient); }).catch((e) => console.log("Connection deferred"));
         }
@@ -442,6 +415,20 @@ export default function Home() {
     checkRefunds();
   }, [activeTab, transactions]);
 
+  // ⚡ MODAL SELECTION LOGIC ⚡
+  const getCurrentModalValue = () => {
+    if (modalType === 'country') return activeCountry.code;
+    if (modalType === 'bank') return selectedBank?.variation_code;
+    if (modalType === 'token') return selectedToken.symbol;
+    if (modalType === 'provider') {
+      if (activeService.id === 'ELECTRICITY') return elecProvider;
+      if (activeService.id === 'INTERNET') return internetProvider;
+      if (activeService.id === 'CABLE') return cableProvider;
+    }
+    if (modalType === 'standard') return telecomProvider;
+    return null;
+  };
+
   return (
     <main className="min-h-screen bg-slate-50 text-slate-900 font-sans p-4 flex flex-col items-center pb-20 relative">
       <style>{`@keyframes logoScale { 0%, 100% { transform: scale(1); opacity: 0.9; } 50% { transform: scale(1.1); opacity: 1; } } .animate-logo-scale { animation: logoScale 1.5s ease-in-out infinite; } .no-scrollbar::-webkit-scrollbar { display: none; } .no-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }`}</style>
@@ -460,6 +447,17 @@ export default function Home() {
       <TermsModal isOpen={isTermsOpen} onClose={() => setIsTermsOpen(false)} />
       <PrivacyModal isOpen={isPrivacyOpen} onClose={() => setIsPrivacyOpen(false)} />
       <ReceiptModal receipt={selectedReceipt} isMainnet={isMainnet} onClose={() => setSelectedReceipt(null)} onShare={handleShareReceipt} onSupport={() => { setSupportTxHash(selectedReceipt.txHash); setSupportMessage(""); setSelectedReceipt(null); setIsSupportOpen(true); }} />
+      <SelectionModal 
+        isOpen={isSelectionModalOpen} 
+        onClose={() => setIsSelectionModalOpen(false)} 
+        title={modalTitle} 
+        type={modalType} 
+        options={modalOptions} 
+        onSelect={modalCallback} 
+        isFetchingBanks={isFetchingBanks} 
+        selectedValue={getCurrentModalValue()} 
+        onRetryBanks={fetchBanksManual} 
+      />
 
       {toast && (
         <div className="fixed top-4 right-4 sm:top-6 sm:right-6 z-[100] animate-in slide-in-from-top-8 fade-in duration-300">
@@ -473,120 +471,6 @@ export default function Home() {
             </div>
             <button onClick={() => setToast(null)} className="shrink-0 text-slate-500 hover:text-slate-300"><XCircle size={16} /></button>
           </div>
-        </div>
-      )}
-
-      {isSelectionModalOpen && (
-        <div className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-sm flex justify-center items-center p-4 animate-in fade-in" onClick={() => setIsSelectionModalOpen(false)}>
-           <div className="bg-white w-full max-w-sm rounded-[2rem] shadow-2xl p-6 animate-in zoom-in-95 duration-200" onClick={(e) => e.stopPropagation()}>
-              <div className="flex justify-between items-center mb-6 shrink-0 border-b border-slate-100 pb-4">
-                <h2 className="text-xl font-black text-slate-900 tracking-tight">{modalTitle}</h2>
-                <button onClick={() => setIsSelectionModalOpen(false)} className="p-2 bg-slate-100 rounded-full hover:bg-slate-200 transition-colors"><XCircle size={20} className="text-slate-500" /></button>
-              </div>
-              <div className="space-y-2.5 max-h-[50vh] overflow-y-auto pr-1">
-                 
-                 {modalType === 'country' && SUPPORTED_COUNTRIES.map(country => (
-                   <button 
-                     key={country.code} 
-                     onClick={() => { 
-                        if (!country.disabled) {
-                            modalCallback?.(country.code); 
-                            setIsSelectionModalOpen(false); 
-                        }
-                     }}
-                     disabled={country.disabled}
-                     className={`w-full text-left p-4 rounded-xl font-bold text-sm transition-all flex justify-between items-center ${
-                         country.disabled 
-                         ? 'bg-slate-50 border border-slate-100 text-slate-400 cursor-not-allowed' 
-                         : 'text-slate-700 bg-slate-50 border border-slate-100 hover:border-emerald-300 hover:bg-emerald-50/50'
-                     }`}
-                   >
-                     <div className="flex items-center gap-3">
-                       <span className="text-2xl">{country.flag}</span>
-                       <span className={`font-black ${country.disabled ? 'text-slate-400' : 'text-slate-800'}`}>{country.name}</span>
-                     </div>
-                     {activeCountry.code === country.code && <CheckCircle2 size={18} className="text-emerald-500"/>}
-                   </button>
-                 ))}
-
-                 {modalType === 'bank' && isFetchingBanks && (
-                   <div className="flex flex-col items-center justify-center p-6 gap-3 text-slate-400">
-                     <Loader2 className="animate-spin text-blue-500" size={24} />
-                     <span className="text-xs font-bold uppercase tracking-widest">Connecting to NIBSS...</span>
-                   </div>
-                 )}
-                 {modalType === 'bank' && !isFetchingBanks && bankVariations?.length === 0 && (
-                   <div className="p-6 text-center text-slate-500 font-bold text-xs flex flex-col items-center gap-3">
-                     No banks available.
-                     <button onClick={fetchBanksManual} className="bg-blue-100 text-blue-600 px-4 py-2 rounded-xl text-xs font-bold w-full">Retry Connection</button>
-                   </div>
-                 )}
-                 {modalType === 'bank' && !isFetchingBanks && bankVariations?.map(bank => (
-                   <button 
-                     key={bank.variation_code} 
-                     onClick={() => { modalCallback?.(bank.variation_code); setIsSelectionModalOpen(false); }}
-                     className="w-full text-left p-4 rounded-xl font-bold text-slate-700 bg-slate-50 border border-slate-100 text-xs hover:border-blue-300 hover:bg-blue-50/50 transition-all flex justify-between items-center"
-                   >
-                     <span>{bank.name}</span>
-                     {selectedBank?.variation_code === bank.variation_code && <CheckCircle2 size={18} className="text-blue-500"/>}
-                   </button>
-                 ))}
-
-                 {modalType === 'token' && SUPPORTED_TOKENS.map(token => (
-                   <button 
-                     key={token.symbol} 
-                     onClick={() => { modalCallback?.(token.symbol); setIsSelectionModalOpen(false); }}
-                     className="w-full text-left p-4 rounded-xl font-bold text-slate-700 bg-slate-50 border border-slate-100 uppercase text-xs hover:border-emerald-300 hover:bg-emerald-50/50 transition-all flex justify-between items-center"
-                   >
-                     <div className="flex items-center gap-3">
-                       <img src={token.logo} alt={token.symbol} className="w-6 h-6 object-contain rounded-full shadow-sm bg-white" />
-                       <span className="text-sm font-black text-slate-800 tracking-tight">{token.symbol}</span>
-                     </div>
-                     {selectedToken.symbol === token.symbol && <CheckCircle2 size={18} className="text-emerald-500"/>}
-                   </button>
-                 ))}
-
-                 {modalType === 'provider' && (modalOptions as any[]).map(provider => (
-                    <button 
-                        key={provider.serviceID} 
-                        onClick={() => { modalCallback?.(provider.serviceID); setIsSelectionModalOpen(false); }}
-                        className={`w-full text-left p-4 rounded-2xl font-bold text-slate-700 bg-white border hover:bg-slate-50 transition-all flex justify-between items-center group hover:border-slate-300`}
-                    >
-                        <div className="flex items-center gap-4">
-                            <div className="w-12 h-12 shrink-0 rounded-full border border-slate-100 bg-white p-0.5 flex items-center justify-center shadow-sm overflow-hidden group-hover:shadow-md transition-shadow">
-                                <img src={provider.logo || '/logo.png'} alt={provider.displayName} className="w-full h-full object-contain" onError={(e) => { e.currentTarget.src = '/logo.png'; }} />
-                            </div>
-                            <div>
-                                <span className="text-sm font-black text-slate-900 tracking-tight">{provider.displayName}</span>
-                            </div>
-                        </div>
-                        {(activeService.id === 'ELECTRICITY' ? elecProvider === provider.serviceID : activeService.id === 'INTERNET' ? internetProvider === provider.serviceID : cableProvider === provider.serviceID) && (
-                          <CheckCircle2 size={20} className={activeService.id === 'ELECTRICITY' ? "text-orange-500" : activeService.id === 'INTERNET' ? "text-sky-500" : "text-pink-500"}/>
-                        )}
-                    </button>
-                 ))}
-
-                 {modalType === 'standard' && (modalOptions as any[]).map(provider => (
-                    <button 
-                        key={provider.serviceID} 
-                        onClick={() => { modalCallback?.(provider.serviceID); setIsSelectionModalOpen(false); }}
-                        className={`w-full text-left p-4 rounded-2xl font-bold text-slate-700 bg-white border hover:bg-slate-50 transition-all flex justify-between items-center group hover:border-emerald-300`}
-                    >
-                        <div className="flex items-center gap-4">
-                            <div className="w-12 h-12 shrink-0 rounded-full border border-slate-100 bg-white p-0.5 flex items-center justify-center shadow-sm overflow-hidden group-hover:shadow-md transition-shadow">
-                                <img src={provider.logo || '/logo.png'} alt={provider.displayName} className="w-full h-full object-contain" onError={(e) => { e.currentTarget.src = '/logo.png'; }} />
-                            </div>
-                            <div>
-                                <span className="text-sm font-black text-slate-900 tracking-tight uppercase">{provider.displayName}</span>
-                            </div>
-                        </div>
-                        {telecomProvider === provider.serviceID && (
-                          <CheckCircle2 size={20} className="text-emerald-500"/>
-                        )}
-                    </button>
-                 ))}
-              </div>
-           </div>
         </div>
       )}
 
@@ -646,7 +530,7 @@ export default function Home() {
                     <button 
                         onClick={() => {
                           if (bankVariations.length === 0) fetchBanksManual();
-                          openSelectionModal('bank', "Select Destination Bank", [], (val: any) => {
+                          openSelectionModal('bank', "Select Destination Bank", bankVariations, (val: any) => {
                             const foundBank = bankVariations.find(b => b.variation_code === val);
                             handleProviderChange(foundBank, 'bank');
                           });
@@ -1153,57 +1037,14 @@ export default function Home() {
         {/* HISTORY UI BLOCK */}
         {/* ========================================================================================= */}
         {activeTab === 'history' && (
-          <div className="bg-white border border-slate-100 rounded-[2.5rem] p-6 shadow-2xl animate-in slide-in-from-bottom-4">
-             {transactions.length === 0 ? (
-                <div className="py-24 text-center">
-                    <div className="bg-slate-100 w-20 h-20 rounded-full flex items-center justify-center mx-auto mb-5 shadow-inner">
-                        <Receipt size={40} className="text-slate-300" />
-                    </div>
-                    <p className="text-slate-400 text-xs font-black uppercase tracking-widest">No transaction activity found</p>
-                </div>
-             ) : (
-                <div className="flex flex-col space-y-4">
-                    {currentTransactions.map((tx, idx) => (
-                        <div 
-                          key={idx} 
-                          onClick={() => setSelectedReceipt(tx)} 
-                          className="p-5 bg-slate-50 rounded-2xl border border-slate-100 flex justify-between items-center cursor-pointer hover:bg-emerald-50 hover:border-emerald-100 transition-all group shadow-sm active:scale-98"
-                        >
-                            <div>
-                                <p className="text-sm font-black text-slate-900 uppercase group-hover:text-emerald-700 transition-colors tracking-tight">{tx.network} {tx.service}</p>
-                                <p className="text-[10px] font-medium text-slate-500 mt-0.5">{tx.date} • <span className={tx.status === 'SUCCESS' ? 'text-emerald-600 font-bold' : tx.status === 'REFUNDED' ? 'text-blue-500 font-bold' : 'text-red-500 font-bold'}>{tx.status}</span></p>
-                            </div>
-                            <div className="text-right flex flex-col items-end gap-1.5">
-                                <p className="text-sm font-black text-emerald-600">₦{tx.amountNaira.toLocaleString()}</p>
-                                <span className="text-[9px] font-black uppercase tracking-widest bg-slate-200 text-slate-500 px-3 py-1 rounded-full group-hover:bg-emerald-200 group-hover:text-emerald-800 transition-all flex items-center gap-1">
-                                  View Receipt <ExternalLink size={10}/>
-                                </span>
-                            </div>
-                        </div>
-                    ))}
-
-                    {totalPages > 1 && (
-                      <div className="flex justify-between items-center mt-6 pt-5 border-t border-slate-100">
-                        <button 
-                          onClick={() => setCurrentPage(p => Math.max(1, p - 1))} 
-                          disabled={currentPage === 1} 
-                          className="flex items-center gap-1.5 px-4 py-2 text-[10px] font-black uppercase tracking-widest bg-slate-100 rounded-lg text-slate-500 hover:bg-slate-200 hover:text-emerald-600 disabled:opacity-30 transition-all"
-                        >
-                          <ChevronLeft size={16} /> Prev
-                        </button>
-                        <span className="text-[10px] font-black tracking-widest text-slate-400 bg-slate-100 px-3 py-1.5 rounded-full">PAGE {currentPage} OF {totalPages}</span>
-                        <button 
-                          onClick={() => setCurrentPage(p => Math.min(totalPages, p + 1))} 
-                          disabled={currentPage === totalPages} 
-                          className="flex items-center gap-1.5 px-4 py-2 text-[10px] font-black uppercase tracking-widest bg-slate-100 rounded-lg text-slate-500 hover:bg-slate-200 hover:text-emerald-600 disabled:opacity-30 transition-all"
-                        >
-                          Next <ChevronRight size={16} />
-                        </button>
-                      </div>
-                    )}
-                </div>
-             )}
-          </div>
+          <HistoryTab 
+            transactions={transactions} 
+            currentTransactions={currentTransactions} 
+            currentPage={currentPage} 
+            totalPages={totalPages} 
+            setCurrentPage={setCurrentPage} 
+            setSelectedReceipt={setSelectedReceipt} 
+          />
         )}
 
         <footer className="mt-12 w-full border-t border-slate-200 pt-8 pb-4 flex flex-col items-center gap-4 animate-in fade-in">
