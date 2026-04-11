@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server';
-import { BASE_URL, getHeaders } from '@/lib/vtpass';
+import { getHeaders } from '@/lib/vtpass'; // ⚡ Removed static BASE_URL import
 import { sendAbaPaySms } from '@/lib/messaging';
 import { sendTelegramAlert } from '@/lib/telegram'; 
 import { supabaseAdmin as supabase } from '@/utils/supabase'; 
@@ -60,16 +60,18 @@ export async function POST(req: Request) {
       isForeign, operator_id, country_code, product_type_id, email
     } = body;
 
+    // ⚡ DYNAMIC ENVIRONMENT SWITCHING VIA APP MODE ⚡
+    const appMode = process.env.NEXT_PUBLIC_APP_MODE || "sandbox";
+    const baseUrl = appMode === "live" ? "https://vtpass.com/api" : "https://sandbox.vtpass.com/api";
+
     if (processedTransactions.has(txHash)) {
       return NextResponse.json({ success: false, code: "DUPLICATE_HASH", message: "Duplicate hash blocked." }, { status: 400 });
     }
 
     const requestedNaira = parseFloat(nairaAmount);
 
-    // ⚡ ADDED EDUCATION (JAMB) TO VERIFICATION REQUIREMENT ⚡
     const needsVerification = !isForeign && (serviceCategory === 'ELECTRICITY' || serviceCategory === 'BANK' || (serviceCategory === 'EDUCATION' && serviceID === 'jamb') || (serviceCategory === 'CABLE' && network !== 'SHOWMAX'));
     
-    // Education (WAEC & JAMB) gets the 100 Naira service fee just like Banks and Electricity
     const serviceFee = (needsVerification || serviceCategory === 'EDUCATION') ? 100 : 0;
     const vendAmount = requestedNaira; 
     const vtRequestId = getStrictRequestId();
@@ -115,7 +117,8 @@ export async function POST(req: Request) {
     }
 
     if (needsVerification) {
-      const verifyRes = await fetch(`${BASE_URL}/merchant-verify`, {
+      // ⚡ USING DYNAMIC baseUrl FOR VERIFICATION ⚡
+      const verifyRes = await fetch(`${baseUrl}/merchant-verify`, {
         method: 'POST',
         headers: getHeaders('POST'),
         body: JSON.stringify({ 
@@ -152,10 +155,9 @@ export async function POST(req: Request) {
         vtpassPayload.variation_code = variation_code;
       }
       else if (serviceCategory === 'EDUCATION') {
-        // ⚡ EDUCATION ROUTING ⚡
         vtpassPayload.variation_code = variation_code;
         if (serviceID === 'jamb') {
-           vtpassPayload.billersCode = billersCode; // JAMB needs Profile ID
+           vtpassPayload.billersCode = billersCode; 
         }
       }
       else if (serviceCategory === 'INTERNET') {
@@ -182,7 +184,8 @@ export async function POST(req: Request) {
 
     let payRes, payData;
     try {
-      payRes = await fetch(`${BASE_URL}/pay`, {
+      // ⚡ USING DYNAMIC baseUrl FOR ACTUAL PAYMENT ⚡
+      payRes = await fetch(`${baseUrl}/pay`, {
         method: 'POST',
         headers: getHeaders('POST'),
         body: JSON.stringify(vtpassPayload)
@@ -212,7 +215,6 @@ export async function POST(req: Request) {
           else if (payData.content?.transactions?.units) vendedUnits = payData.content.transactions.units.toString();
           else if (payData.content?.transactions?.unit) vendedUnits = payData.content.transactions.unit.toString();
         } else if (serviceCategory === 'EDUCATION') {
-          // ⚡ EDUCATION PIN EXTRACTION ⚡
           dbPurchasedCode = payData.purchased_code || payData.Pin || null;
           alertTokenRef = dbPurchasedCode || "Processing PIN";
         } else {
