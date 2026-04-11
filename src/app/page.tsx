@@ -114,11 +114,9 @@ export default function Home() {
     return { cryptoToCharge: crypto.toFixed(4), currentFee: fee };
   }, [nairaAmount, exchangeRate, activeService, activeTab]);
 
-  // ⚡ STRICT FILTERING FIX FOR INTERNET/SPECTRANET ⚡
   const filteredInternetDataPlans = useMemo(() => {
-    if (!internetVariations || internetVariations.length === 0) return [];
+    if (!internetVariations || !Array.isArray(internetVariations) || internetVariations.length === 0) return [];
     
-    // Strict Lock: Only allow variations that actually belong to the selected provider
     let strictVariations = internetVariations;
     if (internetProvider.includes('mtn')) strictVariations = internetVariations.filter(p => p.variation_code.toLowerCase().includes('mtn'));
     else if (internetProvider.includes('airtel')) strictVariations = internetVariations.filter(p => p.variation_code.toLowerCase().includes('airtel'));
@@ -127,10 +125,8 @@ export default function Home() {
     else if (internetProvider === 'spectranet') strictVariations = internetVariations.filter(p => p.variation_code.toLowerCase().includes('spectranet'));
     else if (internetProvider === 'smile-direct') strictVariations = internetVariations.filter(p => p.variation_code.toLowerCase().includes('smile'));
 
-    // Spectranet & Smile don't use standard categories (Daily/Monthly)
     if (internetProvider === 'spectranet' || internetProvider === 'smile-direct') return strictVariations;
 
-    // Apply categories for standard networks
     return strictVariations.filter(plan => {
       const name = (plan.name || "").toLowerCase();
       let category = "Monthly"; 
@@ -161,7 +157,7 @@ export default function Home() {
       if (activeService.id === "AIRTIME") return accountNumber.length === 11 && accountNumber.startsWith("0");
       if (activeService.id === "INTERNET") {
         if (internetProvider === 'smile-direct') return internetAccountId !== null && selectedInternetPlan !== null && customerPhone.length >= 10;
-        else if (internetProvider === 'spectranet') return accountNumber.length >= 5 && selectedInternetPlan !== null && customerPhone.length >= 10;
+        else if (internetProvider === 'spectranet') return accountNumber.length >= 5 && selectedInternetPlan !== null;
         else return accountNumber.length === 11 && accountNumber.startsWith("0") && selectedInternetPlan !== null;
       }
       if (activeService.id === "ELECTRICITY") return accountNumber.length >= 10 && customerName !== null && customerPhone.length >= 10;
@@ -432,8 +428,11 @@ export default function Home() {
         try {
           const res = await fetch(`/api/variations?serviceID=${educationProvider}`);
           const data = await res.json();
-          setEducationVariations(extractVtpassArray(data));
-        } catch (e) {}
+          if (data.code === '011') setEducationVariations([]); // Crash safety
+          else setEducationVariations(extractVtpassArray(data) || []);
+        } catch (e) {
+          setEducationVariations([]);
+        }
       };
       fetchEducation();
     }
@@ -442,9 +441,33 @@ export default function Home() {
   useEffect(() => {
     if (activeTab !== "pay") return;
     if (activeService.id === "CABLE") {
-      const fetchVariations = async () => { try { const res = await fetch(`/api/variations?serviceID=${cableProvider}`); const data = await res.json(); setCableVariations(extractVtpassArray(data)); } catch (e) {} }; fetchVariations();
+      const fetchVariations = async () => { 
+        try { 
+          const res = await fetch(`/api/variations?serviceID=${cableProvider}`); 
+          const data = await res.json(); 
+          if (data.code === '011') setCableVariations([]); // Crash safety
+          else setCableVariations(extractVtpassArray(data) || []); 
+        } catch (e) {
+          setCableVariations([]);
+        } 
+      }; 
+      fetchVariations();
     } else if (activeService.id === "INTERNET") {
-      const fetchInternetVariations = async () => { setInternetVariations([]); try { const res = await fetch(`/api/variations?serviceID=${internetProvider}`); const data = await res.json(); setInternetVariations(extractVtpassArray(data)); } catch (e) {} }; fetchInternetVariations();
+      const fetchInternetVariations = async () => { 
+        setInternetVariations([]); 
+        try { 
+          const res = await fetch(`/api/variations?serviceID=${internetProvider}`); 
+          const data = await res.json(); 
+          if (data.code === '011' || data.error) {
+             setInternetVariations([]); // ⚡ CRASH FIX: Handles 9mobile offline error gracefully
+          } else {
+             setInternetVariations(extractVtpassArray(data) || []); 
+          }
+        } catch (e) {
+          setInternetVariations([]);
+        } 
+      }; 
+      fetchInternetVariations();
     }
   }, [activeTab, activeService.id, cableProvider, internetProvider]);
 
@@ -864,18 +887,18 @@ export default function Home() {
         {/* ======================================= */}
         {activeTab === 'pay' && (
           <div className="bg-white border border-slate-100 rounded-[2.5rem] p-8 shadow-2xl shadow-emerald-900/10 animate-in fade-in zoom-in-95">
-            {/* ⚡ SMALLER SERVICE INDICATOR FRAME ⚡ */}
-            <div className="flex overflow-x-auto gap-2 pb-2 mb-4 no-scrollbar">
+            {/* ⚡ GRID LAYOUT FOR EVEN SPACING ⚡ */}
+            <div className="grid grid-cols-4 gap-2 pb-2 mb-4">
                 {SERVICES.filter(s => s.id !== 'BANK').map(s => (
                     <button 
                         key={s.id} 
                         onClick={() => handleResetService(s)}
-                        className={`min-w-[65px] p-2.5 rounded-xl border-2 transition-all flex flex-col items-center justify-center gap-1.5 shrink-0 ${
+                        className={`w-full p-2.5 rounded-xl border-2 transition-all flex flex-col items-center justify-center gap-1.5 ${
                             activeService.id === s.id ? 'border-emerald-500 bg-emerald-50/50 scale-100 shadow-sm' : 'border-slate-100 bg-white hover:bg-slate-50'
                         }`}
                     >
                         <s.icon size={18} className={s.color} />
-                        <span className="text-[9px] font-black uppercase tracking-tight">{s.name}</span>
+                        <span className="text-[9px] font-black uppercase tracking-tight text-center">{s.name}</span>
                     </button>
                 ))}
             </div>
@@ -965,14 +988,25 @@ export default function Home() {
 
                 <div>
                     <label className="text-[10px] font-black text-slate-400 uppercase mb-2 flex justify-between">
-                      <span>{activeService.id === "INTERNET" ? (['smile-direct', 'spectranet'].includes(internetProvider) ? "Internet ID / Email" : "Phone No") : activeService.id === "AIRTIME" ? "Phone No" : "Number"}</span>
+                      {/* ⚡ SMILE & SPECTRANET LABEL FIX ⚡ */}
+                      <span>
+                        {activeService.id === "INTERNET" ? (
+                            internetProvider === 'smile-direct' ? "Smile Email Address" : 
+                            internetProvider === 'spectranet' ? "Spectranet ID / Phone No" : 
+                            "Phone No"
+                        ) : activeService.id === "AIRTIME" ? "Phone No" : "Number"}
+                      </span>
                       {(activeService.id === "AIRTIME" || (activeService.id === "INTERNET" && internetProvider.includes('-data'))) && (
                         <span className={accountNumber.length === 11 ? "text-emerald-500" : "text-slate-400"}>{accountNumber.length}/11</span>
                       )}
                     </label>
                     <input 
                         type={activeService.id === "INTERNET" && internetProvider === 'smile-direct' ? "email" : "tel"} 
-                        placeholder="Enter Number"
+                        placeholder={
+                            activeService.id === "INTERNET" && internetProvider === 'smile-direct' ? "example@email.com" : 
+                            activeService.id === "INTERNET" && internetProvider === 'spectranet' ? "Enter Spectranet ID" : 
+                            "Enter Number"
+                        }
                         className={`w-full bg-slate-50 border p-5 rounded-2xl font-black text-xl text-slate-800 outline-none transition-all ${
                           ((activeService.id === "AIRTIME" || (activeService.id === "INTERNET" && internetProvider.includes('-data'))) && accountNumber.length > 0 && accountNumber.length < 11) ? "border-red-300" : "border-slate-100 focus:border-emerald-500"
                         }`}
@@ -996,7 +1030,7 @@ export default function Home() {
 
                 {activeService.id === "INTERNET" && (
                   <div className="bg-slate-50 border border-slate-200 rounded-2xl p-4 shadow-sm animate-in fade-in slide-in-from-top-4">
-                     {internetProvider !== 'spectranet' && (
+                     {internetProvider !== 'spectranet' && internetProvider !== 'smile-direct' && (
                        <div className="flex gap-2 mb-4 overflow-x-auto no-scrollbar shadow-inner bg-slate-100 p-1.5 rounded-2xl">
                           {DATA_CATEGORIES.map(cat => (
                             <button key={cat} onClick={() => { setActiveDataCategory(cat); setSelectedInternetPlan(null); setNairaAmount(""); }} className={`px-4 py-2.5 rounded-xl text-[11px] font-black uppercase transition-all whitespace-nowrap ${activeDataCategory === cat ? 'bg-white shadow-lg text-purple-600' : 'text-slate-500'}`}>{cat}</button>
@@ -1020,7 +1054,7 @@ export default function Home() {
                      ) : (
                         <div className="grid grid-cols-1 gap-2 max-h-[30vh] overflow-y-auto pr-1">
                           {internetVariations.length === 0 ? (
-                            <p className="text-center text-xs font-bold text-slate-400 py-4"><Loader2 className="animate-spin" size={14}/> Loading...</p>
+                            <p className="text-center text-xs font-bold text-slate-400 py-4">No packages available or Service offline.</p>
                           ) : filteredInternetDataPlans.map((plan) => (
                                 <button key={plan.variation_code} onClick={() => { setSelectedInternetPlan(plan); setNairaAmount(plan.variation_amount ? plan.variation_amount.toString() : "0"); }} className="p-3 rounded-xl border border-slate-200 bg-white hover:border-sky-300 transition-all text-left flex justify-between items-center group">
                                   <div>
@@ -1094,8 +1128,8 @@ export default function Home() {
                     )}
                 </div>
 
-                {/* ⚡ SMS PHONE NUMBER FIX: ONLY FOR ELECTRICITY & SMILE/SPECTRANET ⚡ */}
-                {(activeService.id === "ELECTRICITY" || (activeService.id === "INTERNET" && ['smile-direct', 'spectranet'].includes(internetProvider))) && (
+                {/* ⚡ SMS PHONE NUMBER FIX: ONLY FOR ELECTRICITY & SMILE ⚡ */}
+                {(activeService.id === "ELECTRICITY" || (activeService.id === "INTERNET" && internetProvider === 'smile-direct')) && (
                     <div className="animate-in fade-in">
                          <input 
                             type="tel" placeholder="SMS Phone Number"
