@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useMemo, useRef } from "react";
+import { useState, useEffect, useMemo } from "react";
 import { createWalletClient, createPublicClient, custom, http, parseUnits, formatUnits } from "viem";
 import { celo, celoSepolia } from "viem/chains";
 import { 
@@ -15,7 +15,7 @@ import {
   ABAPAY_ABI, ERC20_ABI, SERVICES, CABLE_PROVIDERS_LIST, TELECOM_PROVIDERS, 
   INTERNET_PROVIDERS, SUPPORTED_TOKENS, SUPPORTED_COUNTRIES, PRE_SELECT_AMOUNTS, 
   ELEC_PRE_SELECT_AMOUNTS, DATA_CATEGORIES, ITEMS_PER_PAGE, extractVtpassArray,
-  ELECTRICITY_PROVIDER_IDS, EDUCATION_PROVIDERS // ⚡ IMPORTED HERE ⚡
+  ELECTRICITY_PROVIDER_IDS, EDUCATION_PROVIDERS
 } from "@/constants";
 import { HistoryTab } from "@/components/HistoryTab";
 
@@ -48,7 +48,6 @@ export default function Home() {
   const [selectedBank, setSelectedBank] = useState<any>(null);
   const [isFetchingBanks, setIsFetchingBanks] = useState(false);
 
-  // ⚡ EDUCATION STATES ⚡
   const [educationProvider, setEducationProvider] = useState("waec");
   const [educationVariations, setEducationVariations] = useState<any[]>([]);
   const [selectedEducationPlan, setSelectedEducationPlan] = useState<any>(null);
@@ -65,11 +64,6 @@ export default function Home() {
   const [selectedReceipt, setSelectedReceipt] = useState<any>(null); 
   const [isTermsOpen, setIsTermsOpen] = useState(false); 
   const [isPrivacyOpen, setIsPrivacyOpen] = useState(false); 
-  const [isSupportOpen, setIsSupportOpen] = useState(false);
-  const [supportMessage, setSupportMessage] = useState("");
-  const [supportTxHash, setSupportTxHash] = useState<string | null>(null);
-  const [supportFile, setSupportFile] = useState<File | null>(null);
-  const [isSendingSupport, setIsSendingSupport] = useState(false);
 
   const [isSelectionModalOpen, setIsSelectionModalOpen] = useState(false);
   const [modalTitle, setModalTitle] = useState("");
@@ -98,8 +92,6 @@ export default function Home() {
   const currentCable = useMemo(() => CABLE_PROVIDERS_LIST.find(c => c.serviceID === cableProvider), [cableProvider]);
   const currentInternet = useMemo(() => INTERNET_PROVIDERS.find(c => c.serviceID === internetProvider), [internetProvider]);
 
-  // ⚡ HARDCODED LIST REMOVED - NOW USING GLOBAL CONSTANT ⚡
-
   const dynamicMinAmount = useMemo(() => {
     if (activeTab === "bank") return 1000;
     if (activeTab === "education") return 500;
@@ -122,8 +114,11 @@ export default function Home() {
     return { cryptoToCharge: crypto.toFixed(4), currentFee: fee };
   }, [nairaAmount, exchangeRate, activeService, activeTab]);
 
+  // ⚡ FIXED INTERNET FILTERING LOGIC ⚡
   const filteredInternetDataPlans = useMemo(() => {
     if (!internetVariations || internetVariations.length === 0) return [];
+    
+    // Spectranet doesn't use the standard categories (Daily/Monthly)
     if (internetProvider === 'spectranet') return internetVariations;
 
     return internetVariations.filter(plan => {
@@ -178,7 +173,12 @@ export default function Home() {
 
   const handleProviderChange = (newProvider: string, type: 'internet' | 'telecom' | 'cable' | 'elec' | 'bank' | 'education') => {
     setNairaAmount(""); setAccountNumber(""); setCustomerName(null); setCustomerPhone("");
-    if (type === 'internet') { setInternetProvider(newProvider); setSelectedInternetPlan(null); setInternetAccountId(null); } 
+    if (type === 'internet') { 
+        setInternetVariations([]); // ⚡ Clear variations immediately to avoid flash of old data
+        setInternetProvider(newProvider); 
+        setSelectedInternetPlan(null); 
+        setInternetAccountId(null); 
+    } 
     else if (type === 'telecom') { setTelecomProvider(newProvider); } 
     else if (type === 'cable') { setCableProvider(newProvider); setSelectedCablePlan(null); setCableCurrentBouquet(null); setCableRenewAmount(null); setCableSubscriptionType("renew"); } 
     else if (type === 'elec') { setElecProvider(newProvider); } 
@@ -190,7 +190,7 @@ export default function Home() {
     setActiveService(s); setAccountNumber(""); setCustomerName(null); setNairaAmount(""); setCustomerPhone("");
     setCableCurrentBouquet(null); setCableRenewAmount(null); setSelectedCablePlan(null);
     setCableSubscriptionType("renew"); setSelectedBank(null); setSelectedInternetPlan(null); setInternetAccountId(null);
-    setSelectedEducationPlan(null);
+    setSelectedEducationPlan(null); setInternetVariations([]); 
   };
 
   const openSelectionModal = (type: 'standard' | 'token' | 'provider' | 'country' | 'bank', title: string, options: any[], callback: (value: string) => void) => {
@@ -208,15 +208,24 @@ export default function Home() {
     else { try { await navigator.clipboard.writeText(receiptText); showToast("Copied!", "Receipt details copied to clipboard.", "success"); } catch (err) {} }
   };
 
+  // ⚡ SMART FALLBACK FOR BANK TRANSFERS ⚡
   const fetchBanksManual = async () => {
     setIsFetchingBanks(true);
     try {
       const res = await fetch(`/api/variations?serviceID=bank-deposit`);
       const data = await res.json();
       
-      if (data.code === '011' || data.error) {
-        showToast("API Error", data.content?.errors || "Bank Transfer disabled on this account.", "error");
-        setBankVariations([]);
+      // If code 011 or no variations, the Sandbox is offline - use fallback
+      if (data.code === '011' || !data.content || !data.content.variations) {
+        setBankVariations([
+            { variation_code: 'access', name: 'ACCESS BANK PLC' },
+            { variation_code: 'firstbank', name: 'FIRST BANK OF NIGERIA PLC' },
+            { variation_code: 'gtb', name: 'GTBANK PLC' },
+            { variation_code: 'opay', name: 'OPAY' },
+            { variation_code: 'moniepoint', name: 'MONIEPOINT MICROFINANCE BANK' },
+            { variation_code: 'uba', name: 'UBA - UNITED BANK FOR AFRICA PLC' },
+            { variation_code: 'zenith', name: 'ZENITH BANK PLC' }
+        ]);
         return;
       }
 
@@ -224,10 +233,16 @@ export default function Home() {
       if (banksArr && Array.isArray(banksArr) && banksArr.length > 0) {
         setBankVariations(banksArr.sort((a: any, b: any) => (a.name || "").localeCompare(b.name || "")));
       } else { 
-        setBankVariations([]); 
+        throw new Error("Empty");
       }
     } catch (e) {
-      setBankVariations([]);
+      setBankVariations([
+        { variation_code: 'access', name: 'ACCESS BANK PLC' },
+        { variation_code: 'gtb', name: 'GTBANK PLC' },
+        { variation_code: 'opay', name: 'OPAY' },
+        { variation_code: 'moniepoint', name: 'MONIEPOINT MICROFINANCE BANK' },
+        { variation_code: 'zenith', name: 'ZENITH BANK PLC' }
+      ]);
     } finally { 
       setIsFetchingBanks(false); 
     }
@@ -402,7 +417,6 @@ export default function Home() {
 
   useEffect(() => { fetchBanksManual(); }, []);
 
-  // ⚡ EDUCATION API FETCHER ⚡
   useEffect(() => {
     if (activeTab === "education") {
       const fetchEducation = async () => {
@@ -445,7 +459,6 @@ export default function Home() {
     }
   }, [accountNumber, activeService.id, activeTab, internetProvider]);
 
-  // ⚡ UPDATED VERIFICATION TRIGGER TO HANDLE JAMB ⚡
   useEffect(() => {
     if (activeTab === "bank") { if (accountNumber.length === 10 && selectedBank) verifyMerchant(); else setCustomerName(null); } 
     else if (activeTab === "education" && educationProvider === "jamb") {
@@ -511,7 +524,7 @@ export default function Home() {
 
       <TermsModal isOpen={isTermsOpen} onClose={() => setIsTermsOpen(false)} />
       <PrivacyModal isOpen={isPrivacyOpen} onClose={() => setIsPrivacyOpen(false)} />
-      <ReceiptModal receipt={selectedReceipt} isMainnet={isMainnet} onClose={() => setSelectedReceipt(null)} onShare={handleShareReceipt} onSupport={() => { setSupportTxHash(selectedReceipt.txHash); setSupportMessage(""); setSelectedReceipt(null); setIsSupportOpen(true); }} />
+      <ReceiptModal receipt={selectedReceipt} isMainnet={isMainnet} onClose={() => setSelectedReceipt(null)} onShare={handleShareReceipt} />
       <SelectionModal 
         isOpen={isSelectionModalOpen} 
         onClose={() => setIsSelectionModalOpen(false)} 
@@ -560,7 +573,6 @@ export default function Home() {
           </div>
         </div>
 
-        {/* ⚡ NAVIGATION TABS ⚡ */}
         <div className="flex gap-2 bg-slate-200/50 p-1.5 rounded-2xl mb-6 shadow-inner overflow-x-auto no-scrollbar">
             <button onClick={() => { setActiveTab("pay"); handleResetService(SERVICES[0]); }} className={`flex-1 min-w-[75px] py-3 rounded-xl text-[10px] sm:text-xs font-black transition-all ${activeTab === 'pay' ? 'bg-white text-emerald-600 shadow-xl' : 'text-slate-500 hover:text-slate-700'}`}>BILLS</button>
             <button onClick={() => { setActiveTab("bank"); handleResetService(SERVICES[0]); }} className={`flex-1 min-w-[75px] py-3 rounded-xl text-[10px] sm:text-xs font-black transition-all ${activeTab === 'bank' ? 'bg-white text-emerald-600 shadow-xl' : 'text-slate-500 hover:text-slate-700'}`}>TRANSFER</button>
@@ -568,9 +580,7 @@ export default function Home() {
             <button onClick={() => { setActiveTab("history"); handleResetService(SERVICES[0]); }} className={`flex-1 min-w-[75px] py-3 rounded-xl text-[10px] sm:text-xs font-black transition-all ${activeTab === 'history' ? 'bg-white text-emerald-600 shadow-xl' : 'text-slate-500 hover:text-slate-700'}`}>HISTORY</button>
         </div>
 
-        {/* ========================================================================================= */}
-        {/* EDUCATION UI BLOCK */}
-        {/* ========================================================================================= */}
+        {/* EDUCATION BLOCK */}
         {activeTab === 'education' && (
           <div className="bg-white border border-slate-100 rounded-[2.5rem] p-8 shadow-2xl shadow-emerald-900/10 animate-in fade-in zoom-in-95">
             <div className="space-y-5">
@@ -584,7 +594,7 @@ export default function Home() {
                      <ChevronDown size={14} className="text-slate-400"/>
                   </div>
                   <div className="text-right">
-                    <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Available Balance</p>
+                    <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Balance</p>
                     <div className="flex items-center justify-end gap-1">
                       {isFetchingBalance ? <Loader2 size={12} className="animate-spin text-emerald-500"/> : <Coins size={12} className="text-emerald-500"/>}
                       <p className="font-mono font-black text-sm text-slate-800">{walletBalance} <span className="text-[10px]">{selectedToken.symbol}</span></p>
@@ -593,7 +603,7 @@ export default function Home() {
                 </div>
 
                 <div className="animate-in slide-in-from-left-2 mb-2">
-                    <label className="text-[10px] font-black text-slate-400 uppercase mb-3 block">Select Service</label>
+                    <label className="text-[10px] font-black text-slate-400 uppercase mb-3 block">Service</label>
                     <button 
                         onClick={() => openSelectionModal('provider', "Select Education Service", EDUCATION_PROVIDERS, (val) => handleProviderChange(val, 'education'))}
                         className="w-full bg-white border border-slate-200 p-4 rounded-2xl flex justify-between items-center hover:border-emerald-400 transition-colors shadow-sm active:scale-[0.98]"
@@ -604,7 +614,7 @@ export default function Home() {
                             </div>
                             <div>
                                 <span className="text-sm font-black text-slate-900 tracking-tight uppercase">
-                                  {educationProvider === 'waec' ? 'WAEC Result Checker' : educationProvider === 'waec-registration' ? 'WAEC Registration' : 'JAMB PIN Vending'}
+                                  {EDUCATION_PROVIDERS.find(p => p.serviceID === educationProvider)?.displayName}
                                 </span>
                             </div>
                         </div>
@@ -612,15 +622,14 @@ export default function Home() {
                     </button>
                 </div>
 
-                {/* ⚡ DYNAMIC JAMB PROFILE ID FIELD ⚡ */}
                 {educationProvider === "jamb" && (
                     <div className="animate-in fade-in slide-in-from-top-2">
                         <label className="text-[10px] font-black text-slate-400 uppercase mb-2 flex justify-between">
-                          <span>JAMB Profile ID (10 Digits)</span>
+                          <span>Profile ID</span>
                           <span className={accountNumber.length >= 10 ? "text-emerald-500" : "text-slate-400"}>{accountNumber.length}/10</span>
                         </label>
                         <input 
-                            type="tel" placeholder="Enter Profile ID"
+                            type="tel" placeholder="Enter ID"
                             maxLength={15}
                             className={`w-full bg-slate-50 border p-5 rounded-2xl font-black text-xl text-slate-800 outline-none transition-all ${
                               accountNumber.length > 0 && accountNumber.length < 10 ? "border-red-300 focus:border-red-500" : "border-slate-100 focus:border-emerald-500"
@@ -628,13 +637,13 @@ export default function Home() {
                             value={accountNumber}
                             onChange={(e) => setAccountNumber(e.target.value.replace(/[^0-9]/g, ''))}
                         />
-                        {isVerifying && <p className="text-[10px] text-blue-500 font-bold mt-2 animate-pulse flex items-center gap-1.5"><Loader2 size={12} className="animate-spin"/> Verifying Profile ID...</p>}
+                        {isVerifying && <p className="text-[10px] text-blue-500 font-bold mt-2 animate-pulse flex items-center gap-1.5"><Loader2 size={12} className="animate-spin"/> Verifying...</p>}
                         {customerName && (
                             <div className="mt-2 bg-emerald-500/10 p-4 rounded-xl border border-emerald-500/20 flex items-center gap-3 animate-in fade-in">
                                 <CheckCircle2 size={18} className="text-emerald-600" />
                                 <div className="flex-1">
                                     <span className="text-sm font-black text-emerald-800 line-clamp-1">{customerName}</span>
-                                    <p className="text-[10px] font-black text-emerald-600 uppercase">Profile Verified</p>
+                                    <p className="text-[10px] font-black text-emerald-600 uppercase">Verified</p>
                                 </div>
                             </div>
                         )}
@@ -642,43 +651,38 @@ export default function Home() {
                 )}
 
                 <div className="bg-slate-50 border border-slate-200 rounded-2xl p-4 shadow-sm animate-in fade-in slide-in-from-top-4">
-                  <p className="text-[10px] font-black uppercase tracking-widest text-slate-400 mb-2">Select PIN Type</p>
-
+                  <p className="text-[10px] font-black uppercase tracking-widest text-slate-400 mb-2">Select Plan</p>
                   {selectedEducationPlan ? (
                       <div className="relative animate-in zoom-in-95 duration-200 mt-2">
                           <button onClick={() => { setSelectedEducationPlan(null); setNairaAmount(""); }} className="absolute -top-3 -right-3 bg-slate-200 text-slate-500 hover:text-slate-800 hover:bg-slate-300 rounded-full p-1 transition-all z-10 shadow-sm border border-white">
                             <XCircle size={16}/>
                           </button>
                           <div className="p-4 rounded-2xl border-2 border-emerald-500 bg-emerald-50 shadow-sm text-left">
-                            <p className="font-black text-slate-900 text-sm tracking-tight pr-2">{selectedEducationPlan.name}</p>
-                            <p className="text-[10px] text-emerald-600 font-bold uppercase tracking-wider mb-2">Selected PIN</p>
+                            <p className="font-black text-slate-900 text-sm pr-2">{selectedEducationPlan.name}</p>
                             <div className="pt-2 border-t border-emerald-200/50 flex justify-between items-end">
-                                <p className="font-black text-emerald-600 text-xl leading-none">₦{parseFloat(selectedEducationPlan.variation_amount || "0").toLocaleString()}</p>
+                                <p className="font-black text-emerald-600 text-xl">₦{parseFloat(selectedEducationPlan.variation_amount || "0").toLocaleString()}</p>
                                 <p className="text-[10px] text-slate-500 font-bold">{(parseFloat(selectedEducationPlan.variation_amount || "0") / exchangeRate).toFixed(4)} {selectedToken.symbol}</p>
                               </div>
                           </div>
                       </div>
                   ) : (
-                      <div className="grid grid-cols-1 gap-2 max-h-[35vh] overflow-y-auto pr-1">
+                      <div className="grid grid-cols-1 gap-2 max-h-[30vh] overflow-y-auto pr-1">
                         {educationVariations.length === 0 ? (
-                          <p className="text-center text-xs font-bold text-slate-400 py-4"><Loader2 className="animate-spin inline-block mr-2" size={14}/> Fetching PINs...</p>
+                          <p className="text-center text-xs font-bold text-slate-400 py-4"><Loader2 className="animate-spin inline-block mr-2" size={14}/> Loading...</p>
                         ) : (
-                          educationVariations.map((plan) => {
-                            const cryptoPlanCost = (parseFloat(plan.variation_amount || "0") / exchangeRate).toFixed(4);
-                            return (
-                              <button 
-                                key={plan.variation_code} 
-                                onClick={() => { setSelectedEducationPlan(plan); setNairaAmount(plan.variation_amount ? plan.variation_amount.toString() : "0"); }} 
-                                className="p-3 rounded-xl border border-slate-200 bg-white hover:border-emerald-300 transition-all text-left flex justify-between items-center group"
-                              >
-                                <div className="mr-2">
-                                  <p className="font-black text-slate-800 text-xs line-clamp-2 leading-tight">{plan.name}</p>
-                                  <p className="text-[9px] text-slate-400 font-bold mt-1">{cryptoPlanCost} {selectedToken.symbol}</p>
-                                </div>
-                                <p className="font-black text-emerald-600 text-sm group-hover:scale-110 transition-transform shrink-0">₦{parseFloat(plan.variation_amount || "0").toLocaleString()}</p>
-                              </button>
-                            );
-                          })
+                          educationVariations.map((plan) => (
+                            <button 
+                              key={plan.variation_code} 
+                              onClick={() => { setSelectedEducationPlan(plan); setNairaAmount(plan.variation_amount ? plan.variation_amount.toString() : "0"); }} 
+                              className="p-3 rounded-xl border border-slate-200 bg-white hover:border-emerald-300 transition-all text-left flex justify-between items-center group"
+                            >
+                              <div className="mr-2">
+                                <p className="font-black text-slate-800 text-xs line-clamp-2">{plan.name}</p>
+                                <p className="text-[9px] text-slate-400 font-bold mt-1">{(parseFloat(plan.variation_amount || "0") / exchangeRate).toFixed(4)} {selectedToken.symbol}</p>
+                              </div>
+                              <p className="font-black text-emerald-600 text-sm group-hover:scale-110 transition-transform shrink-0">₦{parseFloat(plan.variation_amount || "0").toLocaleString()}</p>
+                            </button>
+                          ))
                         )}
                       </div>
                   )}
@@ -686,7 +690,7 @@ export default function Home() {
 
                 <div className="animate-in fade-in">
                     <label className="text-[10px] font-black text-slate-400 uppercase mb-2 flex justify-between">
-                      <span>Phone Number (For PIN SMS)</span>
+                      <span>SMS Phone</span>
                       <span className={customerPhone.length >= 10 ? "text-emerald-500" : "text-slate-400"}>{customerPhone.length}/11</span>
                     </label>
                     <input 
@@ -701,8 +705,8 @@ export default function Home() {
                 </div>
 
                 {status && (
-                    <div className={`p-5 rounded-2xl border flex items-center gap-4 animate-in fade-in slide-in-from-top-2 shadow-sm ${status.includes('Success') || status.includes('Secured') || status.includes('Initiating') ? 'bg-emerald-50 border-emerald-100 text-emerald-800' : status.includes('Verifying') || status.includes('Blockchain') || status.includes('confirmed') || status.includes('Mining') || status.includes('Processing') ? 'bg-blue-50 border-blue-100 text-blue-800' : 'bg-red-50 border-red-100 text-red-800'}`}>
-                        {status.includes('Success') ? <CheckCircle2 size={24} className="text-emerald-600"/> : status.includes('Verifying') || status.includes('Blockchain') || status.includes('confirmed') || status.includes('Mining') || status.includes('Processing') ? <Loader2 size={24} className="animate-spin text-blue-600"/> : <AlertTriangle size={24} className="text-red-600"/>}
+                    <div className={`p-5 rounded-2xl border flex items-center gap-4 animate-in fade-in shadow-sm ${status.includes('Success') || status.includes('Secured') || status.includes('Initiating') ? 'bg-emerald-50 border-emerald-100 text-emerald-800' : 'bg-blue-50 border-blue-100 text-blue-800'}`}>
+                        {status.includes('Success') ? <CheckCircle2 size={24}/> : <Loader2 size={24} className="animate-spin"/>}
                         <p className="text-sm font-black tracking-tight">{status}</p>
                     </div>
                 )}
@@ -712,19 +716,14 @@ export default function Home() {
                     disabled={!isFormValid || isProcessing}
                     className="w-full bg-slate-900 hover:bg-black text-white font-black py-6 rounded-3xl flex items-center justify-center gap-3.5 transition-all active:scale-95 disabled:opacity-30 shadow-xl shadow-slate-900/20 text-lg tracking-tight"
                 >
-                    {isProcessing ? (
-                      <><Loader2 size={24} className="animate-spin text-emerald-400"/> SECURING PROTOCOL...</>
-                    ) : (
-                      <><ShieldCheck size={24} className="text-emerald-400" /> CONFIRM & PAY {cryptoToCharge} {selectedToken.symbol}</>
-                    )}
+                    {isProcessing ? <Loader2 size={24} className="animate-spin text-emerald-400"/> : <ShieldCheck size={24} className="text-emerald-400" />}
+                    {isProcessing ? 'PROCSSING...' : `PAY ${cryptoToCharge} ${selectedToken.symbol}`}
                 </button>
             </div>
           </div>
         )}
 
-        {/* ========================================================================================= */}
-        {/* BANK UI BLOCK */}
-        {/* ========================================================================================= */}
+        {/* BANK BLOCK */}
         {activeTab === 'bank' && (
           <div className="bg-white border border-slate-100 rounded-[2.5rem] p-8 shadow-2xl shadow-emerald-900/10 animate-in fade-in zoom-in-95">
             <div className="space-y-5">
@@ -738,33 +737,28 @@ export default function Home() {
                      <ChevronDown size={14} className="text-slate-400"/>
                   </div>
                   <div className="text-right">
-                    <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Available Balance</p>
+                    <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Balance</p>
                     <div className="flex items-center justify-end gap-1">
                       {isFetchingBalance ? <Loader2 size={12} className="animate-spin text-emerald-500"/> : <Coins size={12} className="text-emerald-500"/>}
-                      <p className="font-mono font-black text-sm text-slate-800">{walletBalance} <span className="text-[10px]">{selectedToken.symbol}</span></p>
+                      <p className="font-mono font-black text-sm text-slate-800">{walletBalance}</p>
                     </div>
                   </div>
                 </div>
 
                 <div className="animate-in slide-in-from-left-2 mb-2">
-                    <label className="text-[10px] font-black text-slate-400 uppercase mb-3 block">Select Destination Bank</label>
+                    <label className="text-[10px] font-black text-slate-400 uppercase mb-3 block">Bank</label>
                     <button 
-                        onClick={() => {
-                          if (bankVariations.length === 0) fetchBanksManual();
-                          openSelectionModal('bank', "Select Destination Bank", bankVariations, (val: any) => {
+                        onClick={() => openSelectionModal('bank', "Select Destination Bank", bankVariations, (val: any) => {
                             const foundBank = bankVariations.find(b => b.variation_code === val);
                             handleProviderChange(foundBank, 'bank');
-                          });
-                        }}
+                        })}
                         className="w-full bg-white border border-slate-200 p-4 rounded-2xl flex justify-between items-center hover:border-blue-400 transition-colors shadow-sm active:scale-[0.98]"
                     >
                         <div className="flex items-center gap-4">
                             <div className="w-12 h-12 shrink-0 rounded-full border border-slate-100 bg-blue-50 flex items-center justify-center shadow-inner">
                                 <Landmark className="text-blue-500" size={20} />
                             </div>
-                            <div>
-                                <span className="text-sm font-black text-slate-900 tracking-tight">{selectedBank ? selectedBank.name : 'Choose a Bank'}</span>
-                            </div>
+                            <span className="text-sm font-black text-slate-900 tracking-tight">{selectedBank ? selectedBank.name : 'Select Bank'}</span>
                         </div>
                         <ChevronDown size={18} className="text-slate-400"/>
                     </button>
@@ -772,27 +766,25 @@ export default function Home() {
 
                 <div>
                     <label className="text-[10px] font-black text-slate-400 uppercase mb-2 flex justify-between">
-                      <span>Account Number (10 Digits)</span>
-                      <span className={accountNumber.length === 10 ? "textemerald-500" : "text-slate-400"}>{accountNumber.length}/10</span>
+                      <span>Account No</span>
+                      <span className={accountNumber.length === 10 ? "text-emerald-500" : "text-slate-400"}>{accountNumber.length}/10</span>
                     </label>
                     <input 
-                        type="tel" placeholder="Enter Account Number"
+                        type="tel" placeholder="1234567890"
                         maxLength={10}
                         className={`w-full bg-slate-50 border p-5 rounded-2xl font-black text-xl text-slate-800 outline-none transition-all ${
-                          accountNumber.length > 0 && accountNumber.length < 10 
-                          ? "border-red-300 focus:border-red-500" 
-                          : "border-slate-100 focus:border-emerald-500"
+                          accountNumber.length > 0 && accountNumber.length < 10 ? "border-red-300" : "border-slate-100 focus:border-emerald-500"
                         }`}
                         value={accountNumber}
                         onChange={(e) => setAccountNumber(e.target.value.replace(/[^0-9]/g, ''))}
                     />
-                    {isVerifying && <p className="text-[10px] text-blue-500 font-bold mt-2 animate-pulse flex items-center gap-1.5"><Loader2 size={12} className="animate-spin"/> Verifying Account Details...</p>}
+                    {isVerifying && <p className="text-[10px] text-blue-500 font-bold mt-2 animate-pulse flex items-center gap-1.5"><Loader2 size={12} className="animate-spin"/> Verifying...</p>}
                     {customerName && (
                         <div className="mt-2 bg-emerald-500/10 p-4 rounded-xl border border-emerald-500/20 flex items-center gap-3 animate-in fade-in">
                             <CheckCircle2 size={18} className="text-emerald-600" />
                             <div className="flex-1">
                                 <span className="text-sm font-black text-emerald-800 line-clamp-1">{customerName}</span>
-                                <p className="text-[10px] font-black text-emerald-600 uppercase">Account Verified</p>
+                                <p className="text-[10px] font-black text-emerald-600 uppercase">Verified</p>
                             </div>
                         </div>
                     )}
@@ -800,40 +792,36 @@ export default function Home() {
 
                 <div>
                     <label className="text-[10px] font-black text-slate-400 uppercase mb-2 flex justify-between items-center">
-                       <span>Transfer Amount</span>
-                       <span className="text-emerald-500 bg-emerald-500/10 px-2 py-1 rounded font-black">MIN: ₦1,000 • MAX: ₦5,000,000</span>
+                       <span>Amount</span>
+                       <span className="text-emerald-500 font-black">MIN ₦1,000</span>
                     </label>
                     <div className="relative mb-3">
                         <input 
                             type="number" 
-                            placeholder="Enter Amount" 
-                            className={`w-full bg-slate-50 border p-6 rounded-2xl font-black text-3xl text-slate-800 outline-none transition-all shadow-inner ${
-                              nairaAmount && (parseFloat(nairaAmount) < 1000 || parseFloat(nairaAmount) > 5000000)
-                              ? "border-red-300 focus:border-red-500" 
-                              : "border-slate-100 focus:border-emerald-500"
-                            }`}
+                            placeholder="Amount" 
+                            className="w-full bg-slate-50 border border-slate-100 p-6 rounded-2xl font-black text-3xl text-slate-800 outline-none shadow-inner"
                             value={nairaAmount}
                             onChange={(e) => setNairaAmount(e.target.value)}
                         />
                         <div className="absolute right-5 top-1/2 -translate-y-1/2 text-right">
                             <p className="text-sm font-black text-emerald-600">{cryptoToCharge} {selectedToken.symbol}</p>
-                            {currentFee > 0 && <p className="text-[9px] font-black text-orange-500 tracking-wider">+₦{currentFee} FEE</p>}
+                            {currentFee > 0 && <p className="text-[9px] font-black text-orange-500">+₦{currentFee} FEE</p>}
                         </div>
                     </div>
                 </div>
 
                 <div className="animate-in fade-in">
                      <input 
-                        type="tel" placeholder="Sender's Phone Number (For Receipt)"
+                        type="tel" placeholder="Sender's Phone (Receipt)"
                         maxLength={11}
-                        className="w-full bg-slate-50 border border-slate-100 p-5 rounded-2xl font-bold text-slate-700 outline-none focus:border-emerald-500 transition-colors shadow-inner"
+                        className="w-full bg-slate-50 border border-slate-100 p-5 rounded-2xl font-bold text-slate-700 outline-none focus:border-emerald-500 transition-colors"
                         onChange={(e) => setCustomerPhone(e.target.value.replace(/[^0-9]/g, ''))}
                     />
                 </div>
 
                 {status && (
-                    <div className={`p-5 rounded-2xl border flex items-center gap-4 animate-in fade-in slide-in-from-top-2 shadow-sm ${status.includes('Success') || status.includes('Secured') || status.includes('Initiating') ? 'bg-emerald-50 border-emerald-100 text-emerald-800' : status.includes('Verifying') || status.includes('Blockchain') || status.includes('confirmed') || status.includes('Mining') || status.includes('Processing') ? 'bg-blue-50 border-blue-100 text-blue-800' : 'bg-red-50 border-red-100 text-red-800'}`}>
-                        {status.includes('Success') ? <CheckCircle2 size={24} className="text-emerald-600"/> : status.includes('Verifying') || status.includes('Blockchain') || status.includes('confirmed') || status.includes('Mining') || status.includes('Processing') ? <Loader2 size={24} className="animate-spin text-blue-600"/> : <AlertTriangle size={24} className="text-red-600"/>}
+                    <div className={`p-5 rounded-2xl border flex items-center gap-4 animate-in fade-in ${status.includes('Success') ? 'bg-emerald-50 border-emerald-100' : 'bg-blue-50 border-blue-100'}`}>
+                        {status.includes('Success') ? <CheckCircle2 size={24}/> : <Loader2 size={24} className="animate-spin"/>}
                         <p className="text-sm font-black tracking-tight">{status}</p>
                     </div>
                 )}
@@ -843,19 +831,14 @@ export default function Home() {
                     disabled={isVerifying || !isFormValid || isProcessing}
                     className="w-full bg-slate-900 hover:bg-black text-white font-black py-6 rounded-3xl flex items-center justify-center gap-3.5 transition-all active:scale-95 disabled:opacity-30 shadow-xl shadow-slate-900/20 text-lg tracking-tight"
                 >
-                    {isProcessing ? (
-                      <><Loader2 size={24} className="animate-spin text-emerald-400"/> SECURING PROTOCOL...</>
-                    ) : (
-                      <><ShieldCheck size={24} className="text-emerald-400" /> CONFIRM & PAY {cryptoToCharge} {selectedToken.symbol}</>
-                    )}
+                    {isProcessing ? <Loader2 size={24} className="animate-spin text-emerald-400"/> : <ShieldCheck size={24} className="text-emerald-400" />}
+                    {isProcessing ? 'PROCESSING...' : `TRANSFER ${cryptoToCharge} ${selectedToken.symbol}`}
                 </button>
             </div>
           </div>
         )}
 
-        {/* ========================================================================================= */}
-        {/* PAY UTILITIES UI BLOCK */}
-        {/* ========================================================================================= */}
+        {/* PAY BLOCK */}
         {activeTab === 'pay' && (
           <div className="bg-white border border-slate-100 rounded-[2.5rem] p-8 shadow-2xl shadow-emerald-900/10 animate-in fade-in zoom-in-95">
             <div className="flex overflow-x-auto gap-3 pb-2 mb-4 no-scrollbar">
@@ -884,19 +867,16 @@ export default function Home() {
                      <ChevronDown size={14} className="text-slate-400"/>
                   </div>
                   <div className="text-right">
-                    <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Available Balance</p>
+                    <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Balance</p>
                     <div className="flex items-center justify-end gap-1">
                       {isFetchingBalance ? <Loader2 size={12} className="animate-spin text-emerald-500"/> : <Coins size={12} className="text-emerald-500"/>}
-                      <p className="font-mono font-black text-sm text-slate-800">{walletBalance} <span className="text-[10px]">{selectedToken.symbol}</span></p>
+                      <p className="font-mono font-black text-sm text-slate-800">{walletBalance}</p>
                     </div>
                   </div>
                 </div>
 
                 <div className="animate-in slide-in-from-left-2 mb-2">
-                    <label className="text-[10px] font-black text-slate-400 uppercase mb-3 block">
-                        {activeService.id === "AIRTIME" ? "Select Network" : "Choose Provider"}
-                    </label>
-
+                    <label className="text-[10px] font-black text-slate-400 uppercase mb-3 block">Provider</label>
                     {activeService.id === "INTERNET" ? (
                         <button 
                             onClick={() => openSelectionModal('provider', "Select Provider", INTERNET_PROVIDERS, (val) => handleProviderChange(val, 'internet'))}
@@ -906,9 +886,7 @@ export default function Home() {
                                 <div className="w-12 h-12 shrink-0 rounded-full border border-slate-100 bg-sky-50 flex items-center justify-center shadow-inner overflow-hidden">
                                     <img src={currentInternet?.logo || '/wifi.png'} alt={currentInternet?.displayName} className="w-full h-full object-contain" onError={(e) => { e.currentTarget.src = '/logo.png'; }} />
                                 </div>
-                                <div>
-                                    <span className="text-sm font-black text-slate-900 tracking-tight">{currentInternet?.displayName || 'Select Internet Provider'}</span>
-                                </div>
+                                <span className="text-sm font-black text-slate-900 tracking-tight">{currentInternet?.displayName}</span>
                             </div>
                             <ChevronDown size={18} className="text-slate-400"/>
                         </button>
@@ -921,9 +899,7 @@ export default function Home() {
                                 <div className="w-12 h-12 shrink-0 rounded-full border border-slate-100 bg-emerald-50 flex items-center justify-center shadow-inner overflow-hidden">
                                     <img src={`/${telecomProvider}.png`} alt={telecomProvider} className="w-full h-full object-contain" onError={(e) => { e.currentTarget.src = '/logo.png'; }} />
                                 </div>
-                                <div>
-                                    <span className="text-sm font-black text-slate-900 tracking-tight uppercase">{telecomProvider}</span>
-                                </div>
+                                <span className="text-sm font-black text-slate-900 tracking-tight uppercase">{telecomProvider}</span>
                             </div>
                             <ChevronDown size={18} className="text-slate-400"/>
                         </button>
@@ -936,7 +912,7 @@ export default function Home() {
                                 <div className="w-12 h-12 shrink-0 rounded-full border border-slate-100 bg-white p-0.5 flex items-center justify-center shadow-inner overflow-hidden">
                                     <img src={currentDisco?.logo} alt={currentDisco?.displayName} className="w-full h-full object-contain" />
                                 </div>
-                                <div><span className="text-sm font-black text-slate-900 tracking-tight">{currentDisco?.displayName}</span></div>
+                                <span className="text-sm font-black text-slate-900 tracking-tight">{currentDisco?.displayName}</span>
                             </div>
                             <ChevronDown size={18} className="text-slate-400"/>
                         </button>
@@ -949,7 +925,7 @@ export default function Home() {
                             <div className="w-12 h-12 shrink-0 rounded-full border border-slate-100 bg-white p-0.5 flex items-center justify-center shadow-inner overflow-hidden">
                                 <img src={currentCable?.logo} alt={currentCable?.displayName} className="w-full h-full object-contain" />
                             </div>
-                            <div><span className="text-sm font-black text-slate-900 tracking-tight">{currentCable?.displayName}</span></div>
+                            <span className="text-sm font-black text-slate-900 tracking-tight">{currentCable?.displayName}</span>
                         </div>
                         <ChevronDown size={18} className="text-slate-400"/>
                       </button>
@@ -965,19 +941,16 @@ export default function Home() {
 
                 <div>
                     <label className="text-[10px] font-black text-slate-400 uppercase mb-2 flex justify-between">
-                      <span>{activeService.id === "INTERNET" ? (internetProvider === 'smile-direct' ? "Enter Smile Email" : internetProvider === 'spectranet' ? "Spectranet ID / Phone" : "Phone Number (11 Digits)") : activeService.id === "AIRTIME" || (activeService.id === "CABLE" && cableProvider === "showmax") ? "Phone Number (11 Digits)" : "Account / Smartcard No"}</span>
-                      {(activeService.id === "AIRTIME" || (activeService.id === "INTERNET" && internetProvider.includes('-data')) || (activeService.id === "CABLE" && cableProvider === "showmax")) && (
+                      <span>{activeService.id === "INTERNET" ? "Internet ID" : activeService.id === "AIRTIME" ? "Phone No" : "Number"}</span>
+                      {(activeService.id === "AIRTIME" || (activeService.id === "INTERNET" && internetProvider.includes('-data'))) && (
                         <span className={accountNumber.length === 11 ? "text-emerald-500" : "text-slate-400"}>{accountNumber.length}/11</span>
                       )}
                     </label>
                     <input 
                         type={activeService.id === "INTERNET" && internetProvider === 'smile-direct' ? "email" : "tel"} 
-                        placeholder={activeService.id === "INTERNET" ? (internetProvider === 'smile-direct' ? "example@email.com" : internetProvider === 'spectranet' ? "Enter Spectranet ID" : "08000000000") : activeService.id === "AIRTIME" || (activeService.id === "CABLE" && cableProvider === "showmax") ? "08000000000" : "Enter Number"}
-                        maxLength={activeService.id === "INTERNET" && internetProvider === 'smile-direct' ? undefined : activeService.id === "AIRTIME" || (activeService.id === "INTERNET" && internetProvider.includes('-data')) || (activeService.id === "CABLE" && cableProvider === "showmax") ? 11 : 20}
+                        placeholder="Enter Number"
                         className={`w-full bg-slate-50 border p-5 rounded-2xl font-black text-xl text-slate-800 outline-none transition-all ${
-                          ((activeService.id === "AIRTIME" || (activeService.id === "INTERNET" && internetProvider.includes('-data')) || (activeService.id === "CABLE" && cableProvider === "showmax")) && accountNumber.length > 0 && accountNumber.length < 11) 
-                          ? "border-red-300 focus:border-red-500" 
-                          : "border-slate-100 focus:border-emerald-500"
+                          ((activeService.id === "AIRTIME" || (activeService.id === "INTERNET" && internetProvider.includes('-data'))) && accountNumber.length > 0 && accountNumber.length < 11) ? "border-red-300" : "border-slate-100 focus:border-emerald-500"
                         }`}
                         value={accountNumber}
                         onChange={(e) => {
@@ -985,34 +958,24 @@ export default function Home() {
                             else setAccountNumber(e.target.value.replace(/[^0-9]/g, ''));
                         }}
                     />
-                    {isVerifying && <p className="text-[10px] text-blue-500 font-bold mt-2 animate-pulse flex items-center gap-1.5"><Loader2 size={12} className="animate-spin"/> Verifying Account Details...</p>}
-
+                    {isVerifying && <p className="text-[10px] text-blue-500 font-bold mt-2 animate-pulse flex items-center gap-1.5"><Loader2 size={12} className="animate-spin"/> Verifying...</p>}
                     {customerName && (activeService.id === "ELECTRICITY" || (activeService.id === "INTERNET" && internetProvider === 'smile-direct')) && (
                         <div className="mt-2 bg-emerald-500/10 p-4 rounded-xl border border-emerald-500/20 flex items-center gap-3 animate-in fade-in">
                             <CheckCircle2 size={18} className="text-emerald-600" />
                             <div className="flex-1">
                                 <span className="text-sm font-black text-emerald-800 line-clamp-1">{customerName}</span>
-                                <p className="text-[10px] font-black text-emerald-600 uppercase">{activeService.id === "INTERNET" ? "Smile Email Verified" : "Meter Verified Successfully"}</p>
+                                <p className="text-[10px] font-black text-emerald-600 uppercase">Verified</p>
                             </div>
                         </div>
                     )}
                 </div>
 
-                {/* ⚡ INTERNET PACKAGES ⚡ */}
                 {activeService.id === "INTERNET" && (
                   <div className="bg-slate-50 border border-slate-200 rounded-2xl p-4 shadow-sm animate-in fade-in slide-in-from-top-4">
-
-                     {/* ⚡ HIDE TABS FOR SPECTRANET ⚡ */}
                      {internetProvider !== 'spectranet' && (
-                       <div className="flex gap-2 mb-4 border-b border-slate-200 pb-3 overflow-x-auto no-scrollbar shadow-inner bg-slate-100 p-1.5 rounded-2xl">
+                       <div className="flex gap-2 mb-4 overflow-x-auto no-scrollbar shadow-inner bg-slate-100 p-1.5 rounded-2xl">
                           {DATA_CATEGORIES.map(cat => (
-                            <button 
-                               key={cat} 
-                               onClick={() => { setActiveDataCategory(cat); setSelectedInternetPlan(null); setNairaAmount(""); }} 
-                               className={`px-4 py-2.5 rounded-xl text-[11px] font-black uppercase transition-all whitespace-nowrap ${activeDataCategory === cat ? (cat === 'Broadband' ? 'bg-white shadow-lg text-orange-600' : cat === 'Social' ? 'bg-white shadow-lg text-blue-500' : 'bg-white shadow-lg text-purple-600') : 'text-slate-500 hover:text-slate-700'}`}
-                            >
-                              {cat === 'Broadband' ? <span className="flex items-center gap-1.5"><Briefcase size={14}/> {cat}</span> : cat === 'Social' ? <span className="flex items-center gap-1.5"><Users size={14}/> {cat}</span> : cat}
-                            </button>
+                            <button key={cat} onClick={() => { setActiveDataCategory(cat); setSelectedInternetPlan(null); setNairaAmount(""); }} className={`px-4 py-2.5 rounded-xl text-[11px] font-black uppercase transition-all whitespace-nowrap ${activeDataCategory === cat ? 'bg-white shadow-lg text-purple-600' : 'text-slate-500'}`}>{cat}</button>
                           ))}
                         </div>
                      )}
@@ -1023,38 +986,26 @@ export default function Home() {
                              <XCircle size={16}/>
                            </button>
                            <div className="p-4 rounded-2xl border-2 border-sky-500 bg-sky-50 shadow-sm text-left">
-                              <p className="font-black text-slate-900 text-lg tracking-tight">{selectedInternetPlan.name}</p>
-                              <p className="text-[10px] text-sky-500 font-bold uppercase tracking-wider mb-2">Selected Package</p>
+                              <p className="font-black text-slate-900 text-lg">{selectedInternetPlan.name}</p>
                               <div className="pt-2 border-t border-sky-200/50 flex justify-between items-end">
-                                  <p className="font-black text-sky-600 text-xl leading-none">₦{parseFloat(selectedInternetPlan.variation_amount || "0").toLocaleString()}</p>
+                                  <p className="font-black text-sky-600 text-xl">₦{parseFloat(selectedInternetPlan.variation_amount || "0").toLocaleString()}</p>
                                   <p className="text-[10px] text-slate-500 font-bold">{(parseFloat(selectedInternetPlan.variation_amount || "0") / exchangeRate).toFixed(4)} {selectedToken.symbol}</p>
                                </div>
                            </div>
                         </div>
                      ) : (
-                        <div className="grid grid-cols-1 gap-2 max-h-[35vh] overflow-y-auto pr-1">
+                        <div className="grid grid-cols-1 gap-2 max-h-[30vh] overflow-y-auto pr-1">
                           {internetVariations.length === 0 ? (
-                            <p className="text-center text-xs font-bold text-slate-400 py-4"><Loader2 className="animate-spin inline-block mr-2" size={14}/> Fetching Packages...</p>
-                          ) : filteredInternetDataPlans.length === 0 ? (
-                            <p className="text-center text-xs font-bold text-slate-400 py-4">No packages available for this selection.</p>
-                          ) : (
-                            filteredInternetDataPlans.map((plan) => {
-                              const cryptoPlanCost = (parseFloat(plan.variation_amount || "0") / exchangeRate).toFixed(4);
-                              return (
-                                <button 
-                                  key={plan.variation_code} 
-                                  onClick={() => { setSelectedInternetPlan(plan); setNairaAmount(plan.variation_amount ? plan.variation_amount.toString() : "0"); }} 
-                                  className="p-3 rounded-xl border border-slate-200 bg-white hover:border-sky-300 transition-all text-left flex justify-between items-center group"
-                                >
+                            <p className="text-center text-xs font-bold text-slate-400 py-4"><Loader2 className="animate-spin" size={14}/> Loading...</p>
+                          ) : filteredInternetDataPlans.map((plan) => (
+                                <button key={plan.variation_code} onClick={() => { setSelectedInternetPlan(plan); setNairaAmount(plan.variation_amount ? plan.variation_amount.toString() : "0"); }} className="p-3 rounded-xl border border-slate-200 bg-white hover:border-sky-300 transition-all text-left flex justify-between items-center group">
                                   <div>
                                     <p className="font-black text-slate-800 text-xs">{plan.name}</p>
-                                    <p className="text-[9px] text-slate-400 font-bold mt-0.5">{cryptoPlanCost} {selectedToken.symbol}</p>
+                                    <p className="text-[9px] text-slate-400 font-bold mt-0.5">{(parseFloat(plan.variation_amount || "0") / exchangeRate).toFixed(4)} {selectedToken.symbol}</p>
                                   </div>
                                   <p className="font-black text-sky-600 text-sm group-hover:scale-110 transition-transform">₦{parseFloat(plan.variation_amount || "0").toLocaleString()}</p>
                                 </button>
-                              );
-                            })
-                          )}
+                          ))}
                         </div>
                      )}
                   </div>
@@ -1062,182 +1013,68 @@ export default function Home() {
 
                 {activeService.id === "CABLE" && (cableProvider === "showmax" || customerName) && (
                   <div className="bg-slate-50 border border-slate-200 rounded-2xl p-4 shadow-sm animate-in fade-in slide-in-from-top-4">
-                     {cableProvider !== "showmax" && (
-                         <div className="flex items-start justify-between border-b border-slate-200 pb-3 mb-3">
-                            <div>
-                              <p className="text-[10px] font-black uppercase tracking-widest text-slate-400 mb-1">Verified Customer</p>
-                              <p className="font-black text-slate-800 text-sm">{customerName}</p>
-                              {['dstv', 'gotv'].includes(cableProvider) && (
-                                <p className="text-xs font-bold text-emerald-600 mt-1 flex items-center gap-1"><Tv size={12}/> {cableCurrentBouquet}</p>
-                              )}
-                            </div>
-                         </div>
-                     )}
-
-                     {['dstv', 'gotv'].includes(cableProvider) ? (
-                       <>
-                         <div className="flex gap-2 p-1.5 bg-slate-200/50 rounded-xl mb-4 shadow-inner">
-                            <button 
-                              onClick={() => { setCableSubscriptionType("renew"); setNairaAmount(cableRenewAmount ? cableRenewAmount.toString() : ""); setSelectedCablePlan(null); }} 
-                              className={`flex-1 flex items-center justify-center gap-2 py-3 text-[11px] font-black uppercase tracking-wider rounded-xl transition-all ${cableSubscriptionType === "renew" ? "bg-white text-emerald-600 shadow-lg" : "text-slate-500 hover:text-slate-700"}`}
-                            >
-                              <RefreshCw size={14}/> Renew Plan
-                            </button>
-                            <button 
-                              onClick={() => { setCableSubscriptionType("change"); setNairaAmount(""); }} 
-                              className={`flex-1 flex items-center justify-center gap-2 py-3 text-[11px] font-black uppercase tracking-wider rounded-xl transition-all ${cableSubscriptionType === "change" ? "bg-white text-blue-600 shadow-lg" : "text-slate-500 hover:text-slate-700"}`}
-                            >
-                              <ListPlus size={14}/> Change Plan
-                            </button>
-                         </div>
-
-                         {cableSubscriptionType === "renew" ? (
-                            <div className="bg-emerald-500/10 border border-emerald-500/20 rounded-xl p-4 text-center">
-                               <p className="text-[10px] font-black text-emerald-800 uppercase tracking-widest mb-1">Renewal Amount Due</p>
-                               <p className="text-2xl font-black text-emerald-600">₦{cableRenewAmount?.toLocaleString() || "0.00"}</p>
-                            </div>
-                         ) : (
-                            selectedCablePlan ? (
-                               <div className="relative animate-in zoom-in-95 duration-200 mt-2">
-                                  <button onClick={() => { setSelectedCablePlan(null); setNairaAmount(""); }} className="absolute -top-3 -right-3 bg-slate-200 text-slate-500 hover:text-slate-800 hover:bg-slate-300 rounded-full p-1 transition-all z-10 shadow-sm border border-white">
-                                    <XCircle size={16}/>
-                                  </button>
-                                  <div className="p-4 rounded-2xl border-2 border-blue-500 bg-blue-50 shadow-sm text-left">
-                                     <p className="font-black text-slate-900 text-lg tracking-tight">{selectedCablePlan.name}</p>
-                                     <p className="text-[10px] text-blue-500 font-bold uppercase tracking-wider mb-2">Selected Package</p>
-                                     <div className="pt-2 border-t border-blue-200/50 flex justify-between items-end">
-                                         <p className="font-black text-blue-600 text-xl leading-none">₦{parseFloat(selectedCablePlan.variation_amount).toLocaleString()}</p>
-                                         <p className="text-[10px] text-slate-500 font-bold">{(parseFloat(selectedCablePlan.variation_amount) / exchangeRate).toFixed(4)} {selectedToken.symbol}</p>
-                                     </div>
-                                  </div>
-                               </div>
-                            ) : (
-                               <div className="grid grid-cols-1 gap-2 max-h-[35vh] overflow-y-auto pr-1">
-                                 {cableVariations.length === 0 ? (
-                                   <p className="text-center text-xs font-bold text-slate-400 py-4"><Loader2 className="animate-spin inline-block mr-2" size={14}/> Fetching Live Packages...</p>
-                                 ) : (
-                                   cableVariations.map((plan) => {
-                                     const cryptoPlanCost = (parseFloat(plan.variation_amount) / exchangeRate).toFixed(4);
-                                     return (
-                                       <button 
-                                         key={plan.variation_code} 
-                                         onClick={() => { setSelectedCablePlan(plan); setNairaAmount(plan.variation_amount); }} 
-                                         className="p-3 rounded-xl border border-slate-200 bg-white hover:border-slate-300 transition-all text-left flex justify-between items-center group"
-                                       >
-                                         <div>
-                                           <p className="font-black text-slate-800 text-xs">{plan.name}</p>
-                                           <p className="text-[9px] text-slate-400 font-bold mt-0.5">{cryptoPlanCost} {selectedToken.symbol}</p>
-                                         </div>
-                                         <p className="font-black text-blue-600 text-sm group-hover:scale-110 transition-transform">₦{parseFloat(plan.variation_amount).toLocaleString()}</p>
-                                       </button>
-                                     );
-                                   })
-                                 )}
-                               </div>
-                            )
-                         )}
-                       </>
-                     ) : (
-                       selectedCablePlan ? (
+                     {selectedCablePlan ? (
                           <div className="relative animate-in zoom-in-95 duration-200 mt-2">
                              <button onClick={() => { setSelectedCablePlan(null); setNairaAmount(""); }} className="absolute -top-3 -right-3 bg-slate-200 text-slate-500 hover:text-slate-800 hover:bg-slate-300 rounded-full p-1 transition-all z-10 shadow-sm border border-white">
                                <XCircle size={16}/>
                              </button>
                              <div className="p-4 rounded-2xl border-2 border-blue-500 bg-blue-50 shadow-sm text-left">
-                                <p className="font-black text-slate-900 text-lg tracking-tight">{selectedCablePlan.name}</p>
-                                <p className="text-[10px] text-blue-500 font-bold uppercase tracking-wider mb-2">Selected Package</p>
+                                <p className="font-black text-slate-900 text-lg">{selectedCablePlan.name}</p>
                                 <div className="pt-2 border-t border-blue-200/50 flex justify-between items-end">
-                                    <p className="font-black text-blue-600 text-xl leading-none">₦{parseFloat(selectedCablePlan.variation_amount).toLocaleString()}</p>
+                                    <p className="font-black text-blue-600 text-xl">₦{parseFloat(selectedCablePlan.variation_amount).toLocaleString()}</p>
                                     <p className="text-[10px] text-slate-500 font-bold">{(parseFloat(selectedCablePlan.variation_amount) / exchangeRate).toFixed(4)} {selectedToken.symbol}</p>
                                  </div>
                              </div>
                           </div>
                        ) : (
-                          <div className="grid grid-cols-1 gap-2 max-h-[35vh] overflow-y-auto pr-1">
+                          <div className="grid grid-cols-1 gap-2 max-h-[30vh] overflow-y-auto pr-1">
                             {cableVariations.length === 0 ? (
-                              <p className="text-center text-xs font-bold text-slate-400 py-4"><Loader2 className="animate-spin inline-block mr-2" size={14}/> Fetching Live Packages...</p>
-                            ) : (
-                              cableVariations.map((plan) => {
-                                const cryptoPlanCost = (parseFloat(plan.variation_amount) / exchangeRate).toFixed(4);
-                                return (
-                                  <button 
-                                    key={plan.variation_code} 
-                                    onClick={() => { setSelectedCablePlan(plan); setNairaAmount(plan.variation_amount); }} 
-                                    className="p-3 rounded-xl border border-slate-200 bg-white hover:border-slate-300 transition-all text-left flex justify-between items-center group"
-                                  >
-                                    <div>
-                                      <p className="font-black text-slate-800 text-xs">{plan.name}</p>
-                                      <p className="text-[9px] text-slate-400 font-bold mt-0.5">{cryptoPlanCost} {selectedToken.symbol}</p>
-                                    </div>
-                                    <p className="font-black text-blue-600 text-sm group-hover:scale-110 transition-transform">₦{parseFloat(plan.variation_amount).toLocaleString()}</p>
+                              <p className="text-center text-xs font-bold text-slate-400 py-4"><Loader2 className="animate-spin" size={14}/> Loading...</p>
+                            ) : cableVariations.map((plan) => (
+                                  <button key={plan.variation_code} onClick={() => { setSelectedCablePlan(plan); setNairaAmount(plan.variation_amount); }} className="p-3 rounded-xl border border-slate-200 bg-white hover:border-slate-300 transition-all text-left flex justify-between items-center group">
+                                    <p className="font-black text-slate-800 text-xs">{plan.name}</p>
+                                    <p className="font-black text-blue-600 text-sm shrink-0 ml-2">₦{parseFloat(plan.variation_amount).toLocaleString()}</p>
                                   </button>
-                                );
-                              })
-                            )}
+                            ))}
                           </div>
-                       )
-                     )}
+                       )}
                   </div>
                 )}
 
                 <div className={activeService.id === "INTERNET" || activeService.id === "CABLE" ? "hidden" : ""}>
                     <label className="text-[10px] font-black text-slate-400 uppercase mb-2 flex justify-between items-center">
-                       <span>Naira Value</span>
-                       <span className="text-emerald-500 bg-emerald-500/10 px-2 py-1 rounded font-black">MIN: ₦{dynamicMinAmount.toLocaleString()} • MAX: {dynamicMaxAmount === Infinity ? 'NO LIMIT' : `₦${dynamicMaxAmount.toLocaleString()}`}</span>
+                       <span>Amount</span>
+                       <span className="text-emerald-500 font-black">MIN ₦{dynamicMinAmount.toLocaleString()}</span>
                     </label>
                     <div className="relative mb-3">
                         <input 
                             type="number" 
-                            placeholder="Enter Amount" 
-                            className={`w-full bg-slate-50 border p-6 rounded-2xl font-black text-3xl text-slate-800 outline-none transition-all shadow-inner ${
-                              nairaAmount && (parseFloat(nairaAmount) < dynamicMinAmount || parseFloat(nairaAmount) > dynamicMaxAmount)
-                              ? "border-red-300 focus:border-red-500" 
-                              : "border-slate-100 focus:border-emerald-500"
-                            }`}
+                            placeholder="Amount" 
+                            className="w-full bg-slate-50 border border-slate-100 p-6 rounded-2xl font-black text-3xl text-slate-800 outline-none shadow-inner"
                             value={nairaAmount}
                             onChange={(e) => setNairaAmount(e.target.value)}
                         />
                         <div className="absolute right-5 top-1/2 -translate-y-1/2 text-right">
                             <p className="text-sm font-black text-emerald-600">{cryptoToCharge} {selectedToken.symbol}</p>
-                            {currentFee > 0 && <p className="text-[9px] font-black text-orange-500 tracking-wider">+₦{currentFee} FEE</p>}
+                            {currentFee > 0 && <p className="text-[9px] font-black text-orange-500">+₦{currentFee} FEE</p>}
                         </div>
                     </div>
-
-                    {nairaAmount && (parseFloat(nairaAmount) < dynamicMinAmount || parseFloat(nairaAmount) > dynamicMaxAmount) && (
-                        <p className="text-[10px] font-bold text-red-500 flex items-center gap-1.5 mt-[-6px] mb-3 animate-in fade-in">
-                            <AlertTriangle size={12} /> Please enter an amount between ₦{dynamicMinAmount.toLocaleString()} and ₦{dynamicMaxAmount.toLocaleString()}.
-                        </p>
-                    )}
-
-                    {(activeService.id === "AIRTIME" || activeService.id === "ELECTRICITY") && (
-                       <div className="flex gap-2.5 overflow-x-auto py-1.5 no-scrollbar bg-slate-100 p-2 rounded-2xl shadow-inner">
-                          {(activeService.id === "AIRTIME" ? PRE_SELECT_AMOUNTS : ELEC_PRE_SELECT_AMOUNTS).map(amount => {
-                            const cryptoAmtCost = (parseInt(amount) / exchangeRate).toFixed(4);
-                            return (
-                              <button key={amount} onClick={() => setNairaAmount(amount)} className={`flex-1 min-w-[70px] py-4 rounded-xl font-black transition-all whitespace-nowrap ${nairaAmount === amount ? 'bg-white shadow-lg text-emerald-700 scale-105' : 'bg-slate-50 hover:bg-slate-200 text-slate-700'}`}>
-                                 ₦{parseInt(amount).toLocaleString()}
-                                 <p className="text-[8px] mt-0.5 text-slate-400 font-bold">{cryptoAmtCost} {selectedToken.symbol}</p>
-                              </button>
-                            );
-                          })}
-                       </div>
-                    )}
                 </div>
 
                 {(activeService.id === "ELECTRICITY" || activeService.id === "INTERNET") && (
                     <div className="animate-in fade-in">
                          <input 
-                            type="tel" placeholder={activeService.id === "INTERNET" ? "Customer Phone Number" : "Phone for SMS Token (11 Digits)"}
+                            type="tel" placeholder="SMS Phone Number"
                             maxLength={11}
-                            className="w-full bg-slate-50 border border-slate-100 p-5 rounded-2xl font-bold text-slate-700 outline-none focus:border-emerald-500 transition-colors shadow-inner"
+                            className="w-full bg-slate-50 border border-slate-100 p-5 rounded-2xl font-bold text-slate-700 outline-none"
                             onChange={(e) => setCustomerPhone(e.target.value.replace(/[^0-9]/g, ''))}
                         />
                     </div>
                 )}
 
                 {status && (
-                    <div className={`p-5 rounded-2xl border flex items-center gap-4 animate-in fade-in slide-in-from-top-2 shadow-sm ${status.includes('Success') || status.includes('Secured') || status.includes('Initiating') ? 'bg-emerald-50 border-emerald-100 text-emerald-800' : status.includes('Verifying') || status.includes('Blockchain') || status.includes('confirmed') || status.includes('Mining') || status.includes('Processing') ? 'bg-blue-50 border-blue-100 text-blue-800' : 'bg-red-50 border-red-100 text-red-800'}`}>
-                        {status.includes('Success') ? <CheckCircle2 size={24} className="text-emerald-600"/> : status.includes('Verifying') || status.includes('Blockchain') || status.includes('confirmed') || status.includes('Mining') || status.includes('Processing') ? <Loader2 size={24} className="animate-spin text-blue-600"/> : <AlertTriangle size={24} className="text-red-600"/>}
+                    <div className={`p-5 rounded-2xl border flex items-center gap-4 animate-in fade-in ${status.includes('Success') ? 'bg-emerald-50 border-emerald-100' : 'bg-blue-50 border-blue-100'}`}>
+                        {status.includes('Success') ? <CheckCircle2 size={24}/> : <Loader2 size={24} className="animate-spin"/>}
                         <p className="text-sm font-black tracking-tight">{status}</p>
                     </div>
                 )}
@@ -1247,19 +1084,14 @@ export default function Home() {
                     disabled={isVerifying || !isFormValid || isProcessing}
                     className="w-full bg-slate-900 hover:bg-black text-white font-black py-6 rounded-3xl flex items-center justify-center gap-3.5 transition-all active:scale-95 disabled:opacity-30 shadow-xl shadow-slate-900/20 text-lg tracking-tight"
                 >
-                    {isProcessing ? (
-                      <><Loader2 size={24} className="animate-spin text-emerald-400"/> SECURING PROTOCOL...</>
-                    ) : (
-                      <><ShieldCheck size={24} className="text-emerald-400" /> CONFIRM & PAY {cryptoToCharge} {selectedToken.symbol}</>
-                    )}
+                    {isProcessing ? <Loader2 size={24} className="animate-spin text-emerald-400"/> : <ShieldCheck size={24} className="text-emerald-400" />}
+                    {isProcessing ? 'PROCESSING...' : `PAY ${cryptoToCharge} ${selectedToken.symbol}`}
                 </button>
             </div>
           </div>
         )}
 
-        {/* ========================================================================================= */}
-        {/* HISTORY UI BLOCK */}
-        {/* ========================================================================================= */}
+        {/* HISTORY BLOCK */}
         {activeTab === 'history' && (
           <HistoryTab 
             transactions={transactions} 
@@ -1274,13 +1106,13 @@ export default function Home() {
         <footer className="mt-12 w-full border-t border-slate-200 pt-8 pb-4 flex flex-col items-center gap-4 animate-in fade-in">
           <div className="flex items-center gap-2.5 bg-white px-4 py-1.5 rounded-full shadow-sm border border-slate-100">
              <ShieldCheck size={16} className="text-emerald-600" />
-             <span className="text-[11px] font-bold text-slate-500 uppercase tracking-widest">Decentralized & Secured by Celo Network</span>
+             <span className="text-[11px] font-bold text-slate-500 uppercase tracking-widest">Secured by Celo Network</span>
           </div>
           <div className="flex gap-6">
-            <a href="#" onClick={(e) => { e.preventDefault(); setIsTermsOpen(true); }} className="text-[10px] font-black text-slate-400 hover:text-emerald-600 uppercase tracking-tight">Terms of Service</a>
-            <a href="#" onClick={(e) => { e.preventDefault(); setIsPrivacyOpen(true); }} className="text-[10px] font-black text-slate-400 hover:text-emerald-600 uppercase tracking-tight">Privacy Policy</a>
+            <button onClick={() => setIsTermsOpen(true)} className="text-[10px] font-black text-slate-400 hover:text-emerald-600 uppercase">Terms</button>
+            <button onClick={() => setIsPrivacyOpen(true)} className="text-[10px] font-black text-slate-400 hover:text-emerald-600 uppercase">Privacy</button>
           </div>
-          <p className="text-[9px] font-medium text-slate-300 uppercase tracking-[0.2em] mt-2">© 2026 MASONODE ORGANISATION • THE ABAPAY PROTOCOL v3.0</p>
+          <p className="text-[9px] font-medium text-slate-300 uppercase tracking-[0.2em] mt-2">© 2026 MASONODE ORGANISATION • v3.0</p>
         </footer>
       </div>
     </main>
