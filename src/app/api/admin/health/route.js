@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server';
-import { getHeaders } from '@/lib/vtpass'; // ⚡ Removed static BASE_URL
+import { getHeaders } from '@/lib/vtpass'; 
 
 export async function GET() {
   try {
@@ -31,7 +31,7 @@ export async function GET() {
       sms: !isNaN(parseFloat(smsBalance)) ? parseFloat(smsBalance).toFixed(0) : "0",
       status: "Operational"
     });
-  } catch (err: any) {
+  } catch (err) { // ⚡ REMOVED ": any" for JavaScript compatibility
     console.error("Health Check Failed:", err);
     return NextResponse.json({ status: "Error", msg: err.message }, { status: 500 });
   }
