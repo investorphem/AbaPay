@@ -13,70 +13,13 @@ import {
 import { supabase } from "@/utils/supabase";
 import { ELECTRICITY_DISCOS } from "./discos";
 
-// --- WEB3 CONFIG ---
-const ABAPAY_ABI = [{"inputs":[{"internalType":"address","name":"tokenAddress","type":"address"},{"internalType":"string","name":"serviceType","type":"string"},{"internalType":"string","name":"accountNumber","type":"string"},{"internalType":"uint256","name":"amount","type":"uint256"}],"name":"payBill","outputs":[],"stateMutability":"nonpayable","type":"function"}];
-const ERC20_ABI = [
-  {"inputs":[{"internalType":"address","name":"spender","type":"address"},{"internalType":"uint256","name":"amount","type":"uint256"}],"name":"approve","outputs":[{"internalType":"bool","name":"","type":"bool"}],"stateMutability":"nonpayable","type":"function"},
-  {"inputs":[{"internalType":"address","name":"account","type":"address"}],"name":"balanceOf","outputs":[{"internalType":"uint256","name":"","type":"uint256"}],"stateMutability":"view","type":"function"}
-];
-
-const SERVICES = [
-  { id: "AIRTIME", name: "Buy Airtime", icon: Phone, color: "text-[#34d399]", bg: "bg-emerald-500/10" },
-  { id: "INTERNET", name: "Internet", icon: Globe, color: "text-[#0ea5e9]", bg: "bg-sky-500/10" },
-  { id: "ELECTRICITY", name: "Electricity", icon: Lightbulb, color: "text-[#f97316]", bg: "bg-orange-500/10" },
-  { id: "CABLE", name: "Cable TV", icon: Tv, color: "text-[#ec4899]", bg: "bg-pink-500/10" },
-];
-
-const ELECTRICITY_PROVIDER_IDS = ELECTRICITY_DISCOS.map(d => d.serviceID); 
-
-const CABLE_PROVIDERS_LIST = [
-  { serviceID: "dstv", displayName: "DSTV", logo: "/dstv.png" },
-  { serviceID: "gotv", displayName: "GOTV", logo: "/gotv.png" },
-  { serviceID: "showmax", displayName: "Showmax", logo: "/showmax.png" },
-];
-
-const TELECOM_PROVIDERS = ["mtn", "glo", "9mobile", "airtel"]; 
-
-const INTERNET_PROVIDERS = [
-  { serviceID: "mtn-data", displayName: "MTN Data", logo: "/mtn.png" },
-  { serviceID: "glo-data", displayName: "Glo Data", logo: "/glo.png" },
-  { serviceID: "airtel-data", displayName: "Airtel Data", logo: "/airtel.png" },
-  { serviceID: "9mobile-data", displayName: "9Mobile Data", logo: "/9mobile.png" },
-  { serviceID: "smile-direct", displayName: "Smile Network", logo: "/smile.png" },
-  { serviceID: "spectranet", displayName: "Spectranet", logo: "/spectranet.png" }
-];
-
-const SUPPORTED_TOKENS = [
-  { symbol: "USD₮", decimals: 6, mainnet: "0x48065fbbe25f71c9282ddf5e1cd6d6a887483d5e", sepolia: "0xd077A400968890Eacc75cdc901F0356c943e4fDb", logo: "/usdt.png" },
-  { symbol: "USDC", decimals: 6, mainnet: "0xcebA9300f2b948710d2653dD7B07f33A8B32118C", sepolia: "0x01C5C0122039549AD1493B8220cABEdD739BC44E", logo: "/usdc.png" },
-  { symbol: "USDm", decimals: 18, mainnet: "0x765DE816845861e75A25fCA122bb6898B8B1282a", sepolia: "0xdE9e4C3ce781b4bA68120d6261cbad65ce0aB00b", logo: "/cusd.png" },
-];
-
-const SUPPORTED_COUNTRIES = [
-  { code: "NG", name: "Nigeria", flag: "🇳🇬", disabled: false },
-  { code: "SOON", name: "Other countries coming soon", flag: "🌍", disabled: true }
-];
-
-const PRE_SELECT_AMOUNTS = ["100", "200", "500", "1000", "2000"];
-const ELEC_PRE_SELECT_AMOUNTS = ["1000", "2000", "5000", "10000", "20000"];
-const DATA_CATEGORIES = ["Daily", "Weekly", "Monthly", "Social", "Mega", "Broadband"];
-const ITEMS_PER_PAGE = 5;
-
-// ⚡ BULLETPROOF VTPASS EXTRACTOR ⚡
-const extractVtpassArray = (data: any): any[] => {
-  if (!data) return [];
-  if (Array.isArray(data)) return data;
-  if (data.content && Array.isArray(data.content.varations)) return data.content.varations;
-  if (data.content && Array.isArray(data.content.variations)) return data.content.variations;
-  if (data.content && Array.isArray(data.content)) return data.content;
-  if (data.data && Array.isArray(data.data)) return data.data;
-  if (data.content && typeof data.content === 'object') {
-    const nestedArrays = Object.values(data.content).filter(v => Array.isArray(v as any));
-    if (nestedArrays.length > 0) return nestedArrays[0] as any[];
-    return Object.values(data.content); 
-  }
-  return [];
-};
+// ⚡ IMPORTING OUR CLEANED-UP CONSTANTS ⚡
+import { 
+  ABAPAY_ABI, ERC20_ABI, SERVICES, CABLE_PROVIDERS_LIST, TELECOM_PROVIDERS, 
+  INTERNET_PROVIDERS, SUPPORTED_TOKENS, SUPPORTED_COUNTRIES, PRE_SELECT_AMOUNTS, 
+  ELEC_PRE_SELECT_AMOUNTS, DATA_CATEGORIES, ITEMS_PER_PAGE, extractVtpassArray,
+  ELECTRICITY_PROVIDER_IDS
+} from "../constants";
 
 export default function Home() {
   // ==========================================
@@ -108,7 +51,6 @@ export default function Home() {
   const [selectedInternetPlan, setSelectedInternetPlan] = useState<any>(null);
   const [internetAccountId, setInternetAccountId] = useState<string | null>(null);
 
-  // ⚡ BANK STATES ⚡
   const [bankVariations, setBankVariations] = useState<any[]>([]);
   const [selectedBank, setSelectedBank] = useState<any>(null);
   const [isFetchingBanks, setIsFetchingBanks] = useState(false);
@@ -138,7 +80,7 @@ export default function Home() {
   const [modalCallback, setModalCallback] = useState<((value: string) => void) | null>(null);
   const [modalType, setModalType] = useState<'standard' | 'token' | 'provider' | 'country' | 'bank'>('standard'); 
   const [toast, setToast] = useState<{title: string, message: string, type: 'success' | 'error'} | null>(null);
-
+  
   const [currentPage, setCurrentPage] = useState(1);
   const [selectedToken, setSelectedToken] = useState(SUPPORTED_TOKENS[0]);
   const [walletBalance, setWalletBalance] = useState("0.00");
@@ -146,6 +88,9 @@ export default function Home() {
   const [exchangeRate, setExchangeRate] = useState<number>(1550); 
   const [transactions, setTransactions] = useState<any[]>([]);
 
+  // ==========================================
+  // 2. CONSTANTS & MEMOS
+  // ==========================================
   const isMainnet = process.env.NEXT_PUBLIC_NETWORK === "celo";
   const activeChain = isMainnet ? celo : celoSepolia;
   const ABAPAY_CONTRACT = process.env.NEXT_PUBLIC_ABAPAY_ADDRESS as `0x${string}`;
@@ -180,16 +125,13 @@ export default function Home() {
     return { cryptoToCharge: crypto.toFixed(4), currentFee: fee };
   }, [nairaAmount, exchangeRate, activeService, activeTab]);
 
-  // ⚡ UNIFIED FILTER FOR ALL INTERNET PROVIDERS ⚡
   const filteredInternetDataPlans = useMemo(() => {
     if (!internetVariations || internetVariations.length === 0) return [];
-    
-    // Smile and Spectranet bypass the category filters entirely
     if (internetProvider === 'smile-direct' || internetProvider === 'spectranet') return internetVariations;
 
     return internetVariations.filter(plan => {
       const name = (plan.name || "").toLowerCase();
-      let category = "Monthly"; // Default fallback
+      let category = "Monthly";
 
       if (name.includes('broadband') || name.includes('router') || name.includes('5g') || name.includes('hynet')) category = "Broadband";
       else if (name.includes('social') || name.includes('whatsapp') || name.includes('ig') || name.includes('instagram') || name.includes('tiktok') || name.includes('youtube') || name.includes('facebook') || name.includes('opera') || name.includes('xot')) category = "Social";
@@ -236,7 +178,9 @@ export default function Home() {
     return false;
   }, [accountNumber, nairaAmount, activeService, customerName, dynamicMinAmount, dynamicMaxAmount, cableSubscriptionType, selectedCablePlan, selectedBank, selectedInternetPlan, internetAccountId, customerPhone, internetProvider, activeTab, cableProvider]);
 
-  // ⚡ ACTION HANDLERS ⚡
+  // ==========================================
+  // 3. ACTION HANDLERS
+  // ==========================================
   const showToast = (title: string, message: string, type: 'success' | 'error' = 'success') => {
     setToast({ title, message, type });
     setTimeout(() => setToast(null), 5000);
@@ -288,7 +232,6 @@ export default function Home() {
     else { try { await navigator.clipboard.writeText(receiptText); showToast("Copied!", "Receipt details copied to clipboard.", "success"); } catch (err) {} }
   };
 
-  // ⚡ MANUAL BANK FETCHER FOR HARD FALLBACK ⚡
   const fetchBanksManual = async () => {
     setIsFetchingBanks(true);
     try {
@@ -302,7 +245,6 @@ export default function Home() {
         throw new Error("No banks found from API");
       }
     } catch (e) {
-      // ⚡ HARDCODED FALLBACK: Top 10 Nigerian Banks just in case VTpass goes down ⚡
       setBankVariations([
         { variation_code: 'access', name: 'ACCESS BANK PLC' },
         { variation_code: 'firstbank', name: 'FIRST BANK OF NIGERIA PLC' },
@@ -1220,7 +1162,6 @@ export default function Home() {
                         ))}
                       </div>
                      
-                     {/* ⚡ STRICT TERNARY: ONLY SHOW CARD *OR* LIST ⚡ */}
                      {selectedInternetPlan ? (
                         <div className="relative animate-in zoom-in-95 duration-200 mt-2">
                            <button onClick={() => { setSelectedInternetPlan(null); setNairaAmount(""); }} className="absolute -top-3 -right-3 bg-slate-200 text-slate-500 hover:text-slate-800 hover:bg-slate-300 rounded-full p-1 transition-all z-10 shadow-sm border border-white">
@@ -1301,7 +1242,6 @@ export default function Home() {
                                <p className="text-2xl font-black text-emerald-600">₦{cableRenewAmount?.toLocaleString() || "0.00"}</p>
                             </div>
                          ) : (
-                            // ⚡ STRICT TERNARY: ONLY SHOW CARD *OR* LIST ⚡
                             selectedCablePlan ? (
                                <div className="relative animate-in zoom-in-95 duration-200 mt-2">
                                   <button onClick={() => { setSelectedCablePlan(null); setNairaAmount(""); }} className="absolute -top-3 -right-3 bg-slate-200 text-slate-500 hover:text-slate-800 hover:bg-slate-300 rounded-full p-1 transition-all z-10 shadow-sm border border-white">
@@ -1343,7 +1283,6 @@ export default function Home() {
                          )}
                        </>
                      ) : (
-                       // ⚡ STRICT TERNARY: ONLY SHOW CARD *OR* LIST ⚡
                        selectedCablePlan ? (
                           <div className="relative animate-in zoom-in-95 duration-200 mt-2">
                              <button onClick={() => { setSelectedCablePlan(null); setNairaAmount(""); }} className="absolute -top-3 -right-3 bg-slate-200 text-slate-500 hover:text-slate-800 hover:bg-slate-300 rounded-full p-1 transition-all z-10 shadow-sm border border-white">
