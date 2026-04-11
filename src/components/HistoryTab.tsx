@@ -13,15 +13,21 @@ export function HistoryTab({ transactions, currentTransactions, currentPage, tot
        ) : (
           <div className="flex flex-col space-y-4">
               {currentTransactions.map((tx: any, idx: number) => (
-                  <div key={idx} onClick={() => setSelectedReceipt(tx)} className="p-5 bg-slate-50 rounded-2xl border border-slate-100 flex justify-between items-center cursor-pointer hover:bg-emerald-50 hover:border-emerald-100 transition-all group shadow-sm active:scale-98">
+                  <div key={idx} onClick={() => setSelectedReceipt(tx)} className="p-5 bg-slate-50 rounded-2xl border border-slate-100 flex justify-between items-center cursor-pointer hover:bg-emerald-50 hover:border-emerald-100 transition-all group shadow-sm active:scale-[0.98]">
                       <div>
-                          <p className="text-sm font-black text-slate-900 uppercase group-hover:text-emerald-700 transition-colors tracking-tight">{tx.network} {tx.service}</p>
-                          <p className="text-[10px] font-medium text-slate-500 mt-0.5">{tx.date} • <span className={tx.status === 'SUCCESS' ? 'text-emerald-600 font-bold' : tx.status === 'REFUNDED' ? 'text-blue-500 font-bold' : 'text-red-500 font-bold'}>{tx.status}</span></p>
+                          <p className="text-sm font-black text-slate-900 uppercase group-hover:text-emerald-700 transition-colors tracking-tight line-clamp-1">{tx.network} {tx.service}</p>
+                          <p className="text-[10px] font-medium text-slate-500 mt-0.5 flex items-center gap-1.5 flex-wrap">
+                            <span>{tx.date}</span>
+                            <span>•</span>
+                            <span className={tx.status === 'SUCCESS' ? 'text-emerald-600 font-bold' : tx.status === 'REFUNDED' ? 'text-blue-500 font-bold' : 'text-red-500 font-bold'}>{tx.status}</span>
+                            <span>•</span>
+                            <span className="font-mono text-slate-400">{tx.account}</span>
+                          </p>
                       </div>
-                      <div className="text-right flex flex-col items-end gap-1.5">
-                          <p className="text-sm font-black text-emerald-600">₦{tx.amountNaira.toLocaleString()}</p>
+                      <div className="text-right flex flex-col items-end gap-1.5 shrink-0 ml-2">
+                          <p className="text-sm font-black text-emerald-600">₦{Number(tx.amountNaira).toLocaleString()}</p>
                           <span className="text-[9px] font-black uppercase tracking-widest bg-slate-200 text-slate-500 px-3 py-1 rounded-full group-hover:bg-emerald-200 group-hover:text-emerald-800 transition-all flex items-center gap-1">
-                            View Receipt <ExternalLink size={10}/>
+                            Receipt <ExternalLink size={10}/>
                           </span>
                       </div>
                   </div>
