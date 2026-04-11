@@ -5,12 +5,13 @@ import { createWalletClient, createPublicClient, custom, http, parseUnits, forma
 import { celo, celoSepolia } from "viem/chains";
 import { 
   Receipt, ShieldCheck, Zap, AlertTriangle, CheckCircle2, ExternalLink,
-  ChevronDown, Loader2, XCircle, Coins, Briefcase, Share2, ChevronLeft, ChevronRight, RefreshCw, ListPlus, Users, Landmark 
+  ChevronDown, Loader2, XCircle, Coins, Briefcase, Share2, ChevronLeft, 
+  ChevronRight, RefreshCw, ListPlus, Users, Landmark, Tv 
 } from "lucide-react";
 import { supabase } from "@/utils/supabase";
 import { ELECTRICITY_DISCOS } from "./discos";
 
-// ⚡ OUR NEW COMPONENT IMPORTS ⚡
+// ⚡ IMPORTING OUR CLEANED-UP CONSTANTS ⚡
 import { TermsModal, PrivacyModal } from "@/components/InfoModals";
 import ReceiptModal from "@/components/ReceiptModal";
 import { 
@@ -147,16 +148,23 @@ export default function Home() {
     if (activeTab === "pay") {
       if (activeService.id === "AIRTIME") return accountNumber.length === 11 && accountNumber.startsWith("0");
       if (activeService.id === "INTERNET") {
-        if (internetProvider === 'smile-direct') return internetAccountId !== null && selectedInternetPlan !== null && customerPhone.length >= 10;
-        else if (internetProvider === 'spectranet') return accountNumber.length >= 5 && selectedInternetPlan !== null && customerPhone.length >= 10;
-        else return accountNumber.length === 11 && accountNumber.startsWith("0") && selectedInternetPlan !== null;
+        if (internetProvider === 'smile-direct') {
+          return internetAccountId !== null && selectedInternetPlan !== null && customerPhone.length >= 10;
+        } else if (internetProvider === 'spectranet') {
+          return accountNumber.length >= 5 && selectedInternetPlan !== null && customerPhone.length >= 10;
+        } else {
+          return accountNumber.length === 11 && accountNumber.startsWith("0") && selectedInternetPlan !== null;
+        }
       }
       if (activeService.id === "ELECTRICITY") return accountNumber.length >= 10 && customerName !== null;
       if (activeService.id === "CABLE") {
         if (cableProvider === "showmax") return accountNumber.length >= 11 && selectedCablePlan !== null;
         if (accountNumber.length < 10 || customerName === null) return false;
-        if (['dstv', 'gotv'].includes(cableProvider) && cableSubscriptionType === 'change' && !selectedCablePlan) return false;
-        if (!['dstv', 'gotv'].includes(cableProvider) && !selectedCablePlan) return false;
+        if (['dstv', 'gotv'].includes(cableProvider)) {
+          if (cableSubscriptionType === 'change' && !selectedCablePlan) return false;
+        } else {
+          if (!selectedCablePlan) return false;
+        }
         return true;
       }
     }
@@ -480,11 +488,23 @@ export default function Home() {
                  {modalType === 'country' && SUPPORTED_COUNTRIES.map(country => (
                    <button 
                      key={country.code} 
-                     onClick={() => { if (!country.disabled) { modalCallback?.(country.code); setIsSelectionModalOpen(false); } }}
+                     onClick={() => { 
+                        if (!country.disabled) {
+                            modalCallback?.(country.code); 
+                            setIsSelectionModalOpen(false); 
+                        }
+                     }}
                      disabled={country.disabled}
-                     className={`w-full text-left p-4 rounded-xl font-bold text-sm transition-all flex justify-between items-center ${country.disabled ? 'bg-slate-50 border border-slate-100 text-slate-400 cursor-not-allowed' : 'text-slate-700 bg-slate-50 border border-slate-100 hover:border-emerald-300 hover:bg-emerald-50/50'}`}
+                     className={`w-full text-left p-4 rounded-xl font-bold text-sm transition-all flex justify-between items-center ${
+                         country.disabled 
+                         ? 'bg-slate-50 border border-slate-100 text-slate-400 cursor-not-allowed' 
+                         : 'text-slate-700 bg-slate-50 border border-slate-100 hover:border-emerald-300 hover:bg-emerald-50/50'
+                     }`}
                    >
-                     <div className="flex items-center gap-3"><span className="text-2xl">{country.flag}</span><span className={`font-black ${country.disabled ? 'text-slate-400' : 'text-slate-800'}`}>{country.name}</span></div>
+                     <div className="flex items-center gap-3">
+                       <span className="text-2xl">{country.flag}</span>
+                       <span className={`font-black ${country.disabled ? 'text-slate-400' : 'text-slate-800'}`}>{country.name}</span>
+                     </div>
                      {activeCountry.code === country.code && <CheckCircle2 size={18} className="text-emerald-500"/>}
                    </button>
                  ))}
@@ -518,7 +538,10 @@ export default function Home() {
                      onClick={() => { modalCallback?.(token.symbol); setIsSelectionModalOpen(false); }}
                      className="w-full text-left p-4 rounded-xl font-bold text-slate-700 bg-slate-50 border border-slate-100 uppercase text-xs hover:border-emerald-300 hover:bg-emerald-50/50 transition-all flex justify-between items-center"
                    >
-                     <div className="flex items-center gap-3"><img src={token.logo} alt={token.symbol} className="w-6 h-6 object-contain rounded-full shadow-sm bg-white" /><span className="text-sm font-black text-slate-800 tracking-tight">{token.symbol}</span></div>
+                     <div className="flex items-center gap-3">
+                       <img src={token.logo} alt={token.symbol} className="w-6 h-6 object-contain rounded-full shadow-sm bg-white" />
+                       <span className="text-sm font-black text-slate-800 tracking-tight">{token.symbol}</span>
+                     </div>
                      {selectedToken.symbol === token.symbol && <CheckCircle2 size={18} className="text-emerald-500"/>}
                    </button>
                  ))}
@@ -533,7 +556,9 @@ export default function Home() {
                             <div className="w-12 h-12 shrink-0 rounded-full border border-slate-100 bg-white p-0.5 flex items-center justify-center shadow-sm overflow-hidden group-hover:shadow-md transition-shadow">
                                 <img src={provider.logo || '/logo.png'} alt={provider.displayName} className="w-full h-full object-contain" onError={(e) => { e.currentTarget.src = '/logo.png'; }} />
                             </div>
-                            <div><span className="text-sm font-black text-slate-900 tracking-tight">{provider.displayName}</span></div>
+                            <div>
+                                <span className="text-sm font-black text-slate-900 tracking-tight">{provider.displayName}</span>
+                            </div>
                         </div>
                         {(activeService.id === 'ELECTRICITY' ? elecProvider === provider.serviceID : activeService.id === 'INTERNET' ? internetProvider === provider.serviceID : cableProvider === provider.serviceID) && (
                           <CheckCircle2 size={20} className={activeService.id === 'ELECTRICITY' ? "text-orange-500" : activeService.id === 'INTERNET' ? "text-sky-500" : "text-pink-500"}/>
@@ -551,9 +576,13 @@ export default function Home() {
                             <div className="w-12 h-12 shrink-0 rounded-full border border-slate-100 bg-white p-0.5 flex items-center justify-center shadow-sm overflow-hidden group-hover:shadow-md transition-shadow">
                                 <img src={provider.logo || '/logo.png'} alt={provider.displayName} className="w-full h-full object-contain" onError={(e) => { e.currentTarget.src = '/logo.png'; }} />
                             </div>
-                            <div><span className="text-sm font-black text-slate-900 tracking-tight uppercase">{provider.displayName}</span></div>
+                            <div>
+                                <span className="text-sm font-black text-slate-900 tracking-tight uppercase">{provider.displayName}</span>
+                            </div>
                         </div>
-                        {telecomProvider === provider.serviceID && <CheckCircle2 size={20} className="text-emerald-500"/>}
+                        {telecomProvider === provider.serviceID && (
+                          <CheckCircle2 size={20} className="text-emerald-500"/>
+                        )}
                     </button>
                  ))}
               </div>
@@ -588,6 +617,9 @@ export default function Home() {
             <button onClick={() => { setActiveTab("history"); handleResetService(SERVICES[0]); }} className={`flex-1 py-3 rounded-xl text-xs font-black transition-all ${activeTab === 'history' ? 'bg-white text-emerald-600 shadow-xl' : 'text-slate-500 hover:text-slate-700'}`}>HISTORY</button>
         </div>
 
+        {/* ========================================================================================= */}
+        {/* BANK UI BLOCK */}
+        {/* ========================================================================================= */}
         {activeTab === 'bank' && (
           <div className="bg-white border border-slate-100 rounded-[2.5rem] p-8 shadow-2xl shadow-emerald-900/10 animate-in fade-in zoom-in-95">
             <div className="space-y-5">
@@ -642,7 +674,9 @@ export default function Home() {
                         type="tel" placeholder="Enter Account Number"
                         maxLength={10}
                         className={`w-full bg-slate-50 border p-5 rounded-2xl font-black text-xl text-slate-800 outline-none transition-all ${
-                          accountNumber.length > 0 && accountNumber.length < 10 ? "border-red-300 focus:border-red-500" : "border-slate-100 focus:border-emerald-500"
+                          accountNumber.length > 0 && accountNumber.length < 10 
+                          ? "border-red-300 focus:border-red-500" 
+                          : "border-slate-100 focus:border-emerald-500"
                         }`}
                         value={accountNumber}
                         onChange={(e) => setAccountNumber(e.target.value.replace(/[^0-9]/g, ''))}
@@ -669,7 +703,9 @@ export default function Home() {
                             type="number" 
                             placeholder="Enter Amount" 
                             className={`w-full bg-slate-50 border p-6 rounded-2xl font-black text-3xl text-slate-800 outline-none transition-all shadow-inner ${
-                              nairaAmount && (parseFloat(nairaAmount) < 1000 || parseFloat(nairaAmount) > 5000000) ? "border-red-300 focus:border-red-500" : "border-slate-100 focus:border-emerald-500"
+                              nairaAmount && (parseFloat(nairaAmount) < 1000 || parseFloat(nairaAmount) > 5000000)
+                              ? "border-red-300 focus:border-red-500" 
+                              : "border-slate-100 focus:border-emerald-500"
                             }`}
                             value={nairaAmount}
                             onChange={(e) => setNairaAmount(e.target.value)}
@@ -712,6 +748,9 @@ export default function Home() {
           </div>
         )}
 
+        {/* ========================================================================================= */}
+        {/* PAY UTILITIES UI BLOCK */}
+        {/* ========================================================================================= */}
         {activeTab === 'pay' && (
           <div className="bg-white border border-slate-100 rounded-[2.5rem] p-8 shadow-2xl shadow-emerald-900/10 animate-in fade-in zoom-in-95">
             <div className="flex overflow-x-auto gap-3 pb-2 mb-4 no-scrollbar">
@@ -762,7 +801,9 @@ export default function Home() {
                                 <div className="w-12 h-12 shrink-0 rounded-full border border-slate-100 bg-sky-50 flex items-center justify-center shadow-inner overflow-hidden">
                                     <img src={currentInternet?.logo || '/wifi.png'} alt={currentInternet?.displayName} className="w-full h-full object-contain" onError={(e) => { e.currentTarget.src = '/logo.png'; }} />
                                 </div>
-                                <div><span className="text-sm font-black text-slate-900 tracking-tight">{currentInternet?.displayName || 'Select Internet Provider'}</span></div>
+                                <div>
+                                    <span className="text-sm font-black text-slate-900 tracking-tight">{currentInternet?.displayName || 'Select Internet Provider'}</span>
+                                </div>
                             </div>
                             <ChevronDown size={18} className="text-slate-400"/>
                         </button>
@@ -775,7 +816,9 @@ export default function Home() {
                                 <div className="w-12 h-12 shrink-0 rounded-full border border-slate-100 bg-emerald-50 flex items-center justify-center shadow-inner overflow-hidden">
                                     <img src={`/${telecomProvider}.png`} alt={telecomProvider} className="w-full h-full object-contain" onError={(e) => { e.currentTarget.src = '/logo.png'; }} />
                                 </div>
-                                <div><span className="text-sm font-black text-slate-900 tracking-tight uppercase">{telecomProvider}</span></div>
+                                <div>
+                                    <span className="text-sm font-black text-slate-900 tracking-tight uppercase">{telecomProvider}</span>
+                                </div>
                             </div>
                             <ChevronDown size={18} className="text-slate-400"/>
                         </button>
