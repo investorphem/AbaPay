@@ -45,7 +45,7 @@ export function PrivacyModal({ isOpen, onClose }: any) {
 
 export function ReceiptModal({ receipt, isMainnet, onClose, onShare, onSupport }: any) {
   if (!receipt) return null;
-  
+
   // ⚡ DYNAMIC PIN DETECTION ⚡
   const hasPin = receipt.status === 'SUCCESS' && receipt.purchased_code && receipt.purchased_code !== "Vended Successfully";
   const isElectricity = receipt.service?.toUpperCase() === 'ELECTRICITY' || receipt.service === 'Electricity';
@@ -94,11 +94,12 @@ export function ReceiptModal({ receipt, isMainnet, onClose, onShare, onSupport }
              <div className="flex justify-between border-b border-slate-100 pb-3">
                 <span className="text-slate-400 text-[10px] font-bold uppercase tracking-wider">Amount Paid</span>
                 <div className="text-right">
-                   <p className="text-slate-800 font-black text-sm">₦{receipt.amountNaira}</p>
+                   {/* ⚡ APPLIED FORMATTING HERE ⚡ */}
+                   <p className="text-slate-800 font-black text-sm">₦{Number(receipt.amountNaira).toLocaleString()}</p>
                    <p className="text-slate-400 text-[9px] font-bold">{receipt.amountCrypto} {receipt.tokenUsed || 'USD₮'}</p>
                 </div>
              </div>
-             
+
              {/* ⚡ EDU & ELEC PIN RENDERER ⚡ */}
              {hasPin && (
                <div className="mt-4 bg-emerald-50 border-2 border-emerald-200 rounded-xl p-4 text-center">
@@ -139,7 +140,7 @@ export function SelectionModal({
             <button onClick={onClose} className="p-2 bg-slate-100 rounded-full hover:bg-slate-200 transition-colors"><XCircle size={20} className="text-slate-500" /></button>
           </div>
           <div className="space-y-2.5 max-h-[50vh] overflow-y-auto pr-1">
-             
+
              {type === 'country' && SUPPORTED_COUNTRIES.map(country => (
                <button key={country.code} disabled={country.disabled} onClick={() => { if (!country.disabled) { onSelect(country.code); onClose(); } }}
                  className={`w-full text-left p-4 rounded-xl font-bold text-sm transition-all flex justify-between items-center ${country.disabled ? 'bg-slate-50 border border-slate-100 text-slate-400 cursor-not-allowed' : 'text-slate-700 bg-slate-50 border border-slate-100 hover:border-emerald-300 hover:bg-emerald-50/50'}`}>
