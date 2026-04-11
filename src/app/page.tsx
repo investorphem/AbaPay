@@ -29,7 +29,6 @@ export default function Home() {
   const [customerPhone, setCustomerPhone] = useState("");
   const [status, setStatus] = useState("");
   
-  // ⚡ ADDED "education" to Active Tab Types ⚡
   const [activeTab, setActiveTab] = useState<"pay" | "bank" | "education" | "history">("pay");
   const [isProcessing, setIsProcessing] = useState(false); 
   const [customerName, setCustomerName] = useState<string | null>(null);
@@ -50,6 +49,7 @@ export default function Home() {
   const [isFetchingBanks, setIsFetchingBanks] = useState(false);
 
   // ⚡ EDUCATION STATES ⚡
+  const [educationProvider, setEducationProvider] = useState("waec");
   const [educationVariations, setEducationVariations] = useState<any[]>([]);
   const [selectedEducationPlan, setSelectedEducationPlan] = useState<any>(null);
 
@@ -98,6 +98,13 @@ export default function Home() {
   const currentCable = useMemo(() => CABLE_PROVIDERS_LIST.find(c => c.serviceID === cableProvider), [cableProvider]);
   const currentInternet = useMemo(() => INTERNET_PROVIDERS.find(c => c.serviceID === internetProvider), [internetProvider]);
 
+  // ⚡ ADDED JAMB TO EDUCATION PROVIDERS ⚡
+  const EDUCATION_PROVIDERS = [
+    { serviceID: "waec", displayName: "WAEC Result Checker", logo: "/logo.png" },
+    { serviceID: "waec-registration", displayName: "WAEC Registration", logo: "/logo.png" },
+    { serviceID: "jamb", displayName: "JAMB PIN Vending", logo: "/logo.png" }
+  ];
+
   const dynamicMinAmount = useMemo(() => {
     if (activeTab === "bank") return 1000;
     if (activeTab === "education") return 500;
@@ -145,7 +152,10 @@ export default function Home() {
     
     if (activeTab === "bank") return accountNumber.length === 10 && customerName !== null && selectedBank !== null && customerPhone.length >= 10;
     
-    if (activeTab === "education") return selectedEducationPlan !== null && customerPhone.length >= 10;
+    if (activeTab === "education") {
+      if (educationProvider === "jamb") return accountNumber.length >= 10 && customerName !== null && selectedEducationPlan !== null && customerPhone.length >= 10;
+      return selectedEducationPlan !== null && customerPhone.length >= 10;
+    }
 
     if (activeTab === "pay") {
       if (activeService.id === "AIRTIME") return accountNumber.length === 11 && accountNumber.startsWith("0");
@@ -164,20 +174,21 @@ export default function Home() {
       }
     }
     return false;
-  }, [accountNumber, nairaAmount, activeService, customerName, dynamicMinAmount, dynamicMaxAmount, cableSubscriptionType, selectedCablePlan, selectedBank, selectedInternetPlan, internetAccountId, customerPhone, internetProvider, activeTab, cableProvider, selectedEducationPlan]);
+  }, [accountNumber, nairaAmount, activeService, customerName, dynamicMinAmount, dynamicMaxAmount, cableSubscriptionType, selectedCablePlan, selectedBank, selectedInternetPlan, internetAccountId, customerPhone, internetProvider, activeTab, cableProvider, selectedEducationPlan, educationProvider]);
 
   const showToast = (title: string, message: string, type: 'success' | 'error' = 'success') => {
     setToast({ title, message, type });
     setTimeout(() => setToast(null), 5000);
   };
 
-  const handleProviderChange = (newProvider: string, type: 'internet' | 'telecom' | 'cable' | 'elec' | 'bank') => {
+  const handleProviderChange = (newProvider: string, type: 'internet' | 'telecom' | 'cable' | 'elec' | 'bank' | 'education') => {
     setNairaAmount(""); setAccountNumber(""); setCustomerName(null); setCustomerPhone("");
     if (type === 'internet') { setInternetProvider(newProvider); setSelectedInternetPlan(null); setInternetAccountId(null); } 
     else if (type === 'telecom') { setTelecomProvider(newProvider); } 
     else if (type === 'cable') { setCableProvider(newProvider); setSelectedCablePlan(null); setCableCurrentBouquet(null); setCableRenewAmount(null); setCableSubscriptionType("renew"); } 
     else if (type === 'elec') { setElecProvider(newProvider); } 
     else if (type === 'bank') { setSelectedBank(newProvider); }
+    else if (type === 'education') { setEducationProvider(newProvider); setSelectedEducationPlan(null); }
   };
 
   const handleResetService = (s: any) => {
@@ -220,8 +231,16 @@ export default function Home() {
     setIsVerifying(true); setCustomerName(null); setCableCurrentBouquet(null); setCableRenewAmount(null); setInternetAccountId(null);
     try {
         let serviceID = ""; let reqType = undefined;
-        if (activeTab === "bank") { serviceID = "bank-deposit"; reqType = selectedBank?.variation_code; } 
-        else { serviceID = activeService.id === "ELECTRICITY" ? elecProvider : activeService.id === "INTERNET" ? internetProvider : cableProvider; reqType = activeService.id === "ELECTRICITY" ? meterType : undefined; }
+        
+        if (activeTab === "bank") { 
+          serviceID = "bank-deposit"; reqType = selectedBank?.variation_code; 
+        } else if (activeTab === "education" && educationProvider === "jamb") {
+          serviceID = "jamb"; reqType = selectedEducationPlan?.variation_code;
+        } else { 
+          serviceID = activeService.id === "ELECTRICITY" ? elecProvider : activeService.id === "INTERNET" ? internetProvider : cableProvider; 
+          reqType = activeService.id === "ELECTRICITY" ? meterType : undefined; 
+        }
+        
         const res = await fetch(`/api/verify`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ billersCode: accountNumber, serviceID: serviceID, type: reqType }) });
         const data = await res.json();
 
@@ -272,7 +291,11 @@ export default function Home() {
       if (activeTab === "bank") {
         vtpassServiceID = "bank-deposit"; displayNetwork = selectedBank.name; finalVariationCode = selectedBank.variation_code; uiCategory = "BANK";
       } else if (activeTab === "education") {
-        vtpassServiceID = "waec-registration"; displayNetwork = "WAEC"; finalVariationCode = selectedEducationPlan?.variation_code || 'none'; uiCategory = "EDUCATION"; payloadBillersCode = customerPhone;
+        vtpassServiceID = educationProvider; 
+        displayNetwork = educationProvider === "waec" ? "WAEC Result Checker" : educationProvider === "waec-registration" ? "WAEC Registration" : "JAMB PIN Vending"; 
+        finalVariationCode = selectedEducationPlan?.variation_code || 'none'; 
+        uiCategory = "EDUCATION"; 
+        payloadBillersCode = educationProvider === "jamb" ? accountNumber : customerPhone;
       } else {
         uiCategory = activeService.id;
         if (activeService.id === "ELECTRICITY") { vtpassServiceID = elecProvider; displayNetwork = elecProvider; finalVariationCode = meterType; } 
@@ -373,6 +396,21 @@ export default function Home() {
 
   useEffect(() => { fetchBanksManual(); }, []);
 
+  // ⚡ EDUCATION API FETCHER ⚡
+  useEffect(() => {
+    if (activeTab === "education") {
+      const fetchEducation = async () => {
+        setEducationVariations([]);
+        try {
+          const res = await fetch(`/api/variations?serviceID=${educationProvider}`);
+          const data = await res.json();
+          setEducationVariations(extractVtpassArray(data));
+        } catch (e) {}
+      };
+      fetchEducation();
+    }
+  }, [activeTab, educationProvider]);
+
   useEffect(() => {
     if (activeTab !== "pay") return;
     if (activeService.id === "CABLE") {
@@ -381,20 +419,6 @@ export default function Home() {
       const fetchInternetVariations = async () => { setInternetVariations([]); try { const res = await fetch(`/api/variations?serviceID=${internetProvider}`); const data = await res.json(); setInternetVariations(extractVtpassArray(data)); } catch (e) {} }; fetchInternetVariations();
     }
   }, [activeTab, activeService.id, cableProvider, internetProvider]);
-
-  // ⚡ EDUCATION API FETCHER ⚡
-  useEffect(() => {
-    if (activeTab === "education" && educationVariations.length === 0) {
-      const fetchEducation = async () => {
-        try {
-          const res = await fetch(`/api/variations?serviceID=waec-registration`);
-          const data = await res.json();
-          setEducationVariations(extractVtpassArray(data));
-        } catch (e) {}
-      };
-      fetchEducation();
-    }
-  }, [activeTab, educationVariations.length]);
 
   useEffect(() => {
     if (activeTab === "pay") {
@@ -414,6 +438,20 @@ export default function Home() {
       }
     }
   }, [accountNumber, activeService.id, activeTab, internetProvider]);
+
+  // ⚡ UPDATED VERIFICATION TRIGGER TO HANDLE JAMB ⚡
+  useEffect(() => {
+    if (activeTab === "bank") { if (accountNumber.length === 10 && selectedBank) verifyMerchant(); else setCustomerName(null); } 
+    else if (activeTab === "education" && educationProvider === "jamb") {
+       if (accountNumber.length >= 10 && selectedEducationPlan) verifyMerchant(); else setCustomerName(null);
+    }
+    else if (activeTab === "pay") {
+       if (activeService.id === "ELECTRICITY" && accountNumber.length >= 10) verifyMerchant();
+       else if (activeService.id === "CABLE" && cableProvider !== "showmax" && accountNumber.length >= 10) verifyMerchant();
+       else if (activeService.id === "INTERNET" && internetProvider === "smile-direct" && accountNumber.includes('@') && accountNumber.includes('.')) { const timeoutId = setTimeout(() => verifyMerchant(), 1000); return () => clearTimeout(timeoutId); } 
+       else { setCustomerName(null); }
+    }
+  }, [accountNumber, elecProvider, cableProvider, activeService.id, meterType, selectedBank, internetProvider, activeTab, educationProvider, selectedEducationPlan]);
 
   useEffect(() => {
     const checkRefunds = async () => {
@@ -442,6 +480,7 @@ export default function Home() {
     if (modalType === 'bank') return selectedBank?.variation_code;
     if (modalType === 'token') return selectedToken.symbol;
     if (modalType === 'provider') {
+      if (activeTab === 'education') return educationProvider;
       if (activeService.id === 'ELECTRICITY') return elecProvider;
       if (activeService.id === 'INTERNET') return internetProvider;
       if (activeService.id === 'CABLE') return cableProvider;
@@ -464,7 +503,6 @@ export default function Home() {
         </div>
       )}
 
-      {/* COMPONENT MODALS */}
       <TermsModal isOpen={isTermsOpen} onClose={() => setIsTermsOpen(false)} />
       <PrivacyModal isOpen={isPrivacyOpen} onClose={() => setIsPrivacyOpen(false)} />
       <ReceiptModal receipt={selectedReceipt} isMainnet={isMainnet} onClose={() => setSelectedReceipt(null)} onShare={handleShareReceipt} onSupport={() => { setSupportTxHash(selectedReceipt.txHash); setSupportMessage(""); setSelectedReceipt(null); setIsSupportOpen(true); }} />
@@ -516,7 +554,7 @@ export default function Home() {
           </div>
         </div>
 
-        {/* ⚡ UPDATED NAVIGATION TABS ⚡ */}
+        {/* ⚡ NAVIGATION TABS ⚡ */}
         <div className="flex gap-2 bg-slate-200/50 p-1.5 rounded-2xl mb-6 shadow-inner overflow-x-auto no-scrollbar">
             <button onClick={() => { setActiveTab("pay"); handleResetService(SERVICES[0]); }} className={`flex-1 min-w-[75px] py-3 rounded-xl text-[10px] sm:text-xs font-black transition-all ${activeTab === 'pay' ? 'bg-white text-emerald-600 shadow-xl' : 'text-slate-500 hover:text-slate-700'}`}>BILLS</button>
             <button onClick={() => { setActiveTab("bank"); handleResetService(SERVICES[0]); }} className={`flex-1 min-w-[75px] py-3 rounded-xl text-[10px] sm:text-xs font-black transition-all ${activeTab === 'bank' ? 'bg-white text-emerald-600 shadow-xl' : 'text-slate-500 hover:text-slate-700'}`}>TRANSFER</button>
@@ -549,19 +587,56 @@ export default function Home() {
                 </div>
 
                 <div className="animate-in slide-in-from-left-2 mb-2">
-                    <label className="text-[10px] font-black text-slate-400 uppercase mb-3 block">Service Provider</label>
-                    <div className="w-full bg-slate-50 border border-slate-200 p-4 rounded-2xl flex items-center gap-4 shadow-sm cursor-not-allowed">
-                        <div className="w-12 h-12 shrink-0 rounded-full border border-slate-100 bg-white p-0.5 flex items-center justify-center shadow-inner overflow-hidden">
-                            <GraduationCap className="text-emerald-500" size={24} />
+                    <label className="text-[10px] font-black text-slate-400 uppercase mb-3 block">Select Service</label>
+                    <button 
+                        onClick={() => openSelectionModal('provider', "Select Education Service", EDUCATION_PROVIDERS, (val) => handleProviderChange(val, 'education'))}
+                        className="w-full bg-white border border-slate-200 p-4 rounded-2xl flex justify-between items-center hover:border-emerald-400 transition-colors shadow-sm active:scale-[0.98]"
+                    >
+                        <div className="flex items-center gap-4">
+                            <div className="w-12 h-12 shrink-0 rounded-full border border-slate-100 bg-emerald-50 flex items-center justify-center shadow-inner overflow-hidden">
+                                <GraduationCap className="text-emerald-500" size={24} />
+                            </div>
+                            <div>
+                                <span className="text-sm font-black text-slate-900 tracking-tight uppercase">
+                                  {educationProvider === 'waec' ? 'WAEC Result Checker' : educationProvider === 'waec-registration' ? 'WAEC Registration' : 'JAMB PIN Vending'}
+                                </span>
+                            </div>
                         </div>
-                        <div>
-                            <span className="text-sm font-black text-slate-900 tracking-tight uppercase">WAEC Registration</span>
-                        </div>
-                    </div>
+                        <ChevronDown size={18} className="text-slate-400"/>
+                    </button>
                 </div>
 
+                {/* ⚡ DYNAMIC JAMB PROFILE ID FIELD ⚡ */}
+                {educationProvider === "jamb" && (
+                    <div className="animate-in fade-in slide-in-from-top-2">
+                        <label className="text-[10px] font-black text-slate-400 uppercase mb-2 flex justify-between">
+                          <span>JAMB Profile ID (10 Digits)</span>
+                          <span className={accountNumber.length >= 10 ? "text-emerald-500" : "text-slate-400"}>{accountNumber.length}/10</span>
+                        </label>
+                        <input 
+                            type="tel" placeholder="Enter Profile ID"
+                            maxLength={15}
+                            className={`w-full bg-slate-50 border p-5 rounded-2xl font-black text-xl text-slate-800 outline-none transition-all ${
+                              accountNumber.length > 0 && accountNumber.length < 10 ? "border-red-300 focus:border-red-500" : "border-slate-100 focus:border-emerald-500"
+                            }`}
+                            value={accountNumber}
+                            onChange={(e) => setAccountNumber(e.target.value.replace(/[^0-9]/g, ''))}
+                        />
+                        {isVerifying && <p className="text-[10px] text-blue-500 font-bold mt-2 animate-pulse flex items-center gap-1.5"><Loader2 size={12} className="animate-spin"/> Verifying Profile ID...</p>}
+                        {customerName && (
+                            <div className="mt-2 bg-emerald-500/10 p-4 rounded-xl border border-emerald-500/20 flex items-center gap-3 animate-in fade-in">
+                                <CheckCircle2 size={18} className="text-emerald-600" />
+                                <div className="flex-1">
+                                    <span className="text-sm font-black text-emerald-800 line-clamp-1">{customerName}</span>
+                                    <p className="text-[10px] font-black text-emerald-600 uppercase">Profile Verified</p>
+                                </div>
+                            </div>
+                        )}
+                    </div>
+                )}
+
                 <div className="bg-slate-50 border border-slate-200 rounded-2xl p-4 shadow-sm animate-in fade-in slide-in-from-top-4">
-                  <p className="text-[10px] font-black uppercase tracking-widest text-slate-400 mb-2">Select Registration PIN</p>
+                  <p className="text-[10px] font-black uppercase tracking-widest text-slate-400 mb-2">Select PIN Type</p>
                   
                   {selectedEducationPlan ? (
                       <div className="relative animate-in zoom-in-95 duration-200 mt-2">
