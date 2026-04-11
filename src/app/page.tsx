@@ -8,7 +8,7 @@ import {
   Loader2, Coins, Briefcase, ListPlus, Users, Landmark, XCircle, RefreshCw, Tv
 } from "lucide-react";
 import { supabase } from "@/utils/supabase";
-import { ELECTRICITY_DISCOS } from "./discos"; // <-- ADD THIS LINE BACK!
+import { ELECTRICITY_DISCOS } from "./discos";
 
 import { TermsModal, PrivacyModal, ReceiptModal, SelectionModal } from "@/components/Modals";
 import { HistoryTab } from "@/components/HistoryTab";
@@ -113,7 +113,7 @@ export default function Home() {
     return { cryptoToCharge: crypto.toFixed(4), currentFee: fee };
   }, [nairaAmount, exchangeRate, activeService, activeTab]);
 
-      // ⚡ FIXED: ENHANCED FILTER WITH SPECTRANET EXCEPTION ⚡
+  // ⚡ FIXED: ENHANCED FILTER WITH SPECTRANET EXCEPTION ⚡
   const filteredInternetDataPlans = useMemo(() => {
     if (!internetVariations || internetVariations.length === 0) return [];
 
@@ -134,8 +134,6 @@ export default function Home() {
       return category === activeDataCategory;
     }).sort((a, b) => parseFloat(a.variation_amount || "0") - parseFloat(b.variation_amount || "0"));
   }, [internetVariations, activeDataCategory, internetProvider]);
-
-
 
   const isFormValid = useMemo(() => {
     const amount = parseFloat(nairaAmount);
@@ -424,7 +422,6 @@ export default function Home() {
     checkRefunds();
   }, [activeTab, transactions]);
 
-  // ⚡ MODAL SELECTION LOGIC ⚡
   const getCurrentModalValue = () => {
     if (modalType === 'country') return activeCountry.code;
     if (modalType === 'bank') return selectedBank?.variation_code;
@@ -452,7 +449,6 @@ export default function Home() {
         </div>
       )}
 
-      {/* COMPONENT MODALS */}
       <TermsModal isOpen={isTermsOpen} onClose={() => setIsTermsOpen(false)} />
       <PrivacyModal isOpen={isPrivacyOpen} onClose={() => setIsPrivacyOpen(false)} />
       <ReceiptModal receipt={selectedReceipt} isMainnet={isMainnet} onClose={() => setSelectedReceipt(null)} onShare={handleShareReceipt} onSupport={() => { setSupportTxHash(selectedReceipt.txHash); setSupportMessage(""); setSelectedReceipt(null); setIsSupportOpen(true); }} />
@@ -510,9 +506,6 @@ export default function Home() {
             <button onClick={() => { setActiveTab("history"); handleResetService(SERVICES[0]); }} className={`flex-1 py-3 rounded-xl text-xs font-black transition-all ${activeTab === 'history' ? 'bg-white text-emerald-600 shadow-xl' : 'text-slate-500 hover:text-slate-700'}`}>HISTORY</button>
         </div>
 
-        {/* ========================================================================================= */}
-        {/* BANK UI BLOCK */}
-        {/* ========================================================================================= */}
         {activeTab === 'bank' && (
           <div className="bg-white border border-slate-100 rounded-[2.5rem] p-8 shadow-2xl shadow-emerald-900/10 animate-in fade-in zoom-in-95">
             <div className="space-y-5">
@@ -641,9 +634,6 @@ export default function Home() {
           </div>
         )}
 
-        {/* ========================================================================================= */}
-        {/* PAY UTILITIES UI BLOCK */}
-        {/* ========================================================================================= */}
         {activeTab === 'pay' && (
           <div className="bg-white border border-slate-100 rounded-[2.5rem] p-8 shadow-2xl shadow-emerald-900/10 animate-in fade-in zoom-in-95">
             <div className="flex overflow-x-auto gap-3 pb-2 mb-4 no-scrollbar">
@@ -790,17 +780,20 @@ export default function Home() {
                 {activeService.id === "INTERNET" && (
                   <div className="bg-slate-50 border border-slate-200 rounded-2xl p-4 shadow-sm animate-in fade-in slide-in-from-top-4">
                      
-                     <div className="flex gap-2 mb-4 border-b border-slate-200 pb-3 overflow-x-auto no-scrollbar shadow-inner bg-slate-100 p-1.5 rounded-2xl">
-                        {DATA_CATEGORIES.map(cat => (
-                          <button 
-                             key={cat} 
-                             onClick={() => { setActiveDataCategory(cat); setSelectedInternetPlan(null); setNairaAmount(""); }} 
-                             className={`px-4 py-2.5 rounded-xl text-[11px] font-black uppercase transition-all whitespace-nowrap ${activeDataCategory === cat ? (cat === 'Broadband' ? 'bg-white shadow-lg text-orange-600' : cat === 'Social' ? 'bg-white shadow-lg text-blue-500' : 'bg-white shadow-lg text-purple-600') : 'text-slate-500 hover:text-slate-700'}`}
-                          >
-                            {cat === 'Broadband' ? <span className="flex items-center gap-1.5"><Briefcase size={14}/> {cat}</span> : cat === 'Social' ? <span className="flex items-center gap-1.5"><Users size={14}/> {cat}</span> : cat}
-                          </button>
-                        ))}
-                      </div>
+                     {/* ⚡ HIDE TABS FOR SPECTRANET ⚡ */}
+                     {internetProvider !== 'spectranet' && (
+                       <div className="flex gap-2 mb-4 border-b border-slate-200 pb-3 overflow-x-auto no-scrollbar shadow-inner bg-slate-100 p-1.5 rounded-2xl">
+                          {DATA_CATEGORIES.map(cat => (
+                            <button 
+                               key={cat} 
+                               onClick={() => { setActiveDataCategory(cat); setSelectedInternetPlan(null); setNairaAmount(""); }} 
+                               className={`px-4 py-2.5 rounded-xl text-[11px] font-black uppercase transition-all whitespace-nowrap ${activeDataCategory === cat ? (cat === 'Broadband' ? 'bg-white shadow-lg text-orange-600' : cat === 'Social' ? 'bg-white shadow-lg text-blue-500' : 'bg-white shadow-lg text-purple-600') : 'text-slate-500 hover:text-slate-700'}`}
+                            >
+                              {cat === 'Broadband' ? <span className="flex items-center gap-1.5"><Briefcase size={14}/> {cat}</span> : cat === 'Social' ? <span className="flex items-center gap-1.5"><Users size={14}/> {cat}</span> : cat}
+                            </button>
+                          ))}
+                        </div>
+                     )}
                      
                      {selectedInternetPlan ? (
                         <div className="relative animate-in zoom-in-95 duration-200 mt-2">
