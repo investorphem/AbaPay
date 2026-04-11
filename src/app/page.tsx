@@ -114,14 +114,24 @@ export default function Home() {
     return { cryptoToCharge: crypto.toFixed(4), currentFee: fee };
   }, [nairaAmount, exchangeRate, activeService, activeTab]);
 
-  // ⚡ FIXED INTERNET FILTERING LOGIC ⚡
+  // ⚡ STRICT FILTERING FIX FOR INTERNET/SPECTRANET ⚡
   const filteredInternetDataPlans = useMemo(() => {
     if (!internetVariations || internetVariations.length === 0) return [];
     
-    // Spectranet doesn't use the standard categories (Daily/Monthly)
-    if (internetProvider === 'spectranet') return internetVariations;
+    // Strict Lock: Only allow variations that actually belong to the selected provider
+    let strictVariations = internetVariations;
+    if (internetProvider.includes('mtn')) strictVariations = internetVariations.filter(p => p.variation_code.toLowerCase().includes('mtn'));
+    else if (internetProvider.includes('airtel')) strictVariations = internetVariations.filter(p => p.variation_code.toLowerCase().includes('airtel'));
+    else if (internetProvider.includes('glo')) strictVariations = internetVariations.filter(p => p.variation_code.toLowerCase().includes('glo'));
+    else if (internetProvider.includes('9mobile')) strictVariations = internetVariations.filter(p => p.variation_code.toLowerCase().includes('9mobile'));
+    else if (internetProvider === 'spectranet') strictVariations = internetVariations.filter(p => p.variation_code.toLowerCase().includes('spectranet'));
+    else if (internetProvider === 'smile-direct') strictVariations = internetVariations.filter(p => p.variation_code.toLowerCase().includes('smile'));
 
-    return internetVariations.filter(plan => {
+    // Spectranet & Smile don't use standard categories (Daily/Monthly)
+    if (internetProvider === 'spectranet' || internetProvider === 'smile-direct') return strictVariations;
+
+    // Apply categories for standard networks
+    return strictVariations.filter(plan => {
       const name = (plan.name || "").toLowerCase();
       let category = "Monthly"; 
 
@@ -154,7 +164,7 @@ export default function Home() {
         else if (internetProvider === 'spectranet') return accountNumber.length >= 5 && selectedInternetPlan !== null && customerPhone.length >= 10;
         else return accountNumber.length === 11 && accountNumber.startsWith("0") && selectedInternetPlan !== null;
       }
-      if (activeService.id === "ELECTRICITY") return accountNumber.length >= 10 && customerName !== null;
+      if (activeService.id === "ELECTRICITY") return accountNumber.length >= 10 && customerName !== null && customerPhone.length >= 10;
       if (activeService.id === "CABLE") {
         if (cableProvider === "showmax") return accountNumber.length >= 11 && selectedCablePlan !== null;
         if (accountNumber.length < 10 || customerName === null) return false;
@@ -174,7 +184,7 @@ export default function Home() {
   const handleProviderChange = (newProvider: string, type: 'internet' | 'telecom' | 'cable' | 'elec' | 'bank' | 'education') => {
     setNairaAmount(""); setAccountNumber(""); setCustomerName(null); setCustomerPhone("");
     if (type === 'internet') { 
-        setInternetVariations([]); // ⚡ Clear variations immediately to avoid flash of old data
+        setInternetVariations([]); 
         setInternetProvider(newProvider); 
         setSelectedInternetPlan(null); 
         setInternetAccountId(null); 
@@ -208,14 +218,12 @@ export default function Home() {
     else { try { await navigator.clipboard.writeText(receiptText); showToast("Copied!", "Receipt details copied to clipboard.", "success"); } catch (err) {} }
   };
 
-  // ⚡ SMART FALLBACK FOR BANK TRANSFERS ⚡
   const fetchBanksManual = async () => {
     setIsFetchingBanks(true);
     try {
       const res = await fetch(`/api/variations?serviceID=bank-deposit`);
       const data = await res.json();
       
-      // If code 011 or no variations, the Sandbox is offline - use fallback
       if (data.code === '011' || !data.content || !data.content.variations) {
         setBankVariations([
             { variation_code: 'access', name: 'ACCESS BANK PLC' },
@@ -580,7 +588,9 @@ export default function Home() {
             <button onClick={() => { setActiveTab("history"); handleResetService(SERVICES[0]); }} className={`flex-1 min-w-[75px] py-3 rounded-xl text-[10px] sm:text-xs font-black transition-all ${activeTab === 'history' ? 'bg-white text-emerald-600 shadow-xl' : 'text-slate-500 hover:text-slate-700'}`}>HISTORY</button>
         </div>
 
+        {/* ======================================= */}
         {/* EDUCATION BLOCK */}
+        {/* ======================================= */}
         {activeTab === 'education' && (
           <div className="bg-white border border-slate-100 rounded-[2.5rem] p-8 shadow-2xl shadow-emerald-900/10 animate-in fade-in zoom-in-95">
             <div className="space-y-5">
@@ -717,13 +727,15 @@ export default function Home() {
                     className="w-full bg-slate-900 hover:bg-black text-white font-black py-6 rounded-3xl flex items-center justify-center gap-3.5 transition-all active:scale-95 disabled:opacity-30 shadow-xl shadow-slate-900/20 text-lg tracking-tight"
                 >
                     {isProcessing ? <Loader2 size={24} className="animate-spin text-emerald-400"/> : <ShieldCheck size={24} className="text-emerald-400" />}
-                    {isProcessing ? 'PROCSSING...' : `PAY ${cryptoToCharge} ${selectedToken.symbol}`}
+                    {isProcessing ? 'PROCESSING...' : `PAY ${cryptoToCharge} ${selectedToken.symbol}`}
                 </button>
             </div>
           </div>
         )}
 
+        {/* ======================================= */}
         {/* BANK BLOCK */}
+        {/* ======================================= */}
         {activeTab === 'bank' && (
           <div className="bg-white border border-slate-100 rounded-[2.5rem] p-8 shadow-2xl shadow-emerald-900/10 animate-in fade-in zoom-in-95">
             <div className="space-y-5">
@@ -808,6 +820,15 @@ export default function Home() {
                             {currentFee > 0 && <p className="text-[9px] font-black text-orange-500">+₦{currentFee} FEE</p>}
                         </div>
                     </div>
+                    {/* ⚡ MIN MAX ALERT FOR BANK ⚡ */}
+                    {nairaAmount && (parseFloat(nairaAmount) < dynamicMinAmount || parseFloat(nairaAmount) > dynamicMaxAmount) && (
+                        <div className="bg-red-50 border border-red-200 p-3 rounded-xl mt-2 flex items-center gap-2 animate-in fade-in">
+                            <AlertTriangle size={16} className="text-red-500 shrink-0" />
+                            <p className="text-xs font-black text-red-600">
+                                {parseFloat(nairaAmount) < dynamicMinAmount ? `Amount is below the minimum of ₦${dynamicMinAmount.toLocaleString()}` : `Amount exceeds the maximum of ₦${dynamicMaxAmount.toLocaleString()}`}
+                            </p>
+                        </div>
+                    )}
                 </div>
 
                 <div className="animate-in fade-in">
@@ -838,20 +859,23 @@ export default function Home() {
           </div>
         )}
 
+        {/* ======================================= */}
         {/* PAY BLOCK */}
+        {/* ======================================= */}
         {activeTab === 'pay' && (
           <div className="bg-white border border-slate-100 rounded-[2.5rem] p-8 shadow-2xl shadow-emerald-900/10 animate-in fade-in zoom-in-95">
-            <div className="flex overflow-x-auto gap-3 pb-2 mb-4 no-scrollbar">
+            {/* ⚡ SMALLER SERVICE INDICATOR FRAME ⚡ */}
+            <div className="flex overflow-x-auto gap-2 pb-2 mb-4 no-scrollbar">
                 {SERVICES.filter(s => s.id !== 'BANK').map(s => (
                     <button 
                         key={s.id} 
                         onClick={() => handleResetService(s)}
-                        className={`min-w-[80px] p-4 rounded-2xl border-2 transition-all flex flex-col items-center justify-center gap-2 shrink-0 ${
-                            activeService.id === s.id ? 'border-emerald-500 bg-emerald-50/50 scale-105' : 'border-slate-50 bg-slate-50/50 hover:bg-slate-100'
+                        className={`min-w-[65px] p-2.5 rounded-xl border-2 transition-all flex flex-col items-center justify-center gap-1.5 shrink-0 ${
+                            activeService.id === s.id ? 'border-emerald-500 bg-emerald-50/50 scale-100 shadow-sm' : 'border-slate-100 bg-white hover:bg-slate-50'
                         }`}
                     >
-                        <s.icon size={20} className={s.color} />
-                        <span className="text-[8px] font-black uppercase tracking-widest">{s.name}</span>
+                        <s.icon size={18} className={s.color} />
+                        <span className="text-[9px] font-black uppercase tracking-tight">{s.name}</span>
                     </button>
                 ))}
             </div>
@@ -941,7 +965,7 @@ export default function Home() {
 
                 <div>
                     <label className="text-[10px] font-black text-slate-400 uppercase mb-2 flex justify-between">
-                      <span>{activeService.id === "INTERNET" ? "Internet ID" : activeService.id === "AIRTIME" ? "Phone No" : "Number"}</span>
+                      <span>{activeService.id === "INTERNET" ? (['smile-direct', 'spectranet'].includes(internetProvider) ? "Internet ID / Email" : "Phone No") : activeService.id === "AIRTIME" ? "Phone No" : "Number"}</span>
                       {(activeService.id === "AIRTIME" || (activeService.id === "INTERNET" && internetProvider.includes('-data'))) && (
                         <span className={accountNumber.length === 11 ? "text-emerald-500" : "text-slate-400"}>{accountNumber.length}/11</span>
                       )}
@@ -1059,9 +1083,19 @@ export default function Home() {
                             {currentFee > 0 && <p className="text-[9px] font-black text-orange-500">+₦{currentFee} FEE</p>}
                         </div>
                     </div>
+                    {/* ⚡ MIN MAX ALERT FOR UTILITIES ⚡ */}
+                    {nairaAmount && (parseFloat(nairaAmount) < dynamicMinAmount || parseFloat(nairaAmount) > dynamicMaxAmount) && (
+                        <div className="bg-red-50 border border-red-200 p-3 rounded-xl mt-2 flex items-center gap-2 animate-in fade-in">
+                            <AlertTriangle size={16} className="text-red-500 shrink-0" />
+                            <p className="text-xs font-black text-red-600">
+                                {parseFloat(nairaAmount) < dynamicMinAmount ? `Amount is below the minimum of ₦${dynamicMinAmount.toLocaleString()}` : `Amount exceeds the maximum of ₦${dynamicMaxAmount.toLocaleString()}`}
+                            </p>
+                        </div>
+                    )}
                 </div>
 
-                {(activeService.id === "ELECTRICITY" || activeService.id === "INTERNET") && (
+                {/* ⚡ SMS PHONE NUMBER FIX: ONLY FOR ELECTRICITY & SMILE/SPECTRANET ⚡ */}
+                {(activeService.id === "ELECTRICITY" || (activeService.id === "INTERNET" && ['smile-direct', 'spectranet'].includes(internetProvider))) && (
                     <div className="animate-in fade-in">
                          <input 
                             type="tel" placeholder="SMS Phone Number"
