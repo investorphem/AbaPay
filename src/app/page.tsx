@@ -10,7 +10,6 @@ import {
 import { supabase } from "@/utils/supabase";
 import { ELECTRICITY_DISCOS } from "./discos"; // <-- ADD THIS LINE BACK!
 
-
 import { TermsModal, PrivacyModal, ReceiptModal, SelectionModal } from "@/components/Modals";
 import { HistoryTab } from "@/components/HistoryTab";
 import { 
