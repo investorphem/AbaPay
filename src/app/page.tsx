@@ -86,7 +86,7 @@ export default function Home() {
   const [accountNumber, setAccountNumber] = useState("");
   const [customerPhone, setCustomerPhone] = useState("");
   const [status, setStatus] = useState("");
-  
+
   const [activeTab, setActiveTab] = useState<"pay" | "bank" | "history">("pay");
   const [isMiniPay, setIsMiniPay] = useState(false);
   const [isProcessing, setIsProcessing] = useState(false); 
@@ -133,7 +133,7 @@ export default function Home() {
   const [modalCallback, setModalCallback] = useState<((value: string) => void) | null>(null);
   const [modalType, setModalType] = useState<'standard' | 'token' | 'provider' | 'country' | 'bank'>('standard'); 
   const [toast, setToast] = useState<{title: string, message: string, type: 'success' | 'error'} | null>(null);
-  
+
   const [currentPage, setCurrentPage] = useState(1);
   const [selectedToken, setSelectedToken] = useState(SUPPORTED_TOKENS[0]);
   const [walletBalance, setWalletBalance] = useState("0.00");
@@ -234,13 +234,12 @@ export default function Home() {
     setTimeout(() => setToast(null), 5000);
   };
 
-  // ⚡ FIXED: This properly resets memory when you change a provider! ⚡
   const handleProviderChange = (newProvider: string, type: 'internet' | 'telecom' | 'cable' | 'elec' | 'bank') => {
     setNairaAmount("");
     setAccountNumber("");
     setCustomerName(null);
     setCustomerPhone("");
-    
+
     if (type === 'internet') {
       setInternetProvider(newProvider);
       setSelectedInternetPlan(null);
@@ -363,7 +362,7 @@ export default function Home() {
 
       setStatus("Awaiting token approval...");
       const approvalHash = await client.writeContract({ address: tokenAddress as `0x${string}`, abi: ERC20_ABI, functionName: 'approve', args: [ABAPAY_CONTRACT, valueInWei], account: address });
-      
+
       setStatus("Mining approval on Celo Mainnet... Please wait.");
       await publicClient.waitForTransactionReceipt({ hash: approvalHash });
       setStatus("Approval confirmed! Please sign the final payment...");
@@ -443,25 +442,105 @@ export default function Home() {
     } catch (e) { setStatus("Transaction Cancelled."); } finally { setIsProcessing(false); }
   };
 
-  // ==========================================
-  // 4. USE EFFECTS (BACKGROUND TASKS)
-  // ==========================================
+  // ⚡ GUARANTEED LOADING SCREEN DISMISSAL ⚡
   useEffect(() => {
-    // ⚡ FIXED: Ensure Bank API fetches ON MOUNT to be ready when tab is clicked ⚡
-    const fetchBanksOnMount = async () => {
-      setIsFetchingBanks(true);
-      try {
-        const res = await fetch(`/api/variations?serviceID=bank-deposit`);
-        const data = await res.json();
-        let banksArr = data?.content?.varations || data?.content?.variations || [];
-        if (banksArr && Array.isArray(banksArr) && banksArr.length > 0) {
-          setBankVariations(banksArr.sort((a: any, b: any) => (a.name || "").localeCompare(b.name || "")));
-        }
-      } catch (e) {} finally { setIsFetchingBanks(false); }
-    };
-    fetchBanksOnMount();
+    const fallbackTimer = setTimeout(() => setIsInitiallyLoading(false), 2000);
+    return () => clearTimeout(fallbackTimer);
   }, []);
 
+  useEffect(() => {
+    if (status && !isProcessing) {
+      const timer = setTimeout(() => setStatus(""), 5000); 
+      return () => clearTimeout(timer);
+    }
+  }, [status, isProcessing]);
+
+  useEffect(() => {
+    async function initSystem() {
+      try {
+        const savedHistory = localStorage.getItem("abapay_history");
+        if (savedHistory) setTransactions(JSON.parse(savedHistory));
+      } catch(e) {}
+
+      try {
+        const { data: settingsData } = await supabase.from('platform_settings').select('exchange_rate').eq('id', 1).single();
+        if (settingsData && settingsData.exchange_rate) setExchangeRate(Number(settingsData.exchange_rate));
+      } catch (consoleError) {}
+
+      try {
+        if (typeof window !== "undefined" && (window as any).ethereum) {
+          const eth = (window as any).ethereum;
+          if (eth.isMiniPay) setIsMiniPay(true);
+          const walletClient = createWalletClient({ chain: activeChain, transport: custom(eth) });
+          walletClient.requestAddresses().then(([acc]) => {
+            setAddress(acc); setClient(walletClient);
+          }).catch((e) => console.log("Connection deferred"));
+        }
+      } catch (e) {}
+    }
+    initSystem();
+  }, [activeChain]);
+
+  useEffect(() => {
+    if (!address) return;
+    async function fetchCloudHistory() {
+      try {
+        const sixMonthsAgo = new Date();
+        sixMonthsAgo.setMonth(sixMonthsAgo.getMonth() - 6);
+        const { data } = await supabase.from('transactions').select('*').eq('wallet_address', address).gte('created_at', sixMonthsAgo.toISOString()).order('created_at', { ascending: false });
+
+        if (data && data.length > 0) {
+          const cloudHistory = data.map((tx: any) => ({
+            id: tx.tx_hash.slice(0, 8), date: new Date(tx.created_at).toLocaleString(), status: tx.status,
+            amountNaira: tx.amount_naira.toString(), amountCrypto: tx.amount_usdt.toString(), tokenUsed: "USD₮", 
+            service: tx.service_category, network: tx.network, txHash: tx.tx_hash, account: tx.account_number,
+            refund_hash: tx.refund_hash, purchased_code: tx.purchased_code, request_id: tx.request_id, units: tx.units 
+          }));
+          setTransactions(cloudHistory);
+          localStorage.setItem("abapay_history", JSON.stringify(cloudHistory));
+        }
+      } catch (e) {}
+    }
+    fetchCloudHistory();
+  }, [address]);
+
+  useEffect(() => {
+    async function fetchBalance() {
+      if (!address) return;
+      setIsFetchingBalance(true);
+      try {
+        const publicClient = createPublicClient({ chain: activeChain, transport: http() });
+        const tokenAddress = isMainnet ? selectedToken.mainnet : selectedToken.sepolia;
+        const balanceWei = await publicClient.readContract({ address: tokenAddress as `0x${string}`, abi: ERC20_ABI, functionName: 'balanceOf', args: [address] });
+        setWalletBalance(parseFloat(formatUnits(balanceWei as bigint, selectedToken.decimals)).toFixed(4));
+      } catch (error) { setWalletBalance("0.00"); }
+      setIsFetchingBalance(false);
+    }
+    fetchBalance();
+  }, [address, selectedToken, activeChain, isMainnet]);
+
+  // ⚡ DEDICATED BANK FETCHER ⚡
+  useEffect(() => {
+    if (activeTab === "bank" && bankVariations.length === 0) {
+      const fetchBanks = async () => {
+        setIsFetchingBanks(true);
+        try {
+          const res = await fetch(`/api/variations?serviceID=bank-deposit`);
+          const data = await res.json();
+          let banksArr = extractVtpassArray(data);
+          
+          if (banksArr && Array.isArray(banksArr) && banksArr.length > 0) {
+            const sortedBanks = banksArr.sort((a: any, b: any) => (a.name || "").localeCompare(b.name || ""));
+            setBankVariations(sortedBanks);
+          }
+        } catch (e) {}
+        setIsFetchingBanks(false);
+      };
+      fetchBanks();
+    }
+  }, [activeTab, bankVariations.length]);
+
+  // ⚡ DEDICATED UTILITY FETCHER ⚡
   useEffect(() => {
     if (activeTab !== "pay") return;
     if (activeService.id === "CABLE") {
@@ -485,6 +564,26 @@ export default function Home() {
       fetchInternetVariations();
     }
   }, [activeTab, activeService.id, cableProvider, internetProvider]);
+
+  // ⚡ AUTO NETWORK DETECTION ⚡
+  useEffect(() => {
+    if (activeTab === "pay") {
+      if (activeService.id === "AIRTIME" && accountNumber.length >= 4) {
+        const prefix = accountNumber.substring(0, 4);
+        if (["0803","0806","0810","0813","0814","0816","0903","0906","0913","0916","0703","0706"].includes(prefix)) setTelecomProvider("mtn");
+        else if (["0802","0808","0812","0902","0907","0912","0701","0708"].includes(prefix)) setTelecomProvider("airtel");
+        else if (["0805","0807","0811","0905","0705","0915"].includes(prefix)) setTelecomProvider("glo");
+        else if (["0809","0817","0818","0908","0909"].includes(prefix)) setTelecomProvider("9mobile");
+      }
+      if (activeService.id === "INTERNET" && internetProvider.includes("-data") && accountNumber.length >= 4) {
+        const prefix = accountNumber.substring(0, 4);
+        if (["0803","0806","0810","0813","0814","0816","0903","0906","0913","0916","0703","0706"].includes(prefix)) setInternetProvider("mtn-data");
+        else if (["0802","0808","0812","0902","0907","0912","0701","0708"].includes(prefix)) setInternetProvider("airtel-data");
+        else if (["0805","0807","0811","0905","0705","0915"].includes(prefix)) setInternetProvider("glo-data");
+        else if (["0809","0817","0818","0908","0909"].includes(prefix)) setInternetProvider("9mobile-data");
+      }
+    }
+  }, [accountNumber, activeService.id, activeTab, internetProvider]);
 
   useEffect(() => {
     if (activeTab === "bank") {
@@ -739,8 +838,7 @@ export default function Home() {
                     >
                         <div className="flex items-center gap-4">
                             <div className="w-12 h-12 shrink-0 rounded-full border border-slate-100 bg-white p-0.5 flex items-center justify-center shadow-sm overflow-hidden group-hover:shadow-md transition-shadow">
-                                {/* ⚡ FIXED: Safe Fallback Image if Logo is Missing ⚡ */}
-                                <img src={provider.logo} alt={provider.displayName} className="w-full h-full object-contain" onError={(e) => { e.currentTarget.src = '/logo.png'; }} />
+                                <img src={provider.logo} alt={provider.displayName} className="w-full h-full object-contain" />
                             </div>
                             <div>
                                 <span className="text-sm font-black text-slate-900 tracking-tight">{provider.displayName}</span>
@@ -959,7 +1057,7 @@ export default function Home() {
                         >
                             <div className="flex items-center gap-4">
                                 <div className="w-12 h-12 shrink-0 rounded-full border border-slate-100 bg-sky-50 flex items-center justify-center shadow-inner overflow-hidden">
-                                    <img src={currentInternet?.logo || '/wifi.png'} alt={currentInternet?.displayName} className="w-full h-full object-contain" onError={(e) => { e.currentTarget.src = '/logo.png'; }} />
+                                    <img src={currentInternet?.logo || '/wifi.png'} alt={currentInternet?.displayName} className="w-full h-full object-contain" />
                                 </div>
                                 <div>
                                     <span className="text-sm font-black text-slate-900 tracking-tight">{currentInternet?.displayName || 'Select Internet Provider'}</span>
@@ -968,14 +1066,13 @@ export default function Home() {
                             <ChevronDown size={18} className="text-slate-400"/>
                         </button>
                     ) : activeService.id === "AIRTIME" ? (
-                        // ⚡ FIXED: Beautiful Single Dropdown for Airtime (No more duplicated logos) ⚡
                         <button 
                             onClick={() => openSelectionModal('provider', "Select Network", TELECOM_PROVIDERS.map(p => ({ serviceID: p, displayName: p.toUpperCase(), logo: `/${p}.png` })), (val) => handleProviderChange(val, 'telecom'))}
                             className="w-full bg-white border border-slate-200 p-4 rounded-2xl flex justify-between items-center hover:border-emerald-400 transition-colors shadow-sm active:scale-[0.98]"
                         >
                             <div className="flex items-center gap-4">
                                 <div className="w-12 h-12 shrink-0 rounded-full border border-slate-100 bg-emerald-50 flex items-center justify-center shadow-inner overflow-hidden">
-                                    <img src={`/${telecomProvider}.png`} alt={telecomProvider} className="w-full h-full object-contain" onError={(e) => { e.currentTarget.src = '/logo.png'; }} />
+                                    <img src={`/${telecomProvider}.png`} alt={telecomProvider} className="w-full h-full object-contain" />
                                 </div>
                                 <div>
                                     <span className="text-sm font-black text-slate-900 tracking-tight uppercase">{telecomProvider}</span>
@@ -1070,7 +1167,6 @@ export default function Home() {
                         ))}
                       </div>
                      
-                     {/* ⚡ STRICT TERNARY: ONLY SHOW CARD *OR* LIST ⚡ */}
                      {selectedInternetPlan ? (
                         <div className="relative animate-in zoom-in-95 duration-200 mt-2">
                            <button onClick={() => { setSelectedInternetPlan(null); setNairaAmount(""); }} className="absolute -top-3 -right-3 bg-slate-200 text-slate-500 hover:text-slate-800 hover:bg-slate-300 rounded-full p-1 transition-all z-10 shadow-sm border border-white">
@@ -1151,7 +1247,6 @@ export default function Home() {
                                <p className="text-2xl font-black text-emerald-600">₦{cableRenewAmount?.toLocaleString() || "0.00"}</p>
                             </div>
                          ) : (
-                            // ⚡ STRICT TERNARY: ONLY SHOW CARD *OR* LIST ⚡
                             selectedCablePlan ? (
                                <div className="relative animate-in zoom-in-95 duration-200 mt-2">
                                   <button onClick={() => { setSelectedCablePlan(null); setNairaAmount(""); }} className="absolute -top-3 -right-3 bg-slate-200 text-slate-500 hover:text-slate-800 hover:bg-slate-300 rounded-full p-1 transition-all z-10 shadow-sm border border-white">
@@ -1193,7 +1288,6 @@ export default function Home() {
                          )}
                        </>
                      ) : (
-                       // ⚡ STRICT TERNARY: ONLY SHOW CARD *OR* LIST ⚡
                        selectedCablePlan ? (
                           <div className="relative animate-in zoom-in-95 duration-200 mt-2">
                              <button onClick={() => { setSelectedCablePlan(null); setNairaAmount(""); }} className="absolute -top-3 -right-3 bg-slate-200 text-slate-500 hover:text-slate-800 hover:bg-slate-300 rounded-full p-1 transition-all z-10 shadow-sm border border-white">
