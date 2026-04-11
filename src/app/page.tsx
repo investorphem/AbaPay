@@ -5,10 +5,10 @@ import { createWalletClient, createPublicClient, custom, http, parseUnits, forma
 import { celo, celoSepolia } from "viem/chains";
 import { 
   ShieldCheck, Zap, AlertTriangle, CheckCircle2, ChevronDown, 
-  Loader2, Coins, Briefcase, ListPlus, Users, Landmark, XCircle, RefreshCw, Tv
+  Loader2, Coins, Briefcase, ListPlus, Users, Landmark, XCircle, RefreshCw, Tv, GraduationCap
 } from "lucide-react";
 import { supabase } from "@/utils/supabase";
-import { ELECTRICITY_DISCOS } from "./discos";
+import { ELECTRICITY_DISCOS } from "./discos"; 
 
 import { TermsModal, PrivacyModal, ReceiptModal, SelectionModal } from "@/components/Modals";
 import { HistoryTab } from "@/components/HistoryTab";
@@ -28,7 +28,9 @@ export default function Home() {
   const [accountNumber, setAccountNumber] = useState("");
   const [customerPhone, setCustomerPhone] = useState("");
   const [status, setStatus] = useState("");
-  const [activeTab, setActiveTab] = useState<"pay" | "bank" | "history">("pay");
+  
+  // ⚡ ADDED "education" to Active Tab Types ⚡
+  const [activeTab, setActiveTab] = useState<"pay" | "bank" | "education" | "history">("pay");
   const [isProcessing, setIsProcessing] = useState(false); 
   const [customerName, setCustomerName] = useState<string | null>(null);
   const [isVerifying, setIsVerifying] = useState(false);
@@ -46,6 +48,10 @@ export default function Home() {
   const [bankVariations, setBankVariations] = useState<any[]>([]);
   const [selectedBank, setSelectedBank] = useState<any>(null);
   const [isFetchingBanks, setIsFetchingBanks] = useState(false);
+
+  // ⚡ EDUCATION STATES ⚡
+  const [educationVariations, setEducationVariations] = useState<any[]>([]);
+  const [selectedEducationPlan, setSelectedEducationPlan] = useState<any>(null);
 
   const [activeCountry, setActiveCountry] = useState(SUPPORTED_COUNTRIES[0]);
   const [activeService, setActiveService] = useState(SERVICES[0]);
@@ -94,6 +100,7 @@ export default function Home() {
 
   const dynamicMinAmount = useMemo(() => {
     if (activeTab === "bank") return 1000;
+    if (activeTab === "education") return 500;
     if (activeService.id === "ELECTRICITY") return 1000; 
     if (activeService.id === "CABLE") return 500;
     return 100; 
@@ -108,21 +115,18 @@ export default function Home() {
 
   const { cryptoToCharge, currentFee } = useMemo(() => {
     const bill = parseFloat(nairaAmount) || 0;
-    const fee = (activeTab === "bank" || activeService.id === "ELECTRICITY" || activeService.id === "CABLE") ? 100 : 0;
+    const fee = (activeTab === "bank" || activeService.id === "ELECTRICITY" || activeService.id === "CABLE" || activeTab === "education") ? 100 : 0;
     const crypto = (bill + fee) / exchangeRate;
     return { cryptoToCharge: crypto.toFixed(4), currentFee: fee };
   }, [nairaAmount, exchangeRate, activeService, activeTab]);
 
-  // ⚡ FIXED: ENHANCED FILTER WITH SPECTRANET EXCEPTION ⚡
   const filteredInternetDataPlans = useMemo(() => {
     if (!internetVariations || internetVariations.length === 0) return [];
-
-    // Bypass category filters entirely for Spectranet so it shows everything at once
     if (internetProvider === 'spectranet') return internetVariations;
 
     return internetVariations.filter(plan => {
       const name = (plan.name || "").toLowerCase();
-      let category = "Monthly"; // Default fallback
+      let category = "Monthly"; 
 
       if (name.includes('broadband') || name.includes('router') || name.includes('5g') || name.includes('hynet') || name.includes('unlimited')) category = "Broadband";
       else if (name.includes('social') || name.includes('whatsapp') || name.includes('ig') || name.includes('instagram') || name.includes('tiktok') || name.includes('youtube') || name.includes('facebook') || name.includes('opera') || name.includes('xot')) category = "Social";
@@ -138,7 +142,11 @@ export default function Home() {
   const isFormValid = useMemo(() => {
     const amount = parseFloat(nairaAmount);
     if (!nairaAmount || isNaN(amount) || amount < dynamicMinAmount || amount > dynamicMaxAmount) return false;
+    
     if (activeTab === "bank") return accountNumber.length === 10 && customerName !== null && selectedBank !== null && customerPhone.length >= 10;
+    
+    if (activeTab === "education") return selectedEducationPlan !== null && customerPhone.length >= 10;
+
     if (activeTab === "pay") {
       if (activeService.id === "AIRTIME") return accountNumber.length === 11 && accountNumber.startsWith("0");
       if (activeService.id === "INTERNET") {
@@ -156,7 +164,7 @@ export default function Home() {
       }
     }
     return false;
-  }, [accountNumber, nairaAmount, activeService, customerName, dynamicMinAmount, dynamicMaxAmount, cableSubscriptionType, selectedCablePlan, selectedBank, selectedInternetPlan, internetAccountId, customerPhone, internetProvider, activeTab, cableProvider]);
+  }, [accountNumber, nairaAmount, activeService, customerName, dynamicMinAmount, dynamicMaxAmount, cableSubscriptionType, selectedCablePlan, selectedBank, selectedInternetPlan, internetAccountId, customerPhone, internetProvider, activeTab, cableProvider, selectedEducationPlan]);
 
   const showToast = (title: string, message: string, type: 'success' | 'error' = 'success') => {
     setToast({ title, message, type });
@@ -173,9 +181,10 @@ export default function Home() {
   };
 
   const handleResetService = (s: any) => {
-    setActiveService(s); setAccountNumber(""); setCustomerName(null); setNairaAmount(""); 
+    setActiveService(s); setAccountNumber(""); setCustomerName(null); setNairaAmount(""); setCustomerPhone("");
     setCableCurrentBouquet(null); setCableRenewAmount(null); setSelectedCablePlan(null);
     setCableSubscriptionType("renew"); setSelectedBank(null); setSelectedInternetPlan(null); setInternetAccountId(null);
+    setSelectedEducationPlan(null);
   };
 
   const openSelectionModal = (type: 'standard' | 'token' | 'provider' | 'country' | 'bank', title: string, options: any[], callback: (value: string) => void) => {
@@ -262,6 +271,8 @@ export default function Home() {
 
       if (activeTab === "bank") {
         vtpassServiceID = "bank-deposit"; displayNetwork = selectedBank.name; finalVariationCode = selectedBank.variation_code; uiCategory = "BANK";
+      } else if (activeTab === "education") {
+        vtpassServiceID = "waec-registration"; displayNetwork = "WAEC"; finalVariationCode = selectedEducationPlan?.variation_code || 'none'; uiCategory = "EDUCATION"; payloadBillersCode = customerPhone;
       } else {
         uiCategory = activeService.id;
         if (activeService.id === "ELECTRICITY") { vtpassServiceID = elecProvider; displayNetwork = elecProvider; finalVariationCode = meterType; } 
@@ -285,9 +296,9 @@ export default function Home() {
         serviceID: vtpassServiceID, serviceCategory: uiCategory, network: displayNetwork.toUpperCase(), billersCode: payloadBillersCode, amount: cryptoToCharge, nairaAmount: nairaAmount, token: selectedToken.symbol, txHash: hash, variation_code: finalVariationCode, phone: customerPhone || accountNumber, wallet_address: address, subscription_type: activeTab === "pay" && activeService.id === "CABLE" && ['dstv', 'gotv'].includes(cableProvider) ? cableSubscriptionType : undefined
       };
 
-      const newTx: any = { id: hash.slice(0,8), date: new Date().toLocaleString(), status: "PENDING", amountNaira: nairaAmount, amountCrypto: cryptoToCharge, tokenUsed: selectedToken.symbol, service: uiCategory === "BANK" ? "Bank Transfer" : activeService.name, network: displayNetwork.toUpperCase(), txHash: hash, account: accountNumber };
+      const newTx: any = { id: hash.slice(0,8), date: new Date().toLocaleString(), status: "PENDING", amountNaira: nairaAmount, amountCrypto: cryptoToCharge, tokenUsed: selectedToken.symbol, service: uiCategory === "BANK" ? "Bank Transfer" : uiCategory === "EDUCATION" ? "Education PIN" : activeService.name, network: displayNetwork.toUpperCase(), txHash: hash, account: uiCategory === "EDUCATION" ? customerPhone : accountNumber };
 
-      setAccountNumber(""); setNairaAmount(""); setCustomerPhone(""); setCustomerName(null); setSelectedCablePlan(null); setCableCurrentBouquet(null); setSelectedBank(null); setSelectedInternetPlan(null); setInternetAccountId(null);
+      setAccountNumber(""); setNairaAmount(""); setCustomerPhone(""); setCustomerName(null); setSelectedCablePlan(null); setCableCurrentBouquet(null); setSelectedBank(null); setSelectedInternetPlan(null); setInternetAccountId(null); setSelectedEducationPlan(null);
 
       const res = await fetch('/api/pay', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(backendPayload) });
       const result = await res.json();
@@ -371,6 +382,20 @@ export default function Home() {
     }
   }, [activeTab, activeService.id, cableProvider, internetProvider]);
 
+  // ⚡ EDUCATION API FETCHER ⚡
+  useEffect(() => {
+    if (activeTab === "education" && educationVariations.length === 0) {
+      const fetchEducation = async () => {
+        try {
+          const res = await fetch(`/api/variations?serviceID=waec-registration`);
+          const data = await res.json();
+          setEducationVariations(extractVtpassArray(data));
+        } catch (e) {}
+      };
+      fetchEducation();
+    }
+  }, [activeTab, educationVariations.length]);
+
   useEffect(() => {
     if (activeTab === "pay") {
       if (activeService.id === "AIRTIME" && accountNumber.length >= 4) {
@@ -389,16 +414,6 @@ export default function Home() {
       }
     }
   }, [accountNumber, activeService.id, activeTab, internetProvider]);
-
-  useEffect(() => {
-    if (activeTab === "bank") { if (accountNumber.length === 10 && selectedBank) verifyMerchant(); else setCustomerName(null); } 
-    else if (activeTab === "pay") {
-       if (activeService.id === "ELECTRICITY" && accountNumber.length >= 10) verifyMerchant();
-       else if (activeService.id === "CABLE" && cableProvider !== "showmax" && accountNumber.length >= 10) verifyMerchant();
-       else if (activeService.id === "INTERNET" && internetProvider === "smile-direct" && accountNumber.includes('@') && accountNumber.includes('.')) { const timeoutId = setTimeout(() => verifyMerchant(), 1000); return () => clearTimeout(timeoutId); } 
-       else { setCustomerName(null); }
-    }
-  }, [accountNumber, elecProvider, cableProvider, activeService.id, meterType, selectedBank, internetProvider, activeTab]);
 
   useEffect(() => {
     const checkRefunds = async () => {
@@ -449,6 +464,7 @@ export default function Home() {
         </div>
       )}
 
+      {/* COMPONENT MODALS */}
       <TermsModal isOpen={isTermsOpen} onClose={() => setIsTermsOpen(false)} />
       <PrivacyModal isOpen={isPrivacyOpen} onClose={() => setIsPrivacyOpen(false)} />
       <ReceiptModal receipt={selectedReceipt} isMainnet={isMainnet} onClose={() => setSelectedReceipt(null)} onShare={handleShareReceipt} onSupport={() => { setSupportTxHash(selectedReceipt.txHash); setSupportMessage(""); setSelectedReceipt(null); setIsSupportOpen(true); }} />
@@ -500,12 +516,134 @@ export default function Home() {
           </div>
         </div>
 
-        <div className="flex gap-2 bg-slate-200/50 p-1.5 rounded-2xl mb-6 shadow-inner">
-            <button onClick={() => { setActiveTab("pay"); handleResetService(SERVICES[0]); }} className={`flex-1 py-3 rounded-xl text-xs font-black transition-all ${activeTab === 'pay' ? 'bg-white text-emerald-600 shadow-xl' : 'text-slate-500 hover:text-slate-700'}`}>PAY BILLS</button>
-            <button onClick={() => { setActiveTab("bank"); handleResetService(SERVICES[0]); }} className={`flex-1 py-3 rounded-xl text-xs font-black transition-all ${activeTab === 'bank' ? 'bg-white text-emerald-600 shadow-xl' : 'text-slate-500 hover:text-slate-700'}`}>SEND MONEY</button>
-            <button onClick={() => { setActiveTab("history"); handleResetService(SERVICES[0]); }} className={`flex-1 py-3 rounded-xl text-xs font-black transition-all ${activeTab === 'history' ? 'bg-white text-emerald-600 shadow-xl' : 'text-slate-500 hover:text-slate-700'}`}>HISTORY</button>
+        {/* ⚡ UPDATED NAVIGATION TABS ⚡ */}
+        <div className="flex gap-2 bg-slate-200/50 p-1.5 rounded-2xl mb-6 shadow-inner overflow-x-auto no-scrollbar">
+            <button onClick={() => { setActiveTab("pay"); handleResetService(SERVICES[0]); }} className={`flex-1 min-w-[75px] py-3 rounded-xl text-[10px] sm:text-xs font-black transition-all ${activeTab === 'pay' ? 'bg-white text-emerald-600 shadow-xl' : 'text-slate-500 hover:text-slate-700'}`}>BILLS</button>
+            <button onClick={() => { setActiveTab("bank"); handleResetService(SERVICES[0]); }} className={`flex-1 min-w-[75px] py-3 rounded-xl text-[10px] sm:text-xs font-black transition-all ${activeTab === 'bank' ? 'bg-white text-emerald-600 shadow-xl' : 'text-slate-500 hover:text-slate-700'}`}>TRANSFER</button>
+            <button onClick={() => { setActiveTab("education"); handleResetService(SERVICES[0]); }} className={`flex-1 min-w-[75px] py-3 rounded-xl text-[10px] sm:text-xs font-black transition-all ${activeTab === 'education' ? 'bg-white text-emerald-600 shadow-xl' : 'text-slate-500 hover:text-slate-700'}`}>EDUCATION</button>
+            <button onClick={() => { setActiveTab("history"); handleResetService(SERVICES[0]); }} className={`flex-1 min-w-[75px] py-3 rounded-xl text-[10px] sm:text-xs font-black transition-all ${activeTab === 'history' ? 'bg-white text-emerald-600 shadow-xl' : 'text-slate-500 hover:text-slate-700'}`}>HISTORY</button>
         </div>
 
+        {/* ========================================================================================= */}
+        {/* EDUCATION UI BLOCK */}
+        {/* ========================================================================================= */}
+        {activeTab === 'education' && (
+          <div className="bg-white border border-slate-100 rounded-[2.5rem] p-8 shadow-2xl shadow-emerald-900/10 animate-in fade-in zoom-in-95">
+            <div className="space-y-5">
+                <div className="bg-slate-50 border border-slate-100 p-4 rounded-2xl flex justify-between items-center animate-in fade-in">
+                  <div 
+                    className="flex items-center gap-2 cursor-pointer hover:bg-slate-100 p-2 -ml-2 rounded-xl transition-colors" 
+                    onClick={() => openSelectionModal('token', "Select Token", SUPPORTED_TOKENS, (symbol) => setSelectedToken(SUPPORTED_TOKENS.find(t => t.symbol === symbol)!))}
+                  >
+                     <img src={selectedToken.logo} alt={selectedToken.symbol} className="w-7 h-7 object-contain rounded-full shadow-sm bg-white" />
+                     <span className="font-black text-slate-800 uppercase text-sm tracking-tight">{selectedToken.symbol}</span>
+                     <ChevronDown size={14} className="text-slate-400"/>
+                  </div>
+                  <div className="text-right">
+                    <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Available Balance</p>
+                    <div className="flex items-center justify-end gap-1">
+                      {isFetchingBalance ? <Loader2 size={12} className="animate-spin text-emerald-500"/> : <Coins size={12} className="text-emerald-500"/>}
+                      <p className="font-mono font-black text-sm text-slate-800">{walletBalance} <span className="text-[10px]">{selectedToken.symbol}</span></p>
+                    </div>
+                  </div>
+                </div>
+
+                <div className="animate-in slide-in-from-left-2 mb-2">
+                    <label className="text-[10px] font-black text-slate-400 uppercase mb-3 block">Service Provider</label>
+                    <div className="w-full bg-slate-50 border border-slate-200 p-4 rounded-2xl flex items-center gap-4 shadow-sm cursor-not-allowed">
+                        <div className="w-12 h-12 shrink-0 rounded-full border border-slate-100 bg-white p-0.5 flex items-center justify-center shadow-inner overflow-hidden">
+                            <GraduationCap className="text-emerald-500" size={24} />
+                        </div>
+                        <div>
+                            <span className="text-sm font-black text-slate-900 tracking-tight uppercase">WAEC Registration</span>
+                        </div>
+                    </div>
+                </div>
+
+                <div className="bg-slate-50 border border-slate-200 rounded-2xl p-4 shadow-sm animate-in fade-in slide-in-from-top-4">
+                  <p className="text-[10px] font-black uppercase tracking-widest text-slate-400 mb-2">Select Registration PIN</p>
+                  
+                  {selectedEducationPlan ? (
+                      <div className="relative animate-in zoom-in-95 duration-200 mt-2">
+                          <button onClick={() => { setSelectedEducationPlan(null); setNairaAmount(""); }} className="absolute -top-3 -right-3 bg-slate-200 text-slate-500 hover:text-slate-800 hover:bg-slate-300 rounded-full p-1 transition-all z-10 shadow-sm border border-white">
+                            <XCircle size={16}/>
+                          </button>
+                          <div className="p-4 rounded-2xl border-2 border-emerald-500 bg-emerald-50 shadow-sm text-left">
+                            <p className="font-black text-slate-900 text-sm tracking-tight pr-2">{selectedEducationPlan.name}</p>
+                            <p className="text-[10px] text-emerald-600 font-bold uppercase tracking-wider mb-2">Selected PIN</p>
+                            <div className="pt-2 border-t border-emerald-200/50 flex justify-between items-end">
+                                <p className="font-black text-emerald-600 text-xl leading-none">₦{parseFloat(selectedEducationPlan.variation_amount || "0").toLocaleString()}</p>
+                                <p className="text-[10px] text-slate-500 font-bold">{(parseFloat(selectedEducationPlan.variation_amount || "0") / exchangeRate).toFixed(4)} {selectedToken.symbol}</p>
+                              </div>
+                          </div>
+                      </div>
+                  ) : (
+                      <div className="grid grid-cols-1 gap-2 max-h-[35vh] overflow-y-auto pr-1">
+                        {educationVariations.length === 0 ? (
+                          <p className="text-center text-xs font-bold text-slate-400 py-4"><Loader2 className="animate-spin inline-block mr-2" size={14}/> Fetching PINs...</p>
+                        ) : (
+                          educationVariations.map((plan) => {
+                            const cryptoPlanCost = (parseFloat(plan.variation_amount || "0") / exchangeRate).toFixed(4);
+                            return (
+                              <button 
+                                key={plan.variation_code} 
+                                onClick={() => { setSelectedEducationPlan(plan); setNairaAmount(plan.variation_amount ? plan.variation_amount.toString() : "0"); }} 
+                                className="p-3 rounded-xl border border-slate-200 bg-white hover:border-emerald-300 transition-all text-left flex justify-between items-center group"
+                              >
+                                <div className="mr-2">
+                                  <p className="font-black text-slate-800 text-xs line-clamp-2 leading-tight">{plan.name}</p>
+                                  <p className="text-[9px] text-slate-400 font-bold mt-1">{cryptoPlanCost} {selectedToken.symbol}</p>
+                                </div>
+                                <p className="font-black text-emerald-600 text-sm group-hover:scale-110 transition-transform shrink-0">₦{parseFloat(plan.variation_amount || "0").toLocaleString()}</p>
+                              </button>
+                            );
+                          })
+                        )}
+                      </div>
+                  )}
+                </div>
+
+                <div className="animate-in fade-in">
+                    <label className="text-[10px] font-black text-slate-400 uppercase mb-2 flex justify-between">
+                      <span>Phone Number (For PIN SMS)</span>
+                      <span className={customerPhone.length >= 10 ? "text-emerald-500" : "text-slate-400"}>{customerPhone.length}/11</span>
+                    </label>
+                    <input 
+                        type="tel" placeholder="08000000000"
+                        maxLength={11}
+                        className={`w-full bg-slate-50 border p-5 rounded-2xl font-black text-xl text-slate-800 outline-none transition-all ${
+                          customerPhone.length > 0 && customerPhone.length < 10 ? "border-red-300 focus:border-red-500" : "border-slate-100 focus:border-emerald-500"
+                        }`}
+                        value={customerPhone}
+                        onChange={(e) => setCustomerPhone(e.target.value.replace(/[^0-9]/g, ''))}
+                    />
+                </div>
+
+                {status && (
+                    <div className={`p-5 rounded-2xl border flex items-center gap-4 animate-in fade-in slide-in-from-top-2 shadow-sm ${status.includes('Success') || status.includes('Secured') || status.includes('Initiating') ? 'bg-emerald-50 border-emerald-100 text-emerald-800' : status.includes('Verifying') || status.includes('Blockchain') || status.includes('confirmed') || status.includes('Mining') || status.includes('Processing') ? 'bg-blue-50 border-blue-100 text-blue-800' : 'bg-red-50 border-red-100 text-red-800'}`}>
+                        {status.includes('Success') ? <CheckCircle2 size={24} className="text-emerald-600"/> : status.includes('Verifying') || status.includes('Blockchain') || status.includes('confirmed') || status.includes('Mining') || status.includes('Processing') ? <Loader2 size={24} className="animate-spin text-blue-600"/> : <AlertTriangle size={24} className="text-red-600"/>}
+                        <p className="text-sm font-black tracking-tight">{status}</p>
+                    </div>
+                )}
+
+                <button 
+                    onClick={handlePayment}
+                    disabled={!isFormValid || isProcessing}
+                    className="w-full bg-slate-900 hover:bg-black text-white font-black py-6 rounded-3xl flex items-center justify-center gap-3.5 transition-all active:scale-95 disabled:opacity-30 shadow-xl shadow-slate-900/20 text-lg tracking-tight"
+                >
+                    {isProcessing ? (
+                      <><Loader2 size={24} className="animate-spin text-emerald-400"/> SECURING PROTOCOL...</>
+                    ) : (
+                      <><ShieldCheck size={24} className="text-emerald-400" /> CONFIRM & PAY {cryptoToCharge} {selectedToken.symbol}</>
+                    )}
+                </button>
+            </div>
+          </div>
+        )}
+
+        {/* ========================================================================================= */}
+        {/* BANK UI BLOCK */}
+        {/* ========================================================================================= */}
         {activeTab === 'bank' && (
           <div className="bg-white border border-slate-100 rounded-[2.5rem] p-8 shadow-2xl shadow-emerald-900/10 animate-in fade-in zoom-in-95">
             <div className="space-y-5">
@@ -634,6 +772,9 @@ export default function Home() {
           </div>
         )}
 
+        {/* ========================================================================================= */}
+        {/* PAY UTILITIES UI BLOCK */}
+        {/* ========================================================================================= */}
         {activeTab === 'pay' && (
           <div className="bg-white border border-slate-100 rounded-[2.5rem] p-8 shadow-2xl shadow-emerald-900/10 animate-in fade-in zoom-in-95">
             <div className="flex overflow-x-auto gap-3 pb-2 mb-4 no-scrollbar">
