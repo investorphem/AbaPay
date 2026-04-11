@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server';
-import { getHeaders } from '@/lib/vtpass'; // ⚡ Removed static BASE_URL import
+import { getHeaders } from '@/lib/vtpass'; 
 import { sendAbaPaySms } from '@/lib/messaging';
 import { sendTelegramAlert } from '@/lib/telegram'; 
 import { supabaseAdmin as supabase } from '@/utils/supabase'; 
@@ -60,7 +60,6 @@ export async function POST(req: Request) {
       isForeign, operator_id, country_code, product_type_id, email
     } = body;
 
-    // ⚡ DYNAMIC ENVIRONMENT SWITCHING VIA APP MODE ⚡
     const appMode = process.env.NEXT_PUBLIC_APP_MODE || "sandbox";
     const baseUrl = appMode === "live" ? "https://vtpass.com/api" : "https://sandbox.vtpass.com/api";
 
@@ -71,7 +70,7 @@ export async function POST(req: Request) {
     const requestedNaira = parseFloat(nairaAmount);
 
     const needsVerification = !isForeign && (serviceCategory === 'ELECTRICITY' || serviceCategory === 'BANK' || (serviceCategory === 'EDUCATION' && serviceID === 'jamb') || (serviceCategory === 'CABLE' && network !== 'SHOWMAX'));
-    
+
     const serviceFee = (needsVerification || serviceCategory === 'EDUCATION') ? 100 : 0;
     const vendAmount = requestedNaira; 
     const vtRequestId = getStrictRequestId();
@@ -117,10 +116,9 @@ export async function POST(req: Request) {
     }
 
     if (needsVerification) {
-      // ⚡ USING DYNAMIC baseUrl FOR VERIFICATION ⚡
       const verifyRes = await fetch(`${baseUrl}/merchant-verify`, {
         method: 'POST',
-        headers: getHeaders('POST'),
+        headers: getHeaders(), // ⚡ FIXED: Removed 'POST' argument
         body: JSON.stringify({ 
           billersCode, 
           serviceID, 
@@ -184,10 +182,9 @@ export async function POST(req: Request) {
 
     let payRes, payData;
     try {
-      // ⚡ USING DYNAMIC baseUrl FOR ACTUAL PAYMENT ⚡
       payRes = await fetch(`${baseUrl}/pay`, {
         method: 'POST',
-        headers: getHeaders('POST'),
+        headers: getHeaders(), // ⚡ FIXED: Removed 'POST' argument
         body: JSON.stringify(vtpassPayload)
       });
       payData = await payRes.json();
