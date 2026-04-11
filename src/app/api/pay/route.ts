@@ -65,9 +65,12 @@ export async function POST(req: Request) {
     }
 
     const requestedNaira = parseFloat(nairaAmount);
+
+    // ⚡ ADDED EDUCATION (JAMB) TO VERIFICATION REQUIREMENT ⚡
+    const needsVerification = !isForeign && (serviceCategory === 'ELECTRICITY' || serviceCategory === 'BANK' || (serviceCategory === 'EDUCATION' && serviceID === 'jamb') || (serviceCategory === 'CABLE' && network !== 'SHOWMAX'));
     
-    const needsVerification = !isForeign && (serviceCategory === 'ELECTRICITY' || serviceCategory === 'BANK' || (serviceCategory === 'CABLE' && network !== 'SHOWMAX'));
-    const serviceFee = needsVerification ? 100 : 0;
+    // Education (WAEC & JAMB) gets the 100 Naira service fee just like Banks and Electricity
+    const serviceFee = (needsVerification || serviceCategory === 'EDUCATION') ? 100 : 0;
     const vendAmount = requestedNaira; 
     const vtRequestId = getStrictRequestId();
 
@@ -118,7 +121,7 @@ export async function POST(req: Request) {
         body: JSON.stringify({ 
           billersCode, 
           serviceID, 
-          type: serviceCategory === 'ELECTRICITY' ? (variation_code.includes('postpaid') ? 'postpaid' : 'prepaid') : serviceCategory === 'BANK' ? variation_code : undefined 
+          type: serviceCategory === 'ELECTRICITY' ? (variation_code.includes('postpaid') ? 'postpaid' : 'prepaid') : (serviceCategory === 'BANK' || serviceCategory === 'EDUCATION') ? variation_code : undefined 
         })
       });
 
@@ -148,10 +151,16 @@ export async function POST(req: Request) {
         vtpassPayload.billersCode = billersCode;
         vtpassPayload.variation_code = variation_code;
       }
+      else if (serviceCategory === 'EDUCATION') {
+        // ⚡ EDUCATION ROUTING ⚡
+        vtpassPayload.variation_code = variation_code;
+        if (serviceID === 'jamb') {
+           vtpassPayload.billersCode = billersCode; // JAMB needs Profile ID
+        }
+      }
       else if (serviceCategory === 'INTERNET') {
         vtpassPayload.billersCode = billersCode;
         vtpassPayload.variation_code = variation_code;
-        // ⚡ SPECTRANET PAYLOAD OVERRIDE ⚡
         if (serviceID === 'spectranet') {
            vtpassPayload.quantity = 1;
         }
@@ -202,6 +211,10 @@ export async function POST(req: Request) {
           if (payData.units) vendedUnits = payData.units.toString();
           else if (payData.content?.transactions?.units) vendedUnits = payData.content.transactions.units.toString();
           else if (payData.content?.transactions?.unit) vendedUnits = payData.content.transactions.unit.toString();
+        } else if (serviceCategory === 'EDUCATION') {
+          // ⚡ EDUCATION PIN EXTRACTION ⚡
+          dbPurchasedCode = payData.purchased_code || payData.Pin || null;
+          alertTokenRef = dbPurchasedCode || "Processing PIN";
         } else {
           alertTokenRef = payData.content?.transactions?.transactionId || payData.requestId || "Success";
         }
@@ -213,7 +226,7 @@ export async function POST(req: Request) {
         }).eq('tx_hash', txHash);
 
         try { await sendAbaPaySms(vtpassPayload.phone, `Purchase Successful! Ref: ${alertTokenRef}. Amt: ₦${vendAmount}`); } catch (e) {}
-        try { await sendTelegramAlert(`✅ *SALE SUCCESSFUL*\n🛒 *Product:* ${network} ${serviceCategory}\n💰 *Naira:* ₦${vendAmount}\n🪙 *Asset:* ${amount} ${tokenSymbol || 'USD₮'}\n👤 *User:* ${billersCode}\n⛽ *Fee:* ₦${serviceFee}\n🧾 *Ref:* ${alertTokenRef}`); } catch (e) {}
+        try { await sendTelegramAlert(`✅ *SALE SUCCESSFUL*\n🛒 *Product:* ${network} ${serviceCategory}\n💰 *Naira:* ₦${vendAmount}\n🪙 *Asset:* ${amount} ${tokenSymbol || 'USD₮'}\n👤 *User:* ${billersCode || phone}\n⛽ *Fee:* ₦${serviceFee}\n🧾 *Ref:* ${alertTokenRef}`); } catch (e) {}
 
         return NextResponse.json({
           success: true,
@@ -225,7 +238,7 @@ export async function POST(req: Request) {
 
       } else if (actualStatus === 'pending' || actualStatus === 'initiated' || payData.code === '099') {
         await supabase.from('transactions').update({ status: 'PENDING' }).eq('tx_hash', txHash);
-        try { await sendTelegramAlert(`⏳ *TRANSACTION PENDING*\n🛒 *Product:* ${network} ${serviceCategory}\n👤 *User:* ${billersCode}\n⚠️ Network delayed. Awaiting final delivery confirmation from VTpass.`); } catch (e) {}
+        try { await sendTelegramAlert(`⏳ *TRANSACTION PENDING*\n🛒 *Product:* ${network} ${serviceCategory}\n👤 *User:* ${billersCode || phone}\n⚠️ Network delayed. Awaiting final delivery confirmation from VTpass.`); } catch (e) {}
 
         return NextResponse.json({
           success: true, 
@@ -242,7 +255,7 @@ export async function POST(req: Request) {
     } else {
       await supabase.from('transactions').update({ status: 'FAILED_VENDING' }).eq('tx_hash', txHash);
       const rawAdminError = payData.response_description || 'Unknown Provider Error';
-      try { await sendTelegramAlert(`🚨 *VENDING REJECTED*\n🛒 *Product:* ${network} ${serviceCategory}\n👤 *User:* ${billersCode}\n❌ *VTpass Code:* ${payData.code}\n🛑 *Real Error:* ${rawAdminError}\n🔗 *Hash:* \`${txHash}\``); } catch (e) {}
+      try { await sendTelegramAlert(`🚨 *VENDING REJECTED*\n🛒 *Product:* ${network} ${serviceCategory}\n👤 *User:* ${billersCode || phone}\n❌ *VTpass Code:* ${payData.code}\n🛑 *Real Error:* ${rawAdminError}\n🔗 *Hash:* \`${txHash}\``); } catch (e) {}
 
       const friendlyMessage = error_messages[payData.code as string] || "Utility vending failed at the provider level. Please contact support.";
       return NextResponse.json({ success: false, message: friendlyMessage, code: payData.code }, { status: 502 });
