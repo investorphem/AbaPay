@@ -67,7 +67,6 @@ export default function AdminDashboard() {
   const [currentPage, setCurrentPage] = useState(1);
   const [processingRefundId, setProcessingRefundId] = useState<string | null>(null);
 
-  // ⚡ PRICING ENGINE STATE ⚡
   const [currentExchangeRate, setCurrentExchangeRate] = useState<string>("Loading...");
   const [newExchangeRate, setNewExchangeRate] = useState<string>("");
   const [isUpdatingRate, setIsUpdatingRate] = useState(false);
@@ -111,7 +110,6 @@ export default function AdminDashboard() {
     setIsFetching(false);
   };
 
-  // ⚡ FETCH DYNAMIC RATE FROM DB ⚡
   const fetchExchangeRate = async () => {
     const { data, error } = await supabase
       .from('platform_settings')
@@ -128,7 +126,6 @@ export default function AdminDashboard() {
     }
   };
 
-  // ⚡ UPGRADED: SECURE BACKEND RATE UPDATE ⚡
   const updateExchangeRate = async () => {
     if (!newExchangeRate || isNaN(Number(newExchangeRate))) return alert("Invalid rate");
 
@@ -276,7 +273,7 @@ export default function AdminDashboard() {
       const matchesSearch = (tx.account_number || "").includes(searchTerm) || 
                             (tx.network || "").toLowerCase().includes(searchLower) ||
                             (tx.wallet_address || "").toLowerCase().includes(searchLower) ||
-                            (tx.request_id || "").toLowerCase().includes(searchLower); // Added search by request_id
+                            (tx.request_id || "").toLowerCase().includes(searchLower);
       const matchesStatus = filterStatus === "ALL" || tx.status === filterStatus;
       return matchesSearch && matchesStatus;
     });
@@ -293,7 +290,6 @@ export default function AdminDashboard() {
   );
 
   const exportCSV = () => {
-    // Upgraded CSV Export to include Units and Purchased Code
     const headers = "Date,Status,Network,Service,Account,Naira,USDT,Transaction ID,Units,Token PIN,Hash\n";
     const rows = filteredTx.map(tx => `${tx.created_at},${tx.status},${tx.network},${tx.service_category},${tx.account_number},${tx.amount_naira},${tx.amount_usdt},${tx.request_id || 'N/A'},${tx.units || 'N/A'},${tx.purchased_code || 'N/A'},${tx.tx_hash}`).join("\n");
     const blob = new Blob([headers + rows], { type: 'text/csv' });
@@ -346,7 +342,7 @@ export default function AdminDashboard() {
               ))}
             </div>
 
-            {/* ⚡ PRICING ENGINE TAB ⚡ */}
+            {/* PRICING ENGINE TAB */}
             {activeTab === 'pricing' && (
               <div className="bg-[#111114] border border-slate-800 rounded-3xl p-8 animate-in fade-in">
                  <div className="flex items-center gap-3 mb-6">
@@ -409,7 +405,6 @@ export default function AdminDashboard() {
                 </div>
 
                 <div className="overflow-x-auto min-h-[400px] flex flex-col justify-between">
-                  {/* ⚡ UPGRADED ADMIN TABLE FOR NEW COLUMNS ⚡ */}
                   <table className="w-full text-left text-sm">
                     <thead>
                       <tr className="text-slate-500 border-b border-slate-800 text-[10px] uppercase">
@@ -431,13 +426,13 @@ export default function AdminDashboard() {
                             <p className="text-slate-200 font-bold uppercase">{tx.network || 'N/A'}</p>
                             <p className="text-[10px] text-slate-500 uppercase tracking-wider mt-0.5">{tx.service_category} • {tx.account_number}</p>
                           </td>
-                          {/* ⚡ NEW: PROVIDER DATA COLUMN ⚡ */}
+                          {/* ⚡ FIXED: ADDED EDUCATION PIN EXTRACTION ⚡ */}
                           <td className="py-4 px-2 min-w-[180px]">
                             <p className="text-slate-300 font-mono text-[10px] tracking-wider mb-0.5">ID: {tx.request_id || 'N/A'}</p>
-                            {tx.service_category === 'ELECTRICITY' && tx.status === 'SUCCESS' ? (
+                            {(tx.service_category === 'ELECTRICITY' || tx.service_category === 'EDUCATION') && tx.status === 'SUCCESS' ? (
                                 <div className="text-[9px]">
                                     <p className="text-orange-400 font-bold tracking-widest">{tx.purchased_code ? tx.purchased_code.replace(/token\s*[:\-]*\s*/gi, '').trim() : 'N/A'}</p>
-                                    <p className="text-slate-500">{tx.units || 'N/A'} kWh</p>
+                                    <p className="text-slate-500">{tx.service_category === 'ELECTRICITY' && tx.units ? `${tx.units} kWh` : tx.service_category === 'EDUCATION' ? 'Education PIN' : 'N/A'}</p>
                                 </div>
                             ) : (
                                 <p className="text-[9px] text-slate-600 italic">No Token Generated</p>
@@ -457,7 +452,6 @@ export default function AdminDashboard() {
                               }`}>
                                 {tx.status}
                               </span>
-                              {/* ⚡ ALLOW REFUNDS FOR MISMATCHES TOO ⚡ */}
                               {(tx.status === 'FAILED_VENDING' || tx.status === 'FAILED_FUNDS_MISMATCH') && (
                                 <button 
                                   onClick={() => handleRefund(tx)}
