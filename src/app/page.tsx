@@ -62,6 +62,7 @@ const ELEC_PRE_SELECT_AMOUNTS = ["1000", "2000", "5000", "10000", "20000"];
 const DATA_CATEGORIES = ["Daily", "Weekly", "Monthly", "Social", "Mega", "Broadband"];
 const ITEMS_PER_PAGE = 5;
 
+// ⚡ BULLETPROOF VTPASS EXTRACTOR ⚡
 const extractVtpassArray = (data: any): any[] => {
   if (!data) return [];
   if (Array.isArray(data)) return data;
@@ -100,10 +101,12 @@ export default function Home() {
   const [cableVariations, setCableVariations] = useState<any[]>([]);
   const [selectedCablePlan, setSelectedCablePlan] = useState<any>(null);
 
+  // ⚡ INTERNET STATES ⚡
   const [internetVariations, setInternetVariations] = useState<any[]>([]);
   const [selectedInternetPlan, setSelectedInternetPlan] = useState<any>(null);
   const [internetAccountId, setInternetAccountId] = useState<string | null>(null);
 
+  // ⚡ BANK STATES ⚡
   const [bankVariations, setBankVariations] = useState<any[]>([]);
   const [selectedBank, setSelectedBank] = useState<any>(null);
   const [isFetchingBanks, setIsFetchingBanks] = useState(false);
@@ -175,10 +178,14 @@ export default function Home() {
     return { cryptoToCharge: crypto.toFixed(4), currentFee: fee };
   }, [nairaAmount, exchangeRate, activeService, activeTab]);
 
+  // ⚡ STRICT FILTER FOR INTERNET ⚡
   const filteredInternetDataPlans = useMemo(() => {
     if (!internetVariations || internetVariations.length === 0) return [];
+    
+    // Smile and Spectranet bypass the Daily/Weekly category filters entirely
     if (internetProvider === 'smile-direct' || internetProvider === 'spectranet') return internetVariations;
 
+    // Standard Telecom Data applies categories
     return internetVariations.filter(plan => {
       const name = (plan.name || "").toLowerCase();
       let category = "Monthly";
@@ -228,50 +235,56 @@ export default function Home() {
     return false;
   }, [accountNumber, nairaAmount, activeService, customerName, dynamicMinAmount, dynamicMaxAmount, cableSubscriptionType, selectedCablePlan, selectedBank, selectedInternetPlan, internetAccountId, customerPhone, internetProvider, activeTab, cableProvider]);
 
-  // ⚡ BULLETPROOF STARTUP ENGINE ⚡
-  useEffect(() => {
-    // Failsafe timer: forces the loading screen off no matter what happens
-    const fallbackTimer = setTimeout(() => setIsInitiallyLoading(false), 3000);
-
-    async function initSystem() {
-      try {
-        const savedHistory = localStorage.getItem("abapay_history");
-        if (savedHistory) {
-          const parsed = JSON.parse(savedHistory);
-          if (Array.isArray(parsed)) setTransactions(parsed);
-        }
-      } catch (e) {}
-
-      try {
-        const { data: settingsData } = await supabase.from('platform_settings').select('exchange_rate').eq('id', 1).single();
-        if (settingsData && settingsData.exchange_rate) setExchangeRate(Number(settingsData.exchange_rate));
-      } catch (consoleError) {}
-
-      try {
-        if (typeof window !== "undefined" && (window as any).ethereum) {
-          const eth = (window as any).ethereum;
-          if (eth.isMiniPay) setIsMiniPay(true);
-          const walletClient = createWalletClient({ chain: activeChain, transport: custom(eth) });
-          walletClient.requestAddresses().then(([acc]) => {
-            setAddress(acc); setClient(walletClient);
-          }).catch((e) => console.log("Connection deferred"));
-        }
-      } catch (e) {}
-
-      clearTimeout(fallbackTimer);
-      setTimeout(() => setIsInitiallyLoading(false), 1500);
-    }
-    
-    initSystem();
-    return () => clearTimeout(fallbackTimer);
-  }, [activeChain]);
-
+  // ⚡ BACKGROUND FETCHERS ⚡
   useEffect(() => {
     if (status && !isProcessing) {
       const timer = setTimeout(() => setStatus(""), 5000); 
       return () => clearTimeout(timer);
     }
   }, [status, isProcessing]);
+
+  useEffect(() => {
+    async function initSystem() {
+      const savedHistory = localStorage.getItem("abapay_history");
+      if (savedHistory) setTransactions(JSON.parse(savedHistory));
+
+      try {
+        const { data: settingsData } = await supabase.from('platform_settings').select('exchange_rate').eq('id', 1).single();
+        if (settingsData && settingsData.exchange_rate) setExchangeRate(Number(settingsData.exchange_rate));
+      } catch (consoleError) {}
+
+      if (typeof window !== "undefined" && (window as any).ethereum) {
+        const eth = (window as any).ethereum;
+        if (eth.isMiniPay) setIsMiniPay(true);
+        const walletClient = createWalletClient({ chain: activeChain, transport: custom(eth) });
+        walletClient.requestAddresses().then(([acc]) => {
+          setAddress(acc); setClient(walletClient);
+        }).catch((e) => console.log("Connection deferred"));
+      }
+
+      setTimeout(() => setIsInitiallyLoading(false), 2000);
+    }
+    initSystem();
+  }, [activeChain]);
+
+  // GUARANTEED BANK FETCH ON MOUNT
+  useEffect(() => {
+    const fetchBanks = async () => {
+      setIsFetchingBanks(true);
+      try {
+        const res = await fetch(`/api/variations?serviceID=bank-deposit`);
+        const data = await res.json();
+        let banksArr = extractVtpassArray(data);
+        
+        if (banksArr && Array.isArray(banksArr) && banksArr.length > 0) {
+          const sortedBanks = banksArr.sort((a: any, b: any) => (a.name || "").localeCompare(b.name || ""));
+          setBankVariations(sortedBanks);
+        }
+      } catch (e) {}
+      setIsFetchingBanks(false);
+    };
+    fetchBanks();
+  }, []); // Empty dependency array ensures it loads banks once on app launch
 
   useEffect(() => {
     if (!address) return;
@@ -311,26 +324,7 @@ export default function Home() {
     fetchBalance();
   }, [address, selectedToken, activeChain, isMainnet]);
 
-  useEffect(() => {
-    if (activeTab === "bank" && bankVariations.length === 0) {
-      const fetchBanks = async () => {
-        setIsFetchingBanks(true);
-        try {
-          const res = await fetch(`/api/variations?serviceID=bank-deposit`);
-          const data = await res.json();
-          let banksArr = extractVtpassArray(data);
-          
-          if (banksArr && Array.isArray(banksArr) && banksArr.length > 0) {
-            const sortedBanks = banksArr.sort((a: any, b: any) => (a.name || "").localeCompare(b.name || ""));
-            setBankVariations(sortedBanks);
-          }
-        } catch (e) {}
-        setIsFetchingBanks(false);
-      };
-      fetchBanks();
-    }
-  }, [activeTab, bankVariations.length]);
-
+  // DEDICATED UTILITY FETCHER
   useEffect(() => {
     if (activeTab !== "pay") return;
     if (activeService.id === "CABLE") {
@@ -355,6 +349,7 @@ export default function Home() {
     }
   }, [activeTab, activeService.id, cableProvider, internetProvider]);
 
+  // AUTO TELECOM NETWORK DETECTION
   useEffect(() => {
     if (activeTab === "pay") {
       if (activeService.id === "AIRTIME" && accountNumber.length >= 4) {
@@ -374,6 +369,7 @@ export default function Home() {
     }
   }, [accountNumber, activeService.id, activeTab, internetProvider]);
 
+  // ⚡ UNIFIED VERIFICATION ENGINE ⚡
   const verifyMerchant = async () => {
     setIsVerifying(true);
     setCustomerName(null);
@@ -438,9 +434,55 @@ export default function Home() {
     }
   }, [accountNumber, elecProvider, cableProvider, activeService.id, meterType, selectedBank, internetProvider, activeTab]);
 
+  // ⚡ ACTION HANDLERS ⚡
   const showToast = (title: string, message: string, type: 'success' | 'error' = 'success') => {
     setToast({ title, message, type });
     setTimeout(() => setToast(null), 5000);
+  };
+
+  const handleProviderChange = (newProvider: string, type: 'telecom' | 'cable' | 'elec' | 'internet' | 'bank') => {
+    setNairaAmount("");
+    setAccountNumber("");
+    setCustomerName(null);
+    
+    if (type === 'telecom') { setTelecomProvider(newProvider); }
+    if (type === 'cable') { setCableProvider(newProvider); setSelectedCablePlan(null); setCableCurrentBouquet(null); setCableRenewAmount(null); }
+    if (type === 'elec') { setElecProvider(newProvider); }
+    if (type === 'internet') { setInternetProvider(newProvider); setSelectedInternetPlan(null); setInternetAccountId(null); }
+    if (type === 'bank') { setSelectedBank(newProvider); }
+  };
+
+  const handleResetService = (s: any) => {
+    setActiveService(s); setAccountNumber(""); setCustomerName(null); setNairaAmount(""); 
+    setCableCurrentBouquet(null); setCableRenewAmount(null); setSelectedCablePlan(null);
+    setCableSubscriptionType("renew"); setSelectedBank(null); setSelectedInternetPlan(null); setInternetAccountId(null);
+  };
+
+  const openSelectionModal = (type: 'standard' | 'token' | 'provider' | 'country' | 'bank', title: string, options: any[], callback: (value: string) => void) => {
+    setModalType(type as any); setModalTitle(title); setModalOptions(options); setModalCallback(() => callback); setIsSelectionModalOpen(true);
+  };
+
+  const handleCountryChange = (countryCode: string) => {
+    const country = SUPPORTED_COUNTRIES.find(c => c.code === countryCode);
+    if (country && !country.disabled) { setActiveCountry(country); handleResetService(SERVICES[0]); }
+  };
+
+  const handleShareReceipt = async () => {
+    const receiptText = `🧾 AbaPay Receipt\n\nDate: ${selectedReceipt?.date}\nStatus: ${selectedReceipt?.status}\nProduct: ${selectedReceipt?.network} ${selectedReceipt?.service}\nRecipient: ${selectedReceipt?.account}\nAmount Paid: ₦${selectedReceipt?.amountNaira}\nCrypto Used: ${selectedReceipt?.amountCrypto} ${selectedReceipt?.tokenUsed}\nTx Hash: ${selectedReceipt?.txHash}\n\nSecured by Celo Network`;
+    if (navigator.share) { try { await navigator.share({ title: 'Receipt', text: receiptText }); } catch (err) {} } 
+    else { try { await navigator.clipboard.writeText(receiptText); showToast("Copied!", "Receipt details copied to clipboard.", "success"); } catch (err) {} }
+  };
+
+  const submitSupportTicket = async () => {
+    if (!supportMessage.trim()) return;
+    setIsSendingSupport(true);
+    try {
+      const formData = new FormData(); formData.append("message", supportMessage);
+      if (address) formData.append("userAddress", address); if (supportTxHash) formData.append("txHash", supportTxHash); if (supportFile) formData.append("file", supportFile);
+      await fetch('/api/support', { method: 'POST', body: formData });
+      setIsSupportOpen(false); setSupportMessage(""); setSupportFile(null); setSupportTxHash(null); 
+      showToast("Ticket Submitted", "Support has received your request.", "success");
+    } catch (error) { showToast("Connection Error", "Failed to send the ticket.", "error"); } finally { setIsSendingSupport(false); }
   };
 
   const handlePayment = async () => {
@@ -545,39 +587,6 @@ export default function Home() {
     } catch (e) { setStatus("Transaction Cancelled."); } finally { setIsProcessing(false); }
   };
 
-  const handleResetService = (s: any) => {
-    setActiveService(s); setAccountNumber(""); setCustomerName(null); setNairaAmount(""); 
-    setCableCurrentBouquet(null); setCableRenewAmount(null); setSelectedCablePlan(null);
-    setCableSubscriptionType("renew"); setSelectedBank(null); setSelectedInternetPlan(null); setInternetAccountId(null);
-  };
-
-  const openSelectionModal = (type: 'standard' | 'token' | 'provider' | 'country' | 'bank', title: string, options: any[], callback: (value: string) => void) => {
-    setModalType(type as any); setModalTitle(title); setModalOptions(options); setModalCallback(() => callback); setIsSelectionModalOpen(true);
-  };
-
-  const handleCountryChange = (countryCode: string) => {
-    const country = SUPPORTED_COUNTRIES.find(c => c.code === countryCode);
-    if (country && !country.disabled) { setActiveCountry(country); handleResetService(SERVICES[0]); }
-  };
-
-  const handleShareReceipt = async () => {
-    const receiptText = `🧾 AbaPay Receipt\n\nDate: ${selectedReceipt?.date}\nStatus: ${selectedReceipt?.status}\nProduct: ${selectedReceipt?.network} ${selectedReceipt?.service}\nRecipient: ${selectedReceipt?.account}\nAmount Paid: ₦${selectedReceipt?.amountNaira}\nCrypto Used: ${selectedReceipt?.amountCrypto} ${selectedReceipt?.tokenUsed}\nTx Hash: ${selectedReceipt?.txHash}\n\nSecured by Celo Network`;
-    if (navigator.share) { try { await navigator.share({ title: 'Receipt', text: receiptText }); } catch (err) {} } 
-    else { try { await navigator.clipboard.writeText(receiptText); showToast("Copied!", "Receipt details copied to clipboard.", "success"); } catch (err) {} }
-  };
-
-  const submitSupportTicket = async () => {
-    if (!supportMessage.trim()) return;
-    setIsSendingSupport(true);
-    try {
-      const formData = new FormData(); formData.append("message", supportMessage);
-      if (address) formData.append("userAddress", address); if (supportTxHash) formData.append("txHash", supportTxHash); if (supportFile) formData.append("file", supportFile);
-      await fetch('/api/support', { method: 'POST', body: formData });
-      setIsSupportOpen(false); setSupportMessage(""); setSupportFile(null); setSupportTxHash(null); 
-      showToast("Ticket Submitted", "Support has received your request.", "success");
-    } catch (error) { showToast("Connection Error", "Failed to send the ticket.", "error"); } finally { setIsSendingSupport(false); }
-  };
-
   useEffect(() => {
     const checkRefunds = async () => {
       if (activeTab === "history" && transactions.length > 0) {
@@ -600,6 +609,9 @@ export default function Home() {
     checkRefunds();
   }, [activeTab, transactions]);
 
+  // ==========================================
+  // RENDER UI
+  // ==========================================
   return (
     <main className="min-h-screen bg-slate-50 text-slate-900 font-sans p-4 flex flex-col items-center pb-20 relative">
       <style>{`@keyframes logoScale { 0%, 100% { transform: scale(1); opacity: 0.9; } 50% { transform: scale(1.1); opacity: 1; } } .animate-logo-scale { animation: logoScale 1.5s ease-in-out infinite; } .no-scrollbar::-webkit-scrollbar { display: none; } .no-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }`}</style>
@@ -756,6 +768,7 @@ export default function Home() {
                      {activeCountry.code === country.code && <CheckCircle2 size={18} className="text-emerald-500"/>}
                    </button>
                  ))}
+
                  {modalType === 'bank' && isFetchingBanks && (
                    <div className="flex flex-col items-center justify-center p-6 gap-3 text-slate-400">
                      <Loader2 className="animate-spin text-blue-500" size={24} />
@@ -775,6 +788,7 @@ export default function Home() {
                      {selectedBank?.variation_code === bank.variation_code && <CheckCircle2 size={18} className="text-blue-500"/>}
                    </button>
                  ))}
+
                  {modalType === 'token' && SUPPORTED_TOKENS.map(token => (
                    <button 
                      key={token.symbol} 
@@ -785,6 +799,7 @@ export default function Home() {
                      {selectedToken.symbol === token.symbol && <CheckCircle2 size={18} className="text-emerald-500"/>}
                    </button>
                  ))}
+
                  {modalType === 'provider' && (modalOptions as any[]).map(provider => (
                     <button 
                         key={provider.serviceID} 
@@ -802,14 +817,20 @@ export default function Home() {
                         )}
                     </button>
                  ))}
+
                  {modalType === 'standard' && (modalOptions as string[]).map(option => (
                      <button 
                        key={option} 
                        onClick={() => { modalCallback?.(option); setIsSelectionModalOpen(false); }}
                        className="w-full text-left p-4 rounded-xl font-black text-slate-700 bg-slate-50 border border-slate-100 uppercase text-xs hover:border-emerald-300 hover:bg-emerald-50/50 transition-all flex justify-between items-center"
                      >
-                       <span>{option}</span>
-                       {(telecomProvider === option || cableProvider === option) && <CheckCircle2 size={16} className="text-emerald-500"/>}
+                       <div className="flex items-center gap-3">
+                           <div className="w-8 h-8 rounded-full border border-slate-100 bg-white p-0.5 flex items-center justify-center shadow-sm overflow-hidden group-hover:shadow-md transition-shadow">
+                                <img src={`/${option}.png`} alt={option} className="w-full h-full object-contain" onError={(e) => { e.currentTarget.style.display = 'none'; e.currentTarget.parentElement!.innerHTML = `<span class="text-[9px] font-black uppercase text-slate-400">${option.slice(0,3)}</span>`; }} />
+                           </div>
+                           <span>{option}</span>
+                       </div>
+                       {(telecomProvider === option) && <CheckCircle2 size={16} className="text-emerald-500"/>}
                      </button>
                  ))}
               </div>
@@ -840,11 +861,13 @@ export default function Home() {
 
         <div className="flex gap-2 bg-slate-200/50 p-1.5 rounded-2xl mb-6 shadow-inner">
             <button onClick={() => setActiveTab("pay")} className={`flex-1 py-3 rounded-xl text-xs font-black transition-all ${activeTab === 'pay' ? 'bg-white text-emerald-600 shadow-xl' : 'text-slate-500 hover:text-slate-700'}`}>PAY BILLS</button>
-            <button onClick={() => setActiveTab("bank")} className={`flex-1 py-3 rounded-xl text-xs font-black transition-all ${activeTab === 'bank' ? 'bg-white text-emerald-600 shadow-xl' : 'text-slate-500 hover:text-slate-700'}`}>SEND MONEY</button>
+            <button onClick={() => { setActiveTab("bank"); handleResetService(SERVICES[0]); }} className={`flex-1 py-3 rounded-xl text-xs font-black transition-all ${activeTab === 'bank' ? 'bg-white text-emerald-600 shadow-xl' : 'text-slate-500 hover:text-slate-700'}`}>SEND MONEY</button>
             <button onClick={() => setActiveTab("history")} className={`flex-1 py-3 rounded-xl text-xs font-black transition-all ${activeTab === 'history' ? 'bg-white text-emerald-600 shadow-xl' : 'text-slate-500 hover:text-slate-700'}`}>HISTORY</button>
         </div>
 
-        {/* ⚡ BANK TAB UI ⚡ */}
+        {/* ========================================================================================= */}
+        {/* BANK UI BLOCK */}
+        {/* ========================================================================================= */}
         {activeTab === 'bank' && (
           <div className="bg-white border border-slate-100 rounded-[2.5rem] p-8 shadow-2xl shadow-emerald-900/10 animate-in fade-in zoom-in-95">
             <div className="space-y-5">
@@ -869,7 +892,7 @@ export default function Home() {
                 <div className="animate-in slide-in-from-left-2 mb-2">
                     <label className="text-[10px] font-black text-slate-400 uppercase mb-3 block">Select Destination Bank</label>
                     <button 
-                        onClick={() => openSelectionModal('bank', "Select Destination Bank", bankVariations, (bank: any) => setSelectedBank(bank))}
+                        onClick={() => openSelectionModal('bank', "Select Destination Bank", bankVariations, (val: any) => handleProviderChange(val, 'bank'))}
                         className="w-full bg-white border border-slate-200 p-4 rounded-2xl flex justify-between items-center hover:border-blue-400 transition-colors shadow-sm active:scale-[0.98]"
                     >
                         <div className="flex items-center gap-4">
@@ -967,11 +990,13 @@ export default function Home() {
           </div>
         )}
 
-        {/* ⚡ PAY UTILITIES TAB UI ⚡ */}
+        {/* ========================================================================================= */}
+        {/* PAY UTILITIES UI BLOCK */}
+        {/* ========================================================================================= */}
         {activeTab === 'pay' && (
           <div className="bg-white border border-slate-100 rounded-[2.5rem] p-8 shadow-2xl shadow-emerald-900/10 animate-in fade-in zoom-in-95">
             <div className="flex overflow-x-auto gap-3 pb-2 mb-4 no-scrollbar">
-                {SERVICES.map(s => (
+                {SERVICES.filter(s => s.id !== 'BANK').map(s => (
                     <button 
                         key={s.id} 
                         onClick={() => handleResetService(s)}
@@ -1011,7 +1036,7 @@ export default function Home() {
 
                     {activeService.id === "INTERNET" ? (
                         <button 
-                            onClick={() => openSelectionModal('provider', "Select Provider", INTERNET_PROVIDERS, setInternetProvider)}
+                            onClick={() => openSelectionModal('provider', "Select Provider", INTERNET_PROVIDERS, (val) => handleProviderChange(val, 'internet'))}
                             className="w-full bg-white border border-slate-200 p-4 rounded-2xl flex justify-between items-center hover:border-sky-400 transition-colors shadow-sm active:scale-[0.98]"
                         >
                             <div className="flex items-center gap-4">
@@ -1025,27 +1050,23 @@ export default function Home() {
                             <ChevronDown size={18} className="text-slate-400"/>
                         </button>
                     ) : activeService.id === "AIRTIME" ? (
-                      <div className="flex justify-between items-center gap-2">
-                        {TELECOM_PROVIDERS.map((provider) => (
-                          <button
-                            key={provider}
-                            onClick={() => setTelecomProvider(provider)}
-                            className={`flex flex-col items-center gap-2 flex-1 py-3 rounded-2xl transition-all border-2 ${
-                              telecomProvider === provider 
-                              ? 'border-emerald-500 bg-emerald-50/50 scale-105 shadow-sm' 
-                              : 'border-transparent bg-slate-50 hover:bg-slate-100 opacity-60 hover:opacity-100 grayscale hover:grayscale-0'
-                            }`}
-                          >
-                            <div className="w-12 h-12 rounded-full bg-white shadow-sm border border-slate-100 flex items-center justify-center p-0.5 overflow-hidden">
-                              <img src={`/${provider}.png`} alt={provider} className="w-full h-full object-contain" onError={(e) => { e.currentTarget.style.display = 'none'; e.currentTarget.parentElement!.innerHTML = `<span class="text-[9px] font-black uppercase text-slate-400">${provider.slice(0,3)}</span>`; }} />
+                        <button 
+                            onClick={() => openSelectionModal('standard', "Select Network", TELECOM_PROVIDERS, (val) => handleProviderChange(val, 'telecom'))}
+                            className="w-full bg-white border border-slate-200 p-4 rounded-2xl flex justify-between items-center hover:border-emerald-400 transition-colors shadow-sm active:scale-[0.98]"
+                        >
+                            <div className="flex items-center gap-4">
+                                <div className="w-12 h-12 shrink-0 rounded-full border border-slate-100 bg-emerald-50 flex items-center justify-center shadow-inner overflow-hidden">
+                                    <img src={`/${telecomProvider}.png`} alt={telecomProvider} className="w-full h-full object-contain" onError={(e) => { e.currentTarget.style.display = 'none'; e.currentTarget.parentElement!.innerHTML = `<span class="text-[9px] font-black uppercase text-emerald-500">${telecomProvider.slice(0,3)}</span>`; }} />
+                                </div>
+                                <div>
+                                    <span className="text-sm font-black text-slate-900 tracking-tight uppercase">{telecomProvider}</span>
+                                </div>
                             </div>
-                            <span className={`text-[9px] font-black uppercase tracking-wider ${telecomProvider === provider ? 'text-emerald-700' : 'text-slate-500'}`}>{provider}</span>
-                          </button>
-                        ))}
-                      </div>
+                            <ChevronDown size={18} className="text-slate-400"/>
+                        </button>
                     ) : activeService.id === "ELECTRICITY" ? (
                         <button 
-                            onClick={() => openSelectionModal('provider', "Select Provider", ELECTRICITY_DISCOS, setElecProvider)}
+                            onClick={() => openSelectionModal('provider', "Select Provider", ELECTRICITY_DISCOS, (val) => handleProviderChange(val, 'elec'))}
                             className="w-full bg-white border border-slate-200 p-4 rounded-2xl flex justify-between items-center hover:border-orange-400 transition-colors shadow-sm active:scale-[0.98]"
                         >
                             <div className="flex items-center gap-4">
@@ -1058,7 +1079,7 @@ export default function Home() {
                         </button>
                     ) : (
                       <button 
-                        onClick={() => openSelectionModal('provider', "Select Provider", CABLE_PROVIDERS_LIST, setCableProvider)}
+                        onClick={() => openSelectionModal('provider', "Select Provider", CABLE_PROVIDERS_LIST, (val) => handleProviderChange(val, 'cable'))}
                         className="w-full bg-white border border-slate-200 p-4 rounded-2xl flex justify-between items-center hover:border-pink-400 transition-colors shadow-sm active:scale-[0.98]"
                       >
                         <div className="flex items-center gap-4">
@@ -1118,6 +1139,7 @@ export default function Home() {
                 {activeService.id === "INTERNET" && (
                   <div className="bg-slate-50 border border-slate-200 rounded-2xl p-4 shadow-sm animate-in fade-in slide-in-from-top-4">
                      
+                     {/* IF TELECOM DATA, SHOW CATEGORY BUTTONS */}
                      {internetProvider.includes("-data") && (
                        <div className="flex gap-2 mb-4 border-b border-slate-200 pb-3 overflow-x-auto no-scrollbar shadow-inner bg-slate-100 p-1.5 rounded-2xl">
                           {DATA_CATEGORIES.map(cat => (
@@ -1136,6 +1158,7 @@ export default function Home() {
                         <p className="text-[10px] font-black uppercase tracking-widest text-slate-400 mb-2">Select {internetProvider === 'smile-direct' ? 'Smile' : 'Spectranet'} Plan</p>
                      )}
                      
+                     {/* STRICT TERNARY: SHOW EITHER SELECTED CARD OR FULL LIST, NEVER BOTH */}
                      {selectedInternetPlan ? (
                         <div className="relative animate-in zoom-in-95 duration-200 mt-2">
                            <button onClick={() => { setSelectedInternetPlan(null); setNairaAmount(""); }} className="absolute -top-3 -right-3 bg-slate-200 text-slate-500 hover:text-slate-800 hover:bg-slate-300 rounded-full p-1 transition-all z-10 shadow-sm border border-white">
@@ -1216,6 +1239,7 @@ export default function Home() {
                                <p className="text-2xl font-black text-emerald-600">₦{cableRenewAmount?.toLocaleString() || "0.00"}</p>
                             </div>
                          ) : (
+                            // STRICT TERNARY FOR CABLE
                             selectedCablePlan ? (
                                <div className="relative animate-in zoom-in-95 duration-200 mt-2">
                                   <button onClick={() => { setSelectedCablePlan(null); setNairaAmount(""); }} className="absolute -top-3 -right-3 bg-slate-200 text-slate-500 hover:text-slate-800 hover:bg-slate-300 rounded-full p-1 transition-all z-10 shadow-sm border border-white">
@@ -1376,7 +1400,9 @@ export default function Home() {
           </div>
         )}
 
-        {/* ⚡ HISTORY TAB ⚡ */}
+        {/* ========================================================================================= */}
+        {/* HISTORY UI BLOCK */}
+        {/* ========================================================================================= */}
         {activeTab === 'history' && (
           <div className="bg-white border border-slate-100 rounded-[2.5rem] p-6 shadow-2xl animate-in slide-in-from-bottom-4">
              {transactions.length === 0 ? (
