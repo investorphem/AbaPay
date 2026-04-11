@@ -1,8 +1,7 @@
 import { Phone, Globe, Lightbulb, Tv } from "lucide-react";
-import { ELECTRICITY_DISCOS } from "../app/discos";
+import { ELECTRICITY_DISCOS } from "@/app/discos";
 
 export const ABAPAY_ABI = [{"inputs":[{"internalType":"address","name":"tokenAddress","type":"address"},{"internalType":"string","name":"serviceType","type":"string"},{"internalType":"string","name":"accountNumber","type":"string"},{"internalType":"uint256","name":"amount","type":"uint256"}],"name":"payBill","outputs":[],"stateMutability":"nonpayable","type":"function"}];
-
 export const ERC20_ABI = [
   {"inputs":[{"internalType":"address","name":"spender","type":"address"},{"internalType":"uint256","name":"amount","type":"uint256"}],"name":"approve","outputs":[{"internalType":"bool","name":"","type":"bool"}],"stateMutability":"nonpayable","type":"function"},
   {"inputs":[{"internalType":"address","name":"account","type":"address"}],"name":"balanceOf","outputs":[{"internalType":"uint256","name":"","type":"uint256"}],"stateMutability":"view","type":"function"}
@@ -50,7 +49,6 @@ export const ELEC_PRE_SELECT_AMOUNTS = ["1000", "2000", "5000", "10000", "20000"
 export const DATA_CATEGORIES = ["Daily", "Weekly", "Monthly", "Social", "Mega", "Broadband"];
 export const ITEMS_PER_PAGE = 5;
 
-// Bulletproof API array extractor
 export const extractVtpassArray = (data: any): any[] => {
   if (!data) return [];
   if (Array.isArray(data)) return data;
