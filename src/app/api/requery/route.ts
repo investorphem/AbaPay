@@ -27,9 +27,24 @@ export async function POST(req: Request) {
     const actualStatus = requeryData.content?.transactions?.status;
 
     if (actualStatus === 'delivered' || actualStatus === 'successful') {
-      
-      // Grab any PINs or Tokens that were generated late
-      let dbPurchasedCode = requeryData.purchased_code || requeryData.token || requeryData.Pin || null;
+
+      // ⚡ 1. Try all standard hiding spots first
+      let dbPurchasedCode = requeryData.purchased_code || 
+                            requeryData.token || 
+                            requeryData.content?.transactions?.token || 
+                            requeryData.content?.transactions?.purchased_code || 
+                            requeryData.Pin || 
+                            null;
+
+      // ⚡ 2. THE NUCLEAR OPTION: If still null, hunt the raw payload for 20 digits ⚡
+      if (!dbPurchasedCode) {
+          const rawString = JSON.stringify(requeryData);
+          const tokenMatch = rawString.match(/(?:\b|Token:?\s*)(\d{4}[-\s]?\d{4}[-\s]?\d{4}[-\s]?\d{4}[-\s]?\d{4})\b/i);
+          if (tokenMatch) {
+              dbPurchasedCode = tokenMatch[1].replace(/[-\s]/g, ''); // Clean up spaces or dashes
+          }
+      }
+
       let vendedUnits = requeryData.units || requeryData.content?.transactions?.units || null;
 
       // Update Database to SUCCESS
@@ -44,7 +59,7 @@ export async function POST(req: Request) {
       return NextResponse.json({ success: true, status: 'SUCCESS', purchased_code: dbPurchasedCode, units: vendedUnits });
 
     } else if (actualStatus === 'failed') {
-      
+
       // Update Database to FAILED so you can refund them
       await supabase.from('transactions').update({ 
         status: 'FAILED_VENDING' 
