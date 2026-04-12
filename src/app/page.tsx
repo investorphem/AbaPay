@@ -72,6 +72,11 @@ export default function Home() {
   const [modalType, setModalType] = useState<'standard' | 'token' | 'provider' | 'country' | 'bank'>('standard'); 
   const [toast, setToast] = useState<{title: string, message: string, type: 'success' | 'error'} | null>(null);
 
+  // ⚡ SUPPORT STATES ⚡
+  const [isSupportOpen, setIsSupportOpen] = useState(false);
+  const [supportMessage, setSupportMessage] = useState("");
+  const [supportTxHash, setSupportTxHash] = useState<string | null>(null);
+
   const [currentPage, setCurrentPage] = useState(1);
   const [selectedToken, setSelectedToken] = useState(SUPPORTED_TOKENS[0]);
   const [walletBalance, setWalletBalance] = useState("0.00");
@@ -132,11 +137,11 @@ export default function Home() {
       let category = "Monthly"; 
 
       if (name.includes('broadband') || name.includes('router') || name.includes('5g') || name.includes('hynet') || name.includes('unlimited')) category = "Broadband";
-      else if (name.includes('social') || name.includes('whatsapp') || name.includes('tv') || name.includes('instagram') || name.includes('tiktok') || name.includes('youtube') || name.includes('facebook') || name.includes('opera') || name.includes('telegram')) category = "Social";
-      else if (name.includes('60 days') || name.includes('90 days') || name.includes('120 days') || name.includes('year') || name.includes('365') || name.includes('mega') || name.includes('3 months') || name.includes('2 month') || name.includes('quarterly') || name.includes('annual')) category = "Mega";
-      else if (name.includes('month') || name.includes('30 days')) category = "Monthly";
-      else if (name.includes('week') || name.includes('7 days') || name.includes('14 days') || name.includes('weekend')) category = "Weekly";
-      else if (name.includes('1 day') || name.includes('2 days') || name.includes('3 day') || name.includes('daily') || name.includes('24 hrs') || name.includes('24hrs') || name.includes('night') || name.includes('hourly')) category = "Daily";
+      else if (name.includes('social') || name.includes('whatsapp') || name.includes('ig') || name.includes('instagram') || name.includes('tiktok') || name.includes('youtube') || name.includes('facebook') || name.includes('opera') || name.includes('xot')) category = "Social";
+      else if (name.includes('60 day') || name.includes('90 day') || name.includes('120 day') || name.includes('year') || name.includes('365') || name.includes('mega') || name.includes('3 month') || name.includes('2 month') || name.includes('quarterly') || name.includes('annual')) category = "Mega";
+      else if (name.includes('month') || name.includes('30 day')) category = "Monthly";
+      else if (name.includes('week') || name.includes('7 day') || name.includes('14 day') || name.includes('weekend')) category = "Weekly";
+      else if (name.includes('1 day') || name.includes('2 day') || name.includes('3 day') || name.includes('daily') || name.includes('24 hrs') || name.includes('24hrs') || name.includes('night') || name.includes('hourly')) category = "Daily";
 
       return category === activeDataCategory;
     }).sort((a, b) => parseFloat(a.variation_amount || "0") - parseFloat(b.variation_amount || "0"));
@@ -178,7 +183,7 @@ export default function Home() {
   };
 
   const handleProviderChange = (newProvider: string, type: 'internet' | 'telecom' | 'cable' | 'elec' | 'bank' | 'education') => {
-    setNairaAmount(""); setAccountNumber(""); setCustomerName(null); setCustomerPhone("");
+    setNairaAmount(""); setAccountNumber(""); setCustomerName(null); setCustomerPhone(""); // ⚡ CLEARS PHONE ON SWITCH
     if (type === 'internet') { 
         setInternetVariations([]); 
         setInternetProvider(newProvider); 
@@ -193,10 +198,17 @@ export default function Home() {
   };
 
   const handleResetService = (s: any) => {
-    setActiveService(s); setAccountNumber(""); setCustomerName(null); setNairaAmount(""); setCustomerPhone("");
+    setActiveService(s); setAccountNumber(""); setCustomerName(null); setNairaAmount(""); setCustomerPhone(""); // ⚡ CLEARS PHONE
     setCableCurrentBouquet(null); setCableRenewAmount(null); setSelectedCablePlan(null);
     setCableSubscriptionType("renew"); setSelectedBank(null); setSelectedInternetPlan(null); setInternetAccountId(null);
     setSelectedEducationPlan(null); setInternetVariations([]); 
+  };
+
+  // ⚡ FIX: CLEARS ALL STATES WHEN SWITCHING TABS
+  const handleTabSwitch = (tab: "pay" | "bank" | "education" | "history") => {
+    setActiveTab(tab);
+    setCustomerPhone("");
+    handleResetService(SERVICES[0]);
   };
 
   const openSelectionModal = (type: 'standard' | 'token' | 'provider' | 'country' | 'bank', title: string, options: any[], callback: (value: string) => void) => {
@@ -428,7 +440,7 @@ export default function Home() {
         try {
           const res = await fetch(`/api/variations?serviceID=${educationProvider}`);
           const data = await res.json();
-          if (data.code === '011') setEducationVariations([]); // Crash safety
+          if (data.code === '011') setEducationVariations([]); 
           else setEducationVariations(extractVtpassArray(data) || []);
         } catch (e) {
           setEducationVariations([]);
@@ -445,7 +457,7 @@ export default function Home() {
         try { 
           const res = await fetch(`/api/variations?serviceID=${cableProvider}`); 
           const data = await res.json(); 
-          if (data.code === '011') setCableVariations([]); // Crash safety
+          if (data.code === '011') setCableVariations([]); 
           else setCableVariations(extractVtpassArray(data) || []); 
         } catch (e) {
           setCableVariations([]);
@@ -459,7 +471,7 @@ export default function Home() {
           const res = await fetch(`/api/variations?serviceID=${internetProvider}`); 
           const data = await res.json(); 
           if (data.code === '011' || data.error) {
-             setInternetVariations([]); // ⚡ CRASH FIX: Handles 9mobile offline error gracefully
+             setInternetVariations([]); 
           } else {
              setInternetVariations(extractVtpassArray(data) || []); 
           }
@@ -553,9 +565,32 @@ export default function Home() {
         </div>
       )}
 
+      {/* ⚡ MISSING SUPPORT MODAL ADDED ⚡ */}
+      {isSupportOpen && (
+        <div className="fixed inset-0 z-[200] flex items-center justify-center p-4 bg-slate-900/50 backdrop-blur-sm animate-in fade-in">
+           <div className="bg-white w-full max-w-md rounded-[2rem] p-6 shadow-2xl relative animate-in zoom-in-95">
+              <button onClick={() => setIsSupportOpen(false)} className="absolute top-4 right-4 bg-slate-100 p-2 rounded-full text-slate-500 hover:bg-slate-200 transition-colors"><XCircle size={20}/></button>
+              <h3 className="text-xl font-black text-slate-900 mb-2">Need Help?</h3>
+              <p className="text-xs text-slate-500 mb-4">Transaction Ref: <span className="font-mono bg-slate-100 px-1.5 py-0.5 rounded text-slate-700">{supportTxHash}</span></p>
+              <textarea 
+                  className="w-full bg-slate-50 border border-slate-200 p-4 rounded-xl text-sm outline-none focus:border-emerald-500 min-h-[100px] mb-4 font-medium" 
+                  placeholder="Describe your issue so our admins can assist you..." 
+                  value={supportMessage} 
+                  onChange={(e) => setSupportMessage(e.target.value)} 
+              />
+              <button 
+                  onClick={() => { showToast("Message Sent", "Support will review your transaction shortly.", "success"); setIsSupportOpen(false); }} 
+                  className="w-full bg-emerald-500 hover:bg-emerald-600 text-white font-black py-4 rounded-xl transition-colors tracking-tight"
+              >
+                  SEND TICKET
+              </button>
+           </div>
+        </div>
+      )}
+
       <TermsModal isOpen={isTermsOpen} onClose={() => setIsTermsOpen(false)} />
       <PrivacyModal isOpen={isPrivacyOpen} onClose={() => setIsPrivacyOpen(false)} />
-      <ReceiptModal receipt={selectedReceipt} isMainnet={isMainnet} onClose={() => setSelectedReceipt(null)} onShare={handleShareReceipt} />
+      <ReceiptModal receipt={selectedReceipt} isMainnet={isMainnet} onClose={() => setSelectedReceipt(null)} onShare={handleShareReceipt} onSupport={() => { setSupportTxHash(selectedReceipt.txHash); setSupportMessage(""); setSelectedReceipt(null); setIsSupportOpen(true); }} />
       <SelectionModal 
         isOpen={isSelectionModalOpen} 
         onClose={() => setIsSelectionModalOpen(false)} 
@@ -605,10 +640,10 @@ export default function Home() {
         </div>
 
         <div className="flex gap-2 bg-slate-200/50 p-1.5 rounded-2xl mb-6 shadow-inner overflow-x-auto no-scrollbar">
-            <button onClick={() => { setActiveTab("pay"); handleResetService(SERVICES[0]); }} className={`flex-1 min-w-[75px] py-3 rounded-xl text-[10px] sm:text-xs font-black transition-all ${activeTab === 'pay' ? 'bg-white text-emerald-600 shadow-xl' : 'text-slate-500 hover:text-slate-700'}`}>BILLS</button>
-            <button onClick={() => { setActiveTab("bank"); handleResetService(SERVICES[0]); }} className={`flex-1 min-w-[75px] py-3 rounded-xl text-[10px] sm:text-xs font-black transition-all ${activeTab === 'bank' ? 'bg-white text-emerald-600 shadow-xl' : 'text-slate-500 hover:text-slate-700'}`}>TRANSFER</button>
-            <button onClick={() => { setActiveTab("education"); handleResetService(SERVICES[0]); }} className={`flex-1 min-w-[75px] py-3 rounded-xl text-[10px] sm:text-xs font-black transition-all ${activeTab === 'education' ? 'bg-white text-emerald-600 shadow-xl' : 'text-slate-500 hover:text-slate-700'}`}>EDUCATION</button>
-            <button onClick={() => { setActiveTab("history"); handleResetService(SERVICES[0]); }} className={`flex-1 min-w-[75px] py-3 rounded-xl text-[10px] sm:text-xs font-black transition-all ${activeTab === 'history' ? 'bg-white text-emerald-600 shadow-xl' : 'text-slate-500 hover:text-slate-700'}`}>HISTORY</button>
+            <button onClick={() => handleTabSwitch("pay")} className={`flex-1 min-w-[75px] py-3 rounded-xl text-[10px] sm:text-xs font-black transition-all ${activeTab === 'pay' ? 'bg-white text-emerald-600 shadow-xl' : 'text-slate-500 hover:text-slate-700'}`}>BILLS</button>
+            <button onClick={() => handleTabSwitch("bank")} className={`flex-1 min-w-[75px] py-3 rounded-xl text-[10px] sm:text-xs font-black transition-all ${activeTab === 'bank' ? 'bg-white text-emerald-600 shadow-xl' : 'text-slate-500 hover:text-slate-700'}`}>TRANSFER</button>
+            <button onClick={() => handleTabSwitch("education")} className={`flex-1 min-w-[75px] py-3 rounded-xl text-[10px] sm:text-xs font-black transition-all ${activeTab === 'education' ? 'bg-white text-emerald-600 shadow-xl' : 'text-slate-500 hover:text-slate-700'}`}>EDUCATION</button>
+            <button onClick={() => handleTabSwitch("history")} className={`flex-1 min-w-[75px] py-3 rounded-xl text-[10px] sm:text-xs font-black transition-all ${activeTab === 'history' ? 'bg-white text-emerald-600 shadow-xl' : 'text-slate-500 hover:text-slate-700'}`}>HISTORY</button>
         </div>
 
         {/* ======================================= */}
@@ -692,10 +727,15 @@ export default function Home() {
                           </button>
                           <div className="p-4 rounded-2xl border-2 border-emerald-500 bg-emerald-50 shadow-sm text-left">
                             <p className="font-black text-slate-900 text-sm pr-2">{selectedEducationPlan.name}</p>
+                            
+                            {/* ⚡ EDUCATION FEE UI UPDATE ⚡ */}
                             <div className="pt-2 border-t border-emerald-200/50 flex justify-between items-end">
-                                <p className="font-black text-emerald-600 text-xl">₦{parseFloat(selectedEducationPlan.variation_amount || "0").toLocaleString()}</p>
-                                <p className="text-[10px] text-slate-500 font-bold">{(parseFloat(selectedEducationPlan.variation_amount || "0") / exchangeRate).toFixed(4)} {selectedToken.symbol}</p>
-                              </div>
+                                <div>
+                                   <p className="font-black text-emerald-600 text-xl">₦{parseFloat(selectedEducationPlan.variation_amount || "0").toLocaleString()}</p>
+                                   {currentFee > 0 && <p className="text-[9px] font-black text-orange-500">+₦{currentFee} FEE INCLUDED</p>}
+                                </div>
+                                <p className="text-[10px] text-slate-500 font-bold">{cryptoToCharge} {selectedToken.symbol}</p>
+                            </div>
                           </div>
                       </div>
                   ) : (
@@ -843,7 +883,6 @@ export default function Home() {
                             {currentFee > 0 && <p className="text-[9px] font-black text-orange-500">+₦{currentFee} FEE</p>}
                         </div>
                     </div>
-                    {/* ⚡ MIN MAX ALERT FOR BANK ⚡ */}
                     {nairaAmount && (parseFloat(nairaAmount) < dynamicMinAmount || parseFloat(nairaAmount) > dynamicMaxAmount) && (
                         <div className="bg-red-50 border border-red-200 p-3 rounded-xl mt-2 flex items-center gap-2 animate-in fade-in">
                             <AlertTriangle size={16} className="text-red-500 shrink-0" />
@@ -887,7 +926,6 @@ export default function Home() {
         {/* ======================================= */}
         {activeTab === 'pay' && (
           <div className="bg-white border border-slate-100 rounded-[2.5rem] p-8 shadow-2xl shadow-emerald-900/10 animate-in fade-in zoom-in-95">
-            {/* ⚡ GRID LAYOUT FOR EVEN SPACING ⚡ */}
             <div className="grid grid-cols-4 gap-2 pb-2 mb-4">
                 {SERVICES.filter(s => s.id !== 'BANK').map(s => (
                     <button 
@@ -988,7 +1026,6 @@ export default function Home() {
 
                 <div>
                     <label className="text-[10px] font-black text-slate-400 uppercase mb-2 flex justify-between">
-                      {/* ⚡ SMILE & SPECTRANET LABEL FIX ⚡ */}
                       <span>
                         {activeService.id === "INTERNET" ? (
                             internetProvider === 'smile-direct' ? "Smile Email Address" : 
@@ -1117,7 +1154,6 @@ export default function Home() {
                             {currentFee > 0 && <p className="text-[9px] font-black text-orange-500">+₦{currentFee} FEE</p>}
                         </div>
                     </div>
-                    {/* ⚡ MIN MAX ALERT FOR UTILITIES ⚡ */}
                     {nairaAmount && (parseFloat(nairaAmount) < dynamicMinAmount || parseFloat(nairaAmount) > dynamicMaxAmount) && (
                         <div className="bg-red-50 border border-red-200 p-3 rounded-xl mt-2 flex items-center gap-2 animate-in fade-in">
                             <AlertTriangle size={16} className="text-red-500 shrink-0" />
@@ -1127,7 +1163,6 @@ export default function Home() {
                         </div>
                     )}
 
-                    {/* ⚡ RESTORED PRE-SELECTION BUTTONS FOR AIRTIME & ELECTRICITY ⚡ */}
                     {(activeService.id === "AIRTIME" || activeService.id === "ELECTRICITY") && (
                        <div className="flex gap-2.5 overflow-x-auto py-1.5 mt-3 no-scrollbar bg-slate-100 p-2 rounded-2xl shadow-inner">
                           {(activeService.id === "AIRTIME" ? PRE_SELECT_AMOUNTS : ELEC_PRE_SELECT_AMOUNTS).map(amount => {
@@ -1147,7 +1182,6 @@ export default function Home() {
                     )}
                 </div>
 
-                {/* ⚡ SMS PHONE NUMBER FIX: ONLY FOR ELECTRICITY & SMILE ⚡ */}
                 {(activeService.id === "ELECTRICITY" || (activeService.id === "INTERNET" && internetProvider === 'smile-direct')) && (
                     <div className="animate-in fade-in">
                          <input 
