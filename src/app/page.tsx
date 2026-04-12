@@ -3,6 +3,7 @@
 import { useState, useEffect, useMemo } from "react";
 import { createWalletClient, createPublicClient, custom, http, parseUnits, formatUnits } from "viem";
 import { celo, celoSepolia } from "viem/chains";
+import Link from "next/link";
 import { 
   ShieldCheck, Zap, AlertTriangle, CheckCircle2, ChevronDown, 
   Loader2, Coins, Briefcase, ListPlus, Users, Landmark, XCircle, RefreshCw, Tv, GraduationCap
@@ -1387,10 +1388,12 @@ export default function Home() {
              <ShieldCheck size={16} className="text-emerald-600" />
              <span className="text-[11px] font-bold text-slate-500 uppercase tracking-widest">Secured by Celo Network</span>
           </div>
-          <div className="flex gap-6">
-            <button onClick={() => setIsTermsOpen(true)} className="text-[10px] font-black text-slate-400 hover:text-emerald-600 uppercase">Terms</button>
-            <button onClick={() => setIsPrivacyOpen(true)} className="text-[10px] font-black text-slate-400 hover:text-emerald-600 uppercase">Privacy</button>
+                    <div className="flex gap-6">
+            <Link href="/docs" className="text-[10px] font-black text-slate-400 hover:text-emerald-600 uppercase transition-colors">Docs & FAQ</Link>
+            <button onClick={() => setIsTermsOpen(true)} className="text-[10px] font-black text-slate-400 hover:text-emerald-600 uppercase transition-colors">Terms</button>
+            <button onClick={() => setIsPrivacyOpen(true)} className="text-[10px] font-black text-slate-400 hover:text-emerald-600 uppercase transition-colors">Privacy</button>
           </div>
+
           <p className="text-[9px] font-medium text-slate-300 uppercase tracking-[0.2em] mt-2">© 2026 MASONODE ORGANISATION • v3.0</p>
         </footer>
       </div>
