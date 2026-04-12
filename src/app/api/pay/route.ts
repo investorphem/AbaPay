@@ -209,12 +209,31 @@ export async function POST(req: Request) {
         let alertTokenRef = "Success"; 
 
         if (serviceCategory === 'ELECTRICITY' && !isForeign) {
-          dbPurchasedCode = payData.purchased_code || payData.token || null;
-          alertTokenRef = dbPurchasedCode || "Processing Token";
+          // ⚡ 1. Try all normal VTpass nesting locations first
+          dbPurchasedCode = payData.purchased_code || 
+                            payData.token || 
+                            payData.tokens ||
+                            payData.content?.transactions?.token || 
+                            payData.content?.transactions?.purchased_code || 
+                            null;
 
+          // ⚡ 2. THE NUCLEAR OPTION: Rip the raw JSON string for any 20-digit pattern
+          if (!dbPurchasedCode) {
+              const rawPayloadString = JSON.stringify(payData);
+              const tokenMatch = rawPayloadString.match(/(?:\b|Token:?\s*)(\d{4}[-\s]?\d{4}[-\s]?\d{4}[-\s]?\d{4}[-\s]?\d{4})\b/i);
+              
+              if (tokenMatch) {
+                  dbPurchasedCode = tokenMatch[1].replace(/[-\s]/g, ''); // Clear dashes or spaces
+              }
+          }
+
+          alertTokenRef = dbPurchasedCode || (appMode === "sandbox" ? "No Token in Sandbox" : "Processing Token");
+
+          // Extract Units
           if (payData.units) vendedUnits = payData.units.toString();
           else if (payData.content?.transactions?.units) vendedUnits = payData.content.transactions.units.toString();
           else if (payData.content?.transactions?.unit) vendedUnits = payData.content.transactions.unit.toString();
+          
         } else if (serviceCategory === 'EDUCATION') {
           dbPurchasedCode = payData.purchased_code || payData.Pin || null;
           alertTokenRef = dbPurchasedCode || "Processing PIN";
