@@ -89,6 +89,11 @@ export default function Home() {
   const isMainnet = process.env.NEXT_PUBLIC_NETWORK === "celo";
   const activeChain = isMainnet ? celo : celoSepolia;
   const ABAPAY_CONTRACT = process.env.NEXT_PUBLIC_ABAPAY_ADDRESS as `0x${string}`;
+  
+  // ⚡ ADDED: The cUSD/USDm contract addresses for MiniPay Gas payments
+  const GAS_CURRENCY = isMainnet 
+    ? "0x765DE816845861e75A25fCA122bb6898B8B1282a" 
+    : "0xdE9e4C3ce781b4bA68120d6261cbad65ce0aB00b";
 
   const indexOfLastItem = currentPage * ITEMS_PER_PAGE;
   const indexOfFirstItem = indexOfLastItem - ITEMS_PER_PAGE;
@@ -347,8 +352,16 @@ export default function Home() {
       const tokenAddress = isMainnet ? selectedToken.mainnet : selectedToken.sepolia;
       const publicClient = createPublicClient({ chain: activeChain, transport: http() });
 
+      // ⚡ UPDATED: Passing feeCurrency to the approval transaction for MiniPay users
       setStatus("Awaiting token approval...");
-      const approvalHash = await client.writeContract({ address: tokenAddress as `0x${string}`, abi: ERC20_ABI, functionName: 'approve', args: [ABAPAY_CONTRACT, valueInWei], account: address });
+      const approvalHash = await client.writeContract({ 
+          address: tokenAddress as `0x${string}`, 
+          abi: ERC20_ABI, 
+          functionName: 'approve', 
+          args: [ABAPAY_CONTRACT, valueInWei], 
+          account: address,
+          feeCurrency: GAS_CURRENCY as `0x${string}`
+      });
 
       setStatus("Mining approval on Celo Mainnet... Please wait.");
       await publicClient.waitForTransactionReceipt({ hash: approvalHash });
@@ -380,7 +393,15 @@ export default function Home() {
         } else { vtpassServiceID = telecomProvider; displayNetwork = telecomProvider; }
       }
 
-      const hash = await client.writeContract({ address: ABAPAY_CONTRACT, abi: ABAPAY_ABI, functionName: 'payBill', args: [tokenAddress, vtpassServiceID, payloadBillersCode, valueInWei], account: address });
+      // ⚡ UPDATED: Passing feeCurrency to the payment transaction for MiniPay users
+      const hash = await client.writeContract({ 
+          address: ABAPAY_CONTRACT, 
+          abi: ABAPAY_ABI, 
+          functionName: 'payBill', 
+          args: [tokenAddress, vtpassServiceID, payloadBillersCode, valueInWei], 
+          account: address,
+          feeCurrency: GAS_CURRENCY as `0x${string}`
+      });
       setStatus(`${selectedToken.symbol} Secured. Processing...`);
 
       const backendPayload = {
@@ -395,7 +416,16 @@ export default function Home() {
       const result = await res.json();
 
       if (result.success) {
-        setStatus("Success! Token/Ref Dispatched."); newTx.status = "SUCCESS"; newTx.purchased_code = result.purchased_code; newTx.units = result.units; newTx.request_id = result.data?.requestId; showToast("Transaction Successful", "Your transaction has been successfully processed.", "success");
+        if (result.message && result.message.toLowerCase().includes("processing")) {
+           setStatus("Transaction Processing...");
+           newTx.status = "PENDING";
+           showToast("Transaction Pending", result.message, "success");
+        } else {
+           setStatus("Success! Token/Ref Dispatched."); 
+           newTx.status = "SUCCESS"; 
+           showToast("Transaction Successful", "Your transaction has been successfully processed.", "success");
+        }
+        newTx.purchased_code = result.purchased_code; newTx.units = result.units; newTx.request_id = result.data?.requestId;
       } else {
         setStatus(`Error: ${result.message || 'Transaction Failed'}`); newTx.status = "FAILED_VENDING";
       }
@@ -445,7 +475,7 @@ export default function Home() {
              status: tx.status, 
              amountNaira: tx.amount_naira.toString(), 
              amountCrypto: tx.amount_usdt.toString(), 
-             tokenUsed: tx.token_used || "USD₮", // ⚡ FIX 1: TOKEN MEMORY RESTORED
+             tokenUsed: tx.token_used || "USD₮", 
              service: tx.service_category, 
              network: tx.network, 
              txHash: tx.tx_hash, 
@@ -1353,7 +1383,7 @@ export default function Home() {
                 )}
 
                 {status && (
-                    <div className={`p-5 rounded-2xl border flex items-center gap-4 animate-in fade-in ${status.includes('Success') ? 'bg-emerald-50 border-emerald-100' : 'bg-blue-50 border-blue-100'}`}>
+                    <div className={`p-5 rounded-2xl border flex items-center gap-4 animate-in fade-in shadow-sm ${status.includes('Success') || status.includes('Secured') || status.includes('Initiating') ? 'bg-emerald-50 border-emerald-100 text-emerald-800' : status.includes('Processing') ? 'bg-orange-50 border-orange-100 text-orange-800' : 'bg-blue-50 border-blue-100 text-blue-800'}`}>
                         {status.includes('Success') ? <CheckCircle2 size={24}/> : <Loader2 size={24} className="animate-spin"/>}
                         <p className="text-sm font-black tracking-tight">{status}</p>
                     </div>
@@ -1388,12 +1418,11 @@ export default function Home() {
              <ShieldCheck size={16} className="text-emerald-600" />
              <span className="text-[11px] font-bold text-slate-500 uppercase tracking-widest">Secured by Celo Network</span>
           </div>
-                    <div className="flex gap-6">
+          <div className="flex gap-6">
             <Link href="/docs" className="text-[10px] font-black text-slate-400 hover:text-emerald-600 uppercase transition-colors">Docs & FAQ</Link>
             <button onClick={() => setIsTermsOpen(true)} className="text-[10px] font-black text-slate-400 hover:text-emerald-600 uppercase transition-colors">Terms</button>
             <button onClick={() => setIsPrivacyOpen(true)} className="text-[10px] font-black text-slate-400 hover:text-emerald-600 uppercase transition-colors">Privacy</button>
           </div>
-
           <p className="text-[9px] font-medium text-slate-300 uppercase tracking-[0.2em] mt-2">© 2026 MASONODE ORGANISATION • v3.0</p>
         </footer>
       </div>
