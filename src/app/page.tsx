@@ -72,10 +72,12 @@ export default function Home() {
   const [modalType, setModalType] = useState<'standard' | 'token' | 'provider' | 'country' | 'bank'>('standard'); 
   const [toast, setToast] = useState<{title: string, message: string, type: 'success' | 'error'} | null>(null);
 
-  // ⚡ SUPPORT STATES ⚡
+  // ⚡ RESTORED FULL SUPPORT STATES ⚡
   const [isSupportOpen, setIsSupportOpen] = useState(false);
   const [supportMessage, setSupportMessage] = useState("");
   const [supportTxHash, setSupportTxHash] = useState<string | null>(null);
+  const [supportFile, setSupportFile] = useState<File | null>(null);
+  const [isSendingSupport, setIsSendingSupport] = useState(false);
 
   const [currentPage, setCurrentPage] = useState(1);
   const [selectedToken, setSelectedToken] = useState(SUPPORTED_TOKENS[0]);
@@ -183,7 +185,7 @@ export default function Home() {
   };
 
   const handleProviderChange = (newProvider: string, type: 'internet' | 'telecom' | 'cable' | 'elec' | 'bank' | 'education') => {
-    setNairaAmount(""); setAccountNumber(""); setCustomerName(null); setCustomerPhone(""); // ⚡ CLEARS PHONE ON SWITCH
+    setNairaAmount(""); setAccountNumber(""); setCustomerName(null); setCustomerPhone(""); 
     if (type === 'internet') { 
         setInternetVariations([]); 
         setInternetProvider(newProvider); 
@@ -198,13 +200,12 @@ export default function Home() {
   };
 
   const handleResetService = (s: any) => {
-    setActiveService(s); setAccountNumber(""); setCustomerName(null); setNairaAmount(""); setCustomerPhone(""); // ⚡ CLEARS PHONE
+    setActiveService(s); setAccountNumber(""); setCustomerName(null); setNairaAmount(""); setCustomerPhone(""); 
     setCableCurrentBouquet(null); setCableRenewAmount(null); setSelectedCablePlan(null);
     setCableSubscriptionType("renew"); setSelectedBank(null); setSelectedInternetPlan(null); setInternetAccountId(null);
     setSelectedEducationPlan(null); setInternetVariations([]); 
   };
 
-  // ⚡ FIX: CLEARS ALL STATES WHEN SWITCHING TABS
   const handleTabSwitch = (tab: "pay" | "bank" | "education" | "history") => {
     setActiveTab(tab);
     setCustomerPhone("");
@@ -224,6 +225,37 @@ export default function Home() {
     const receiptText = `🧾 AbaPay Receipt\n\nDate: ${selectedReceipt?.date}\nStatus: ${selectedReceipt?.status}\nProduct: ${selectedReceipt?.network} ${selectedReceipt?.service}\nRecipient: ${selectedReceipt?.account}\nAmount Paid: ₦${selectedReceipt?.amountNaira}\nCrypto Used: ${selectedReceipt?.amountCrypto} ${selectedReceipt?.tokenUsed}\nTx Hash: ${selectedReceipt?.txHash}\n\nSecured by Celo Network`;
     if (navigator.share) { try { await navigator.share({ title: 'Receipt', text: receiptText }); } catch (err) {} } 
     else { try { await navigator.clipboard.writeText(receiptText); showToast("Copied!", "Receipt details copied to clipboard.", "success"); } catch (err) {} }
+  };
+
+  // ⚡ RESTORED FULL SUPPORT LOGIC INTEGRATED TO YOUR ROUTE ⚡
+  const handleSendSupport = async () => {
+    if (!supportMessage.trim()) return showToast("Error", "Please enter a message.", "error");
+    setIsSendingSupport(true);
+    try {
+      const formData = new FormData();
+      formData.append("message", supportMessage);
+      if (address) formData.append("userAddress", address);
+      if (supportTxHash) formData.append("txHash", supportTxHash);
+      if (supportFile) formData.append("file", supportFile);
+
+      const res = await fetch('/api/support', {
+        method: 'POST',
+        body: formData
+      });
+      const data = await res.json();
+      if (data.success) {
+        showToast("Ticket Sent", data.message, "success");
+        setIsSupportOpen(false);
+        setSupportMessage("");
+        setSupportFile(null);
+      } else {
+        showToast("Error", data.message || "Failed to send ticket", "error");
+      }
+    } catch (e) {
+      showToast("Error", "Network error. Failed to send ticket.", "error");
+    } finally {
+      setIsSendingSupport(false);
+    }
   };
 
   const fetchBanksManual = async () => {
@@ -565,24 +597,37 @@ export default function Home() {
         </div>
       )}
 
-      {/* ⚡ MISSING SUPPORT MODAL ADDED ⚡ */}
+      {/* ⚡ RESTORED ORIGINAL SUPPORT MODAL WITH FORM DATA UPLOAD ⚡ */}
       {isSupportOpen && (
         <div className="fixed inset-0 z-[200] flex items-center justify-center p-4 bg-slate-900/50 backdrop-blur-sm animate-in fade-in">
            <div className="bg-white w-full max-w-md rounded-[2rem] p-6 shadow-2xl relative animate-in zoom-in-95">
-              <button onClick={() => setIsSupportOpen(false)} className="absolute top-4 right-4 bg-slate-100 p-2 rounded-full text-slate-500 hover:bg-slate-200 transition-colors"><XCircle size={20}/></button>
+              <button onClick={() => { setIsSupportOpen(false); setSupportFile(null); setSupportMessage(""); }} className="absolute top-4 right-4 bg-slate-100 p-2 rounded-full text-slate-500 hover:bg-slate-200 transition-colors"><XCircle size={20}/></button>
               <h3 className="text-xl font-black text-slate-900 mb-2">Need Help?</h3>
-              <p className="text-xs text-slate-500 mb-4">Transaction Ref: <span className="font-mono bg-slate-100 px-1.5 py-0.5 rounded text-slate-700">{supportTxHash}</span></p>
+              {supportTxHash && <p className="text-xs text-slate-500 mb-4">Transaction Ref: <span className="font-mono bg-slate-100 px-1.5 py-0.5 rounded text-slate-700">{supportTxHash.slice(0, 15)}...</span></p>}
+              
               <textarea 
                   className="w-full bg-slate-50 border border-slate-200 p-4 rounded-xl text-sm outline-none focus:border-emerald-500 min-h-[100px] mb-4 font-medium" 
                   placeholder="Describe your issue so our admins can assist you..." 
                   value={supportMessage} 
                   onChange={(e) => setSupportMessage(e.target.value)} 
               />
+
+              <div className="mb-4">
+                 <label className="block text-xs font-bold text-slate-500 mb-2">Attach Screenshot (Optional)</label>
+                 <input 
+                    type="file" 
+                    accept="image/*"
+                    onChange={(e) => setSupportFile(e.target.files ? e.target.files[0] : null)}
+                    className="w-full text-sm text-slate-500 file:mr-4 file:py-2 file:px-4 file:rounded-full file:border-0 file:text-xs file:font-bold file:bg-emerald-50 file:text-emerald-700 hover:file:bg-emerald-100 transition-colors cursor-pointer"
+                 />
+              </div>
+
               <button 
-                  onClick={() => { showToast("Message Sent", "Support will review your transaction shortly.", "success"); setIsSupportOpen(false); }} 
-                  className="w-full bg-emerald-500 hover:bg-emerald-600 text-white font-black py-4 rounded-xl transition-colors tracking-tight"
+                  onClick={handleSendSupport}
+                  disabled={isSendingSupport || !supportMessage.trim()}
+                  className="w-full bg-emerald-500 hover:bg-emerald-600 disabled:opacity-50 disabled:bg-slate-300 text-white font-black py-4 rounded-xl transition-colors tracking-tight flex justify-center items-center gap-2"
               >
-                  SEND TICKET
+                  {isSendingSupport ? <><Loader2 size={18} className="animate-spin"/> SENDING...</> : "SEND TICKET"}
               </button>
            </div>
         </div>
@@ -728,7 +773,6 @@ export default function Home() {
                           <div className="p-4 rounded-2xl border-2 border-emerald-500 bg-emerald-50 shadow-sm text-left">
                             <p className="font-black text-slate-900 text-sm pr-2">{selectedEducationPlan.name}</p>
                             
-                            {/* ⚡ EDUCATION FEE UI UPDATE ⚡ */}
                             <div className="pt-2 border-t border-emerald-200/50 flex justify-between items-end">
                                 <div>
                                    <p className="font-black text-emerald-600 text-xl">₦{parseFloat(selectedEducationPlan.variation_amount || "0").toLocaleString()}</p>
