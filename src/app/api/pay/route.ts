@@ -85,7 +85,8 @@ export async function POST(req: Request) {
       amount_naira: vendAmount,
       fee_naira: serviceFee,
       status: 'PROCESSING',
-      wallet_address: wallet_address || "UNKNOWN"
+      wallet_address: wallet_address || "UNKNOWN",
+      token_used: tokenSymbol // ⚡ PERFECT TOKEN MEMORY ADDED HERE
     };
 
     const { error: dbError } = await supabase.from('transactions').insert([dbPayload]);
@@ -111,7 +112,7 @@ export async function POST(req: Request) {
 
     // ⚡ FIX: Matches the frontend's 4-decimal rounding perfectly to prevent micro-fraction underpayment flags
     const expectedCryptoStr = requiredCrypto.toFixed(4);
-    
+
     if (parseFloat(amount) < parseFloat(expectedCryptoStr)) {
         await supabase.from('transactions').update({ status: 'FAILED_FUNDS_MISMATCH' }).eq('tx_hash', txHash);
         try { await sendTelegramAlert(`🚨 *RATE MISMATCH / UNDERPAYMENT*\nUser: ${wallet_address}\nHash: \`${txHash}\`\nThey paid: ${amount} ${tokenSymbol}. We expected: ${expectedCryptoStr} based on rate ₦${baseRate}.`); } catch (e) {}
