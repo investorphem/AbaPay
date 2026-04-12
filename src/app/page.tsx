@@ -132,11 +132,11 @@ export default function Home() {
       let category = "Monthly"; 
 
       if (name.includes('broadband') || name.includes('router') || name.includes('5g') || name.includes('hynet') || name.includes('unlimited')) category = "Broadband";
-      else if (name.includes('social') || name.includes('whatsapp') || name.includes('ig') || name.includes('instagram') || name.includes('tiktok') || name.includes('youtube') || name.includes('facebook') || name.includes('opera') || name.includes('xot')) category = "Social";
-      else if (name.includes('60 day') || name.includes('90 day') || name.includes('120 day') || name.includes('year') || name.includes('365') || name.includes('mega') || name.includes('3 month') || name.includes('2 month') || name.includes('quarterly') || name.includes('annual')) category = "Mega";
-      else if (name.includes('month') || name.includes('30 day')) category = "Monthly";
-      else if (name.includes('week') || name.includes('7 day') || name.includes('14 day') || name.includes('weekend')) category = "Weekly";
-      else if (name.includes('1 day') || name.includes('2 day') || name.includes('3 day') || name.includes('daily') || name.includes('24 hrs') || name.includes('24hrs') || name.includes('night') || name.includes('hourly')) category = "Daily";
+      else if (name.includes('social') || name.includes('whatsapp') || name.includes('tv') || name.includes('instagram') || name.includes('tiktok') || name.includes('youtube') || name.includes('facebook') || name.includes('opera') || name.includes('telegram')) category = "Social";
+      else if (name.includes('60 days') || name.includes('90 days') || name.includes('120 days') || name.includes('year') || name.includes('365') || name.includes('mega') || name.includes('3 months') || name.includes('2 month') || name.includes('quarterly') || name.includes('annual')) category = "Mega";
+      else if (name.includes('month') || name.includes('30 days')) category = "Monthly";
+      else if (name.includes('week') || name.includes('7 days') || name.includes('14 days') || name.includes('weekend')) category = "Weekly";
+      else if (name.includes('1 day') || name.includes('2 days') || name.includes('3 day') || name.includes('daily') || name.includes('24 hrs') || name.includes('24hrs') || name.includes('night') || name.includes('hourly')) category = "Daily";
 
       return category === activeDataCategory;
     }).sort((a, b) => parseFloat(a.variation_amount || "0") - parseFloat(b.variation_amount || "0"));
