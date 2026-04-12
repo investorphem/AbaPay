@@ -72,7 +72,6 @@ export default function Home() {
   const [modalType, setModalType] = useState<'standard' | 'token' | 'provider' | 'country' | 'bank'>('standard'); 
   const [toast, setToast] = useState<{title: string, message: string, type: 'success' | 'error'} | null>(null);
 
-  // ⚡ RESTORED FULL SUPPORT STATES ⚡
   const [isSupportOpen, setIsSupportOpen] = useState(false);
   const [supportMessage, setSupportMessage] = useState("");
   const [supportTxHash, setSupportTxHash] = useState<string | null>(null);
@@ -227,7 +226,6 @@ export default function Home() {
     else { try { await navigator.clipboard.writeText(receiptText); showToast("Copied!", "Receipt details copied to clipboard.", "success"); } catch (err) {} }
   };
 
-  // ⚡ RESTORED FULL SUPPORT LOGIC INTEGRATED TO YOUR ROUTE ⚡
   const handleSendSupport = async () => {
     if (!supportMessage.trim()) return showToast("Error", "Please enter a message.", "error");
     setIsSendingSupport(true);
@@ -597,7 +595,6 @@ export default function Home() {
         </div>
       )}
 
-      {/* ⚡ RESTORED ORIGINAL SUPPORT MODAL WITH FORM DATA UPLOAD ⚡ */}
       {isSupportOpen && (
         <div className="fixed inset-0 z-[200] flex items-center justify-center p-4 bg-slate-900/50 backdrop-blur-sm animate-in fade-in">
            <div className="bg-white w-full max-w-md rounded-[2rem] p-6 shadow-2xl relative animate-in zoom-in-95">
@@ -1150,33 +1147,125 @@ export default function Home() {
                   </div>
                 )}
 
+                {/* ⚡ RESTORED CABLE RENEW / CHANGE UI FOR DSTV & GOTV ⚡ */}
                 {activeService.id === "CABLE" && (cableProvider === "showmax" || customerName) && (
                   <div className="bg-slate-50 border border-slate-200 rounded-2xl p-4 shadow-sm animate-in fade-in slide-in-from-top-4">
-                     {selectedCablePlan ? (
+                     {cableProvider !== "showmax" && (
+                         <div className="flex items-start justify-between border-b border-slate-200 pb-3 mb-3">
+                            <div>
+                              <p className="text-[10px] font-black uppercase tracking-widest text-slate-400 mb-1">Verified Customer</p>
+                              <p className="font-black text-slate-800 text-sm">{customerName}</p>
+                              {['dstv', 'gotv'].includes(cableProvider) && (
+                                <p className="text-xs font-bold text-emerald-600 mt-1 flex items-center gap-1"><Tv size={12}/> {cableCurrentBouquet}</p>
+                              )}
+                            </div>
+                         </div>
+                     )}
+
+                     {['dstv', 'gotv'].includes(cableProvider) ? (
+                       <>
+                         <div className="flex gap-2 p-1.5 bg-slate-200/50 rounded-xl mb-4 shadow-inner">
+                            <button 
+                              onClick={() => { setCableSubscriptionType("renew"); setNairaAmount(cableRenewAmount ? cableRenewAmount.toString() : ""); setSelectedCablePlan(null); }} 
+                              className={`flex-1 flex items-center justify-center gap-2 py-3 text-[11px] font-black uppercase tracking-wider rounded-xl transition-all ${cableSubscriptionType === "renew" ? "bg-white text-emerald-600 shadow-lg" : "text-slate-500 hover:text-slate-700"}`}
+                            >
+                              <RefreshCw size={14}/> Renew Plan
+                            </button>
+                            <button 
+                              onClick={() => { setCableSubscriptionType("change"); setNairaAmount(""); }} 
+                              className={`flex-1 flex items-center justify-center gap-2 py-3 text-[11px] font-black uppercase tracking-wider rounded-xl transition-all ${cableSubscriptionType === "change" ? "bg-white text-blue-600 shadow-lg" : "text-slate-500 hover:text-slate-700"}`}
+                            >
+                              <ListPlus size={14}/> Change Plan
+                            </button>
+                         </div>
+
+                         {cableSubscriptionType === "renew" ? (
+                            <div className="bg-emerald-500/10 border border-emerald-500/20 rounded-xl p-4 text-center">
+                               <p className="text-[10px] font-black text-emerald-800 uppercase tracking-widest mb-1">Renewal Amount Due</p>
+                               <p className="text-2xl font-black text-emerald-600">₦{cableRenewAmount?.toLocaleString() || "0.00"}</p>
+                            </div>
+                         ) : (
+                            selectedCablePlan ? (
+                               <div className="relative animate-in zoom-in-95 duration-200 mt-2">
+                                  <button onClick={() => { setSelectedCablePlan(null); setNairaAmount(""); }} className="absolute -top-3 -right-3 bg-slate-200 text-slate-500 hover:text-slate-800 hover:bg-slate-300 rounded-full p-1 transition-all z-10 shadow-sm border border-white">
+                                    <XCircle size={16}/>
+                                  </button>
+                                  <div className="p-4 rounded-2xl border-2 border-blue-500 bg-blue-50 shadow-sm text-left">
+                                     <p className="font-black text-slate-900 text-lg tracking-tight">{selectedCablePlan.name}</p>
+                                     <p className="text-[10px] text-blue-500 font-bold uppercase tracking-wider mb-2">Selected Package</p>
+                                     <div className="pt-2 border-t border-blue-200/50 flex justify-between items-end">
+                                         <p className="font-black text-blue-600 text-xl leading-none">₦{parseFloat(selectedCablePlan.variation_amount).toLocaleString()}</p>
+                                         <p className="text-[10px] text-slate-500 font-bold">{(parseFloat(selectedCablePlan.variation_amount) / exchangeRate).toFixed(4)} {selectedToken.symbol}</p>
+                                     </div>
+                                  </div>
+                               </div>
+                            ) : (
+                               <div className="grid grid-cols-1 gap-2 max-h-[35vh] overflow-y-auto pr-1">
+                                 {cableVariations.length === 0 ? (
+                                   <p className="text-center text-xs font-bold text-slate-400 py-4"><Loader2 className="animate-spin inline-block mr-2" size={14}/> Fetching Live Packages...</p>
+                                 ) : (
+                                   cableVariations.map((plan) => {
+                                     const cryptoPlanCost = (parseFloat(plan.variation_amount) / exchangeRate).toFixed(4);
+                                     return (
+                                       <button 
+                                         key={plan.variation_code} 
+                                         onClick={() => { setSelectedCablePlan(plan); setNairaAmount(plan.variation_amount); }} 
+                                         className="p-3 rounded-xl border border-slate-200 bg-white hover:border-slate-300 transition-all text-left flex justify-between items-center group"
+                                       >
+                                         <div>
+                                           <p className="font-black text-slate-800 text-xs">{plan.name}</p>
+                                           <p className="text-[9px] text-slate-400 font-bold mt-0.5">{cryptoPlanCost} {selectedToken.symbol}</p>
+                                         </div>
+                                         <p className="font-black text-blue-600 text-sm group-hover:scale-110 transition-transform">₦{parseFloat(plan.variation_amount).toLocaleString()}</p>
+                                       </button>
+                                     );
+                                   })
+                                 )}
+                               </div>
+                            )
+                         )}
+                       </>
+                     ) : (
+                       // ⚡ STARTIMES AND SHOWMAX LOGIC ⚡
+                       selectedCablePlan ? (
                           <div className="relative animate-in zoom-in-95 duration-200 mt-2">
                              <button onClick={() => { setSelectedCablePlan(null); setNairaAmount(""); }} className="absolute -top-3 -right-3 bg-slate-200 text-slate-500 hover:text-slate-800 hover:bg-slate-300 rounded-full p-1 transition-all z-10 shadow-sm border border-white">
                                <XCircle size={16}/>
                              </button>
                              <div className="p-4 rounded-2xl border-2 border-blue-500 bg-blue-50 shadow-sm text-left">
-                                <p className="font-black text-slate-900 text-lg">{selectedCablePlan.name}</p>
+                                <p className="font-black text-slate-900 text-lg tracking-tight">{selectedCablePlan.name}</p>
+                                <p className="text-[10px] text-blue-500 font-bold uppercase tracking-wider mb-2">Selected Package</p>
                                 <div className="pt-2 border-t border-blue-200/50 flex justify-between items-end">
-                                    <p className="font-black text-blue-600 text-xl">₦{parseFloat(selectedCablePlan.variation_amount).toLocaleString()}</p>
+                                    <p className="font-black text-blue-600 text-xl leading-none">₦{parseFloat(selectedCablePlan.variation_amount).toLocaleString()}</p>
                                     <p className="text-[10px] text-slate-500 font-bold">{(parseFloat(selectedCablePlan.variation_amount) / exchangeRate).toFixed(4)} {selectedToken.symbol}</p>
                                  </div>
                              </div>
                           </div>
                        ) : (
-                          <div className="grid grid-cols-1 gap-2 max-h-[30vh] overflow-y-auto pr-1">
+                          <div className="grid grid-cols-1 gap-2 max-h-[35vh] overflow-y-auto pr-1">
                             {cableVariations.length === 0 ? (
-                              <p className="text-center text-xs font-bold text-slate-400 py-4"><Loader2 className="animate-spin" size={14}/> Loading...</p>
-                            ) : cableVariations.map((plan) => (
-                                  <button key={plan.variation_code} onClick={() => { setSelectedCablePlan(plan); setNairaAmount(plan.variation_amount); }} className="p-3 rounded-xl border border-slate-200 bg-white hover:border-slate-300 transition-all text-left flex justify-between items-center group">
-                                    <p className="font-black text-slate-800 text-xs">{plan.name}</p>
-                                    <p className="font-black text-blue-600 text-sm shrink-0 ml-2">₦{parseFloat(plan.variation_amount).toLocaleString()}</p>
+                              <p className="text-center text-xs font-bold text-slate-400 py-4"><Loader2 className="animate-spin inline-block mr-2" size={14}/> Fetching Live Packages...</p>
+                            ) : (
+                              cableVariations.map((plan) => {
+                                const cryptoPlanCost = (parseFloat(plan.variation_amount) / exchangeRate).toFixed(4);
+                                return (
+                                  <button 
+                                    key={plan.variation_code} 
+                                    onClick={() => { setSelectedCablePlan(plan); setNairaAmount(plan.variation_amount); }} 
+                                    className="p-3 rounded-xl border border-slate-200 bg-white hover:border-slate-300 transition-all text-left flex justify-between items-center group"
+                                  >
+                                    <div>
+                                      <p className="font-black text-slate-800 text-xs">{plan.name}</p>
+                                      <p className="text-[9px] text-slate-400 font-bold mt-0.5">{cryptoPlanCost} {selectedToken.symbol}</p>
+                                    </div>
+                                    <p className="font-black text-blue-600 text-sm group-hover:scale-110 transition-transform">₦{parseFloat(plan.variation_amount).toLocaleString()}</p>
                                   </button>
-                            ))}
+                                );
+                              })
+                            )}
                           </div>
-                       )}
+                       )
+                     )}
                   </div>
                 )}
 
