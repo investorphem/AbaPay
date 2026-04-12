@@ -438,7 +438,22 @@ export default function Home() {
         const sixMonthsAgo = new Date(); sixMonthsAgo.setMonth(sixMonthsAgo.getMonth() - 6);
         const { data } = await supabase.from('transactions').select('*').eq('wallet_address', address).gte('created_at', sixMonthsAgo.toISOString()).order('created_at', { ascending: false });
         if (data && data.length > 0) {
-          const cloudHistory = data.map((tx: any) => ({ id: tx.tx_hash.slice(0, 8), date: new Date(tx.created_at).toLocaleString(), status: tx.status, amountNaira: tx.amount_naira.toString(), amountCrypto: tx.amount_usdt.toString(), tokenUsed: "USD₮", service: tx.service_category, network: tx.network, txHash: tx.tx_hash, account: tx.account_number, refund_hash: tx.refund_hash, purchased_code: tx.purchased_code, request_id: tx.request_id, units: tx.units }));
+          const cloudHistory = data.map((tx: any) => ({ 
+             id: tx.tx_hash.slice(0, 8), 
+             date: new Date(tx.created_at).toLocaleString(), 
+             status: tx.status, 
+             amountNaira: tx.amount_naira.toString(), 
+             amountCrypto: tx.amount_usdt.toString(), 
+             tokenUsed: tx.token_used || "USD₮", // ⚡ FIX 1: TOKEN MEMORY RESTORED
+             service: tx.service_category, 
+             network: tx.network, 
+             txHash: tx.tx_hash, 
+             account: tx.account_number, 
+             refund_hash: tx.refund_hash, 
+             purchased_code: tx.purchased_code, 
+             request_id: tx.request_id, 
+             units: tx.units 
+          }));
           setTransactions(cloudHistory); localStorage.setItem("abapay_history", JSON.stringify(cloudHistory));
         }
       } catch (e) {}
@@ -601,7 +616,7 @@ export default function Home() {
               <button onClick={() => { setIsSupportOpen(false); setSupportFile(null); setSupportMessage(""); }} className="absolute top-4 right-4 bg-slate-100 p-2 rounded-full text-slate-500 hover:bg-slate-200 transition-colors"><XCircle size={20}/></button>
               <h3 className="text-xl font-black text-slate-900 mb-2">Need Help?</h3>
               {supportTxHash && <p className="text-xs text-slate-500 mb-4">Transaction Ref: <span className="font-mono bg-slate-100 px-1.5 py-0.5 rounded text-slate-700">{supportTxHash.slice(0, 15)}...</span></p>}
-              
+
               <textarea 
                   className="w-full bg-slate-50 border border-slate-200 p-4 rounded-xl text-sm outline-none focus:border-emerald-500 min-h-[100px] mb-4 font-medium" 
                   placeholder="Describe your issue so our admins can assist you..." 
@@ -769,7 +784,7 @@ export default function Home() {
                           </button>
                           <div className="p-4 rounded-2xl border-2 border-emerald-500 bg-emerald-50 shadow-sm text-left">
                             <p className="font-black text-slate-900 text-sm pr-2">{selectedEducationPlan.name}</p>
-                            
+
                             <div className="pt-2 border-t border-emerald-200/50 flex justify-between items-end">
                                 <div>
                                    <p className="font-black text-emerald-600 text-xl">₦{parseFloat(selectedEducationPlan.variation_amount || "0").toLocaleString()}</p>
@@ -1147,7 +1162,7 @@ export default function Home() {
                   </div>
                 )}
 
-                {/* ⚡ RESTORED CABLE RENEW / CHANGE UI FOR DSTV & GOTV ⚡ */}
+                {/* ⚡ RESTORED CABLE RENEW / CHANGE UI FOR DSTV & GOTV WITH FEE UI ⚡ */}
                 {activeService.id === "CABLE" && (cableProvider === "showmax" || customerName) && (
                   <div className="bg-slate-50 border border-slate-200 rounded-2xl p-4 shadow-sm animate-in fade-in slide-in-from-top-4">
                      {cableProvider !== "showmax" && (
@@ -1183,6 +1198,8 @@ export default function Home() {
                             <div className="bg-emerald-500/10 border border-emerald-500/20 rounded-xl p-4 text-center">
                                <p className="text-[10px] font-black text-emerald-800 uppercase tracking-widest mb-1">Renewal Amount Due</p>
                                <p className="text-2xl font-black text-emerald-600">₦{cableRenewAmount?.toLocaleString() || "0.00"}</p>
+                               {/* ⚡ RENEWAL FEE BADGE ⚡ */}
+                               {currentFee > 0 && <p className="text-[10px] font-black text-orange-500 mt-1">+₦{currentFee} FEE INCLUDED</p>}
                             </div>
                          ) : (
                             selectedCablePlan ? (
@@ -1194,7 +1211,11 @@ export default function Home() {
                                      <p className="font-black text-slate-900 text-lg tracking-tight">{selectedCablePlan.name}</p>
                                      <p className="text-[10px] text-blue-500 font-bold uppercase tracking-wider mb-2">Selected Package</p>
                                      <div className="pt-2 border-t border-blue-200/50 flex justify-between items-end">
-                                         <p className="font-black text-blue-600 text-xl leading-none">₦{parseFloat(selectedCablePlan.variation_amount).toLocaleString()}</p>
+                                         {/* ⚡ CHANGE BOUQUET FEE BADGE ⚡ */}
+                                         <div>
+                                            <p className="font-black text-blue-600 text-xl leading-none">₦{parseFloat(selectedCablePlan.variation_amount).toLocaleString()}</p>
+                                            {currentFee > 0 && <p className="text-[9px] font-black text-orange-500 mt-1">+₦{currentFee} FEE INCLUDED</p>}
+                                         </div>
                                          <p className="text-[10px] text-slate-500 font-bold">{(parseFloat(selectedCablePlan.variation_amount) / exchangeRate).toFixed(4)} {selectedToken.symbol}</p>
                                      </div>
                                   </div>
@@ -1236,7 +1257,11 @@ export default function Home() {
                                 <p className="font-black text-slate-900 text-lg tracking-tight">{selectedCablePlan.name}</p>
                                 <p className="text-[10px] text-blue-500 font-bold uppercase tracking-wider mb-2">Selected Package</p>
                                 <div className="pt-2 border-t border-blue-200/50 flex justify-between items-end">
-                                    <p className="font-black text-blue-600 text-xl leading-none">₦{parseFloat(selectedCablePlan.variation_amount).toLocaleString()}</p>
+                                    {/* ⚡ STARTIMES/SHOWMAX FEE BADGE ⚡ */}
+                                    <div>
+                                       <p className="font-black text-blue-600 text-xl leading-none">₦{parseFloat(selectedCablePlan.variation_amount).toLocaleString()}</p>
+                                       {currentFee > 0 && <p className="text-[9px] font-black text-orange-500 mt-1">+₦{currentFee} FEE INCLUDED</p>}
+                                    </div>
                                     <p className="text-[10px] text-slate-500 font-bold">{(parseFloat(selectedCablePlan.variation_amount) / exchangeRate).toFixed(4)} {selectedToken.symbol}</p>
                                  </div>
                              </div>
