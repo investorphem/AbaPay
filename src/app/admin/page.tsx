@@ -202,21 +202,18 @@ export default function AdminDashboard() {
     } catch (error) { setStatus("Rejected or Insufficient Gas."); }
   };
 
-  // ⚡ BULLETPROOF REFUND LOGIC ⚡
   const handleRefund = async (tx: any) => {
     try {
       if (!client || !address) return alert("Connect your Admin Wallet first.");
 
       setProcessingRefundId(tx.id);
 
-      // 1. Force rawAmount to be exactly what is in the amount_usdt column
       const rawAmount = parseFloat(tx.amount_usdt);
       
       if (isNaN(rawAmount) || rawAmount <= 0) {
           throw new Error("Invalid crypto amount found in database.");
       }
 
-      // 2. Identify the Token and Decimals
       const tokenSymbol = tx.tokenUsed || tx.token_used || "USD₮"; 
       const tokenData = TOKENS[tokenSymbol as keyof typeof TOKENS];
       if (!tokenData) throw new Error(`Token ${tokenSymbol} is not supported.`);
@@ -224,12 +221,9 @@ export default function AdminDashboard() {
       const tokenAddr = isMainnet ? tokenData.mainnet : tokenData.sepolia;
       const decimals = tokenData.decimals;
 
-      // 3. Format the amount STRICTLY to the token's decimal limit before parsing
-      // This prevents "underflow/overflow" reverts if the db has a number like 1.123456789
       const cleanAmountString = rawAmount.toFixed(decimals);
       const valueInWei = parseUnits(cleanAmountString, decimals);
 
-      // 4. Execute the Smart Contract Call
       const refundHash = await client.writeContract({
         address: ABAPAY_CONTRACT as `0x${string}`,
         abi: ABAPAY_ADMIN_ABI,
@@ -245,7 +239,6 @@ export default function AdminDashboard() {
           throw new Error("Transaction reverted. The Vault does not have enough balance.");
       }
 
-      // 5. Update Database
       const dbRes = await fetch('/api/admin/refund', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -268,13 +261,25 @@ export default function AdminDashboard() {
     }
   };
 
+  // ⚡ DYNAMIC ACCOUNTING & VOLUME CALCULATIONS ⚡
+  const currentVaultTotal = parseFloat(usdtVaultBalance || "0") + parseFloat(usdcVaultBalance || "0") + parseFloat(cusdVaultBalance || "0");
+
   const analytics = useMemo(() => {
     const successTx = dbTransactions.filter(tx => tx.status === "SUCCESS");
+    
+    // Calculates every single crypto dollar that has been deposited into the contract
+    const totalDeposited = dbTransactions.reduce((acc, tx) => acc + (parseFloat(tx.amount_usdt) || 0), 0);
+    
+    // Calculates every single crypto dollar that was refunded
+    const totalRefunded = dbTransactions.filter(tx => tx.status === "REFUNDED").reduce((acc, tx) => acc + (parseFloat(tx.amount_usdt) || 0), 0);
+
     return {
-      vol: successTx.reduce((acc, tx) => acc + Number(tx.amount_naira), 0),
-      fees: successTx.reduce((acc, tx) => acc + Number(tx.fee_naira), 0),
+      vol: successTx.reduce((acc, tx) => acc + Number(tx.amount_naira || 0), 0),
+      fees: successTx.reduce((acc, tx) => acc + Number(tx.fee_naira || 0), 0),
       count: successTx.length,
-      users: new Set(successTx.map(tx => tx.wallet_address)).size
+      users: new Set(successTx.map(tx => tx.wallet_address)).size,
+      totalDeposited,
+      totalRefunded
     };
   }, [dbTransactions]);
 
@@ -301,8 +306,8 @@ export default function AdminDashboard() {
   );
 
   const exportCSV = () => {
-    const headers = "Date,Status,Network,Service,Account,Naira,USDT,Transaction ID,Units,Token PIN,Hash\n";
-    const rows = filteredTx.map(tx => `${tx.created_at},${tx.status},${tx.network},${tx.service_category},${tx.account_number},${tx.amount_naira},${tx.amount_usdt},${tx.request_id || 'N/A'},${tx.units || 'N/A'},${tx.purchased_code || 'N/A'},${tx.tx_hash}`).join("\n");
+    const headers = "Date,Status,Network,Service,Account,Naira,Crypto,Token Used,Transaction ID,Units,Token PIN,Hash\n";
+    const rows = filteredTx.map(tx => `${tx.created_at},${tx.status},${tx.network},${tx.service_category},${tx.account_number},${tx.amount_naira},${tx.amount_usdt},${tx.token_used || 'USD₮'},${tx.request_id || 'N/A'},${tx.units || 'N/A'},${tx.purchased_code || 'N/A'},${tx.tx_hash}`).join("\n");
     const blob = new Blob([headers + rows], { type: 'text/csv' });
     const url = window.URL.createObjectURL(blob);
     const a = document.createElement('a'); a.href = url; a.download = `AbaPay_Report.csv`; a.click();
@@ -342,7 +347,7 @@ export default function AdminDashboard() {
             {/* STATS */}
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
               <StatBox label="VTpass Wallet" value={`₦${vtBalance}`} sub="Naira Float" color="text-white" icon={<Banknote size={16}/>} />
-              <StatBox label="Blockchain Vaults" value={`$${(parseFloat(usdtVaultBalance) + parseFloat(usdcVaultBalance) + parseFloat(cusdVaultBalance)).toFixed(2)}`} sub="Total Locked Assets" color="text-emerald-500" icon={<Wallet size={16}/>} />
+              <StatBox label="Blockchain Vaults" value={`$${currentVaultTotal.toFixed(2)}`} sub="Total Locked Assets" color="text-emerald-500" icon={<Wallet size={16}/>} />
               <StatBox label="Admin Profit" value={`₦${analytics.fees.toLocaleString()}`} sub="Fee Accrued" color="text-blue-400" icon={<BarChart3 size={16}/>} />
               <StatBox label="SMS Health" value={`${smsBalance} Units`} sub="Messaging Units" color="text-orange-400" icon={<Activity size={16}/>} />
             </div>
@@ -450,7 +455,7 @@ export default function AdminDashboard() {
                           </td>
                           <td className="py-4 px-2 min-w-[120px]">
                             <p className="text-white font-black">₦{tx.amount_naira.toLocaleString()}</p>
-                            <p className="text-[10px] text-emerald-500 font-mono">${(tx.amount_usdt || tx.amount_crypto || 0).toString()} Paid</p>
+                            <p className="text-[10px] text-emerald-500 font-mono">${(tx.amount_usdt || tx.amount_crypto || 0).toString()} {tx.token_used || 'USD₮'}</p>
                           </td>
                           <td className="py-4 px-2">
                             <div className="flex flex-col items-start gap-2">
@@ -534,20 +539,52 @@ export default function AdminDashboard() {
 
             {/* ANALYTICS TAB */}
             {activeTab === 'analytics' && (
-               <div className="grid grid-cols-1 md:grid-cols-2 gap-6 animate-in fade-in">
-                  <div className="bg-[#111114] border border-slate-800 rounded-3xl p-6">
-                    <h3 className="text-xs font-black uppercase text-slate-500 mb-6 flex items-center gap-2"><Users size={14}/> User Acquisition</h3>
-                    <div className="flex items-baseline gap-2">
-                      <span className="text-4xl font-black">{analytics.users}</span>
-                      <span className="text-emerald-500 text-xs font-bold">Total Unique Wallets</span>
+               <div className="space-y-6 animate-in fade-in">
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                    <div className="bg-[#111114] border border-slate-800 rounded-3xl p-6">
+                      <h3 className="text-xs font-black uppercase text-slate-500 mb-6 flex items-center gap-2"><Users size={14}/> User Acquisition</h3>
+                      <div className="flex items-baseline gap-2">
+                        <span className="text-4xl font-black">{analytics.users}</span>
+                        <span className="text-emerald-500 text-xs font-bold">Total Unique Wallets</span>
+                      </div>
+                    </div>
+                    <div className="bg-[#111114] border border-slate-800 rounded-3xl p-6">
+                      <h3 className="text-xs font-black uppercase text-slate-500 mb-6 flex items-center gap-2"><Activity size={14}/> Transaction Volume</h3>
+                      <div className="flex items-baseline gap-2">
+                        <span className="text-4xl font-black">₦{analytics.vol.toLocaleString()}</span>
+                        <span className="text-slate-500 text-xs">Gross Vended Value</span>
+                      </div>
                     </div>
                   </div>
-                  <div className="bg-[#111114] border border-slate-800 rounded-3xl p-6">
-                    <h3 className="text-xs font-black uppercase text-slate-500 mb-6 flex items-center gap-2"><Activity size={14}/> Transaction Volume</h3>
-                    <div className="flex items-baseline gap-2">
-                      <span className="text-4xl font-black">₦{analytics.vol.toLocaleString()}</span>
-                      <span className="text-slate-500 text-xs">Gross Vended Value</span>
-                    </div>
+
+                  {/* ⚡ THE NEW SMART CONTRACT ACCOUNTING SECTION ⚡ */}
+                  <div className="bg-slate-900 border border-slate-800 rounded-3xl p-8">
+                     <div className="flex items-center gap-3 mb-6">
+                        <div className="bg-emerald-500/10 p-3 rounded-full"><Database className="text-emerald-400" size={24}/></div>
+                        <div>
+                          <h2 className="text-xl font-black text-white">Smart Contract Accounting</h2>
+                          <p className="text-xs font-bold text-slate-500 uppercase tracking-widest mt-1">Lifetime Volume & Treasury Flow</p>
+                        </div>
+                     </div>
+
+                     <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+                        <div className="border-l-2 border-emerald-500 pl-4">
+                           <p className="text-[10px] font-black text-slate-500 uppercase tracking-widest mb-1">Total Crypto Received</p>
+                           <p className="text-3xl font-black text-white">${analytics.totalDeposited.toFixed(2)}</p>
+                           <p className="text-[10px] text-slate-500 mt-1">All-time lifetime deposits</p>
+                        </div>
+                        <div className="border-l-2 border-blue-500 pl-4">
+                           <p className="text-[10px] font-black text-slate-500 uppercase tracking-widest mb-1">Total Processed Refunds</p>
+                           <p className="text-3xl font-black text-white">${analytics.totalRefunded.toFixed(2)}</p>
+                           <p className="text-[10px] text-slate-500 mt-1">Crypto returned to users</p>
+                        </div>
+                        <div className="border-l-2 border-purple-500 pl-4 bg-purple-500/5 -ml-4 pl-8 py-2 rounded-r-xl">
+                           <p className="text-[10px] font-black text-purple-400 uppercase tracking-widest mb-1">Total Admin Withdrawals</p>
+                           {/* The Math: Total Deposited - Total Refunded - What is currently sitting in the vault */}
+                           <p className="text-3xl font-black text-purple-400">${Math.max(0, analytics.totalDeposited - analytics.totalRefunded - currentVaultTotal).toFixed(2)}</p>
+                           <p className="text-[10px] text-purple-400 mt-1">Crypto swept to treasury</p>
+                        </div>
+                     </div>
                   </div>
                </div>
             )}
