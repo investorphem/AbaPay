@@ -68,7 +68,6 @@ export async function POST(req: Request) {
     }
 
     const requestedNaira = parseFloat(nairaAmount);
-
     const needsVerification = !isForeign && (serviceCategory === 'ELECTRICITY' || serviceCategory === 'BANK' || (serviceCategory === 'EDUCATION' && serviceID === 'jamb') || (serviceCategory === 'CABLE' && network !== 'SHOWMAX'));
 
     const serviceFee = (needsVerification || serviceCategory === 'EDUCATION') ? 100 : 0;
@@ -86,7 +85,7 @@ export async function POST(req: Request) {
       fee_naira: serviceFee,
       status: 'PROCESSING',
       wallet_address: wallet_address || "UNKNOWN",
-      token_used: tokenSymbol // ⚡ PERFECT TOKEN MEMORY ADDED HERE
+      token_used: tokenSymbol 
     };
 
     const { error: dbError } = await supabase.from('transactions').insert([dbPayload]);
@@ -109,8 +108,6 @@ export async function POST(req: Request) {
     const baseRate = parseFloat(settingsData.exchange_rate);
     const expectedTotalNaira = vendAmount + serviceFee;
     const requiredCrypto = expectedTotalNaira / baseRate;
-
-    // ⚡ FIX: Matches the frontend's 4-decimal rounding perfectly to prevent micro-fraction underpayment flags
     const expectedCryptoStr = requiredCrypto.toFixed(4);
 
     if (parseFloat(amount) < parseFloat(expectedCryptoStr)) {
@@ -209,27 +206,16 @@ export async function POST(req: Request) {
         let alertTokenRef = "Success"; 
 
         if (serviceCategory === 'ELECTRICITY' && !isForeign) {
-          // ⚡ 1. Try all normal VTpass nesting locations first
-          dbPurchasedCode = payData.purchased_code || 
-                            payData.token || 
-                            payData.tokens ||
-                            payData.content?.transactions?.token || 
-                            payData.content?.transactions?.purchased_code || 
-                            null;
+          dbPurchasedCode = payData.purchased_code || payData.token || payData.tokens || payData.content?.transactions?.token || payData.content?.transactions?.purchased_code || null;
 
-          // ⚡ 2. THE NUCLEAR OPTION: Rip the raw JSON string for any 20-digit pattern
           if (!dbPurchasedCode) {
               const rawPayloadString = JSON.stringify(payData);
               const tokenMatch = rawPayloadString.match(/(?:\b|Token:?\s*)(\d{4}[-\s]?\d{4}[-\s]?\d{4}[-\s]?\d{4}[-\s]?\d{4})\b/i);
-              
-              if (tokenMatch) {
-                  dbPurchasedCode = tokenMatch[1].replace(/[-\s]/g, ''); // Clear dashes or spaces
-              }
+              if (tokenMatch) dbPurchasedCode = tokenMatch[1].replace(/[-\s]/g, '');
           }
 
-          alertTokenRef = dbPurchasedCode || (appMode === "sandbox" ? "No Token in Sandbox" : "Processing Token");
+          alertTokenRef = dbPurchasedCode || "Processing Token";
 
-          // Extract Units
           if (payData.units) vendedUnits = payData.units.toString();
           else if (payData.content?.transactions?.units) vendedUnits = payData.content.transactions.units.toString();
           else if (payData.content?.transactions?.unit) vendedUnits = payData.content.transactions.unit.toString();
@@ -241,6 +227,23 @@ export async function POST(req: Request) {
           alertTokenRef = payData.content?.transactions?.transactionId || payData.requestId || "Success";
         }
 
+        // ⚡ NEW: STRICT TOKEN REQUIREMENT LOGIC ⚡
+        const requiresCode = (serviceCategory === 'ELECTRICITY' && !isForeign) || serviceCategory === 'EDUCATION';
+        
+        if (requiresCode && !dbPurchasedCode) {
+            // VTpass claimed "Success" but failed to actually give us the PIN/Token. Force it to PENDING.
+            await supabase.from('transactions').update({ status: 'PENDING' }).eq('tx_hash', txHash);
+            
+            try { await sendTelegramAlert(`⏳ *TOKEN DELAYED (PENDING)*\n🛒 *Product:* ${network} ${serviceCategory}\n👤 *User:* ${billersCode || phone}\n⚠️ Provider reported success but no PIN/Token was generated yet. Moved to PENDING for requery.`); } catch (e) {}
+
+            return NextResponse.json({
+              success: true,
+              message: "Transaction is processing. Awaiting Token/PIN generation from the provider.",
+              data: { vendedToken: "Processing...", vendAmount, requestId: payData.requestId, units: vendedUnits }
+            });
+        }
+
+        // If it reaches here, it either has a valid code, or doesn't need one (like Airtime/Data)
         await supabase.from('transactions').update({ 
             status: 'SUCCESS',
             purchased_code: dbPurchasedCode, 
