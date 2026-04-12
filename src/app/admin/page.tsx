@@ -25,7 +25,6 @@ const celoSepolia = defineChain({
   rpcUrls: { default: { http: ['https://forno.celo-sepolia.celo-testnet.org'] } },
 });
 
-// UPGRADED: Added refundUser to the Contract ABI
 const ABAPAY_ADMIN_ABI = [
   {"inputs":[],"name":"owner","outputs":[{"internalType":"address","name":"","type":"address"}],"stateMutability":"view","type":"function"},
   {"inputs":[{"internalType":"address","name":"tokenAddress","type":"address"}],"name":"withdrawFunds","outputs":[],"stateMutability":"nonpayable","type":"function"},
@@ -203,23 +202,34 @@ export default function AdminDashboard() {
     } catch (error) { setStatus("Rejected or Insufficient Gas."); }
   };
 
+  // ⚡ BULLETPROOF REFUND LOGIC ⚡
   const handleRefund = async (tx: any) => {
     try {
       if (!client || !address) return alert("Connect your Admin Wallet first.");
 
       setProcessingRefundId(tx.id);
 
-      const rawAmount = tx.amount_usdt || tx.amount_crypto || tx.amountCrypto;
-      if (!rawAmount) throw new Error("Could not locate the crypto amount for this transaction.");
+      // 1. Force rawAmount to be exactly what is in the amount_usdt column
+      const rawAmount = parseFloat(tx.amount_usdt);
+      
+      if (isNaN(rawAmount) || rawAmount <= 0) {
+          throw new Error("Invalid crypto amount found in database.");
+      }
 
+      // 2. Identify the Token and Decimals
       const tokenSymbol = tx.tokenUsed || tx.token_used || "USD₮"; 
       const tokenData = TOKENS[tokenSymbol as keyof typeof TOKENS];
       if (!tokenData) throw new Error(`Token ${tokenSymbol} is not supported.`);
 
       const tokenAddr = isMainnet ? tokenData.mainnet : tokenData.sepolia;
       const decimals = tokenData.decimals;
-      const valueInWei = parseUnits(rawAmount.toString(), decimals);
 
+      // 3. Format the amount STRICTLY to the token's decimal limit before parsing
+      // This prevents "underflow/overflow" reverts if the db has a number like 1.123456789
+      const cleanAmountString = rawAmount.toFixed(decimals);
+      const valueInWei = parseUnits(cleanAmountString, decimals);
+
+      // 4. Execute the Smart Contract Call
       const refundHash = await client.writeContract({
         address: ABAPAY_CONTRACT as `0x${string}`,
         abi: ABAPAY_ADMIN_ABI,
@@ -232,9 +242,10 @@ export default function AdminDashboard() {
       const receipt = await publicClient.waitForTransactionReceipt({ hash: refundHash });
 
       if (receipt.status !== 'success') {
-          throw new Error("Transaction reverted. Does the Vault have enough balance?");
+          throw new Error("Transaction reverted. The Vault does not have enough balance.");
       }
 
+      // 5. Update Database
       const dbRes = await fetch('/api/admin/refund', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -246,12 +257,12 @@ export default function AdminDashboard() {
         fetchCloudLedger(); 
         fetchOnChainBalances(); 
       } else {
-        alert("Crypto refunded successfully, but backend failed to secure the database update.");
+        alert("Crypto refunded successfully, but backend failed to update the database status.");
       }
 
     } catch (error: any) {
       console.error(error);
-      alert(`Refund rejected or failed: ${error.message}`);
+      alert(`Refund Failed: ${error.message || "Execution Reverted. Please check Vault Balance."}`);
     } finally {
       setProcessingRefundId(null);
     }
@@ -426,7 +437,6 @@ export default function AdminDashboard() {
                             <p className="text-slate-200 font-bold uppercase">{tx.network || 'N/A'}</p>
                             <p className="text-[10px] text-slate-500 uppercase tracking-wider mt-0.5">{tx.service_category} • {tx.account_number}</p>
                           </td>
-                          {/* ⚡ FIXED: ADDED EDUCATION PIN EXTRACTION ⚡ */}
                           <td className="py-4 px-2 min-w-[180px]">
                             <p className="text-slate-300 font-mono text-[10px] tracking-wider mb-0.5">ID: {tx.request_id || 'N/A'}</p>
                             {(tx.service_category === 'ELECTRICITY' || tx.service_category === 'EDUCATION') && tx.status === 'SUCCESS' ? (
