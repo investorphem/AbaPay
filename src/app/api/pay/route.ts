@@ -109,16 +109,19 @@ export async function POST(req: Request) {
     const expectedTotalNaira = vendAmount + serviceFee;
     const requiredCrypto = expectedTotalNaira / baseRate;
 
-    if (parseFloat(amount) < (requiredCrypto * 0.99)) {
+    // ⚡ FIX: Matches the frontend's 4-decimal rounding perfectly to prevent micro-fraction underpayment flags
+    const expectedCryptoStr = requiredCrypto.toFixed(4);
+    
+    if (parseFloat(amount) < parseFloat(expectedCryptoStr)) {
         await supabase.from('transactions').update({ status: 'FAILED_FUNDS_MISMATCH' }).eq('tx_hash', txHash);
-        try { await sendTelegramAlert(`🚨 *RATE MISMATCH / UNDERPAYMENT*\nUser: ${wallet_address}\nHash: \`${txHash}\`\nThey paid: ${amount} ${tokenSymbol}. We expected: ${requiredCrypto.toFixed(4)} based on rate ₦${baseRate}.`); } catch (e) {}
+        try { await sendTelegramAlert(`🚨 *RATE MISMATCH / UNDERPAYMENT*\nUser: ${wallet_address}\nHash: \`${txHash}\`\nThey paid: ${amount} ${tokenSymbol}. We expected: ${expectedCryptoStr} based on rate ₦${baseRate}.`); } catch (e) {}
         return NextResponse.json({ success: false, code: "FUNDS", message: "Insufficient crypto paid. Admin has been notified." }, { status: 400 });
     }
 
     if (needsVerification) {
       const verifyRes = await fetch(`${baseUrl}/merchant-verify`, {
         method: 'POST',
-        headers: getHeaders(), // ⚡ FIXED: Removed 'POST' argument
+        headers: getHeaders(), 
         body: JSON.stringify({ 
           billersCode, 
           serviceID, 
@@ -184,7 +187,7 @@ export async function POST(req: Request) {
     try {
       payRes = await fetch(`${baseUrl}/pay`, {
         method: 'POST',
-        headers: getHeaders(), // ⚡ FIXED: Removed 'POST' argument
+        headers: getHeaders(), 
         body: JSON.stringify(vtpassPayload)
       });
       payData = await payRes.json();
