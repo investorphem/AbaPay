@@ -6,7 +6,7 @@ import {
   Lock, ArrowDownToLine, Wallet, ShieldAlert, Activity, 
   Database, RefreshCcw, Globe, Zap, ExternalLink, 
   Search, Download, Users, BarChart3, Banknote,
-  ChevronLeft, ChevronRight, Loader2, Save, Gauge
+  ChevronLeft, ChevronRight, Loader2, Save, Gauge, RefreshCw
 } from "lucide-react";
 import { supabase } from "@/utils/supabase";
 
@@ -65,6 +65,7 @@ export default function AdminDashboard() {
 
   const [currentPage, setCurrentPage] = useState(1);
   const [processingRefundId, setProcessingRefundId] = useState<string | null>(null);
+  const [isRequeryingId, setIsRequeryingId] = useState<string | null>(null); // ⚡ NEW: Requery Loading State
 
   const [currentExchangeRate, setCurrentExchangeRate] = useState<string>("Loading...");
   const [newExchangeRate, setNewExchangeRate] = useState<string>("");
@@ -261,16 +262,45 @@ export default function AdminDashboard() {
     }
   };
 
-  // ⚡ DYNAMIC ACCOUNTING & VOLUME CALCULATIONS ⚡
+  // ⚡ NEW: REQUERY LOGIC FOR ADMIN ⚡
+  const handleRequery = async (tx: any) => {
+    if (!tx.request_id) return alert("This transaction has no Provider Request ID to query.");
+    setIsRequeryingId(tx.id);
+
+    try {
+      const res = await fetch('/api/requery', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ request_id: tx.request_id, tx_hash: tx.tx_hash })
+      });
+      const data = await res.json();
+
+      if (data.success) {
+        if (data.status === 'SUCCESS') {
+           alert("✅ Transaction was successfully delivered by the provider!");
+           fetchCloudLedger(); 
+        } else if (data.status === 'FAILED_VENDING') {
+           alert("❌ Provider rejected the transaction. It is now marked for a refund.");
+           fetchCloudLedger();
+        } else {
+           alert("⏳ Provider is still processing it. Check back later.");
+        }
+      } else {
+        alert(`Error: ${data.message}`);
+      }
+    } catch (error) {
+      alert("Network error while checking status.");
+    } finally {
+      setIsRequeryingId(null);
+    }
+  };
+
   const currentVaultTotal = parseFloat(usdtVaultBalance || "0") + parseFloat(usdcVaultBalance || "0") + parseFloat(cusdVaultBalance || "0");
 
   const analytics = useMemo(() => {
     const successTx = dbTransactions.filter(tx => tx.status === "SUCCESS");
     
-    // Calculates every single crypto dollar that has been deposited into the contract
     const totalDeposited = dbTransactions.reduce((acc, tx) => acc + (parseFloat(tx.amount_usdt) || 0), 0);
-    
-    // Calculates every single crypto dollar that was refunded
     const totalRefunded = dbTransactions.filter(tx => tx.status === "REFUNDED").reduce((acc, tx) => acc + (parseFloat(tx.amount_usdt) || 0), 0);
 
     return {
@@ -413,6 +443,7 @@ export default function AdminDashboard() {
                   <select value={filterStatus} onChange={(e) => setFilterStatus(e.target.value)} className="bg-slate-950 border border-slate-800 rounded-xl px-4 py-3 text-sm text-slate-300">
                     <option value="ALL">All Status</option>
                     <option value="SUCCESS">Success</option>
+                    <option value="PENDING">Pending</option>
                     <option value="FAILED_VENDING">Failed</option>
                     <option value="REFUNDED">Refunded</option>
                     <option value="FAILED_FUNDS_MISMATCH">Rate Mismatch</option> 
@@ -463,10 +494,24 @@ export default function AdminDashboard() {
                                 tx.status === 'SUCCESS' ? 'bg-emerald-500/10 text-emerald-500' : 
                                 tx.status === 'REFUNDED' ? 'bg-blue-500/10 text-blue-400' :
                                 tx.status === 'FAILED_FUNDS_MISMATCH' ? 'bg-purple-500/10 text-purple-400' :
+                                tx.status === 'PENDING' ? 'bg-orange-500/10 text-orange-400' : // ⚡ Added Orange for Pending
                                 'bg-red-500/10 text-red-500'
                               }`}>
                                 {tx.status}
                               </span>
+
+                              {/* ⚡ REQUERY BUTTON FOR PENDING TXs ⚡ */}
+                              {tx.status === 'PENDING' && (
+                                <button 
+                                  onClick={() => handleRequery(tx)}
+                                  disabled={isRequeryingId === tx.id}
+                                  className="bg-slate-800 hover:bg-slate-700 border border-slate-700 text-white text-[9px] font-bold uppercase tracking-widest px-3 py-1.5 rounded-lg flex items-center gap-1.5 transition-colors disabled:opacity-50"
+                                >
+                                  {isRequeryingId === tx.id ? <Loader2 size={10} className="animate-spin text-orange-400" /> : <RefreshCw size={10} className="text-orange-400" />}
+                                  {isRequeryingId === tx.id ? 'Checking...' : 'Check Status'}
+                                </button>
+                              )}
+
                               {(tx.status === 'FAILED_VENDING' || tx.status === 'FAILED_FUNDS_MISMATCH') && (
                                 <button 
                                   onClick={() => handleRefund(tx)}
