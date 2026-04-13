@@ -36,9 +36,9 @@ export const INTERNET_PROVIDERS = [
 
 // ⚡ ADDED EDUCATION PROVIDERS ⚡
 export const EDUCATION_PROVIDERS = [
-  { serviceID: "waec", displayName: "WAEC Result Checker", logo: "/logo.png" },
-  { serviceID: "waec-registration", displayName: "WAEC Registration", logo: "/logo.png" },
-  { serviceID: "jamb", displayName: "JAMB PIN Vending", logo: "/logo.png" }
+  { serviceID: "waec", displayName: "WAEC Result Checker", logo: "/waec.png" },
+  { serviceID: "waec-registration", displayName: "WAEC Registration", logo: "/waec.png" },
+  { serviceID: "jamb", displayName: "JAMB PIN Vending", logo: "/jamb.png" }
 ];
 
 export const SUPPORTED_TOKENS = [
