@@ -1,7 +1,8 @@
 "use client";
 
 import { useState, useEffect, useMemo } from "react";
-import { createWalletClient, createPublicClient, custom, http, formatUnits, parseUnits, defineChain } from "viem";
+import { createWalletClient, createPublicClient, custom, http, formatUnits, parseUnits } from "viem";
+import { celo, celoSepolia } from "viem/chains"; // ⚡ IMPORTED DIRECTLY TO MATCH FRONTEND
 import { 
   Lock, ArrowDownToLine, Wallet, ShieldAlert, Activity, 
   Database, RefreshCcw, Globe, Zap, ExternalLink, 
@@ -9,21 +10,6 @@ import {
   ChevronLeft, ChevronRight, Loader2, Save, Gauge, RefreshCw
 } from "lucide-react";
 import { supabase } from "@/utils/supabase";
-
-// --- DYNAMIC NETWORK CONFIG ---
-const celoMainnet = defineChain({
-  id: 42220,
-  name: 'Celo',
-  nativeCurrency: { decimals: 18, name: 'CELO', symbol: 'CELO' },
-  rpcUrls: { default: { http: ['https://forno.celo.org'] } },
-});
-
-const celoSepolia = defineChain({
-  id: 11142220,
-  name: 'Celo Sepolia',
-  nativeCurrency: { decimals: 18, name: 'CELO', symbol: 'CELO' },
-  rpcUrls: { default: { http: ['https://forno.celo-sepolia.celo-testnet.org'] } },
-});
 
 const ABAPAY_ADMIN_ABI = [
   {"inputs":[],"name":"owner","outputs":[{"internalType":"address","name":"","type":"address"}],"stateMutability":"view","type":"function"},
@@ -47,7 +33,10 @@ const ITEMS_PER_PAGE = 10;
 export default function AdminDashboard() {
   const [address, setAddress] = useState<string | null>(null);
   const [client, setClient] = useState<any>(null);
+  
   const [isOwner, setIsOwner] = useState<boolean | null>(null);
+  const [isAuthenticating, setIsAuthenticating] = useState(true); // ⚡ NEW LOADING STATE
+  const [authError, setAuthError] = useState(""); // ⚡ NEW ERROR TRACKER
 
   const [usdtVaultBalance, setUsdtVaultBalance] = useState("0.00");
   const [usdcVaultBalance, setUsdcVaultBalance] = useState("0.00");
@@ -65,7 +54,7 @@ export default function AdminDashboard() {
 
   const [currentPage, setCurrentPage] = useState(1);
   const [processingRefundId, setProcessingRefundId] = useState<string | null>(null);
-  const [isRequeryingId, setIsRequeryingId] = useState<string | null>(null); // ⚡ NEW: Requery Loading State
+  const [isRequeryingId, setIsRequeryingId] = useState<string | null>(null); 
 
   const [currentExchangeRate, setCurrentExchangeRate] = useState<string>("Loading...");
   const [newExchangeRate, setNewExchangeRate] = useState<string>("");
@@ -73,17 +62,29 @@ export default function AdminDashboard() {
 
   const isMainnet = process.env.NEXT_PUBLIC_NETWORK === "celo";
   const isLive = process.env.NEXT_PUBLIC_APP_MODE === "live";
-  const activeChain = isMainnet ? celoMainnet : celoSepolia;
+  const activeChain = isMainnet ? celo : celoSepolia; // ⚡ UPDATED TO USE VIEM CHAINS
   const ABAPAY_CONTRACT = process.env.NEXT_PUBLIC_ABAPAY_ADDRESS as `0x${string}`;
 
   useEffect(() => {
     async function initAdmin() {
       if (typeof window !== "undefined" && (window as any).ethereum) {
+        setIsAuthenticating(true);
+        setAuthError("");
         try {
           const walletClient = createWalletClient({ chain: activeChain, transport: custom((window as any).ethereum) });
           const [account] = await walletClient.requestAddresses();
           setAddress(account);
           setClient(walletClient);
+
+          // ⚡ NEW: AUTO-SWITCH NETWORK LOGIC FOR ADMINS ⚡
+          try {
+            const currentChainId = await walletClient.getChainId();
+            if (currentChainId !== activeChain.id) {
+              await walletClient.switchChain({ id: activeChain.id });
+            }
+          } catch (switchError) {
+             try { await walletClient.addChain({ chain: activeChain }); } catch(e) {}
+          }
 
           const publicClient = createPublicClient({ chain: activeChain, transport: http() });
           const contractOwner = await publicClient.readContract({
@@ -97,12 +98,23 @@ export default function AdminDashboard() {
             refreshAllData();
           } else {
             setIsOwner(false);
+            setAuthError("The connected wallet is not the owner of this contract.");
           }
-        } catch (error) { console.error("Admin init failed", error); }
+        } catch (error) { 
+          console.error("Admin init failed", error); 
+          setIsOwner(false);
+          setAuthError("Failed to read Smart Contract. Check NEXT_PUBLIC_ABAPAY_ADDRESS in your .env");
+        } finally {
+          setIsAuthenticating(false);
+        }
+      } else {
+        setIsOwner(false);
+        setAuthError("Web3 Wallet not detected.");
+        setIsAuthenticating(false);
       }
     }
     initAdmin();
-  }, [activeChain]);
+  }, [activeChain, ABAPAY_CONTRACT]);
 
   const refreshAllData = async () => {
     setIsFetching(true);
@@ -210,7 +222,7 @@ export default function AdminDashboard() {
       setProcessingRefundId(tx.id);
 
       const rawAmount = parseFloat(tx.amount_usdt);
-      
+
       if (isNaN(rawAmount) || rawAmount <= 0) {
           throw new Error("Invalid crypto amount found in database.");
       }
@@ -262,7 +274,6 @@ export default function AdminDashboard() {
     }
   };
 
-  // ⚡ NEW: REQUERY LOGIC FOR ADMIN ⚡
   const handleRequery = async (tx: any) => {
     if (!tx.request_id) return alert("This transaction has no Provider Request ID to query.");
     setIsRequeryingId(tx.id);
@@ -299,7 +310,7 @@ export default function AdminDashboard() {
 
   const analytics = useMemo(() => {
     const successTx = dbTransactions.filter(tx => tx.status === "SUCCESS");
-    
+
     const totalDeposited = dbTransactions.reduce((acc, tx) => acc + (parseFloat(tx.amount_usdt) || 0), 0);
     const totalRefunded = dbTransactions.filter(tx => tx.status === "REFUNDED").reduce((acc, tx) => acc + (parseFloat(tx.amount_usdt) || 0), 0);
 
@@ -365,11 +376,19 @@ export default function AdminDashboard() {
           </button>
         </div>
 
-        {!isOwner ? (
-          <div className="py-40 text-center bg-slate-900/30 border border-dashed border-slate-800 rounded-3xl">
+        {/* ⚡ UPDATED SECURITY RENDER BLOCK ⚡ */}
+        {isAuthenticating ? (
+          <div className="py-40 text-center bg-slate-900/30 border border-dashed border-slate-800 rounded-3xl flex flex-col items-center animate-in fade-in">
+             <Loader2 size={48} className="text-emerald-500 mb-4 animate-spin" />
+             <h2 className="text-xl font-bold text-white">Authenticating Admin...</h2>
+             <p className="text-slate-500 text-sm mt-2">Connecting to the Smart Contract</p>
+          </div>
+        ) : !isOwner ? (
+          <div className="py-40 text-center bg-slate-900/30 border border-dashed border-slate-800 rounded-3xl animate-in fade-in">
              <ShieldAlert size={48} className="mx-auto text-red-500 mb-4 animate-pulse" />
-             <h2 className="text-xl font-bold">Security Challenge Failed</h2>
-             <p className="text-slate-500 text-sm mt-2">Connected: {address?.slice(0,12)}...</p>
+             <h2 className="text-xl font-bold text-white">Security Challenge Failed</h2>
+             <p className="text-slate-500 text-sm mt-2 mb-4">Connected Wallet: {address || 'None'}</p>
+             <p className="text-red-400 text-[10px] font-mono bg-red-500/10 border border-red-500/20 inline-block px-4 py-2 rounded-lg uppercase tracking-widest">{authError}</p>
           </div>
         ) : (
           <div className="space-y-6">
@@ -494,13 +513,12 @@ export default function AdminDashboard() {
                                 tx.status === 'SUCCESS' ? 'bg-emerald-500/10 text-emerald-500' : 
                                 tx.status === 'REFUNDED' ? 'bg-blue-500/10 text-blue-400' :
                                 tx.status === 'FAILED_FUNDS_MISMATCH' ? 'bg-purple-500/10 text-purple-400' :
-                                tx.status === 'PENDING' ? 'bg-orange-500/10 text-orange-400' : // ⚡ Added Orange for Pending
+                                tx.status === 'PENDING' ? 'bg-orange-500/10 text-orange-400' : 
                                 'bg-red-500/10 text-red-500'
                               }`}>
                                 {tx.status}
                               </span>
 
-                              {/* ⚡ REQUERY BUTTON FOR PENDING TXs ⚡ */}
                               {tx.status === 'PENDING' && (
                                 <button 
                                   onClick={() => handleRequery(tx)}
@@ -602,7 +620,6 @@ export default function AdminDashboard() {
                     </div>
                   </div>
 
-                  {/* ⚡ THE NEW SMART CONTRACT ACCOUNTING SECTION ⚡ */}
                   <div className="bg-slate-900 border border-slate-800 rounded-3xl p-8">
                      <div className="flex items-center gap-3 mb-6">
                         <div className="bg-emerald-500/10 p-3 rounded-full"><Database className="text-emerald-400" size={24}/></div>
@@ -625,7 +642,6 @@ export default function AdminDashboard() {
                         </div>
                         <div className="border-l-2 border-purple-500 pl-4 bg-purple-500/5 -ml-4 pl-8 py-2 rounded-r-xl">
                            <p className="text-[10px] font-black text-purple-400 uppercase tracking-widest mb-1">Total Admin Withdrawals</p>
-                           {/* The Math: Total Deposited - Total Refunded - What is currently sitting in the vault */}
                            <p className="text-3xl font-black text-purple-400">${Math.max(0, analytics.totalDeposited - analytics.totalRefunded - currentVaultTotal).toFixed(2)}</p>
                            <p className="text-[10px] text-purple-400 mt-1">Crypto swept to treasury</p>
                         </div>
