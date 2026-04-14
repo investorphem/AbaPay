@@ -11,10 +11,11 @@ Designed for low fees, instant cross-border utility vending, and mobile-first ac
 * **Web3 Payments:** Pay bills directly with USDT on Celo Mainnet or Celo Sepolia.
 * **Instant Vending:** Automated API integration with VTpass for instant token generation and airtime top-ups.
 * **Smart Merchant Verification:** Validates electricity meters and smartcard IUC numbers *before* accepting crypto payments, eliminating user errors.
-* **DND-Fallback SMS:** Automated SMS dlivery of elecricity tokens bypassing the Nigerian Do-Not-Disturb (DND) registr
+* **DND-Fallback SMS:** Automated SMS delivery of electricity tokens bypassing the Nigerian Do-Not-Disturb (DND) registry.
 * **Dynamic Exchange Engine:** Live market rate conversions with automated profit spread calculation.
-* **Executive Admn Dahboard:** Real-time onitoring of VTpass fiat balances, blockchain USDT vaults, and cloud transactn gr
+* **Executive Admin Dashboard:** Real-time monitoring of VTpass fiat balances, blockchain USDT vaults, and cloud transaction ledgers.
 * **Telegram Integration:** Instant admin notifications for successful sales and multimodal customer support tickets.
+
 ---
 
 ## 🛠️ Tech Stack
@@ -70,7 +71,7 @@ TELEGRAM_ADMIN_CHAT_ID=your_chat_id
 
 AbaPay is highly optimized for mobile Web3 experiences. To test the dApp within the Celo MiniPay environment:
 1. Deploy the project to Vercel.
-2. Ensure environent variables are set to `celo-sepolia` and `sandbox`.
+2. Ensure environment variables are set to `celo-sepolia` and `sandbox`.
 3. Open the Opera Mini browser on Android, navigate to the MiniPay tab, and enter your Vercel URL.
 
 ---
