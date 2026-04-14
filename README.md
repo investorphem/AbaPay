@@ -13,7 +13,7 @@ Designed for low fees, instant cross-border utility vending, and mobile-first ac
 * **Smart Merchant Verification:** Validates electricity meters and smartcard IUC numbers *before* accepting crypto payments, eliminating user errors.
 * **DND-Fallback SMS:** Automated SMS delivery of elecricity tokens bypassing the Nigerian Do-Not-Disturb (DND) registr
 * **Dynamic Exchange Engine:** Live market rate conversions with automated profit spread calculation.
-* **Executive Admn Dahboard:** Real-time monitoring of VTpass fiat balances, blockchain USDT vaults, and cloud transaction leger.
+* **Executive Admn Dahboard:** Real-time monitoring of VTpass fiat balances, blockchain USDT vaults, and cloud transacton leger.
 * **Telegram Integration:** Instant admin notifications for successful sales and multimodal customer support tickets.
 ---
 
