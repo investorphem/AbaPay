@@ -35,6 +35,10 @@ export default function Home() {
   const [customerName, setCustomerName] = useState<string | null>(null);
   const [isVerifying, setIsVerifying] = useState(false);
 
+  // ⚡ NEW STATES: Address and Dynamic Minimum Amount Tracker
+  const [meterAddress, setMeterAddress] = useState<string | null>(null);
+  const [dynamicElecMin, setDynamicElecMin] = useState<number>(1000);
+
   const [cableCurrentBouquet, setCableCurrentBouquet] = useState<string | null>(null);
   const [cableRenewAmount, setCableRenewAmount] = useState<number | null>(null);
   const [cableSubscriptionType, setCableSubscriptionType] = useState<"renew" | "change">("renew");
@@ -89,8 +93,7 @@ export default function Home() {
   const isMainnet = process.env.NEXT_PUBLIC_NETWORK === "celo";
   const activeChain = isMainnet ? celo : celoSepolia;
   const ABAPAY_CONTRACT = process.env.NEXT_PUBLIC_ABAPAY_ADDRESS as `0x${string}`;
-  
-  // ⚡ ADDED: The cUSD/USDm contract addresses for MiniPay Gas payments
+
   const GAS_CURRENCY = isMainnet 
     ? "0x765DE816845861e75A25fCA122bb6898B8B1282a" 
     : "0xdE9e4C3ce781b4bA68120d6261cbad65ce0aB00b";
@@ -106,9 +109,7 @@ export default function Home() {
 
   const dynamicMinAmount = useMemo(() => {
     if (activeTab === "bank") return 1000;
-    if (activeTab === "education") return 500;
-    if (activeService.id === "ELECTRICITY") return 1000; 
-    if (activeService.id === "CABLE") return 500;
+    if (activeService.id === "AIRTIME") return 50;
     return 100; 
   }, [activeService, activeTab]);
 
@@ -118,6 +119,10 @@ export default function Home() {
     if (activeService.id === "AIRTIME") return 50000;
     return Infinity; 
   }, [activeService, activeTab]);
+
+  // ⚡ HELPER CONSTANTS FOR RENDER LOGIC
+  const isFixedPlan = activeTab === "education" || (activeTab === "pay" && (activeService.id === "INTERNET" || activeService.id === "CABLE"));
+  const currentMinDisplay = (activeTab === "pay" && activeService.id === "ELECTRICITY") ? dynamicElecMin : dynamicMinAmount;
 
   const { cryptoToCharge, currentFee } = useMemo(() => {
     const bill = parseFloat(nairaAmount) || 0;
@@ -156,7 +161,14 @@ export default function Home() {
 
   const isFormValid = useMemo(() => {
     const amount = parseFloat(nairaAmount);
-    if (!nairaAmount || isNaN(amount) || amount < dynamicMinAmount || amount > dynamicMaxAmount) return false;
+
+    // ⚡ UPDATED: Bypass min/max checks entirely if it's a fixed variation plan (Data/Cable/Education)
+    if (!nairaAmount || isNaN(amount)) return false;
+
+    if (!isFixedPlan) {
+        const activeMinAmount = (activeTab === "pay" && activeService.id === "ELECTRICITY") ? dynamicElecMin : dynamicMinAmount;
+        if (amount < activeMinAmount || amount > dynamicMaxAmount) return false;
+    }
 
     if (activeTab === "bank") return accountNumber.length === 10 && customerName !== null && selectedBank !== null && customerPhone.length >= 10;
 
@@ -182,7 +194,7 @@ export default function Home() {
       }
     }
     return false;
-  }, [accountNumber, nairaAmount, activeService, customerName, dynamicMinAmount, dynamicMaxAmount, cableSubscriptionType, selectedCablePlan, selectedBank, selectedInternetPlan, internetAccountId, customerPhone, internetProvider, activeTab, cableProvider, selectedEducationPlan, educationProvider]);
+  }, [accountNumber, nairaAmount, activeService, customerName, dynamicMinAmount, dynamicMaxAmount, dynamicElecMin, cableSubscriptionType, selectedCablePlan, selectedBank, selectedInternetPlan, internetAccountId, customerPhone, internetProvider, activeTab, cableProvider, selectedEducationPlan, educationProvider, isFixedPlan]);
 
   const showToast = (title: string, message: string, type: 'success' | 'error' = 'success') => {
     setToast({ title, message, type });
@@ -190,7 +202,7 @@ export default function Home() {
   };
 
   const handleProviderChange = (newProvider: string, type: 'internet' | 'telecom' | 'cable' | 'elec' | 'bank' | 'education') => {
-    setNairaAmount(""); setAccountNumber(""); setCustomerName(null); setCustomerPhone(""); 
+    setNairaAmount(""); setAccountNumber(""); setCustomerName(null); setCustomerPhone(""); setMeterAddress(null); setDynamicElecMin(1000);
     if (type === 'internet') { 
         setInternetVariations([]); 
         setInternetProvider(newProvider); 
@@ -208,7 +220,7 @@ export default function Home() {
     setActiveService(s); setAccountNumber(""); setCustomerName(null); setNairaAmount(""); setCustomerPhone(""); 
     setCableCurrentBouquet(null); setCableRenewAmount(null); setSelectedCablePlan(null);
     setCableSubscriptionType("renew"); setSelectedBank(null); setSelectedInternetPlan(null); setInternetAccountId(null);
-    setSelectedEducationPlan(null); setInternetVariations([]); 
+    setSelectedEducationPlan(null); setInternetVariations([]); setMeterAddress(null); setDynamicElecMin(1000);
   };
 
   const handleTabSwitch = (tab: "pay" | "bank" | "education" | "history") => {
@@ -302,6 +314,8 @@ export default function Home() {
 
   const verifyMerchant = async () => {
     setIsVerifying(true); setCustomerName(null); setCableCurrentBouquet(null); setCableRenewAmount(null); setInternetAccountId(null);
+    setMeterAddress(null); setDynamicElecMin(1000); // ⚡ RESET METER DATA
+
     try {
         let serviceID = ""; let reqType = undefined;
 
@@ -319,6 +333,11 @@ export default function Home() {
 
         if (data.code === '000') {
           setCustomerName(data.content.Customer_Name || data.content.account_name || data.content.name);
+          
+          // ⚡ CAPTURE DYNAMIC ELECTRICITY DATA
+          if (data.content.Address) setMeterAddress(data.content.Address);
+          if (data.content.Min_Purchase_Amount) setDynamicElecMin(Number(data.content.Min_Purchase_Amount));
+
           if (activeTab === "pay" && activeService.id === "INTERNET" && internetProvider === "smile-direct") setInternetAccountId(data.content.AccountId || data.content.account_id);
           if (activeTab === "pay" && activeService.id === "CABLE") {
             setCableCurrentBouquet(data.content.Current_Bouquet || "Unknown Package");
@@ -352,7 +371,6 @@ export default function Home() {
       const tokenAddress = isMainnet ? selectedToken.mainnet : selectedToken.sepolia;
       const publicClient = createPublicClient({ chain: activeChain, transport: http() });
 
-      // ⚡ UPDATED: Passing feeCurrency to the approval transaction for MiniPay users
       setStatus("Awaiting token approval...");
       const approvalHash = await client.writeContract({ 
           address: tokenAddress as `0x${string}`, 
@@ -393,7 +411,6 @@ export default function Home() {
         } else { vtpassServiceID = telecomProvider; displayNetwork = telecomProvider; }
       }
 
-      // ⚡ UPDATED: Passing feeCurrency to the payment transaction for MiniPay users
       const hash = await client.writeContract({ 
           address: ABAPAY_CONTRACT, 
           abi: ABAPAY_ABI, 
@@ -411,6 +428,7 @@ export default function Home() {
       const newTx: any = { id: hash.slice(0,8), date: new Date().toLocaleString(), status: "PENDING", amountNaira: nairaAmount, amountCrypto: cryptoToCharge, tokenUsed: selectedToken.symbol, service: uiCategory === "BANK" ? "Bank Transfer" : uiCategory === "EDUCATION" ? "Education PIN" : activeService.name, network: displayNetwork.toUpperCase(), txHash: hash, account: uiCategory === "EDUCATION" ? customerPhone : accountNumber };
 
       setAccountNumber(""); setNairaAmount(""); setCustomerPhone(""); setCustomerName(null); setSelectedCablePlan(null); setCableCurrentBouquet(null); setSelectedBank(null); setSelectedInternetPlan(null); setInternetAccountId(null); setSelectedEducationPlan(null);
+      setMeterAddress(null); setDynamicElecMin(1000);
 
       const res = await fetch('/api/pay', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(backendPayload) });
       const result = await res.json();
@@ -579,15 +597,15 @@ export default function Home() {
   }, [accountNumber, activeService.id, activeTab, internetProvider]);
 
   useEffect(() => {
-    if (activeTab === "bank") { if (accountNumber.length === 10 && selectedBank) verifyMerchant(); else setCustomerName(null); } 
+    if (activeTab === "bank") { if (accountNumber.length === 10 && selectedBank) verifyMerchant(); else { setCustomerName(null); setMeterAddress(null); setDynamicElecMin(1000); } } 
     else if (activeTab === "education" && educationProvider === "jamb") {
-       if (accountNumber.length >= 10 && selectedEducationPlan) verifyMerchant(); else setCustomerName(null);
+       if (accountNumber.length >= 10 && selectedEducationPlan) verifyMerchant(); else { setCustomerName(null); setMeterAddress(null); setDynamicElecMin(1000); }
     }
     else if (activeTab === "pay") {
        if (activeService.id === "ELECTRICITY" && accountNumber.length >= 10) verifyMerchant();
        else if (activeService.id === "CABLE" && cableProvider !== "showmax" && accountNumber.length >= 10) verifyMerchant();
        else if (activeService.id === "INTERNET" && internetProvider === "smile-direct" && accountNumber.includes('@') && accountNumber.includes('.')) { const timeoutId = setTimeout(() => verifyMerchant(), 1000); return () => clearTimeout(timeoutId); } 
-       else { setCustomerName(null); }
+       else { setCustomerName(null); setMeterAddress(null); setDynamicElecMin(1000); }
     }
   }, [accountNumber, elecProvider, cableProvider, activeService.id, meterType, selectedBank, internetProvider, activeTab, educationProvider, selectedEducationPlan]);
 
@@ -796,10 +814,10 @@ export default function Home() {
                         {isVerifying && <p className="text-[10px] text-blue-500 font-bold mt-2 animate-pulse flex items-center gap-1.5"><Loader2 size={12} className="animate-spin"/> Verifying...</p>}
                         {customerName && (
                             <div className="mt-2 bg-emerald-500/10 p-4 rounded-xl border border-emerald-500/20 flex items-center gap-3 animate-in fade-in">
-                                <CheckCircle2 size={18} className="text-emerald-600" />
+                                <CheckCircle2 size={18} className="text-emerald-600 shrink-0" />
                                 <div className="flex-1">
                                     <span className="text-sm font-black text-emerald-800 line-clamp-1">{customerName}</span>
-                                    <p className="text-[10px] font-black text-emerald-600 uppercase">Verified</p>
+                                    <p className="text-[10px] font-black text-emerald-600 uppercase mt-0.5">Verified</p>
                                 </div>
                             </div>
                         )}
@@ -943,10 +961,10 @@ export default function Home() {
                     {isVerifying && <p className="text-[10px] text-blue-500 font-bold mt-2 animate-pulse flex items-center gap-1.5"><Loader2 size={12} className="animate-spin"/> Verifying...</p>}
                     {customerName && (
                         <div className="mt-2 bg-emerald-500/10 p-4 rounded-xl border border-emerald-500/20 flex items-center gap-3 animate-in fade-in">
-                            <CheckCircle2 size={18} className="text-emerald-600" />
+                            <CheckCircle2 size={18} className="text-emerald-600 shrink-0" />
                             <div className="flex-1">
                                 <span className="text-sm font-black text-emerald-800 line-clamp-1">{customerName}</span>
-                                <p className="text-[10px] font-black text-emerald-600 uppercase">Verified</p>
+                                <p className="text-[10px] font-black text-emerald-600 uppercase mt-0.5">Verified</p>
                             </div>
                         </div>
                     )}
@@ -955,7 +973,7 @@ export default function Home() {
                 <div>
                     <label className="text-[10px] font-black text-slate-400 uppercase mb-2 flex justify-between items-center">
                        <span>Amount</span>
-                       <span className="text-emerald-500 font-black">MIN ₦1,000</span>
+                       <span className="text-emerald-500 font-black">MIN ₦{dynamicMinAmount.toLocaleString()}</span>
                     </label>
                     <div className="relative mb-3">
                         <input 
@@ -1141,12 +1159,17 @@ export default function Home() {
                         }}
                     />
                     {isVerifying && <p className="text-[10px] text-blue-500 font-bold mt-2 animate-pulse flex items-center gap-1.5"><Loader2 size={12} className="animate-spin"/> Verifying...</p>}
+                    
+                    {/* ⚡ UPDATED: VERIFIED BLOCK NOW SHOWS METER ADDRESS ⚡ */}
                     {customerName && (activeService.id === "ELECTRICITY" || (activeService.id === "INTERNET" && internetProvider === 'smile-direct')) && (
                         <div className="mt-2 bg-emerald-500/10 p-4 rounded-xl border border-emerald-500/20 flex items-center gap-3 animate-in fade-in">
-                            <CheckCircle2 size={18} className="text-emerald-600" />
+                            <CheckCircle2 size={18} className="text-emerald-600 shrink-0" />
                             <div className="flex-1">
                                 <span className="text-sm font-black text-emerald-800 line-clamp-1">{customerName}</span>
-                                <p className="text-[10px] font-black text-emerald-600 uppercase">Verified</p>
+                                {activeService.id === "ELECTRICITY" && meterAddress && (
+                                     <p className="text-[10px] font-medium text-emerald-700 leading-tight mt-0.5 pr-2">{meterAddress}</p>
+                                )}
+                                <p className="text-[10px] font-black text-emerald-600 uppercase mt-0.5">Verified</p>
                             </div>
                         </div>
                     )}
@@ -1193,7 +1216,6 @@ export default function Home() {
                   </div>
                 )}
 
-                {/* ⚡ RESTORED CABLE RENEW / CHANGE UI FOR DSTV & GOTV WITH FEE UI ⚡ */}
                 {activeService.id === "CABLE" && (cableProvider === "showmax" || customerName) && (
                   <div className="bg-slate-50 border border-slate-200 rounded-2xl p-4 shadow-sm animate-in fade-in slide-in-from-top-4">
                      {cableProvider !== "showmax" && (
@@ -1229,7 +1251,6 @@ export default function Home() {
                             <div className="bg-emerald-500/10 border border-emerald-500/20 rounded-xl p-4 text-center">
                                <p className="text-[10px] font-black text-emerald-800 uppercase tracking-widest mb-1">Renewal Amount Due</p>
                                <p className="text-2xl font-black text-emerald-600">₦{cableRenewAmount?.toLocaleString() || "0.00"}</p>
-                               {/* ⚡ RENEWAL FEE BADGE ⚡ */}
                                {currentFee > 0 && <p className="text-[10px] font-black text-orange-500 mt-1">+₦{currentFee} FEE INCLUDED</p>}
                             </div>
                          ) : (
@@ -1242,7 +1263,6 @@ export default function Home() {
                                      <p className="font-black text-slate-900 text-lg tracking-tight">{selectedCablePlan.name}</p>
                                      <p className="text-[10px] text-blue-500 font-bold uppercase tracking-wider mb-2">Selected Package</p>
                                      <div className="pt-2 border-t border-blue-200/50 flex justify-between items-end">
-                                         {/* ⚡ CHANGE BOUQUET FEE BADGE ⚡ */}
                                          <div>
                                             <p className="font-black text-blue-600 text-xl leading-none">₦{parseFloat(selectedCablePlan.variation_amount).toLocaleString()}</p>
                                             {currentFee > 0 && <p className="text-[9px] font-black text-orange-500 mt-1">+₦{currentFee} FEE INCLUDED</p>}
@@ -1278,7 +1298,6 @@ export default function Home() {
                          )}
                        </>
                      ) : (
-                       // ⚡ STARTIMES AND SHOWMAX LOGIC ⚡
                        selectedCablePlan ? (
                           <div className="relative animate-in zoom-in-95 duration-200 mt-2">
                              <button onClick={() => { setSelectedCablePlan(null); setNairaAmount(""); }} className="absolute -top-3 -right-3 bg-slate-200 text-slate-500 hover:text-slate-800 hover:bg-slate-300 rounded-full p-1 transition-all z-10 shadow-sm border border-white">
@@ -1288,7 +1307,6 @@ export default function Home() {
                                 <p className="font-black text-slate-900 text-lg tracking-tight">{selectedCablePlan.name}</p>
                                 <p className="text-[10px] text-blue-500 font-bold uppercase tracking-wider mb-2">Selected Package</p>
                                 <div className="pt-2 border-t border-blue-200/50 flex justify-between items-end">
-                                    {/* ⚡ STARTIMES/SHOWMAX FEE BADGE ⚡ */}
                                     <div>
                                        <p className="font-black text-blue-600 text-xl leading-none">₦{parseFloat(selectedCablePlan.variation_amount).toLocaleString()}</p>
                                        {currentFee > 0 && <p className="text-[9px] font-black text-orange-500 mt-1">+₦{currentFee} FEE INCLUDED</p>}
@@ -1326,9 +1344,10 @@ export default function Home() {
                 )}
 
                 <div className={activeService.id === "INTERNET" || activeService.id === "CABLE" ? "hidden" : ""}>
+                    {/* ⚡ UPDATED: LABEL NOW SHOWS DYNAMIC ELECTRICITY MINIMUM ⚡ */}
                     <label className="text-[10px] font-black text-slate-400 uppercase mb-2 flex justify-between items-center">
                        <span>Amount</span>
-                       <span className="text-emerald-500 font-black">MIN ₦{dynamicMinAmount.toLocaleString()}</span>
+                       <span className="text-emerald-500 font-black">MIN ₦{currentMinDisplay.toLocaleString()}</span>
                     </label>
                     <div className="relative mb-3">
                         <input 
@@ -1343,27 +1362,35 @@ export default function Home() {
                             {currentFee > 0 && <p className="text-[9px] font-black text-orange-500">+₦{currentFee} FEE</p>}
                         </div>
                     </div>
-                    {nairaAmount && (parseFloat(nairaAmount) < dynamicMinAmount || parseFloat(nairaAmount) > dynamicMaxAmount) && (
+
+                    {/* ⚡ UPDATED: ERROR MESSAGE NOW RESPECTS DYNAMIC MINIMUM AND BYPASSES FIXED PLANS ⚡ */}
+                    {nairaAmount && !isFixedPlan && (parseFloat(nairaAmount) < currentMinDisplay || parseFloat(nairaAmount) > dynamicMaxAmount) && (
                         <div className="bg-red-50 border border-red-200 p-3 rounded-xl mt-2 flex items-center gap-2 animate-in fade-in">
                             <AlertTriangle size={16} className="text-red-500 shrink-0" />
                             <p className="text-xs font-black text-red-600">
-                                {parseFloat(nairaAmount) < dynamicMinAmount ? `Amount is below the minimum of ₦${dynamicMinAmount.toLocaleString()}` : `Amount exceeds the maximum of ₦${dynamicMaxAmount.toLocaleString()}`}
+                                {parseFloat(nairaAmount) < currentMinDisplay ? `Amount is below the minimum of ₦${currentMinDisplay.toLocaleString()}` : `Amount exceeds the maximum of ₦${dynamicMaxAmount.toLocaleString()}`}
                             </p>
                         </div>
                     )}
 
                     {(activeService.id === "AIRTIME" || activeService.id === "ELECTRICITY") && (
                        <div className="flex gap-2.5 overflow-x-auto py-1.5 mt-3 no-scrollbar bg-slate-100 p-2 rounded-2xl shadow-inner">
-                          {(activeService.id === "AIRTIME" ? PRE_SELECT_AMOUNTS : ELEC_PRE_SELECT_AMOUNTS).map(amount => {
-                            const cryptoAmtCost = (parseInt(amount) / exchangeRate).toFixed(4);
+                          {(activeService.id === "AIRTIME" ? PRE_SELECT_AMOUNTS : ELEC_PRE_SELECT_AMOUNTS).map(amountStr => {
+                            const amountVal = parseInt(amountStr);
+                            const cryptoAmtCost = (amountVal / exchangeRate).toFixed(4);
+                            
+                            // ⚡ UPDATED: PRE-SELECT BUTTONS GREY OUT IF BELOW DYNAMIC MINIMUM ⚡
+                            const isDisabled = activeService.id === "ELECTRICITY" && amountVal < currentMinDisplay;
+
                             return (
                               <button 
-                                 key={amount} 
-                                 onClick={() => setNairaAmount(amount)} 
-                                 className={`flex-1 min-w-[70px] py-4 rounded-xl font-black transition-all whitespace-nowrap ${nairaAmount === amount ? 'bg-white shadow-lg text-emerald-700 scale-105' : 'bg-slate-50 hover:bg-slate-200 text-slate-700'}`}
+                                 key={amountStr} 
+                                 onClick={() => !isDisabled && setNairaAmount(amountStr)} 
+                                 disabled={isDisabled}
+                                 className={`flex-1 min-w-[70px] py-4 rounded-xl font-black transition-all whitespace-nowrap ${isDisabled ? 'bg-slate-200 text-slate-400 opacity-50 cursor-not-allowed' : nairaAmount === amountStr ? 'bg-white shadow-lg text-emerald-700 scale-105' : 'bg-slate-50 hover:bg-slate-200 text-slate-700'}`}
                               >
-                                 ₦{parseInt(amount).toLocaleString()}
-                                 <p className="text-[8px] mt-0.5 text-slate-400 font-bold">{cryptoAmtCost} {selectedToken.symbol}</p>
+                                 ₦{amountVal.toLocaleString()}
+                                 <p className={`text-[8px] mt-0.5 font-bold ${isDisabled ? 'text-slate-400' : 'text-slate-400'}`}>{cryptoAmtCost} {selectedToken.symbol}</p>
                               </button>
                             );
                           })}
