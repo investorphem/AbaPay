@@ -11,7 +11,8 @@ import {
 import { supabase } from "@/utils/supabase";
 import { ELECTRICITY_DISCOS } from "./discos"; 
 
-import { TermsModal, PrivacyModal, ReceiptModal, SelectionModal } from "@/components/Modals";
+// ⚡ REMOVED TermsModal and PrivacyModal imports since we use real pages now
+import { ReceiptModal, SelectionModal } from "@/components/Modals";
 import { 
   ABAPAY_ABI, ERC20_ABI, SERVICES, CABLE_PROVIDERS_LIST, TELECOM_PROVIDERS, 
   INTERNET_PROVIDERS, SUPPORTED_TOKENS, SUPPORTED_COUNTRIES, PRE_SELECT_AMOUNTS, 
@@ -67,8 +68,6 @@ export default function Home() {
   const [activeDataCategory, setActiveDataCategory] = useState(DATA_CATEGORIES[0]);
 
   const [selectedReceipt, setSelectedReceipt] = useState<any>(null); 
-  const [isTermsOpen, setIsTermsOpen] = useState(false); 
-  const [isPrivacyOpen, setIsPrivacyOpen] = useState(false); 
 
   const [isSelectionModalOpen, setIsSelectionModalOpen] = useState(false);
   const [modalTitle, setModalTitle] = useState("");
@@ -109,7 +108,7 @@ export default function Home() {
 
   const dynamicMinAmount = useMemo(() => {
     if (activeTab === "bank") return 1000;
-    if (activeService.id === "AIRTIME") return 100;
+    if (activeService.id === "AIRTIME") return 100; 
     return 100; 
   }, [activeService, activeTab]);
 
@@ -704,8 +703,6 @@ export default function Home() {
         </div>
       )}
 
-      <TermsModal isOpen={isTermsOpen} onClose={() => setIsTermsOpen(false)} />
-      <PrivacyModal isOpen={isPrivacyOpen} onClose={() => setIsPrivacyOpen(false)} />
       <ReceiptModal receipt={selectedReceipt} isMainnet={isMainnet} onClose={() => setSelectedReceipt(null)} onShare={handleShareReceipt} onSupport={() => { setSupportTxHash(selectedReceipt.txHash); setSupportMessage(""); setSelectedReceipt(null); setIsSupportOpen(true); }} />
       <SelectionModal 
         isOpen={isSelectionModalOpen} 
@@ -1454,8 +1451,8 @@ export default function Home() {
           </div>
           <div className="flex gap-6">
             <Link href="/docs" className="text-[10px] font-black text-slate-400 hover:text-emerald-600 uppercase transition-colors">Docs & FAQ</Link>
-            <button onClick={() => setIsTermsOpen(true)} className="text-[10px] font-black text-slate-400 hover:text-emerald-600 uppercase transition-colors">Terms</button>
-            <button onClick={() => setIsPrivacyOpen(true)} className="text-[10px] font-black text-slate-400 hover:text-emerald-600 uppercase transition-colors">Privacy</button>
+            <Link href="/terms" className="text-[10px] font-black text-slate-400 hover:text-emerald-600 uppercase transition-colors">Terms</Link>
+            <Link href="/privacy" className="text-[10px] font-black text-slate-400 hover:text-emerald-600 uppercase transition-colors">Privacy</Link>
           </div>
           <p className="text-[9px] font-medium text-slate-300 uppercase tracking-[0.2em] mt-2">© 2026 MASONODE TECHNOLOGIES LIMITED • v3.0</p>
         </footer>
