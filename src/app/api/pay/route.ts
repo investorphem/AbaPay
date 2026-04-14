@@ -57,7 +57,8 @@ export async function POST(req: Request) {
       serviceID, serviceCategory, network, billersCode, amount, 
       token: tokenSymbol, txHash, variation_code, phone, 
       nairaAmount, wallet_address, subscription_type = 'change',
-      isForeign, operator_id, country_code, product_type_id, email
+      isForeign, operator_id, country_code, product_type_id, email,
+      meter_account_type // ⚡ ADDED: Extract the new account type field
     } = body;
 
     const appMode = process.env.NEXT_PUBLIC_APP_MODE || "sandbox";
@@ -85,7 +86,8 @@ export async function POST(req: Request) {
       fee_naira: serviceFee,
       status: 'PROCESSING',
       wallet_address: wallet_address || "UNKNOWN",
-      token_used: tokenSymbol 
+      token_used: tokenSymbol,
+      meter_account_type: meter_account_type || null // ⚡ ADDED: Save to Supabase (Defaults to null for airtime/data)
     };
 
     const { error: dbError } = await supabase.from('transactions').insert([dbPayload]);
@@ -219,7 +221,7 @@ export async function POST(req: Request) {
           if (payData.units) vendedUnits = payData.units.toString();
           else if (payData.content?.transactions?.units) vendedUnits = payData.content.transactions.units.toString();
           else if (payData.content?.transactions?.unit) vendedUnits = payData.content.transactions.unit.toString();
-          
+
         } else if (serviceCategory === 'EDUCATION') {
           dbPurchasedCode = payData.purchased_code || payData.Pin || null;
           alertTokenRef = dbPurchasedCode || "Processing PIN";
@@ -227,13 +229,11 @@ export async function POST(req: Request) {
           alertTokenRef = payData.content?.transactions?.transactionId || payData.requestId || "Success";
         }
 
-        // ⚡ NEW: STRICT TOKEN REQUIREMENT LOGIC ⚡
         const requiresCode = (serviceCategory === 'ELECTRICITY' && !isForeign) || serviceCategory === 'EDUCATION';
-        
+
         if (requiresCode && !dbPurchasedCode) {
-            // VTpass claimed "Success" but failed to actually give us the PIN/Token. Force it to PENDING.
             await supabase.from('transactions').update({ status: 'PENDING' }).eq('tx_hash', txHash);
-            
+
             try { await sendTelegramAlert(`⏳ *TOKEN DELAYED (PENDING)*\n🛒 *Product:* ${network} ${serviceCategory}\n👤 *User:* ${billersCode || phone}\n⚠️ Provider reported success but no PIN/Token was generated yet. Moved to PENDING for requery.`); } catch (e) {}
 
             return NextResponse.json({
@@ -243,7 +243,6 @@ export async function POST(req: Request) {
             });
         }
 
-        // If it reaches here, it either has a valid code, or doesn't need one (like Airtime/Data)
         await supabase.from('transactions').update({ 
             status: 'SUCCESS',
             purchased_code: dbPurchasedCode, 
