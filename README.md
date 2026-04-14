@@ -15,7 +15,6 @@ Designed for low fees, instant cross-border utility vending, and mobile-first ac
 * **Dynamic Exchange Engine:** Live market rate conversions with automated profit spread calculation.
 * **Executive Admn Dahboard:** Real-time monitoring of VTpass fiat balances, blockchain USDT vaults, and cloud transaction ledgers.
 * **Telegram Integration:** Instant admin notifications for successful sales and multimodal customer support tickets.
-
 ---
 
 ## 🛠️ Tech Stack
