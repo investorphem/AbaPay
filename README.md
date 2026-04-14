@@ -71,7 +71,7 @@ TELEGRAM_ADMIN_CHAT_ID=your_chat_id
 
 AbaPay is highly optimized for mobile Web3 experiences. To test the dApp within the Celo MiniPay environment:
 1. Deploy the project to Vercel.
-2. Ensure environment variables are set to `celo-sepolia` and `sandbox`.
+2. Ensure environent variables are set to `celo-sepolia` and `sandbox`.
 3. Open the Opera Mini browser on Android, navigate to the MiniPay tab, and enter your Vercel URL.
 
 ---
