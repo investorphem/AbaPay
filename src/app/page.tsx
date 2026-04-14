@@ -35,7 +35,6 @@ export default function Home() {
   const [customerName, setCustomerName] = useState<string | null>(null);
   const [isVerifying, setIsVerifying] = useState(false);
 
-  // ⚡ NEW STATES: Address, Dynamic Minimum, and Account Type Tracker
   const [meterAddress, setMeterAddress] = useState<string | null>(null);
   const [dynamicElecMin, setDynamicElecMin] = useState<number>(1000);
   const [meterAccountType, setMeterAccountType] = useState<string | null>(null);
@@ -110,7 +109,7 @@ export default function Home() {
 
   const dynamicMinAmount = useMemo(() => {
     if (activeTab === "bank") return 1000;
-    if (activeService.id === "AIRTIME") return 100; // ⚡ Set to 100 as discussed
+    if (activeService.id === "AIRTIME") return 100;
     return 100; 
   }, [activeService, activeTab]);
 
@@ -313,7 +312,7 @@ export default function Home() {
 
   const verifyMerchant = async () => {
     setIsVerifying(true); setCustomerName(null); setCableCurrentBouquet(null); setCableRenewAmount(null); setInternetAccountId(null);
-    setMeterAddress(null); setDynamicElecMin(1000); setMeterAccountType(null); // ⚡ RESET METER DATA
+    setMeterAddress(null); setDynamicElecMin(1000); setMeterAccountType(null); 
 
     try {
         let serviceID = ""; let reqType = undefined;
@@ -333,7 +332,6 @@ export default function Home() {
         if (data.code === '000') {
           setCustomerName(data.content.Customer_Name || data.content.account_name || data.content.name);
 
-          // ⚡ CAPTURE DYNAMIC ELECTRICITY DATA AND ACCOUNT TYPE
           if (data.content.Address) setMeterAddress(data.content.Address);
           if (data.content.Min_Purchase_Amount) setDynamicElecMin(Number(data.content.Min_Purchase_Amount));
           if (data.content.Customer_Account_Type) setMeterAccountType(data.content.Customer_Account_Type);
@@ -434,7 +432,7 @@ export default function Home() {
         phone: customerPhone || accountNumber, 
         wallet_address: address, 
         subscription_type: activeTab === "pay" && activeService.id === "CABLE" && ['dstv', 'gotv'].includes(cableProvider) ? cableSubscriptionType : undefined,
-        meter_account_type: meterAccountType // ⚡ Passed to API
+        meter_account_type: meterAccountType 
       };
 
       const newTx: any = { id: hash.slice(0,8), date: new Date().toLocaleString(), status: "PENDING", amountNaira: nairaAmount, amountCrypto: cryptoToCharge, tokenUsed: selectedToken.symbol, service: uiCategory === "BANK" ? "Bank Transfer" : uiCategory === "EDUCATION" ? "Education PIN" : activeService.name, network: displayNetwork.toUpperCase(), txHash: hash, account: uiCategory === "EDUCATION" ? customerPhone : accountNumber };
@@ -1459,7 +1457,7 @@ export default function Home() {
             <button onClick={() => setIsTermsOpen(true)} className="text-[10px] font-black text-slate-400 hover:text-emerald-600 uppercase transition-colors">Terms</button>
             <button onClick={() => setIsPrivacyOpen(true)} className="text-[10px] font-black text-slate-400 hover:text-emerald-600 uppercase transition-colors">Privacy</button>
           </div>
-          <p className="text-[9px] font-medium text-slate-300 uppercase tracking-[0.2em] mt-2">© 2026 MASONODE ORGANISATION • v3.0</p>
+          <p className="text-[9px] font-medium text-slate-300 uppercase tracking-[0.2em] mt-2">© 2026 MASONODE TECHNOLOGIES LIMITED • v3.0</p>
         </footer>
       </div>
     </main>
