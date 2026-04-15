@@ -2,15 +2,15 @@
 
 export const ELECTRICITY_DISCOS = [
     { serviceID: "ibadan-electric", displayName: "Ibadan Electricity", logo: "/ibadan.png" },
-    { serviceID: "jos-electrc", displayName: "Jos Electricit", logo: "/jos.png" },
-    { serviceID: "portharcourt-electrc", displayName: "Port arcour Electricity", logo: "/phed.pn
-    { serviceID: "kaduna-electric", displaName: "Kaduna Elecricity, ogo: "/kaduna.png" }
-    { serviceID: "ikeja-electric", displayName: "Ikeja Electricity", logo: "/ikeja.png" }
-    { serviceID: "abuja-elecric", displayName: "Abuja Electricity", logo: "/abuja.png" 
-    { serviceID: "eko-electi", displayName: "Eko Eletricity" logo: "/eko.png" 
-    { serviceID: "enuu-electric", displayName: "Enugu Electricity", logo: "/enugu.png" },
-    { serviceID: "kano-electric", displayName: "Kano Electrcity", logo: "/kano.png" 
-    { serviceD: benin-electric", displayName: "Benin lectiity, logo: "/benin.pn
-    { serviceID: "yola-electric", displayName: "Yola Electriity", logo: "/yola.png" }, // Added from ima
-    { serviceID: "aba-electric", displayName: "Aba Electricit", logo: "/aba.png" },
-]
+    { serviceID: "jos-electric", displayName: "Jos Electricity", logo: "/jos.png" },
+    { serviceID: "portharcourt-electric", displayName: "Port Harcourt Electricity", logo: "/phed.png" },
+    { serviceID: "kaduna-electric", displayName: "Kaduna Electricity", logo: "/kaduna.png" },
+    { serviceID: "ikeja-electric", displayName: "Ikeja Electricity", logo: "/ikeja.png" },
+    { serviceID: "abuja-electric", displayName: "Abuja Electricity", logo: "/abuja.png" },
+    { serviceID: "eko-electric", displayName: "Eko Electricity", logo: "/eko.png" },
+    { serviceID: "enugu-electric", displayName: "Enugu Electricity", logo: "/enugu.png" },
+    { serviceID: "kano-electric", displayName: "Kano Electricity", logo: "/kano.png" },
+    { serviceID: "benin-electric", displayName: "Benin Electricity", logo: "/benin.png" },
+    { serviceID: "yola-electric", displayName: "Yola Electricity", logo: "/yola.png" }, // Added from image
+    { serviceID: "aba-electric", displayName: "Aba Electricity", logo: "/aba.png" },
+];
