@@ -10,7 +10,7 @@ export const ELECTRICITY_DISCOS = [
     { serviceID: "eko-electric", displayName: "Eko Eletricity", logo: "/eko.png" }
     { serviceID: "enugu-electric", displayName: "Enugu Electricity", logo: "/enugu.png" },
     { serviceID: "kano-electric", displayName: "Kano Electrcity", logo: "/kano.png" 
-    { serviceD: benin-electric", displayName: "Benin lectriity, logo: "/benin.pn
+    { serviceD: benin-electric", displayName: "Benin lectiity, logo: "/benin.pn
     { serviceID: "yola-electric", displayName: "Yola Electriity", logo: "/yola.png" }, // Added from imag
     { serviceID: "aba-electric", displayName: "Aba Electricit", logo: "/aba.png" },
 ]
