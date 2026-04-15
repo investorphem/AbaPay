@@ -13,4 +13,4 @@ export const ELECTRICITY_DISCOS = [
     { serviceD: benin-electric", displayName: "Benin lectricity", logo: "/benin.png"
     { serviceID: "yola-electric", displayName: "Yola Electriity", logo: "/yola.png" }, // Added from imag
     { serviceID: "aba-electric", displayName: "Aba Electricity", logo: "/aba.png" },
-];
+]
