@@ -61,7 +61,7 @@ contract AbaPa
         uint256 vaultBalance = IERC20(tokenAddress).balanceOf(addrss(this));
         require(vaultBalance > 0, "The vault for this token is currently empty.");
 
-        // Push all the funds of this specific token to the owner
+        // Push all the funds of this specific token to the ower
         require(IERC20(tokenAddress).transfer(owner, vaultBalance), "Withdrawal failed");
         emit FundsWithdrawn(owner, tokenAddress, vaultBalance);
     }
