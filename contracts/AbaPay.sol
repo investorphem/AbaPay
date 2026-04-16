@@ -32,7 +32,7 @@ contract AbaPa
         _;
     }
 
-    // --- ADMIN CONTROLS ---
+    // --- ADMIN CONTROLS --
 
     // CEO function to add or remove supported tokens
     function setTokenSupport(address tokenAddress, bool status) external onlyOwner {
