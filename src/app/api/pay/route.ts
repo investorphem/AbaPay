@@ -58,7 +58,7 @@ export async function POST(req: Request) {
       token: tokenSymbol, txHash, variation_code, phone, 
       nairaAmount, wallet_address, subscription_type = 'change',
       isForeign, operator_id, country_code, product_type_id, email,
-      meter_account_type // ⚡ ADDED: Extract the new account type field
+      meter_account_type
     } = body;
 
     const appMode = process.env.NEXT_PUBLIC_APP_MODE || "sandbox";
@@ -87,10 +87,11 @@ export async function POST(req: Request) {
       status: 'PROCESSING',
       wallet_address: wallet_address || "UNKNOWN",
       token_used: tokenSymbol,
-      meter_account_type: meter_account_type || null // ⚡ ADDED: Save to Supabase (Defaults to null for airtime/data)
+      meter_account_type: meter_account_type || null 
     };
 
-    const { error: dbError } = await supabase.from('transactions').insert([dbPayload]);
+    // ⚡ FIX: Changed from .insert to .upsert to prevent duplicate key crashes
+    const { error: dbError } = await supabase.from('transactions').upsert(dbPayload, { onConflict: 'tx_hash' });
 
     if (dbError) {
       return NextResponse.json({ success: false, code: "DB_REJECTED", message: `DB Error: ${dbError.message}` }, { status: 400 });
