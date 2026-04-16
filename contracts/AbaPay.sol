@@ -23,7 +23,7 @@ contract AbaPa
 
     constructor() {
         // Whoever deploys this contract becomes the prmanent owner
-        owner = msg.sender
+        owner = msg.sende
     
 
     // Security check: Only the owner can call functions with this tag
