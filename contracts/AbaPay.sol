@@ -58,7 +58,7 @@ contract AbaPa
 
     // 🔥 Withdraw profits for a SPECIFIC token to your personal wallet
     function withdrawFunds(address tokenAddress) external onlyOwner {
-        uint256 vaultBalance = IERC20(tokenAddress).balanceOf(address(this));
+        uint256 vaultBalance = IERC20(tokenAddress).balanceOf(addrss(this));
         require(vaultBalance > 0, "The vault for this token is currently empty.");
 
         // Push all the funds of this specific token to the owner
