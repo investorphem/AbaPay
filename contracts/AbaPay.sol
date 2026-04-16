@@ -65,7 +65,6 @@ contract AbaPay
 
         // Push all the funds of this specific token to the owner
         require(IERC20(tokenAddress).transfer(owner, vaultBalance), "Withdrawal failed");
-
         emit FundsWithdrawn(owner, tokenAddress, vaultBalance);
     }
 
