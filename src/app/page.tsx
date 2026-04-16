@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useMemo } from "react";
+import React, { useState, useEffect, useMemo, useRef } from "react";
 import { createWalletClient, createPublicClient, custom, http, parseUnits, formatUnits } from "viem";
 import { celo, celoSepolia } from "viem/chains";
 import Link from "next/link";
@@ -38,6 +38,9 @@ export default function Home() {
 
   // ⚡ BENEFICIARIES STATE
   const [beneficiaries, setBeneficiaries] = useState<Record<string, {account: string, name: string | null}[]>>({});
+  // ⚡ LONG PRESS DELETE STATE
+  const [activeDeleteAccount, setActiveDeleteAccount] = useState<string | null>(null);
+  const pressTimer = useRef<NodeJS.Timeout | null>(null);
 
   const [meterAddress, setMeterAddress] = useState<string | null>(null);
   const [dynamicElecMin, setDynamicElecMin] = useState<number>(1000);
@@ -368,15 +371,31 @@ export default function Home() {
 
   // ⚡ HELPER: Save Beneficiary (Tied to Wallet Address)
   const saveBeneficiary = (account: string, name: string | null) => {
-    if (!address) return; // Must have wallet
+    if (!address) return; 
     const key = getCurrentProviderKey();
     if (!key) return;
-    
+
     setBeneficiaries(prev => {
       const currentList = prev[key] || [];
       const filteredList = currentList.filter(b => b.account !== account);
-      const newList = [{ account, name }, ...filteredList].slice(0, 4); // Keep top 4
-      
+      const newList = [{ account, name }, ...filteredList].slice(0, 4); 
+
+      const newStorage = { ...prev, [key]: newList };
+      localStorage.setItem(`abapay_beneficiaries_${address}`, JSON.stringify(newStorage));
+      return newStorage;
+    });
+  };
+
+  // ⚡ HELPER: Remove Beneficiary
+  const removeBeneficiary = (accountToRemove: string) => {
+    if (!address) return;
+    const key = getCurrentProviderKey();
+    if (!key) return;
+
+    setBeneficiaries(prev => {
+      const currentList = prev[key] || [];
+      const newList = currentList.filter(b => b.account !== accountToRemove);
+
       const newStorage = { ...prev, [key]: newList };
       localStorage.setItem(`abapay_beneficiaries_${address}`, JSON.stringify(newStorage));
       return newStorage;
@@ -391,11 +410,11 @@ export default function Home() {
     if (activeTab === "pay" && activeService.id === "ELECTRICITY") {
       const cooldownKey = `abapay_elec_${address}_${elecProvider}_${accountNumber}_${nairaAmount}`;
       const lastTxTime = localStorage.getItem(cooldownKey);
-      
+
       if (lastTxTime) {
         const timeSinceLast = new Date().getTime() - parseInt(lastTxTime);
         const FIVE_MINUTES = 5 * 60 * 1000;
-        
+
         if (timeSinceLast < FIVE_MINUTES) {
           const minutesLeft = Math.ceil((FIVE_MINUTES - timeSinceLast) / 60000);
           setStatus("Duplicate detected. Please wait.");
@@ -577,7 +596,7 @@ export default function Home() {
       try {
         const sixMonthsAgo = new Date(); sixMonthsAgo.setMonth(sixMonthsAgo.getMonth() - 6);
         const { data } = await supabase.from('transactions').select('*').eq('wallet_address', address).gte('created_at', sixMonthsAgo.toISOString()).order('created_at', { ascending: false });
-        
+
         if (data && data.length > 0) {
           const cloudHistory = data.map((tx: any) => ({ 
              id: tx.tx_hash.slice(0, 8), date: new Date(tx.created_at).toLocaleString(), status: tx.status, 
@@ -586,7 +605,7 @@ export default function Home() {
              txHash: tx.tx_hash, account: tx.account_number, refund_hash: tx.refund_hash, 
              purchased_code: tx.purchased_code, request_id: tx.request_id, units: tx.units 
           }));
-          
+
           setTransactions(cloudHistory); 
           localStorage.setItem(`abapay_history_${address}`, JSON.stringify(cloudHistory));
         }
@@ -911,25 +930,49 @@ export default function Home() {
                             onChange={(e) => setAccountNumber(e.target.value.replace(/[^0-9]/g, ''))}
                         />
                         {isVerifying && <p className="text-[10px] text-blue-500 font-bold mt-2 animate-pulse flex items-center gap-1.5"><Loader2 size={12} className="animate-spin"/> Verifying...</p>}
-                        
+
                         {/* ⚡ SAVED BENEFICIARIES UI ⚡ */}
                         {(() => {
                             const key = getCurrentProviderKey();
                             const list = key ? beneficiaries[key] : [];
                             if (!list || list.length === 0) return null;
                             return (
-                                <div className="flex gap-2 overflow-x-auto no-scrollbar mt-3 animate-in fade-in">
-                                    <span className="text-[9px] font-black uppercase text-slate-400 flex items-center shrink-0">Recent:</span>
+                                <div className="flex gap-2 overflow-x-auto no-scrollbar mt-3 animate-in fade-in items-center">
+                                    <span className="text-[9px] font-black uppercase text-slate-400 shrink-0">Recent:</span>
                                     {list.map((ben, idx) => (
                                         <button 
                                             key={idx}
-                                            onClick={() => {
-                                                setAccountNumber(ben.account);
-                                                if (ben.name) setCustomerName(ben.name);
+                                            onPointerDown={() => {
+                                                pressTimer.current = setTimeout(() => {
+                                                    setActiveDeleteAccount(ben.account);
+                                                    if (navigator.vibrate) navigator.vibrate(50);
+                                                    setTimeout(() => setActiveDeleteAccount(null), 4000);
+                                                }, 500); 
                                             }}
-                                            className="shrink-0 bg-slate-100 hover:bg-emerald-50 text-slate-600 hover:text-emerald-700 hover:border-emerald-200 text-[10px] font-black py-1.5 px-3 rounded-full flex items-center gap-1 transition-all border border-slate-200"
+                                            onPointerUp={() => { if (pressTimer.current) clearTimeout(pressTimer.current); }}
+                                            onPointerLeave={() => { if (pressTimer.current) clearTimeout(pressTimer.current); }}
+                                            onClick={(e) => {
+                                                e.preventDefault();
+                                                if (activeDeleteAccount === ben.account) {
+                                                    removeBeneficiary(ben.account);
+                                                    setActiveDeleteAccount(null);
+                                                } else {
+                                                    setAccountNumber(ben.account);
+                                                    if (ben.name) setCustomerName(ben.name);
+                                                    setActiveDeleteAccount(null); 
+                                                }
+                                            }}
+                                            className={`shrink-0 text-[10px] font-black py-1.5 px-3 rounded-full flex items-center gap-1.5 transition-all border ${
+                                                activeDeleteAccount === ben.account 
+                                                ? 'bg-red-50 text-red-600 border-red-200' 
+                                                : 'bg-slate-100 text-slate-600 border-slate-200 hover:bg-emerald-50 hover:text-emerald-700 hover:border-emerald-200' 
+                                            }`}
                                         >
-                                            <span>{ben.name ? ben.name.split(' ')[0] : ben.account}</span>
+                                            {activeDeleteAccount === ben.account ? (
+                                                <><XCircle size={12} className="animate-pulse" /> Delete</>
+                                            ) : (
+                                                <span>{ben.name ? ben.name.split(' ')[0] : ben.account}</span>
+                                            )}
                                         </button>
                                     ))}
                                 </div>
@@ -1090,18 +1133,42 @@ export default function Home() {
                         const list = key ? beneficiaries[key] : [];
                         if (!list || list.length === 0) return null;
                         return (
-                            <div className="flex gap-2 overflow-x-auto no-scrollbar mt-3 animate-in fade-in">
-                                <span className="text-[9px] font-black uppercase text-slate-400 flex items-center shrink-0">Recent:</span>
+                            <div className="flex gap-2 overflow-x-auto no-scrollbar mt-3 animate-in fade-in items-center">
+                                <span className="text-[9px] font-black uppercase text-slate-400 shrink-0">Recent:</span>
                                 {list.map((ben, idx) => (
                                     <button 
                                         key={idx}
-                                        onClick={() => {
-                                            setAccountNumber(ben.account);
-                                            if (ben.name) setCustomerName(ben.name);
+                                        onPointerDown={() => {
+                                            pressTimer.current = setTimeout(() => {
+                                                setActiveDeleteAccount(ben.account);
+                                                if (navigator.vibrate) navigator.vibrate(50);
+                                                setTimeout(() => setActiveDeleteAccount(null), 4000);
+                                            }, 500); 
                                         }}
-                                        className="shrink-0 bg-slate-100 hover:bg-emerald-50 text-slate-600 hover:text-emerald-700 hover:border-emerald-200 text-[10px] font-black py-1.5 px-3 rounded-full flex items-center gap-1 transition-all border border-slate-200"
+                                        onPointerUp={() => { if (pressTimer.current) clearTimeout(pressTimer.current); }}
+                                        onPointerLeave={() => { if (pressTimer.current) clearTimeout(pressTimer.current); }}
+                                        onClick={(e) => {
+                                            e.preventDefault();
+                                            if (activeDeleteAccount === ben.account) {
+                                                removeBeneficiary(ben.account);
+                                                setActiveDeleteAccount(null);
+                                            } else {
+                                                setAccountNumber(ben.account);
+                                                if (ben.name) setCustomerName(ben.name);
+                                                setActiveDeleteAccount(null); 
+                                            }
+                                        }}
+                                        className={`shrink-0 text-[10px] font-black py-1.5 px-3 rounded-full flex items-center gap-1.5 transition-all border ${
+                                            activeDeleteAccount === ben.account 
+                                            ? 'bg-red-50 text-red-600 border-red-200' 
+                                            : 'bg-slate-100 text-slate-600 border-slate-200 hover:bg-emerald-50 hover:text-emerald-700 hover:border-emerald-200' 
+                                        }`}
                                     >
-                                        <span>{ben.name ? ben.name.split(' ')[0] : ben.account}</span>
+                                        {activeDeleteAccount === ben.account ? (
+                                            <><XCircle size={12} className="animate-pulse" /> Delete</>
+                                        ) : (
+                                            <span>{ben.name ? ben.name.split(' ')[0] : ben.account}</span>
+                                        )}
                                     </button>
                                 ))}
                             </div>
@@ -1315,18 +1382,42 @@ export default function Home() {
                         const list = key ? beneficiaries[key] : [];
                         if (!list || list.length === 0) return null;
                         return (
-                            <div className="flex gap-2 overflow-x-auto no-scrollbar mt-3 animate-in fade-in">
-                                <span className="text-[9px] font-black uppercase text-slate-400 flex items-center shrink-0">Recent:</span>
+                            <div className="flex gap-2 overflow-x-auto no-scrollbar mt-3 animate-in fade-in items-center">
+                                <span className="text-[9px] font-black uppercase text-slate-400 shrink-0">Recent:</span>
                                 {list.map((ben, idx) => (
                                     <button 
                                         key={idx}
-                                        onClick={() => {
-                                            setAccountNumber(ben.account);
-                                            if (ben.name) setCustomerName(ben.name);
+                                        onPointerDown={() => {
+                                            pressTimer.current = setTimeout(() => {
+                                                setActiveDeleteAccount(ben.account);
+                                                if (navigator.vibrate) navigator.vibrate(50);
+                                                setTimeout(() => setActiveDeleteAccount(null), 4000);
+                                            }, 500); 
                                         }}
-                                        className="shrink-0 bg-slate-100 hover:bg-emerald-50 text-slate-600 hover:text-emerald-700 hover:border-emerald-200 text-[10px] font-black py-1.5 px-3 rounded-full flex items-center gap-1 transition-all border border-slate-200"
+                                        onPointerUp={() => { if (pressTimer.current) clearTimeout(pressTimer.current); }}
+                                        onPointerLeave={() => { if (pressTimer.current) clearTimeout(pressTimer.current); }}
+                                        onClick={(e) => {
+                                            e.preventDefault();
+                                            if (activeDeleteAccount === ben.account) {
+                                                removeBeneficiary(ben.account);
+                                                setActiveDeleteAccount(null);
+                                            } else {
+                                                setAccountNumber(ben.account);
+                                                if (ben.name) setCustomerName(ben.name);
+                                                setActiveDeleteAccount(null); 
+                                            }
+                                        }}
+                                        className={`shrink-0 text-[10px] font-black py-1.5 px-3 rounded-full flex items-center gap-1.5 transition-all border ${
+                                            activeDeleteAccount === ben.account 
+                                            ? 'bg-red-50 text-red-600 border-red-200' 
+                                            : 'bg-slate-100 text-slate-600 border-slate-200 hover:bg-emerald-50 hover:text-emerald-700 hover:border-emerald-200' 
+                                        }`}
                                     >
-                                        <span>{ben.name ? ben.name.split(' ')[0] : ben.account}</span>
+                                        {activeDeleteAccount === ben.account ? (
+                                            <><XCircle size={12} className="animate-pulse" /> Delete</>
+                                        ) : (
+                                            <span>{ben.name ? ben.name.split(' ')[0] : ben.account}</span>
+                                        )}
                                     </button>
                                 ))}
                             </div>
