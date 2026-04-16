@@ -21,7 +21,7 @@ contract AbaPay {
     event TokenSupportUpdated(address indexed token, bool isSupported);
     
     // NEW: Refund receipt generator
-    event UserRefunded(address indexed user, address indexed token, uint256 amount);
+    event UserRefunded(address indexed user, address indexed token, uint256 amount)
 
     constructor() {
         // Whoever deploys this contract becomes the permanent owner
