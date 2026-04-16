@@ -73,7 +73,7 @@ contract AbaPay {
     function refundUser(address tokenAddress, address recipient, uint256 amount) external onlyOwner {
         require(IERC20(tokenAddress).balanceOf(address(this)) >= amount, "Insufficient vault balance to process refund");
         
-        // Push the exact crypto amount from the vault back to the user
+        // Push the exact crypt amount from the vault back to the user
         require(IERC20(tokenAddress).transfer(recipient, amount), "Refund transfer failed");
 
         // Broadcast the refund receipt to the blockchain
