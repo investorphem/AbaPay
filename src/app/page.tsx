@@ -36,6 +36,9 @@ export default function Home() {
   const [customerName, setCustomerName] = useState<string | null>(null);
   const [isVerifying, setIsVerifying] = useState(false);
 
+  // ⚡ BENEFICIARIES STATE
+  const [beneficiaries, setBeneficiaries] = useState<Record<string, {account: string, name: string | null}[]>>({});
+
   const [meterAddress, setMeterAddress] = useState<string | null>(null);
   const [dynamicElecMin, setDynamicElecMin] = useState<number>(1000);
   const [meterAccountType, setMeterAccountType] = useState<string | null>(null);
@@ -350,9 +353,62 @@ export default function Home() {
     setIsVerifying(false);
   };
 
+  // ⚡ HELPER: Get Current Provider Key for Beneficiaries
+  const getCurrentProviderKey = () => {
+    if (activeTab === "bank") return selectedBank?.variation_code;
+    if (activeTab === "education") return educationProvider;
+    if (activeTab === "pay") {
+      if (activeService.id === "AIRTIME") return telecomProvider;
+      if (activeService.id === "INTERNET") return internetProvider;
+      if (activeService.id === "ELECTRICITY") return `${elecProvider}-${meterType}`;
+      if (activeService.id === "CABLE") return cableProvider;
+    }
+    return null;
+  };
+
+  // ⚡ HELPER: Save Beneficiary (Tied to Wallet Address)
+  const saveBeneficiary = (account: string, name: string | null) => {
+    if (!address) return; // Must have wallet
+    const key = getCurrentProviderKey();
+    if (!key) return;
+    
+    setBeneficiaries(prev => {
+      const currentList = prev[key] || [];
+      const filteredList = currentList.filter(b => b.account !== account);
+      const newList = [{ account, name }, ...filteredList].slice(0, 4); // Keep top 4
+      
+      const newStorage = { ...prev, [key]: newList };
+      localStorage.setItem(`abapay_beneficiaries_${address}`, JSON.stringify(newStorage));
+      return newStorage;
+    });
+  };
+
   const handlePayment = async () => {
     if (!address || !client) return setStatus("Connect Wallet First");
     if (parseFloat(cryptoToCharge) > parseFloat(walletBalance)) return setStatus(`Insufficient ${selectedToken.symbol} Balance.`);
+
+    // ⚡ ELECTRICITY COOLDOWN PROTECTION
+    if (activeTab === "pay" && activeService.id === "ELECTRICITY") {
+      const cooldownKey = `abapay_elec_${address}_${elecProvider}_${accountNumber}_${nairaAmount}`;
+      const lastTxTime = localStorage.getItem(cooldownKey);
+      
+      if (lastTxTime) {
+        const timeSinceLast = new Date().getTime() - parseInt(lastTxTime);
+        const FIVE_MINUTES = 5 * 60 * 1000;
+        
+        if (timeSinceLast < FIVE_MINUTES) {
+          const minutesLeft = Math.ceil((FIVE_MINUTES - timeSinceLast) / 60000);
+          setStatus("Duplicate detected. Please wait.");
+          showToast(
+            "Duplicate Protection", 
+            `You just purchased ₦${nairaAmount} for this exact meter recently. Please wait ${minutesLeft} minute(s) before trying again to avoid double-billing.`, 
+            "error"
+          );
+          return; // Stop the transaction
+        }
+      }
+      localStorage.setItem(cooldownKey, new Date().getTime().toString());
+    }
 
     setIsProcessing(true);
     setStatus("Initiating Blockchain Escrow...");
@@ -370,7 +426,6 @@ export default function Home() {
       const tokenAddress = isMainnet ? selectedToken.mainnet : selectedToken.sepolia;
       const publicClient = createPublicClient({ chain: activeChain, transport: http() });
 
-      // ⚡ FIX 1: Detect MiniPay so we don't force feeCurrency (MiniPay handles its own gas automatically)
       const isMiniPay = typeof window !== "undefined" && (window as any).ethereum?.isMiniPay;
       const txConfig = {
          account: address,
@@ -389,9 +444,6 @@ export default function Home() {
       setStatus("Mining approval on Celo Mainnet... Please wait.");
       await publicClient.waitForTransactionReceipt({ hash: approvalHash });
 
-      // ⚡ FIX 2: The RPC Sync Delay!
-      // Give MiniPay's internal nodes 3 seconds to realize the approval actually happened 
-      // before trying to trigger the second popup.
       setStatus("Syncing network state... Please wait a moment.");
       await new Promise(resolve => setTimeout(resolve, 3000));
 
@@ -450,11 +502,14 @@ export default function Home() {
 
       const newTx: any = { id: hash.slice(0,8), date: new Date().toLocaleString(), status: "PENDING", amountNaira: nairaAmount, amountCrypto: cryptoToCharge, tokenUsed: selectedToken.symbol, service: uiCategory === "BANK" ? "Bank Transfer" : uiCategory === "EDUCATION" ? "Education PIN" : activeService.name, network: displayNetwork.toUpperCase(), txHash: hash, account: uiCategory === "EDUCATION" ? customerPhone : accountNumber };
 
-      setAccountNumber(""); setNairaAmount(""); setCustomerPhone(""); setCustomerName(null); setSelectedCablePlan(null); setCableCurrentBouquet(null); setSelectedBank(null); setSelectedInternetPlan(null); setInternetAccountId(null); setSelectedEducationPlan(null);
-      setMeterAddress(null); setDynamicElecMin(1000); setMeterAccountType(null);
-
       const res = await fetch('/api/pay', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(backendPayload) });
       const result = await res.json();
+
+      // ⚡ SAVE BENEFICIARY
+      saveBeneficiary(accountNumber, customerName);
+
+      setAccountNumber(""); setNairaAmount(""); setCustomerPhone(""); setCustomerName(null); setSelectedCablePlan(null); setCableCurrentBouquet(null); setSelectedBank(null); setSelectedInternetPlan(null); setInternetAccountId(null); setSelectedEducationPlan(null);
+      setMeterAddress(null); setDynamicElecMin(1000); setMeterAccountType(null);
 
       if (result.success) {
         if (result.message && result.message.toLowerCase().includes("processing")) {
@@ -472,7 +527,9 @@ export default function Home() {
       }
 
       const updatedHistory = [newTx, ...transactions];
-      setTransactions(updatedHistory); localStorage.setItem("abapay_history", JSON.stringify(updatedHistory)); setCurrentPage(1);
+      setTransactions(updatedHistory); 
+      localStorage.setItem(`abapay_history_${address}`, JSON.stringify(updatedHistory)); // ⚡ Tied to Address
+      setCurrentPage(1);
 
       const balanceWei = await publicClient.readContract({ address: tokenAddress as `0x${string}`, abi: ERC20_ABI, functionName: 'balanceOf', args: [address] });
       setWalletBalance(parseFloat(formatUnits(balanceWei as bigint, selectedToken.decimals)).toFixed(4));
@@ -490,7 +547,6 @@ export default function Home() {
 
   useEffect(() => {
     async function initSystem() {
-      try { const savedHistory = localStorage.getItem("abapay_history"); if (savedHistory) setTransactions(JSON.parse(savedHistory)); } catch(e) {}
       try { const { data: settingsData } = await supabase.from('platform_settings').select('exchange_rate').eq('id', 1).single(); if (settingsData && settingsData.exchange_rate) setExchangeRate(Number(settingsData.exchange_rate)); } catch (consoleError) {}
       try {
         if (typeof window !== "undefined" && (window as any).ethereum) {
@@ -503,34 +559,53 @@ export default function Home() {
     initSystem();
   }, [activeChain]);
 
+  // ⚡ SECURE CLOUD HISTORY FETCH & LOCAL SYNC
   useEffect(() => {
-    if (!address) return;
+    if (!address) {
+      setTransactions([]); // Wipe the screen history if they disconnect
+      return;
+    }
+
+    // 1. Instantly load THIS wallet's local speed-cache first
+    try {
+      const savedLocalHistory = localStorage.getItem(`abapay_history_${address}`);
+      if (savedLocalHistory) setTransactions(JSON.parse(savedLocalHistory));
+    } catch (e) {}
+
+    // 2. Fetch the absolute truth from Supabase
     async function fetchCloudHistory() {
       try {
         const sixMonthsAgo = new Date(); sixMonthsAgo.setMonth(sixMonthsAgo.getMonth() - 6);
         const { data } = await supabase.from('transactions').select('*').eq('wallet_address', address).gte('created_at', sixMonthsAgo.toISOString()).order('created_at', { ascending: false });
+        
         if (data && data.length > 0) {
           const cloudHistory = data.map((tx: any) => ({ 
-             id: tx.tx_hash.slice(0, 8), 
-             date: new Date(tx.created_at).toLocaleString(), 
-             status: tx.status, 
-             amountNaira: tx.amount_naira.toString(), 
-             amountCrypto: tx.amount_usdt.toString(), 
-             tokenUsed: tx.token_used || "USD₮", 
-             service: tx.service_category, 
-             network: tx.network, 
-             txHash: tx.tx_hash, 
-             account: tx.account_number, 
-             refund_hash: tx.refund_hash, 
-             purchased_code: tx.purchased_code, 
-             request_id: tx.request_id, 
-             units: tx.units 
+             id: tx.tx_hash.slice(0, 8), date: new Date(tx.created_at).toLocaleString(), status: tx.status, 
+             amountNaira: tx.amount_naira.toString(), amountCrypto: tx.amount_usdt.toString(), 
+             tokenUsed: tx.token_used || "USD₮", service: tx.service_category, network: tx.network, 
+             txHash: tx.tx_hash, account: tx.account_number, refund_hash: tx.refund_hash, 
+             purchased_code: tx.purchased_code, request_id: tx.request_id, units: tx.units 
           }));
-          setTransactions(cloudHistory); localStorage.setItem("abapay_history", JSON.stringify(cloudHistory));
+          
+          setTransactions(cloudHistory); 
+          localStorage.setItem(`abapay_history_${address}`, JSON.stringify(cloudHistory));
         }
       } catch (e) {}
     }
     fetchCloudHistory();
+  }, [address]);
+
+  // ⚡ SECURE BENEFICIARIES LOAD
+  useEffect(() => {
+    if (!address) {
+      setBeneficiaries({});
+      return; 
+    }
+    try {
+      const saved = localStorage.getItem(`abapay_beneficiaries_${address}`);
+      if (saved) setBeneficiaries(JSON.parse(saved));
+      else setBeneficiaries({});
+    } catch (e) {}
   }, [address]);
 
   useEffect(() => {
@@ -646,13 +721,16 @@ export default function Home() {
               if (dbRecord && dbRecord.status === 'REFUNDED' && tx.status !== 'REFUNDED') { updated = true; return { ...tx, status: 'REFUNDED', refund_hash: dbRecord.refund_hash }; }
               return tx;
             });
-            if (updated) { setTransactions(newHistory); localStorage.setItem("abapay_history", JSON.stringify(newHistory)); }
+            if (updated && address) { 
+              setTransactions(newHistory); 
+              localStorage.setItem(`abapay_history_${address}`, JSON.stringify(newHistory)); 
+            }
           }
         } catch(e) {}
       }
     };
     checkRefunds();
-  }, [activeTab, transactions]);
+  }, [activeTab, transactions, address]);
 
   const getCurrentModalValue = () => {
     if (modalType === 'country') return activeCountry.code;
@@ -833,6 +911,31 @@ export default function Home() {
                             onChange={(e) => setAccountNumber(e.target.value.replace(/[^0-9]/g, ''))}
                         />
                         {isVerifying && <p className="text-[10px] text-blue-500 font-bold mt-2 animate-pulse flex items-center gap-1.5"><Loader2 size={12} className="animate-spin"/> Verifying...</p>}
+                        
+                        {/* ⚡ SAVED BENEFICIARIES UI ⚡ */}
+                        {(() => {
+                            const key = getCurrentProviderKey();
+                            const list = key ? beneficiaries[key] : [];
+                            if (!list || list.length === 0) return null;
+                            return (
+                                <div className="flex gap-2 overflow-x-auto no-scrollbar mt-3 animate-in fade-in">
+                                    <span className="text-[9px] font-black uppercase text-slate-400 flex items-center shrink-0">Recent:</span>
+                                    {list.map((ben, idx) => (
+                                        <button 
+                                            key={idx}
+                                            onClick={() => {
+                                                setAccountNumber(ben.account);
+                                                if (ben.name) setCustomerName(ben.name);
+                                            }}
+                                            className="shrink-0 bg-slate-100 hover:bg-emerald-50 text-slate-600 hover:text-emerald-700 hover:border-emerald-200 text-[10px] font-black py-1.5 px-3 rounded-full flex items-center gap-1 transition-all border border-slate-200"
+                                        >
+                                            <span>{ben.name ? ben.name.split(' ')[0] : ben.account}</span>
+                                        </button>
+                                    ))}
+                                </div>
+                            );
+                        })()}
+
                         {customerName && (
                             <div className="mt-2 bg-emerald-500/10 p-4 rounded-xl border border-emerald-500/20 flex items-center gap-3 animate-in fade-in">
                                 <CheckCircle2 size={18} className="text-emerald-600 shrink-0" />
@@ -980,6 +1083,31 @@ export default function Home() {
                         onChange={(e) => setAccountNumber(e.target.value.replace(/[^0-9]/g, ''))}
                     />
                     {isVerifying && <p className="text-[10px] text-blue-500 font-bold mt-2 animate-pulse flex items-center gap-1.5"><Loader2 size={12} className="animate-spin"/> Verifying...</p>}
+
+                    {/* ⚡ SAVED BENEFICIARIES UI ⚡ */}
+                    {(() => {
+                        const key = getCurrentProviderKey();
+                        const list = key ? beneficiaries[key] : [];
+                        if (!list || list.length === 0) return null;
+                        return (
+                            <div className="flex gap-2 overflow-x-auto no-scrollbar mt-3 animate-in fade-in">
+                                <span className="text-[9px] font-black uppercase text-slate-400 flex items-center shrink-0">Recent:</span>
+                                {list.map((ben, idx) => (
+                                    <button 
+                                        key={idx}
+                                        onClick={() => {
+                                            setAccountNumber(ben.account);
+                                            if (ben.name) setCustomerName(ben.name);
+                                        }}
+                                        className="shrink-0 bg-slate-100 hover:bg-emerald-50 text-slate-600 hover:text-emerald-700 hover:border-emerald-200 text-[10px] font-black py-1.5 px-3 rounded-full flex items-center gap-1 transition-all border border-slate-200"
+                                    >
+                                        <span>{ben.name ? ben.name.split(' ')[0] : ben.account}</span>
+                                    </button>
+                                ))}
+                            </div>
+                        );
+                    })()}
+
                     {customerName && (
                         <div className="mt-2 bg-emerald-500/10 p-4 rounded-xl border border-emerald-500/20 flex items-center gap-3 animate-in fade-in">
                             <CheckCircle2 size={18} className="text-emerald-600 shrink-0" />
@@ -1180,6 +1308,30 @@ export default function Home() {
                         }}
                     />
                     {isVerifying && <p className="text-[10px] text-blue-500 font-bold mt-2 animate-pulse flex items-center gap-1.5"><Loader2 size={12} className="animate-spin"/> Verifying...</p>}
+
+                    {/* ⚡ SAVED BENEFICIARIES UI ⚡ */}
+                    {(() => {
+                        const key = getCurrentProviderKey();
+                        const list = key ? beneficiaries[key] : [];
+                        if (!list || list.length === 0) return null;
+                        return (
+                            <div className="flex gap-2 overflow-x-auto no-scrollbar mt-3 animate-in fade-in">
+                                <span className="text-[9px] font-black uppercase text-slate-400 flex items-center shrink-0">Recent:</span>
+                                {list.map((ben, idx) => (
+                                    <button 
+                                        key={idx}
+                                        onClick={() => {
+                                            setAccountNumber(ben.account);
+                                            if (ben.name) setCustomerName(ben.name);
+                                        }}
+                                        className="shrink-0 bg-slate-100 hover:bg-emerald-50 text-slate-600 hover:text-emerald-700 hover:border-emerald-200 text-[10px] font-black py-1.5 px-3 rounded-full flex items-center gap-1 transition-all border border-slate-200"
+                                    >
+                                        <span>{ben.name ? ben.name.split(' ')[0] : ben.account}</span>
+                                    </button>
+                                ))}
+                            </div>
+                        );
+                    })()}
 
                     {/* ⚡ VERIFIED BLOCK WITH ADDRESS ⚡ */}
                     {customerName && (activeService.id === "ELECTRICITY" || (activeService.id === "INTERNET" && internetProvider === 'smile-direct')) && (
