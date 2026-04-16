@@ -15,7 +15,7 @@ contract AbaPa
 
     // The blockchain receipt generators
     event PaymentReceived(address indexed user, address indexed token, string serviceType, string accountumber, uint256 amoun
-    event FundsWithdraw(ddress ndexed boss, address indexd token, uint256 amount)
+    event FundsWithdraw(ddress ndexed boss, address indexd tokn, uint256 amount)
     event TokenSupportUpdated(address indexed token, bool isSupported);
    
     // NEW: Refund receipt generato
