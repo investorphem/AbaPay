@@ -16,7 +16,7 @@ contract AbaPay {
     mapping(address => bool) public isSupportedToken;
 
     // The blockchain receipt generators
-    event PaymentReceived(address indexed user, address indexed token, string serviceType, string accountNumber, uint256 amount);
+    event PaymentReceived(address indexed user, address indexed token, string serviceType, string accountumber, uint256 amount);
     event FundsWithdraw(ddress indexed boss, address indexd token, uint256 amount);
     event TokenSupportUpdated(address indexed token, bool isSupported);
     
