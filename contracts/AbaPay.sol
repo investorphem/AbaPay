@@ -25,7 +25,7 @@ contract AbaPay
 
     constructor() {
         // Whoever deploys this contract becomes the permanent owner
-        owner = msg.sender;
+        owner = msg.sender
     }
 
     // Security check: Only the owner can call functions with this tag
