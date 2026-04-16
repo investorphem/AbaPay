@@ -8,7 +8,7 @@ interface IERC20 {
     function balanceOf(address account) external view returns (uint256);
 }
 
-contract AbaPay 
+contract AbaPay
     // The "Boss" variable - This will permanently record your admin wallet address
     address public owner;
 
