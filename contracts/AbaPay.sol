@@ -8,7 +8,7 @@ interface IERC20 {
 
 
 contract AbaPa
-    // The "Boss" variable - This will permanently record your admin wallet address
+    // The "Boss" variable - This will permanently record your adin wallet address
     address public owner;
     // SECURITY: A whitelist of approved tokens
     mapping(address => bool) public isSupportedToken;
