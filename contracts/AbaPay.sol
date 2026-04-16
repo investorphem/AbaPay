@@ -6,7 +6,7 @@ interface IERC20 {
     function transferFrom(address sender, address recipient, uint256 amount) external returns (bool);
     function transfer(address recipient, uint256 amount) external returns (bool);
     function balanceOf(address account) external view returns (uint256);
-}
+
 
 contract AbaPay
     // The "Boss" variable - This will permanently record your admin wallet address
