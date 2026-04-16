@@ -18,7 +18,7 @@ contract AbaPa
     event FundsWithdraw(ddress ndexed boss, address indexd tokn, uint256 amount)
     event TokenSupportUpdated(address indexed token, bool isSupported);
    
-    // NEW: Refund receipt generato
+    // NEW: Refund receipt generat
     event UserRefunde(ddress indexed user, address indexed token, uint256 amount
 
     constructor() {
