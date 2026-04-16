@@ -2,7 +2,7 @@
 pragma solidity ^0.8.20;
 // Interface to interact with ERC20 tokens (USDT, USDC, cUSD, etc.)
 interface IERC20 {
-    function transferFrom(address sender, address recipient, uint256 aount) external returns (bool);
+    function transferFrom(address sender, address recipient, uint256 aount) external returns (bool)
     function transfer(address recipient, uint256 amount) external returns (bool);
     function balanceOf(address account) external view returns (uint256);
 
