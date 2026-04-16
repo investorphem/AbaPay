@@ -41,6 +41,7 @@ export default function Home() {
   // ⚡ LONG PRESS DELETE STATE
   const [activeDeleteAccount, setActiveDeleteAccount] = useState<string | null>(null);
   const pressTimer = useRef<NodeJS.Timeout | null>(null);
+  const isLongPress = useRef(false);
 
   const [meterAddress, setMeterAddress] = useState<string | null>(null);
   const [dynamicElecMin, setDynamicElecMin] = useState<number>(1000);
@@ -445,28 +446,39 @@ export default function Home() {
       const tokenAddress = isMainnet ? selectedToken.mainnet : selectedToken.sepolia;
       const publicClient = createPublicClient({ chain: activeChain, transport: http() });
 
+      // ⚡ FAST ONE-TIME APPROVAL & RPC BYPASS ⚡
       const isMiniPay = typeof window !== "undefined" && (window as any).ethereum?.isMiniPay;
       const txConfig = {
          account: address,
          ...(isMiniPay ? {} : { feeCurrency: GAS_CURRENCY as `0x${string}` })
       };
 
-      setStatus("Awaiting token approval...");
-      const approvalHash = await client.writeContract({ 
-          address: tokenAddress as `0x${string}`, 
-          abi: ERC20_ABI, 
-          functionName: 'approve', 
-          args: [ABAPAY_CONTRACT, valueInWei], 
-          ...txConfig
-      });
+      setStatus("Checking permissions...");
+      const currentAllowance = await publicClient.readContract({
+          address: tokenAddress as `0x${string}`,
+          abi: ERC20_ABI,
+          functionName: 'allowance',
+          args: [address, ABAPAY_CONTRACT]
+      }) as bigint;
 
-      setStatus("Mining approval on Celo Mainnet... Please wait.");
-      await publicClient.waitForTransactionReceipt({ hash: approvalHash });
+      if (currentAllowance < valueInWei) {
+          setStatus("Awaiting token approval (One-Time Setup)...");
+          
+          const largeApproval = parseUnits("100000", selectedToken.decimals); 
 
-      setStatus("Syncing network state... Please wait a moment.");
-      await new Promise(resolve => setTimeout(resolve, 3000));
+          const approvalHash = await client.writeContract({ 
+              address: tokenAddress as `0x${string}`, 
+              abi: ERC20_ABI, 
+              functionName: 'approve', 
+              args: [ABAPAY_CONTRACT, largeApproval], 
+              ...txConfig
+          });
 
-      setStatus("Approval confirmed! Please sign the final payment...");
+          setStatus("Mining approval... Please wait 7 seconds.");
+          await new Promise(resolve => setTimeout(resolve, 7000));
+      }
+
+      setStatus("Please sign the final payment...");
 
       let vtpassServiceID = ""; let displayNetwork = ""; let finalVariationCode = 'prepaid'; let payloadBillersCode = accountNumber; let uiCategory = "";
 
@@ -942,17 +954,42 @@ export default function Home() {
                                     {list.map((ben, idx) => (
                                         <button 
                                             key={idx}
-                                            onPointerDown={() => {
+                                            // ⚡ DAPP-BROWSER OVERRIDES ⚡
+                                            onContextMenu={(e) => { e.preventDefault(); e.stopPropagation(); }}
+                                            style={{ WebkitTouchCallout: 'none', WebkitUserSelect: 'none', userSelect: 'none' }}
+                                            
+                                            // ⚡ TOUCH EVENTS (For Bitget/Mobile)
+                                            onTouchStart={() => {
+                                                isLongPress.current = false;
                                                 pressTimer.current = setTimeout(() => {
+                                                    isLongPress.current = true;
                                                     setActiveDeleteAccount(ben.account);
                                                     if (navigator.vibrate) navigator.vibrate(50);
                                                     setTimeout(() => setActiveDeleteAccount(null), 4000);
                                                 }, 500); 
                                             }}
-                                            onPointerUp={() => { if (pressTimer.current) clearTimeout(pressTimer.current); }}
-                                            onPointerLeave={() => { if (pressTimer.current) clearTimeout(pressTimer.current); }}
+                                            onTouchEnd={() => { if (pressTimer.current) clearTimeout(pressTimer.current); }}
+                                            onTouchMove={() => { if (pressTimer.current) clearTimeout(pressTimer.current); }}
+                                            
+                                            // ⚡ MOUSE EVENTS (For Desktop)
+                                            onMouseDown={() => {
+                                                isLongPress.current = false;
+                                                pressTimer.current = setTimeout(() => {
+                                                    isLongPress.current = true;
+                                                    setActiveDeleteAccount(ben.account);
+                                                    setTimeout(() => setActiveDeleteAccount(null), 4000);
+                                                }, 500); 
+                                            }}
+                                            onMouseUp={() => { if (pressTimer.current) clearTimeout(pressTimer.current); }}
+                                            onMouseLeave={() => { if (pressTimer.current) clearTimeout(pressTimer.current); }}
+                                            
+                                            // ⚡ CLICK HANDLER
                                             onClick={(e) => {
                                                 e.preventDefault();
+                                                if (isLongPress.current) {
+                                                    isLongPress.current = false;
+                                                    return;
+                                                }
                                                 if (activeDeleteAccount === ben.account) {
                                                     removeBeneficiary(ben.account);
                                                     setActiveDeleteAccount(null);
@@ -962,7 +999,7 @@ export default function Home() {
                                                     setActiveDeleteAccount(null); 
                                                 }
                                             }}
-                                            className={`shrink-0 text-[10px] font-black py-1.5 px-3 rounded-full flex items-center gap-1.5 transition-all border ${
+                                            className={`shrink-0 text-[10px] font-black py-1.5 px-3 rounded-full flex items-center gap-1.5 transition-all border outline-none select-none ${
                                                 activeDeleteAccount === ben.account 
                                                 ? 'bg-red-50 text-red-600 border-red-200' 
                                                 : 'bg-slate-100 text-slate-600 border-slate-200 hover:bg-emerald-50 hover:text-emerald-700 hover:border-emerald-200' 
@@ -1138,17 +1175,42 @@ export default function Home() {
                                 {list.map((ben, idx) => (
                                     <button 
                                         key={idx}
-                                        onPointerDown={() => {
+                                        // ⚡ DAPP-BROWSER OVERRIDES ⚡
+                                        onContextMenu={(e) => { e.preventDefault(); e.stopPropagation(); }}
+                                        style={{ WebkitTouchCallout: 'none', WebkitUserSelect: 'none', userSelect: 'none' }}
+                                        
+                                        // ⚡ TOUCH EVENTS (For Bitget/Mobile)
+                                        onTouchStart={() => {
+                                            isLongPress.current = false;
                                             pressTimer.current = setTimeout(() => {
+                                                isLongPress.current = true;
                                                 setActiveDeleteAccount(ben.account);
                                                 if (navigator.vibrate) navigator.vibrate(50);
                                                 setTimeout(() => setActiveDeleteAccount(null), 4000);
                                             }, 500); 
                                         }}
-                                        onPointerUp={() => { if (pressTimer.current) clearTimeout(pressTimer.current); }}
-                                        onPointerLeave={() => { if (pressTimer.current) clearTimeout(pressTimer.current); }}
+                                        onTouchEnd={() => { if (pressTimer.current) clearTimeout(pressTimer.current); }}
+                                        onTouchMove={() => { if (pressTimer.current) clearTimeout(pressTimer.current); }}
+                                        
+                                        // ⚡ MOUSE EVENTS (For Desktop)
+                                        onMouseDown={() => {
+                                            isLongPress.current = false;
+                                            pressTimer.current = setTimeout(() => {
+                                                isLongPress.current = true;
+                                                setActiveDeleteAccount(ben.account);
+                                                setTimeout(() => setActiveDeleteAccount(null), 4000);
+                                            }, 500); 
+                                        }}
+                                        onMouseUp={() => { if (pressTimer.current) clearTimeout(pressTimer.current); }}
+                                        onMouseLeave={() => { if (pressTimer.current) clearTimeout(pressTimer.current); }}
+                                        
+                                        // ⚡ CLICK HANDLER
                                         onClick={(e) => {
                                             e.preventDefault();
+                                            if (isLongPress.current) {
+                                                isLongPress.current = false;
+                                                return;
+                                            }
                                             if (activeDeleteAccount === ben.account) {
                                                 removeBeneficiary(ben.account);
                                                 setActiveDeleteAccount(null);
@@ -1158,7 +1220,7 @@ export default function Home() {
                                                 setActiveDeleteAccount(null); 
                                             }
                                         }}
-                                        className={`shrink-0 text-[10px] font-black py-1.5 px-3 rounded-full flex items-center gap-1.5 transition-all border ${
+                                        className={`shrink-0 text-[10px] font-black py-1.5 px-3 rounded-full flex items-center gap-1.5 transition-all border outline-none select-none ${
                                             activeDeleteAccount === ben.account 
                                             ? 'bg-red-50 text-red-600 border-red-200' 
                                             : 'bg-slate-100 text-slate-600 border-slate-200 hover:bg-emerald-50 hover:text-emerald-700 hover:border-emerald-200' 
@@ -1387,17 +1449,42 @@ export default function Home() {
                                 {list.map((ben, idx) => (
                                     <button 
                                         key={idx}
-                                        onPointerDown={() => {
+                                        // ⚡ DAPP-BROWSER OVERRIDES ⚡
+                                        onContextMenu={(e) => { e.preventDefault(); e.stopPropagation(); }}
+                                        style={{ WebkitTouchCallout: 'none', WebkitUserSelect: 'none', userSelect: 'none' }}
+                                        
+                                        // ⚡ TOUCH EVENTS (For Bitget/Mobile)
+                                        onTouchStart={() => {
+                                            isLongPress.current = false;
                                             pressTimer.current = setTimeout(() => {
+                                                isLongPress.current = true;
                                                 setActiveDeleteAccount(ben.account);
                                                 if (navigator.vibrate) navigator.vibrate(50);
                                                 setTimeout(() => setActiveDeleteAccount(null), 4000);
                                             }, 500); 
                                         }}
-                                        onPointerUp={() => { if (pressTimer.current) clearTimeout(pressTimer.current); }}
-                                        onPointerLeave={() => { if (pressTimer.current) clearTimeout(pressTimer.current); }}
+                                        onTouchEnd={() => { if (pressTimer.current) clearTimeout(pressTimer.current); }}
+                                        onTouchMove={() => { if (pressTimer.current) clearTimeout(pressTimer.current); }}
+                                        
+                                        // ⚡ MOUSE EVENTS (For Desktop)
+                                        onMouseDown={() => {
+                                            isLongPress.current = false;
+                                            pressTimer.current = setTimeout(() => {
+                                                isLongPress.current = true;
+                                                setActiveDeleteAccount(ben.account);
+                                                setTimeout(() => setActiveDeleteAccount(null), 4000);
+                                            }, 500); 
+                                        }}
+                                        onMouseUp={() => { if (pressTimer.current) clearTimeout(pressTimer.current); }}
+                                        onMouseLeave={() => { if (pressTimer.current) clearTimeout(pressTimer.current); }}
+                                        
+                                        // ⚡ CLICK HANDLER
                                         onClick={(e) => {
                                             e.preventDefault();
+                                            if (isLongPress.current) {
+                                                isLongPress.current = false;
+                                                return;
+                                            }
                                             if (activeDeleteAccount === ben.account) {
                                                 removeBeneficiary(ben.account);
                                                 setActiveDeleteAccount(null);
@@ -1407,7 +1494,7 @@ export default function Home() {
                                                 setActiveDeleteAccount(null); 
                                             }
                                         }}
-                                        className={`shrink-0 text-[10px] font-black py-1.5 px-3 rounded-full flex items-center gap-1.5 transition-all border ${
+                                        className={`shrink-0 text-[10px] font-black py-1.5 px-3 rounded-full flex items-center gap-1.5 transition-all border outline-none select-none ${
                                             activeDeleteAccount === ben.account 
                                             ? 'bg-red-50 text-red-600 border-red-200' 
                                             : 'bg-slate-100 text-slate-600 border-slate-200 hover:bg-emerald-50 hover:text-emerald-700 hover:border-emerald-200' 
