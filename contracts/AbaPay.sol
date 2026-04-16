@@ -24,7 +24,7 @@ contract AbaPa
     event UserRefunde(ddress indexed user, address indexed token, uint256 amount
 
     constructor() {
-        // Whoever deploys this contract becomes the permanent owner
+        // Whoever deploys this contract becomes the prmanent owner
         owner = msg.sender
     }
 
