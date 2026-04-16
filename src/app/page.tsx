@@ -36,9 +36,11 @@ export default function Home() {
   const [customerName, setCustomerName] = useState<string | null>(null);
   const [isVerifying, setIsVerifying] = useState(false);
 
+  // ⚡ CONFIRMATION MODAL STATE ⚡
+  const [isConfirmModalOpen, setIsConfirmModalOpen] = useState(false);
+
   // ⚡ BENEFICIARIES STATE
   const [beneficiaries, setBeneficiaries] = useState<Record<string, {account: string, name: string | null}[]>>({});
-  // ⚡ LONG PRESS DELETE STATE
   const [activeDeleteAccount, setActiveDeleteAccount] = useState<string | null>(null);
   const pressTimer = useRef<NodeJS.Timeout | null>(null);
   const isLongPress = useRef(false);
@@ -137,6 +139,50 @@ export default function Home() {
     const crypto = (bill + fee) / exchangeRate;
     return { cryptoToCharge: crypto.toFixed(4), currentFee: fee };
   }, [nairaAmount, exchangeRate, activeService, activeTab]);
+
+  // ⚡ CALCULATE NAIRA EQUIVALENT BALANCE ⚡
+  const walletBalanceNaira = useMemo(() => {
+    const bal = parseFloat(walletBalance);
+    if (isNaN(bal)) return "0.00";
+    return (bal * exchangeRate).toLocaleString('en-NG', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  }, [walletBalance, exchangeRate]);
+
+  // ⚡ GENERATE CONFIRMATION MODAL DETAILS ⚡
+  const checkoutDetails = useMemo(() => {
+    let title = "";
+    let recipient = accountNumber;
+    let recipientLabel = "Recipient";
+
+    if (activeTab === "bank") {
+      title = `Transfer to ${selectedBank?.name || "Bank"}`;
+      recipient = `${accountNumber}`;
+      recipientLabel = "Account";
+    } else if (activeTab === "education") {
+      title = EDUCATION_PROVIDERS.find(p => p.serviceID === educationProvider)?.displayName || "Education";
+      recipient = educationProvider === "jamb" ? accountNumber : customerPhone;
+      recipientLabel = educationProvider === "jamb" ? "Profile ID" : "Phone Number";
+    } else {
+      if (activeService.id === "AIRTIME") {
+         title = `${telecomProvider.toUpperCase()} Airtime`;
+         recipient = accountNumber;
+         recipientLabel = "Phone Number";
+      } else if (activeService.id === "INTERNET") {
+         title = `${currentInternet?.displayName || "Data"} Plan`;
+         recipient = accountNumber;
+         recipientLabel = internetProvider === 'smile-direct' ? "Email Account" : internetProvider === 'spectranet' ? "Spectranet ID" : "Phone Number";
+      } else if (activeService.id === "ELECTRICITY") {
+         title = `${currentDisco?.displayName || "Electricity"} (${meterType})`;
+         recipient = accountNumber;
+         recipientLabel = "Meter No";
+      } else if (activeService.id === "CABLE") {
+         title = `${currentCable?.displayName || "Cable TV"}`;
+         recipient = accountNumber;
+         recipientLabel = "Smartcard / IUC";
+      }
+    }
+
+    return { title, recipient, recipientLabel };
+  }, [activeTab, activeService, selectedBank, educationProvider, telecomProvider, currentInternet, internetProvider, currentDisco, meterType, currentCable, accountNumber, customerName, customerPhone]);
 
   const filteredInternetDataPlans = useMemo(() => {
     if (!internetVariations || !Array.isArray(internetVariations) || internetVariations.length === 0) return [];
@@ -357,7 +403,6 @@ export default function Home() {
     setIsVerifying(false);
   };
 
-  // ⚡ HELPER: Get Current Provider Key for Beneficiaries
   const getCurrentProviderKey = () => {
     if (activeTab === "bank") return selectedBank?.variation_code;
     if (activeTab === "education") return educationProvider;
@@ -370,7 +415,6 @@ export default function Home() {
     return null;
   };
 
-  // ⚡ HELPER: Save Beneficiary (Tied to Wallet Address)
   const saveBeneficiary = (account: string, name: string | null) => {
     if (!address) return; 
     const key = getCurrentProviderKey();
@@ -387,7 +431,6 @@ export default function Home() {
     });
   };
 
-  // ⚡ HELPER: Remove Beneficiary
   const removeBeneficiary = (accountToRemove: string) => {
     if (!address) return;
     const key = getCurrentProviderKey();
@@ -403,11 +446,11 @@ export default function Home() {
     });
   };
 
-  const handlePayment = async () => {
+  // ⚡ RENAMED: This actually executes the payment after modal confirmation
+  const processBlockchainPayment = async () => {
     if (!address || !client) return setStatus("Connect Wallet First");
     if (parseFloat(cryptoToCharge) > parseFloat(walletBalance)) return setStatus(`Insufficient ${selectedToken.symbol} Balance.`);
 
-    // ⚡ ELECTRICITY COOLDOWN PROTECTION
     if (activeTab === "pay" && activeService.id === "ELECTRICITY") {
       const cooldownKey = `abapay_elec_${address}_${elecProvider}_${accountNumber}_${nairaAmount}`;
       const lastTxTime = localStorage.getItem(cooldownKey);
@@ -419,12 +462,8 @@ export default function Home() {
         if (timeSinceLast < FIVE_MINUTES) {
           const minutesLeft = Math.ceil((FIVE_MINUTES - timeSinceLast) / 60000);
           setStatus("Duplicate detected. Please wait.");
-          showToast(
-            "Duplicate Protection", 
-            `You just purchased ₦${nairaAmount} for this exact meter recently. Please wait ${minutesLeft} minute(s) before trying again to avoid double-billing.`, 
-            "error"
-          );
-          return; // Stop the transaction
+          showToast("Duplicate Protection", `You just purchased ₦${nairaAmount} for this exact meter recently. Please wait ${minutesLeft} min(s) to avoid double-billing.`, "error");
+          return; 
         }
       }
       localStorage.setItem(cooldownKey, new Date().getTime().toString());
@@ -446,7 +485,6 @@ export default function Home() {
       const tokenAddress = isMainnet ? selectedToken.mainnet : selectedToken.sepolia;
       const publicClient = createPublicClient({ chain: activeChain, transport: http() });
 
-      // ⚡ FAST ONE-TIME APPROVAL & RPC BYPASS ⚡
       const isMiniPay = typeof window !== "undefined" && (window as any).ethereum?.isMiniPay;
       const txConfig = {
          account: address,
@@ -536,7 +574,6 @@ export default function Home() {
       const res = await fetch('/api/pay', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(backendPayload) });
       const result = await res.json();
 
-      // ⚡ SAVE BENEFICIARY
       saveBeneficiary(accountNumber, customerName);
 
       setAccountNumber(""); setNairaAmount(""); setCustomerPhone(""); setCustomerName(null); setSelectedCablePlan(null); setCableCurrentBouquet(null); setSelectedBank(null); setSelectedInternetPlan(null); setInternetAccountId(null); setSelectedEducationPlan(null);
@@ -559,12 +596,18 @@ export default function Home() {
 
       const updatedHistory = [newTx, ...transactions];
       setTransactions(updatedHistory); 
-      localStorage.setItem(`abapay_history_${address}`, JSON.stringify(updatedHistory)); // ⚡ Tied to Address
+      localStorage.setItem(`abapay_history_${address}`, JSON.stringify(updatedHistory));
       setCurrentPage(1);
 
       const balanceWei = await publicClient.readContract({ address: tokenAddress as `0x${string}`, abi: ERC20_ABI, functionName: 'balanceOf', args: [address] });
       setWalletBalance(parseFloat(formatUnits(balanceWei as bigint, selectedToken.decimals)).toFixed(4));
-    } catch (e) { setStatus("Transaction Cancelled."); } finally { setIsProcessing(false); }
+    } catch (e: any) { 
+        console.error("PAYMENT ERROR:", e);
+        const errorMsg = e.shortMessage || e.message || "Transaction Cancelled.";
+        setStatus(`Error: ${errorMsg.slice(0, 40)}...`); 
+    } finally { 
+        setIsProcessing(false); 
+    }
   };
 
   useEffect(() => {
@@ -590,20 +633,16 @@ export default function Home() {
     initSystem();
   }, [activeChain]);
 
-  // ⚡ SECURE CLOUD HISTORY FETCH & LOCAL SYNC
   useEffect(() => {
     if (!address) {
-      setTransactions([]); // Wipe the screen history if they disconnect
+      setTransactions([]);
       return;
     }
-
-    // 1. Instantly load THIS wallet's local speed-cache first
     try {
       const savedLocalHistory = localStorage.getItem(`abapay_history_${address}`);
       if (savedLocalHistory) setTransactions(JSON.parse(savedLocalHistory));
     } catch (e) {}
 
-    // 2. Fetch the absolute truth from Supabase
     async function fetchCloudHistory() {
       try {
         const sixMonthsAgo = new Date(); sixMonthsAgo.setMonth(sixMonthsAgo.getMonth() - 6);
@@ -626,7 +665,6 @@ export default function Home() {
     fetchCloudHistory();
   }, [address]);
 
-  // ⚡ SECURE BENEFICIARIES LOAD
   useEffect(() => {
     if (!address) {
       setBeneficiaries({});
@@ -791,6 +829,63 @@ export default function Home() {
         </div>
       )}
 
+      {/* ⚡ CONFIRMATION MODAL ⚡ */}
+      {isConfirmModalOpen && (
+        <div className="fixed inset-0 z-[300] flex items-end sm:items-center justify-center bg-slate-900/60 backdrop-blur-md animate-in fade-in duration-200">
+           <div className="bg-white w-full max-w-md rounded-t-[2.5rem] sm:rounded-[2.5rem] p-6 pb-10 sm:pb-6 shadow-2xl relative animate-in slide-in-from-bottom-10 sm:zoom-in-95 duration-300">
+              <div className="w-12 h-1.5 bg-slate-200 rounded-full mx-auto mb-6 sm:hidden"></div>
+              
+              <div className="flex justify-between items-center mb-6">
+                 <h3 className="text-xl font-black text-slate-900 tracking-tight">Confirm Payment</h3>
+                 <button onClick={() => setIsConfirmModalOpen(false)} className="bg-slate-100 p-2 rounded-full text-slate-500 hover:bg-slate-200 transition-colors"><XCircle size={20}/></button>
+              </div>
+
+              <div className="text-center mb-8">
+                 <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-2">Total Payable</p>
+                 <h2 className="text-4xl font-black text-slate-900 mb-2">₦{(parseFloat(nairaAmount || "0") + currentFee).toLocaleString()}</h2>
+                 <div className="flex items-center justify-center gap-1.5 text-emerald-600 font-bold bg-emerald-50 w-max mx-auto px-4 py-1.5 rounded-full text-sm shadow-inner">
+                    <img src={selectedToken.logo} alt="token" className="w-4 h-4 rounded-full"/>
+                    {cryptoToCharge} {selectedToken.symbol}
+                 </div>
+              </div>
+
+              <div className="bg-slate-50 border border-slate-100 rounded-3xl p-5 space-y-4 mb-8 shadow-sm">
+                 <div className="flex justify-between items-center">
+                    <span className="text-xs font-bold text-slate-500">Service</span>
+                    <span className="text-sm font-black text-slate-900 text-right">{checkoutDetails.title}</span>
+                 </div>
+                 <div className="flex justify-between items-center">
+                    <span className="text-xs font-bold text-slate-500">{checkoutDetails.recipientLabel}</span>
+                    <span className="text-sm font-black text-slate-900 text-right">{checkoutDetails.recipient}</span>
+                 </div>
+                 {customerName && (
+                     <div className="flex justify-between items-center">
+                        <span className="text-xs font-bold text-slate-500">Customer</span>
+                        <span className="text-sm font-black text-slate-900 truncate max-w-[180px] text-right">{customerName}</span>
+                     </div>
+                 )}
+                 <div className="flex justify-between items-center pt-4 border-t border-slate-200/60 mt-2">
+                    <span className="text-xs font-bold text-slate-500">Processing Fee</span>
+                    <span className={`text-sm font-black ${currentFee > 0 ? 'text-orange-500' : 'text-emerald-500'}`}>
+                       {currentFee > 0 ? `₦${currentFee}` : 'Free'}
+                    </span>
+                 </div>
+              </div>
+
+              <button 
+                  onClick={() => {
+                      setIsConfirmModalOpen(false);
+                      processBlockchainPayment();
+                  }}
+                  className="w-full bg-slate-900 hover:bg-black text-white font-black py-5 rounded-2xl flex items-center justify-center gap-2.5 transition-all active:scale-95 shadow-xl shadow-slate-900/20 text-lg tracking-tight"
+              >
+                  <ShieldCheck size={22} className="text-emerald-400" />
+                  CONFIRM & PAY
+              </button>
+           </div>
+        </div>
+      )}
+
       {isSupportOpen && (
         <div className="fixed inset-0 z-[200] flex items-center justify-center p-4 bg-slate-900/50 backdrop-blur-sm animate-in fade-in">
            <div className="bg-white w-full max-w-md rounded-[2rem] p-6 shadow-2xl relative animate-in zoom-in-95">
@@ -898,10 +993,13 @@ export default function Home() {
                      <ChevronDown size={14} className="text-slate-400"/>
                   </div>
                   <div className="text-right">
-                    <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Balance</p>
-                    <div className="flex items-center justify-end gap-1">
-                      {isFetchingBalance ? <Loader2 size={12} className="animate-spin text-emerald-500"/> : <Coins size={12} className="text-emerald-500"/>}
-                      <p className="font-mono font-black text-sm text-slate-800">{walletBalance} <span className="text-[10px]">{selectedToken.symbol}</span></p>
+                    <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-0.5">Balance</p>
+                    <div className="flex items-center justify-end gap-1.5">
+                      {isFetchingBalance ? <Loader2 size={14} className="animate-spin text-emerald-500"/> : <Coins size={14} className="text-emerald-500"/>}
+                      <div className="flex flex-col items-end">
+                        <p className="font-mono font-black text-sm text-slate-800 leading-none">{walletBalance}</p>
+                        {!isFetchingBalance && <p className="text-[9px] font-bold text-slate-400 mt-1 tracking-tight">≈ ₦{walletBalanceNaira}</p>}
+                      </div>
                     </div>
                   </div>
                 </div>
@@ -954,36 +1052,15 @@ export default function Home() {
                                     {list.map((ben, idx) => (
                                         <button 
                                             key={idx}
-                                            // ⚡ DAPP-BROWSER OVERRIDES ⚡
-                                            onContextMenu={(e) => { e.preventDefault(); e.stopPropagation(); }}
-                                            style={{ WebkitTouchCallout: 'none', WebkitUserSelect: 'none', userSelect: 'none' }}
-                                            
-                                            // ⚡ TOUCH EVENTS (For Bitget/Mobile)
-                                            onTouchStart={() => {
-                                                isLongPress.current = false;
+                                            onPointerDown={() => {
                                                 pressTimer.current = setTimeout(() => {
-                                                    isLongPress.current = true;
                                                     setActiveDeleteAccount(ben.account);
                                                     if (navigator.vibrate) navigator.vibrate(50);
                                                     setTimeout(() => setActiveDeleteAccount(null), 4000);
                                                 }, 500); 
                                             }}
-                                            onTouchEnd={() => { if (pressTimer.current) clearTimeout(pressTimer.current); }}
-                                            onTouchMove={() => { if (pressTimer.current) clearTimeout(pressTimer.current); }}
-                                            
-                                            // ⚡ MOUSE EVENTS (For Desktop)
-                                            onMouseDown={() => {
-                                                isLongPress.current = false;
-                                                pressTimer.current = setTimeout(() => {
-                                                    isLongPress.current = true;
-                                                    setActiveDeleteAccount(ben.account);
-                                                    setTimeout(() => setActiveDeleteAccount(null), 4000);
-                                                }, 500); 
-                                            }}
-                                            onMouseUp={() => { if (pressTimer.current) clearTimeout(pressTimer.current); }}
-                                            onMouseLeave={() => { if (pressTimer.current) clearTimeout(pressTimer.current); }}
-                                            
-                                            // ⚡ CLICK HANDLER
+                                            onPointerUp={() => { if (pressTimer.current) clearTimeout(pressTimer.current); }}
+                                            onPointerLeave={() => { if (pressTimer.current) clearTimeout(pressTimer.current); }}
                                             onClick={(e) => {
                                                 e.preventDefault();
                                                 if (isLongPress.current) {
@@ -1094,7 +1171,7 @@ export default function Home() {
                 )}
 
                 <button 
-                    onClick={handlePayment}
+                    onClick={() => setIsConfirmModalOpen(true)}
                     disabled={!isFormValid || isProcessing}
                     className="w-full bg-slate-900 hover:bg-black text-white font-black py-6 rounded-3xl flex items-center justify-center gap-3.5 transition-all active:scale-95 disabled:opacity-30 shadow-xl shadow-slate-900/20 text-lg tracking-tight"
                 >
@@ -1121,10 +1198,13 @@ export default function Home() {
                      <ChevronDown size={14} className="text-slate-400"/>
                   </div>
                   <div className="text-right">
-                    <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Balance</p>
-                    <div className="flex items-center justify-end gap-1">
-                      {isFetchingBalance ? <Loader2 size={12} className="animate-spin text-emerald-500"/> : <Coins size={12} className="text-emerald-500"/>}
-                      <p className="font-mono font-black text-sm text-slate-800">{walletBalance}</p>
+                    <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-0.5">Balance</p>
+                    <div className="flex items-center justify-end gap-1.5">
+                      {isFetchingBalance ? <Loader2 size={14} className="animate-spin text-emerald-500"/> : <Coins size={14} className="text-emerald-500"/>}
+                      <div className="flex flex-col items-end">
+                        <p className="font-mono font-black text-sm text-slate-800 leading-none">{walletBalance}</p>
+                        {!isFetchingBalance && <p className="text-[9px] font-bold text-slate-400 mt-1 tracking-tight">≈ ₦{walletBalanceNaira}</p>}
+                      </div>
                     </div>
                   </div>
                 </div>
@@ -1175,11 +1255,8 @@ export default function Home() {
                                 {list.map((ben, idx) => (
                                     <button 
                                         key={idx}
-                                        // ⚡ DAPP-BROWSER OVERRIDES ⚡
                                         onContextMenu={(e) => { e.preventDefault(); e.stopPropagation(); }}
                                         style={{ WebkitTouchCallout: 'none', WebkitUserSelect: 'none', userSelect: 'none' }}
-                                        
-                                        // ⚡ TOUCH EVENTS (For Bitget/Mobile)
                                         onTouchStart={() => {
                                             isLongPress.current = false;
                                             pressTimer.current = setTimeout(() => {
@@ -1191,8 +1268,6 @@ export default function Home() {
                                         }}
                                         onTouchEnd={() => { if (pressTimer.current) clearTimeout(pressTimer.current); }}
                                         onTouchMove={() => { if (pressTimer.current) clearTimeout(pressTimer.current); }}
-                                        
-                                        // ⚡ MOUSE EVENTS (For Desktop)
                                         onMouseDown={() => {
                                             isLongPress.current = false;
                                             pressTimer.current = setTimeout(() => {
@@ -1203,8 +1278,6 @@ export default function Home() {
                                         }}
                                         onMouseUp={() => { if (pressTimer.current) clearTimeout(pressTimer.current); }}
                                         onMouseLeave={() => { if (pressTimer.current) clearTimeout(pressTimer.current); }}
-                                        
-                                        // ⚡ CLICK HANDLER
                                         onClick={(e) => {
                                             e.preventDefault();
                                             if (isLongPress.current) {
@@ -1293,7 +1366,7 @@ export default function Home() {
                 )}
 
                 <button 
-                    onClick={handlePayment}
+                    onClick={() => setIsConfirmModalOpen(true)}
                     disabled={isVerifying || !isFormValid || isProcessing}
                     className="w-full bg-slate-900 hover:bg-black text-white font-black py-6 rounded-3xl flex items-center justify-center gap-3.5 transition-all active:scale-95 disabled:opacity-30 shadow-xl shadow-slate-900/20 text-lg tracking-tight"
                 >
@@ -1335,10 +1408,13 @@ export default function Home() {
                      <ChevronDown size={14} className="text-slate-400"/>
                   </div>
                   <div className="text-right">
-                    <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Balance</p>
-                    <div className="flex items-center justify-end gap-1">
-                      {isFetchingBalance ? <Loader2 size={12} className="animate-spin text-emerald-500"/> : <Coins size={12} className="text-emerald-500"/>}
-                      <p className="font-mono font-black text-sm text-slate-800">{walletBalance}</p>
+                    <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-0.5">Balance</p>
+                    <div className="flex items-center justify-end gap-1.5">
+                      {isFetchingBalance ? <Loader2 size={14} className="animate-spin text-emerald-500"/> : <Coins size={14} className="text-emerald-500"/>}
+                      <div className="flex flex-col items-end">
+                        <p className="font-mono font-black text-sm text-slate-800 leading-none">{walletBalance}</p>
+                        {!isFetchingBalance && <p className="text-[9px] font-bold text-slate-400 mt-1 tracking-tight">≈ ₦{walletBalanceNaira}</p>}
+                      </div>
                     </div>
                   </div>
                 </div>
@@ -1449,11 +1525,8 @@ export default function Home() {
                                 {list.map((ben, idx) => (
                                     <button 
                                         key={idx}
-                                        // ⚡ DAPP-BROWSER OVERRIDES ⚡
                                         onContextMenu={(e) => { e.preventDefault(); e.stopPropagation(); }}
                                         style={{ WebkitTouchCallout: 'none', WebkitUserSelect: 'none', userSelect: 'none' }}
-                                        
-                                        // ⚡ TOUCH EVENTS (For Bitget/Mobile)
                                         onTouchStart={() => {
                                             isLongPress.current = false;
                                             pressTimer.current = setTimeout(() => {
@@ -1465,8 +1538,6 @@ export default function Home() {
                                         }}
                                         onTouchEnd={() => { if (pressTimer.current) clearTimeout(pressTimer.current); }}
                                         onTouchMove={() => { if (pressTimer.current) clearTimeout(pressTimer.current); }}
-                                        
-                                        // ⚡ MOUSE EVENTS (For Desktop)
                                         onMouseDown={() => {
                                             isLongPress.current = false;
                                             pressTimer.current = setTimeout(() => {
@@ -1477,8 +1548,6 @@ export default function Home() {
                                         }}
                                         onMouseUp={() => { if (pressTimer.current) clearTimeout(pressTimer.current); }}
                                         onMouseLeave={() => { if (pressTimer.current) clearTimeout(pressTimer.current); }}
-                                        
-                                        // ⚡ CLICK HANDLER
                                         onClick={(e) => {
                                             e.preventDefault();
                                             if (isLongPress.current) {
@@ -1765,7 +1834,7 @@ export default function Home() {
                 )}
 
                 <button 
-                    onClick={handlePayment}
+                    onClick={() => setIsConfirmModalOpen(true)}
                     disabled={isVerifying || !isFormValid || isProcessing}
                     className="w-full bg-slate-900 hover:bg-black text-white font-black py-6 rounded-3xl flex items-center justify-center gap-3.5 transition-all active:scale-95 disabled:opacity-30 shadow-xl shadow-slate-900/20 text-lg tracking-tight"
                 >
