@@ -11,8 +11,8 @@ import {
 import { supabase } from "@/utils/supabase";
 import { ELECTRICITY_DISCOS } from "./discos"; 
 
-// ⚡ REMOVED TermsModal and PrivacyModal imports since we use real pages now
 import { ReceiptModal, SelectionModal } from "@/components/Modals";
+import { TermsModal, PrivacyModal } from "@/components/Modals";
 import { 
   ABAPAY_ABI, ERC20_ABI, SERVICES, CABLE_PROVIDERS_LIST, TELECOM_PROVIDERS, 
   INTERNET_PROVIDERS, SUPPORTED_TOKENS, SUPPORTED_COUNTRIES, PRE_SELECT_AMOUNTS, 
@@ -68,6 +68,8 @@ export default function Home() {
   const [activeDataCategory, setActiveDataCategory] = useState(DATA_CATEGORIES[0]);
 
   const [selectedReceipt, setSelectedReceipt] = useState<any>(null); 
+  const [isTermsOpen, setIsTermsOpen] = useState(false); 
+  const [isPrivacyOpen, setIsPrivacyOpen] = useState(false); 
 
   const [isSelectionModalOpen, setIsSelectionModalOpen] = useState(false);
   const [modalTitle, setModalTitle] = useState("");
@@ -108,7 +110,7 @@ export default function Home() {
 
   const dynamicMinAmount = useMemo(() => {
     if (activeTab === "bank") return 1000;
-    if (activeService.id === "AIRTIME") return 100; 
+    if (activeService.id === "AIRTIME") return 100;
     return 100; 
   }, [activeService, activeTab]);
 
@@ -368,18 +370,31 @@ export default function Home() {
       const tokenAddress = isMainnet ? selectedToken.mainnet : selectedToken.sepolia;
       const publicClient = createPublicClient({ chain: activeChain, transport: http() });
 
+      // ⚡ FIX 1: Detect MiniPay so we don't force feeCurrency (MiniPay handles its own gas automatically)
+      const isMiniPay = typeof window !== "undefined" && (window as any).ethereum?.isMiniPay;
+      const txConfig = {
+         account: address,
+         ...(isMiniPay ? {} : { feeCurrency: GAS_CURRENCY as `0x${string}` })
+      };
+
       setStatus("Awaiting token approval...");
       const approvalHash = await client.writeContract({ 
           address: tokenAddress as `0x${string}`, 
           abi: ERC20_ABI, 
           functionName: 'approve', 
           args: [ABAPAY_CONTRACT, valueInWei], 
-          account: address,
-          feeCurrency: GAS_CURRENCY as `0x${string}`
+          ...txConfig
       });
 
       setStatus("Mining approval on Celo Mainnet... Please wait.");
       await publicClient.waitForTransactionReceipt({ hash: approvalHash });
+
+      // ⚡ FIX 2: The RPC Sync Delay!
+      // Give MiniPay's internal nodes 3 seconds to realize the approval actually happened 
+      // before trying to trigger the second popup.
+      setStatus("Syncing network state... Please wait a moment.");
+      await new Promise(resolve => setTimeout(resolve, 3000));
+
       setStatus("Approval confirmed! Please sign the final payment...");
 
       let vtpassServiceID = ""; let displayNetwork = ""; let finalVariationCode = 'prepaid'; let payloadBillersCode = accountNumber; let uiCategory = "";
@@ -413,8 +428,7 @@ export default function Home() {
           abi: ABAPAY_ABI, 
           functionName: 'payBill', 
           args: [tokenAddress, vtpassServiceID, payloadBillersCode, valueInWei], 
-          account: address,
-          feeCurrency: GAS_CURRENCY as `0x${string}`
+          ...txConfig
       });
       setStatus(`${selectedToken.symbol} Secured. Processing...`);
 
