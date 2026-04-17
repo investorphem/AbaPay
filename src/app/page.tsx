@@ -512,6 +512,7 @@ export default function Home() {
           args: [address, ABAPAY_CONTRACT],
           blockTag: 'latest'
       }) as bigint;
+      alert(`DEBUG: Your exact on-chain allowance is ${formatUnits(currentAllowance, selectedToken.decimals)} ${selectedToken.symbol}`);
 
       if (currentAllowance < valueInWei) {
           // ⚡ USDT ZERO-RESET RULE (Vercel Safe BigInt)
@@ -631,20 +632,19 @@ export default function Home() {
 
       const balanceWei = await publicClient.readContract({ address: tokenAddress as `0x${string}`, abi: ERC20_ABI, functionName: 'balanceOf', args: [address] });
       setWalletBalance(parseFloat(formatUnits(balanceWei as bigint, selectedToken.decimals)).toFixed(4));
-    } catch (e: any) { 
+        } catch (e: any) { 
         console.error("PAYMENT ERROR:", e);
         if (activeCooldownKey) {
             localStorage.removeItem(activeCooldownKey);
         }
         
-        // Clean error messages for the UI
-        let errorMsg = e.shortMessage || e.message || "Transaction Cancelled.";
-        if (errorMsg.includes("allowance") || errorMsg.includes("RPC")) {
-             errorMsg = "Blockchain Sync Error. Please try again to reset approval.";
-        }
+        // Force the raw error to your screen
+        const deepError = e.details || (e.cause?.message) || e.shortMessage || e.message || "Unknown";
+        alert(`RAW BLOCKCHAIN ERROR:\n\n${deepError}`);
 
-        setStatus(`Error: ${errorMsg.slice(0, 50)}...`); 
+        setStatus(`Error: ${deepError.slice(0, 40)}...`); 
     } finally { 
+ 
         setIsProcessing(false); 
     }
   };
