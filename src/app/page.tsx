@@ -515,16 +515,17 @@ export default function Home() {
           args: [address, ABAPAY_CONTRACT]
       }) as bigint;
 
-      if (currentAllowance < valueInWei) {
+            if (currentAllowance < valueInWei) {
           // ⚡ FIX 3: USDT Strict "Zero-Reset" Rule
           // If you have a small allowance, USDT requires you to reset it to 0 before approving 100k!
-          if (currentAllowance > 0n && selectedToken.symbol === "USD₮") {
+          if (currentAllowance > BigInt(0) && selectedToken.symbol === "USD₮") {
               setStatus("Awaiting token reset...");
               const resetHash = await client.writeContract({ 
-                  address: tokenAddress as `0x${string}`, abi: ERC20_ABI, functionName: 'approve', args: [ABAPAY_CONTRACT, 0n], account: address
+                  address: tokenAddress as `0x${string}`, abi: ERC20_ABI, functionName: 'approve', args: [ABAPAY_CONTRACT, BigInt(0)], account: address
               });
               await waitForReceiptSafe(resetHash, "Mining reset on Celo... Please wait.");
           }
+
 
           // We restore the "100k Approval" because it creates a beautiful 1-click checkout!
           setStatus("Awaiting token approval (One-Time Setup)...");
