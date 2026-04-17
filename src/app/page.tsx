@@ -497,27 +497,18 @@ export default function Home() {
       const waitForReceiptSafe = async (hash: string, loadingMsg: string) => {
           setStatus(loadingMsg);
           const receiptPromise = publicClient.waitForTransactionReceipt({ hash: hash as `0x${string}`, confirmations: 1 });
-          const timeoutPromise = new Promise((_, reject) => setTimeout(() => reject(new Error("Timeout: Wallet took too long to confirm.")), 45000));
+          const timeoutPromise = new Promise((_, reject) => setTimeout(() => reject(new Error("Timeout: Wallet took too long to confirm.")), 60000));
           const receipt: any = await Promise.race([receiptPromise, timeoutPromise]);
           if (receipt && receipt.status !== "success") throw new Error("Transaction reverted on the blockchain.");
           return receipt;
       };
 
-      // ⚡ FIX: The Celo Gas Adapter Router
-      // Celo gas requires 18 decimals. USDT/USDC only have 6. We MUST use Celo's official adapter addresses!
-      let feeAdapter = GAS_CURRENCY; 
-      if (isMainnet) {
-        if (selectedToken.symbol === "USD₮") feeAdapter = "0x0e2a3e05bc9a16f5292a6170456a710cb89c6f72";
-        else if (selectedToken.symbol === "USDC") feeAdapter = "0x2F25deB3848C207fc8E0c34035B3Ba7fC157602B";
-        else if (selectedToken.symbol === "cUSD") feeAdapter = "0x765DE816845861e75A25fCA122bb6898B8B1282a";
-      } else {
-        if (selectedToken.symbol === "USDC") feeAdapter = "0x4822e58de6f5e485eF90df51C41CE01721331dC0";
+      // ⚡ THE MINIPAY "FEE ABSTRACTION" FIX ⚡
+      const isMiniPay = typeof window !== "undefined" && !!(window as any).ethereum?.isMiniPay;
+      const txConfig: any = { account: address as `0x${string}` };
+      if (isMiniPay) {
+          txConfig.feeCurrency = tokenAddress as `0x${string}`;
       }
-
-      const txConfig = {
-         account: address,
-         feeCurrency: feeAdapter as `0x${string}`
-      };
 
       setStatus("Checking permissions...");
       const currentAllowance = await publicClient.readContract({
@@ -577,7 +568,6 @@ export default function Home() {
         } else { vtpassServiceID = telecomProvider; displayNetwork = telecomProvider; }
       }
 
-      // ⚡ RESTORED THE txConfig SO MINIPAY KNOWS WHICH GAS TO USE
       const hash = await client.writeContract({ 
           address: ABAPAY_CONTRACT, 
           abi: ABAPAY_ABI, 
