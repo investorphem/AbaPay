@@ -446,7 +446,7 @@ export default function Home() {
     });
   };
 
-          // ⚡ EXECUTING THE BLOCKCHAIN PAYMENT AFTER CONFIRMATION ⚡
+            // ⚡ EXECUTING THE BLOCKCHAIN PAYMENT AFTER CONFIRMATION ⚡
   const processBlockchainPayment = async () => {
     if (!address || !client) return setStatus("Connect Wallet First");
     if (parseFloat(cryptoToCharge) > parseFloat(walletBalance)) return setStatus(`Insufficient ${selectedToken.symbol} Balance.`);
@@ -489,27 +489,23 @@ export default function Home() {
       
       const publicClient = createPublicClient({ 
           chain: activeChain, 
-          // ⚡ CACHE BUSTING: Force HTTP transport to never store old data
           transport: http(undefined, { fetchOptions: { cache: 'no-store' } }),
           pollingInterval: 4000 
       });
 
-      // ⚡ THE FINAL MINIPAY BYPASS ⚡
       const isMiniPay = typeof window !== "undefined" && !!(window as any).ethereum?.isMiniPay;
 
+      // ⚡ NAKED PAYLOAD: No hardcoded gas. We let the wallet simulate it.
       const txConfig: any = {
-          account: address as `0x${string}`,
-          gas: BigInt(800000) // ⚡ This skips the crashing public RPC estimation!
+          account: address as `0x${string}`
       };
 
-      // We do NOT pass 'feeCurrency' to MiniPay (fixes Permission Denied).
       if (!isMiniPay) {
-          txConfig.feeCurrency = GAS_CURRENCY as `0x${string}`; // Bitget still gets its feeCurrency
+          txConfig.feeCurrency = GAS_CURRENCY as `0x${string}`; 
       }
 
       setStatus("Verifying live blockchain permissions...");
       
-      // ⚡ CACHE BUSTING: The 'blockTag: latest' ignores false positives
       const currentAllowance = await publicClient.readContract({
           address: tokenAddress as `0x${string}`,
           abi: ERC20_ABI,
@@ -519,7 +515,6 @@ export default function Home() {
       }) as bigint;
 
       if (currentAllowance < valueInWei) {
-          // ⚡ USDT ZERO-RESET RULE
           if (currentAllowance > BigInt(0) && selectedToken.symbol === "USD₮") {
               setStatus("Resetting token allowance...");
               const resetHash = await client.writeContract({ 
@@ -577,11 +572,19 @@ export default function Home() {
         } else { vtpassServiceID = telecomProvider; displayNetwork = telecomProvider; }
       }
 
+      // ⚡ NONCE DESYNC FIX ⚡
+      // Fetch the absolute live transaction count from the blockchain to bypass MiniPay's broken cache
+      const realNonce = await publicClient.getTransactionCount({ 
+          address: address as `0x${string}`,
+          blockTag: 'latest'
+      });
+
       const hash = await client.writeContract({ 
           address: ABAPAY_CONTRACT, 
           abi: ABAPAY_ABI, 
           functionName: 'payBill', 
           args: [tokenAddress, vtpassServiceID, payloadBillersCode, valueInWei], 
+          nonce: realNonce, // Force MiniPay to use the correct math
           ...txConfig
       });
       setStatus(`${selectedToken.symbol} Secured. Processing...`);
@@ -641,7 +644,6 @@ export default function Home() {
             localStorage.removeItem(activeCooldownKey);
         }
         
-        // ⚡ Unmasked Error so we know exactly what is happening
         const errorMsg = e.shortMessage || e.message || "Transaction Cancelled.";
         alert(`RAW ERROR:\n\n${errorMsg}`); 
 
@@ -650,6 +652,7 @@ export default function Home() {
         setIsProcessing(false); 
     }
   };
+
 
 
 
