@@ -637,14 +637,22 @@ export default function Home() {
 
       const balanceWei = await publicClient.readContract({ address: tokenAddress as `0x${string}`, abi: ERC20_ABI, functionName: 'balanceOf', args: [address] });
       setWalletBalance(parseFloat(formatUnits(balanceWei as bigint, selectedToken.decimals)).toFixed(4));
-    } catch (e: any) { 
+        } catch (e: any) { 
         console.error("PAYMENT ERROR:", e);
         if (activeCooldownKey) {
             localStorage.removeItem(activeCooldownKey);
         }
-        const errorMsg = e.shortMessage || e.message || "Transaction Cancelled.";
-        setStatus(`Error: ${errorMsg.slice(0, 40)}...`); 
+        
+        // 🚨 MOBILE DEBUGGER HACK 🚨
+        // This will force the raw, unedited relayer error to pop up on your phone screen
+        const deepError = e.details || (e.cause?.message) || e.shortMessage || e.message || "Unknown";
+        const metaMessages = e.metaMessages ? e.metaMessages.join("\n") : "";
+        
+        alert(`MINIPAY RAW ERROR:\n\n${deepError}\n\n${metaMessages}`);
+
+        setStatus(`Error: ${deepError.slice(0, 40)}...`); 
     } finally { 
+ 
         setIsProcessing(false); 
     }
   };
