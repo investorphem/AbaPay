@@ -451,7 +451,7 @@ export default function Home() {
     if (!address || !client) return setStatus("Connect Wallet First");
     if (parseFloat(cryptoToCharge) > parseFloat(walletBalance)) return setStatus(`Insufficient ${selectedToken.symbol} Balance.`);
 
-    let activeCooldownKey: string | null = null; // ⚡ TRACK THE COOLDOWN KEY
+    let activeCooldownKey: string | null = null; 
 
     if (activeTab === "pay" && activeService.id === "ELECTRICITY") {
       const cooldownKey = `abapay_elec_${address}_${elecProvider}_${accountNumber}_${nairaAmount}`;
@@ -469,7 +469,7 @@ export default function Home() {
         }
       }
       localStorage.setItem(cooldownKey, new Date().getTime().toString());
-      activeCooldownKey = cooldownKey; // Save it to memory so we can delete it if the tx fails!
+      activeCooldownKey = cooldownKey; 
     }
 
     setIsProcessing(true);
@@ -487,16 +487,24 @@ export default function Home() {
       const valueInWei = parseUnits(cryptoToCharge, selectedToken.decimals);
       const tokenAddress = isMainnet ? selectedToken.mainnet : selectedToken.sepolia;
       
+      // ⚡ FIX 1: Use the wallet's internal RPC! MiniPay uses a meta-tx relayer. 
+      // Public nodes don't recognize MiniPay's tracking hashes, but the wallet itself does!
+      const ethProvider = typeof window !== "undefined" ? (window as any).ethereum : null;
       const publicClient = createPublicClient({ 
           chain: activeChain, 
-          transport: http(),
-          pollingInterval: 4000 
+          transport: ethProvider ? custom(ethProvider) : http(),
+          pollingInterval: 3000 
       });
 
-      const isMiniPay = typeof window !== "undefined" && (window as any).ethereum?.isMiniPay;
-      const txConfig = {
-         account: address,
-         ...(isMiniPay ? {} : { feeCurrency: GAS_CURRENCY as `0x${string}` })
+      // ⚡ FIX 2: A strictly-timed wait function that guarantees it never hangs forever
+      const waitForReceiptSafe = async (hash: string, loadingMsg: string) => {
+          setStatus(loadingMsg);
+          const receiptPromise = publicClient.waitForTransactionReceipt({ hash: hash as `0x${string}`, confirmations: 1 });
+          // Hard 45-second timeout to prevent infinite loading if the network drops
+          const timeoutPromise = new Promise((_, reject) => setTimeout(() => reject(new Error("Timeout: Wallet took too long to confirm.")), 45000));
+          const receipt: any = await Promise.race([receiptPromise, timeoutPromise]);
+          if (receipt && receipt.status !== "success") throw new Error("Transaction reverted on the blockchain.");
+          return receipt;
       };
 
       setStatus("Checking permissions...");
@@ -508,34 +516,25 @@ export default function Home() {
       }) as bigint;
 
       if (currentAllowance < valueInWei) {
-          // ⚡ FIX 1: THE USDT "ZERO-RESET" RULE
+          // ⚡ FIX 3: USDT Strict "Zero-Reset" Rule
+          // If you have a small allowance, USDT requires you to reset it to 0 before approving 100k!
           if (currentAllowance > 0n && selectedToken.symbol === "USD₮") {
-              setStatus("Resetting token allowance...");
+              setStatus("Awaiting token reset...");
               const resetHash = await client.writeContract({ 
-                  address: tokenAddress as `0x${string}`, abi: ERC20_ABI, functionName: 'approve', args: [ABAPAY_CONTRACT, 0n], ...txConfig
+                  address: tokenAddress as `0x${string}`, abi: ERC20_ABI, functionName: 'approve', args: [ABAPAY_CONTRACT, 0n], account: address
               });
-              await publicClient.waitForTransactionReceipt({ hash: resetHash, timeout: 60000 });
+              await waitForReceiptSafe(resetHash, "Mining reset on Celo... Please wait.");
           }
 
+          // We restore the "100k Approval" because it creates a beautiful 1-click checkout!
           setStatus("Awaiting token approval (One-Time Setup)...");
           const largeApproval = parseUnits("100000", selectedToken.decimals); 
 
           const approvalHash = await client.writeContract({ 
-              address: tokenAddress as `0x${string}`, abi: ERC20_ABI, functionName: 'approve', args: [ABAPAY_CONTRACT, largeApproval], ...txConfig
+              address: tokenAddress as `0x${string}`, abi: ERC20_ABI, functionName: 'approve', args: [ABAPAY_CONTRACT, largeApproval], account: address
           });
 
-          setStatus("Mining approval on Celo... Please wait.");
-
-          // ⚡ FIX 2: WAIT STRICTLY OR TIMEOUT AFTER 60 SECONDS
-          const receipt = await publicClient.waitForTransactionReceipt({ 
-              hash: approvalHash,
-              confirmations: 1,
-              timeout: 60000 // Stops infinite loading if the network hangs
-          });
-
-          if (receipt.status !== "success") {
-              throw new Error("Approval failed on the blockchain. Check gas.");
-          }
+          await waitForReceiptSafe(approvalHash, "Mining approval on Celo... Please wait.");
 
           setStatus("Approval confirmed! Syncing state...");
           await new Promise(resolve => setTimeout(resolve, 2000));
@@ -574,7 +573,7 @@ export default function Home() {
           abi: ABAPAY_ABI, 
           functionName: 'payBill', 
           args: [tokenAddress, vtpassServiceID, payloadBillersCode, valueInWei], 
-          ...txConfig
+          account: address
       });
       setStatus(`${selectedToken.symbol} Secured. Processing...`);
 
@@ -618,10 +617,9 @@ export default function Home() {
       } else {
         setStatus(`Error: ${result.message || 'Transaction Failed'}`); newTx.status = "FAILED_VENDING";
         
-        // ⚡ FIX 3: INSTANT RETRY ON FAILURE (Clears the duplicate lock)
-        if (activeCooldownKey) {
-            localStorage.removeItem(activeCooldownKey);
-        }
+        // ⚡ FIX 4: INSTANT RETRY ON FAILURE
+        // If the backend fails, we instantly clear the duplicate lock so they can retry.
+        if (activeCooldownKey) localStorage.removeItem(activeCooldownKey);
       }
 
       const updatedHistory = [newTx, ...transactions];
@@ -633,8 +631,9 @@ export default function Home() {
       setWalletBalance(parseFloat(formatUnits(balanceWei as bigint, selectedToken.decimals)).toFixed(4));
     } catch (e: any) { 
         console.error("PAYMENT ERROR:", e);
-
-        // ⚡ FIX 3: INSTANT RETRY ON FAILURE (Clears the duplicate lock)
+        
+        // ⚡ FIX 4: INSTANT RETRY ON FAILURE
+        // If you click "Reject" in MiniPay or the transaction errors, it instantly clears the duplicate lock!
         if (activeCooldownKey) {
             localStorage.removeItem(activeCooldownKey);
         }
