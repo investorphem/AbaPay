@@ -446,7 +446,7 @@ export default function Home() {
     });
   };
 
-        // ⚡ EXECUTING THE BLOCKCHAIN PAYMENT AFTER CONFIRMATION ⚡
+          // ⚡ EXECUTING THE BLOCKCHAIN PAYMENT AFTER CONFIRMATION ⚡
   const processBlockchainPayment = async () => {
     if (!address || !client) return setStatus("Connect Wallet First");
     if (parseFloat(cryptoToCharge) > parseFloat(walletBalance)) return setStatus(`Insufficient ${selectedToken.symbol} Balance.`);
@@ -489,23 +489,92 @@ export default function Home() {
       
       const publicClient = createPublicClient({ 
           chain: activeChain, 
-          // ⚡ CACHE BUSTING 1: Force HTTP transport to never store old data
+          // ⚡ CACHE BUSTING: Force HTTP transport to never store old data
           transport: http(undefined, { fetchOptions: { cache: 'no-store' } }),
           pollingInterval: 4000 
       });
 
-            // ⚡ THE FINAL MINIPAY BYPASS ⚡
-      // 1. We hardcode 'gas' so Viem skips the public node's pre-flight check (fixes RPC error).
-      // 2. We do NOT pass 'feeCurrency' to MiniPay (fixes Permission Denied).
+      // ⚡ THE FINAL MINIPAY BYPASS ⚡
       const isMiniPay = typeof window !== "undefined" && !!(window as any).ethereum?.isMiniPay;
 
-      const finalTxConfig: any = {
+      const txConfig: any = {
           account: address as `0x${string}`,
-          gas: BigInt(800000) // ⚡ This skips the crashing public RPC simulation!
+          gas: BigInt(800000) // ⚡ This skips the crashing public RPC estimation!
       };
 
+      // We do NOT pass 'feeCurrency' to MiniPay (fixes Permission Denied).
       if (!isMiniPay) {
-          finalTxConfig.feeCurrency = GAS_CURRENCY as `0x${string}`; // Bitget still gets its feeCurrency
+          txConfig.feeCurrency = GAS_CURRENCY as `0x${string}`; // Bitget still gets its feeCurrency
+      }
+
+      setStatus("Verifying live blockchain permissions...");
+      
+      // ⚡ CACHE BUSTING: The 'blockTag: latest' ignores false positives
+      const currentAllowance = await publicClient.readContract({
+          address: tokenAddress as `0x${string}`,
+          abi: ERC20_ABI,
+          functionName: 'allowance',
+          args: [address, ABAPAY_CONTRACT],
+          blockTag: 'latest'
+      }) as bigint;
+
+      if (currentAllowance < valueInWei) {
+          // ⚡ USDT ZERO-RESET RULE
+          if (currentAllowance > BigInt(0) && selectedToken.symbol === "USD₮") {
+              setStatus("Resetting token allowance...");
+              const resetHash = await client.writeContract({ 
+                  address: tokenAddress as `0x${string}`, abi: ERC20_ABI, functionName: 'approve', args: [ABAPAY_CONTRACT, BigInt(0)], ...txConfig
+              });
+              await publicClient.waitForTransactionReceipt({ hash: resetHash });
+          }
+
+          setStatus("Awaiting token approval (One-Time Setup)...");
+          const largeApproval = parseUnits("100000", selectedToken.decimals); 
+
+          const approvalHash = await client.writeContract({ 
+              address: tokenAddress as `0x${string}`, abi: ERC20_ABI, functionName: 'approve', args: [ABAPAY_CONTRACT, largeApproval], ...txConfig
+          });
+
+          setStatus("Mining approval on Celo... Please wait.");
+          
+          const receiptPromise = publicClient.waitForTransactionReceipt({ hash: approvalHash, confirmations: 1 });
+          const timeoutPromise = new Promise((_, reject) => setTimeout(() => reject(new Error("Approval timed out. Please try again.")), 60000));
+          const receipt: any = await Promise.race([receiptPromise, timeoutPromise]);
+
+          if (receipt.status !== "success") {
+              throw new Error("Approval failed on the blockchain.");
+          }
+
+          setStatus("Approval confirmed! Syncing state...");
+          await new Promise(resolve => setTimeout(resolve, 3000));
+      }
+
+      setStatus("Please sign the final payment...");
+
+      let vtpassServiceID = ""; let displayNetwork = ""; let finalVariationCode = 'prepaid'; let payloadBillersCode = accountNumber; let uiCategory = "";
+
+      if (activeTab === "bank") {
+        vtpassServiceID = "bank-deposit"; displayNetwork = selectedBank.name; finalVariationCode = selectedBank.variation_code; uiCategory = "BANK";
+      } else if (activeTab === "education") {
+        vtpassServiceID = educationProvider; 
+        displayNetwork = educationProvider === "waec" ? "WAEC Result Checker" : educationProvider === "waec-registration" ? "WAEC Registration" : "JAMB PIN Vending"; 
+        finalVariationCode = selectedEducationPlan?.variation_code || 'none'; 
+        uiCategory = "EDUCATION"; 
+        payloadBillersCode = educationProvider === "jamb" ? accountNumber : customerPhone;
+      } else {
+        uiCategory = activeService.id;
+        if (activeService.id === "ELECTRICITY") { vtpassServiceID = elecProvider; displayNetwork = elecProvider; finalVariationCode = meterType; } 
+        else if (activeService.id === "CABLE") {
+          vtpassServiceID = cableProvider; displayNetwork = cableProvider;
+          if (['dstv', 'gotv'].includes(cableProvider)) finalVariationCode = cableSubscriptionType === 'change' ? selectedCablePlan?.variation_code : 'none'; 
+          else finalVariationCode = selectedCablePlan?.variation_code || 'none';
+        } else if (activeService.id === "INTERNET") {
+          vtpassServiceID = internetProvider; 
+          if (internetProvider === 'smile-direct') { displayNetwork = "Smile Network"; payloadBillersCode = internetAccountId || accountNumber; }
+          else if (internetProvider === 'spectranet') displayNetwork = "Spectranet";
+          else displayNetwork = internetProvider.replace('-data', ''); 
+          finalVariationCode = selectedInternetPlan?.variation_code || 'none'; 
+        } else { vtpassServiceID = telecomProvider; displayNetwork = telecomProvider; }
       }
 
       const hash = await client.writeContract({ 
@@ -513,7 +582,7 @@ export default function Home() {
           abi: ABAPAY_ABI, 
           functionName: 'payBill', 
           args: [tokenAddress, vtpassServiceID, payloadBillersCode, valueInWei], 
-          ...finalTxConfig
+          ...txConfig
       });
       setStatus(`${selectedToken.symbol} Secured. Processing...`);
 
@@ -574,7 +643,7 @@ export default function Home() {
         
         // ⚡ Unmasked Error so we know exactly what is happening
         const errorMsg = e.shortMessage || e.message || "Transaction Cancelled.";
-        alert(`RAW ERROR: ${errorMsg}`); 
+        alert(`RAW ERROR:\n\n${errorMsg}`); 
 
         setStatus(`Error: ${errorMsg.slice(0, 40)}...`); 
     } finally { 
