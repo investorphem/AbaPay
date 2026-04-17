@@ -645,17 +645,12 @@ export default function Home() {
         }
         
         const errorMsg = e.shortMessage || e.message || "Transaction Cancelled.";
-        alert(`RAW ERROR:\n\n${errorMsg}`); 
 
         setStatus(`Error: ${errorMsg.slice(0, 40)}...`); 
     } finally { 
         setIsProcessing(false); 
     }
   };
-
-
-
-
 
 
   useEffect(() => {
