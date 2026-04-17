@@ -446,7 +446,7 @@ export default function Home() {
     });
   };
 
-      // ⚡ EXECUTING THE BLOCKCHAIN PAYMENT AFTER CONFIRMATION ⚡
+        // ⚡ EXECUTING THE BLOCKCHAIN PAYMENT AFTER CONFIRMATION ⚡
   const processBlockchainPayment = async () => {
     if (!address || !client) return setStatus("Connect Wallet First");
     if (parseFloat(cryptoToCharge) > parseFloat(walletBalance)) return setStatus(`Insufficient ${selectedToken.symbol} Balance.`);
@@ -512,7 +512,6 @@ export default function Home() {
           args: [address, ABAPAY_CONTRACT],
           blockTag: 'latest'
       }) as bigint;
-      alert(`DEBUG: Your exact on-chain allowance is ${formatUnits(currentAllowance, selectedToken.decimals)} ${selectedToken.symbol}`);
 
       if (currentAllowance < valueInWei) {
           // ⚡ USDT ZERO-RESET RULE (Vercel Safe BigInt)
@@ -574,12 +573,14 @@ export default function Home() {
         } else { vtpassServiceID = telecomProvider; displayNetwork = telecomProvider; }
       }
 
+      // ⚡ MINIPAY RELAYER FIX: Passing a "Naked" Transaction ⚡
+      // We do NOT pass `...txConfig` here. This prevents MiniPay's security from throwing "Permission denied".
       const hash = await client.writeContract({ 
           address: ABAPAY_CONTRACT, 
           abi: ABAPAY_ABI, 
           functionName: 'payBill', 
           args: [tokenAddress, vtpassServiceID, payloadBillersCode, valueInWei], 
-          ...txConfig
+          account: address as `0x${string}`
       });
       setStatus(`${selectedToken.symbol} Secured. Processing...`);
 
@@ -632,22 +633,23 @@ export default function Home() {
 
       const balanceWei = await publicClient.readContract({ address: tokenAddress as `0x${string}`, abi: ERC20_ABI, functionName: 'balanceOf', args: [address] });
       setWalletBalance(parseFloat(formatUnits(balanceWei as bigint, selectedToken.decimals)).toFixed(4));
-        } catch (e: any) { 
+    } catch (e: any) { 
         console.error("PAYMENT ERROR:", e);
         if (activeCooldownKey) {
             localStorage.removeItem(activeCooldownKey);
         }
         
-        // Force the raw error to your screen
-        const deepError = e.details || (e.cause?.message) || e.shortMessage || e.message || "Unknown";
-        alert(`RAW BLOCKCHAIN ERROR:\n\n${deepError}`);
+        let errorMsg = e.shortMessage || e.message || "Transaction Cancelled.";
+        if (errorMsg.includes("allowance") || errorMsg.includes("RPC")) {
+             errorMsg = "Blockchain Sync Error. Please try again to reset approval.";
+        }
 
-        setStatus(`Error: ${deepError.slice(0, 40)}...`); 
+        setStatus(`Error: ${errorMsg.slice(0, 50)}...`); 
     } finally { 
- 
         setIsProcessing(false); 
     }
   };
+
 
 
 
