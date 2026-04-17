@@ -446,7 +446,7 @@ export default function Home() {
     });
   };
 
-  // ⚡ RENAMED: This actually executes the payment after modal confirmation
+  // ⚡ EXECUTING THE BLOCKCHAIN PAYMENT AFTER CONFIRMATION ⚡
   const processBlockchainPayment = async () => {
     if (!address || !client) return setStatus("Connect Wallet First");
     if (parseFloat(cryptoToCharge) > parseFloat(walletBalance)) return setStatus(`Insufficient ${selectedToken.symbol} Balance.`);
@@ -483,7 +483,13 @@ export default function Home() {
 
       const valueInWei = parseUnits(cryptoToCharge, selectedToken.decimals);
       const tokenAddress = isMainnet ? selectedToken.mainnet : selectedToken.sepolia;
-      const publicClient = createPublicClient({ chain: activeChain, transport: http() });
+      
+      // ⚡ FIX 1: Slow down polling to prevent rate-limits and infinite loading
+      const publicClient = createPublicClient({ 
+          chain: activeChain, 
+          transport: http(),
+          pollingInterval: 4000 
+      });
 
       const isMiniPay = typeof window !== "undefined" && (window as any).ethereum?.isMiniPay;
       const txConfig = {
@@ -501,7 +507,7 @@ export default function Home() {
 
       if (currentAllowance < valueInWei) {
           setStatus("Awaiting token approval (One-Time Setup)...");
-          
+
           const largeApproval = parseUnits("100000", selectedToken.decimals); 
 
           const approvalHash = await client.writeContract({ 
@@ -512,8 +518,20 @@ export default function Home() {
               ...txConfig
           });
 
-          setStatus("Mining approval... Please wait 7 seconds.");
-          await new Promise(resolve => setTimeout(resolve, 7000));
+          setStatus("Mining approval on Celo... Please wait.");
+          
+          // ⚡ FIX 2: Wait strictly for confirmation to prevent "reverted" errors
+          const receipt = await publicClient.waitForTransactionReceipt({ 
+              hash: approvalHash,
+              confirmations: 1
+          });
+
+          if (receipt.status !== "success") {
+              throw new Error("Approval failed on the blockchain. Check gas.");
+          }
+
+          setStatus("Approval confirmed! Syncing state...");
+          await new Promise(resolve => setTimeout(resolve, 2000));
       }
 
       setStatus("Please sign the final payment...");
@@ -834,7 +852,7 @@ export default function Home() {
         <div className="fixed inset-0 z-[300] flex items-end sm:items-center justify-center bg-slate-900/60 backdrop-blur-md animate-in fade-in duration-200">
            <div className="bg-white w-full max-w-md rounded-t-[2.5rem] sm:rounded-[2.5rem] p-6 pb-10 sm:pb-6 shadow-2xl relative animate-in slide-in-from-bottom-10 sm:zoom-in-95 duration-300">
               <div className="w-12 h-1.5 bg-slate-200 rounded-full mx-auto mb-6 sm:hidden"></div>
-              
+
               <div className="flex justify-between items-center mb-6">
                  <h3 className="text-xl font-black text-slate-900 tracking-tight">Confirm Payment</h3>
                  <button onClick={() => setIsConfirmModalOpen(false)} className="bg-slate-100 p-2 rounded-full text-slate-500 hover:bg-slate-200 transition-colors"><XCircle size={20}/></button>
@@ -1052,15 +1070,29 @@ export default function Home() {
                                     {list.map((ben, idx) => (
                                         <button 
                                             key={idx}
-                                            onPointerDown={() => {
+                                            onContextMenu={(e) => { e.preventDefault(); e.stopPropagation(); }}
+                                            style={{ WebkitTouchCallout: 'none', WebkitUserSelect: 'none', userSelect: 'none' }}
+                                            onTouchStart={() => {
+                                                isLongPress.current = false;
                                                 pressTimer.current = setTimeout(() => {
+                                                    isLongPress.current = true;
                                                     setActiveDeleteAccount(ben.account);
                                                     if (navigator.vibrate) navigator.vibrate(50);
                                                     setTimeout(() => setActiveDeleteAccount(null), 4000);
                                                 }, 500); 
                                             }}
-                                            onPointerUp={() => { if (pressTimer.current) clearTimeout(pressTimer.current); }}
-                                            onPointerLeave={() => { if (pressTimer.current) clearTimeout(pressTimer.current); }}
+                                            onTouchEnd={() => { if (pressTimer.current) clearTimeout(pressTimer.current); }}
+                                            onTouchMove={() => { if (pressTimer.current) clearTimeout(pressTimer.current); }}
+                                            onMouseDown={() => {
+                                                isLongPress.current = false;
+                                                pressTimer.current = setTimeout(() => {
+                                                    isLongPress.current = true;
+                                                    setActiveDeleteAccount(ben.account);
+                                                    setTimeout(() => setActiveDeleteAccount(null), 4000);
+                                                }, 500); 
+                                            }}
+                                            onMouseUp={() => { if (pressTimer.current) clearTimeout(pressTimer.current); }}
+                                            onMouseLeave={() => { if (pressTimer.current) clearTimeout(pressTimer.current); }}
                                             onClick={(e) => {
                                                 e.preventDefault();
                                                 if (isLongPress.current) {
