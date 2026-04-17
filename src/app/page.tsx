@@ -451,6 +451,8 @@ export default function Home() {
     if (!address || !client) return setStatus("Connect Wallet First");
     if (parseFloat(cryptoToCharge) > parseFloat(walletBalance)) return setStatus(`Insufficient ${selectedToken.symbol} Balance.`);
 
+    let activeCooldownKey: string | null = null; // ⚡ TRACK THE COOLDOWN KEY
+
     if (activeTab === "pay" && activeService.id === "ELECTRICITY") {
       const cooldownKey = `abapay_elec_${address}_${elecProvider}_${accountNumber}_${nairaAmount}`;
       const lastTxTime = localStorage.getItem(cooldownKey);
@@ -467,6 +469,7 @@ export default function Home() {
         }
       }
       localStorage.setItem(cooldownKey, new Date().getTime().toString());
+      activeCooldownKey = cooldownKey; // Save it to memory so we can delete it if the tx fails!
     }
 
     setIsProcessing(true);
@@ -484,7 +487,6 @@ export default function Home() {
       const valueInWei = parseUnits(cryptoToCharge, selectedToken.decimals);
       const tokenAddress = isMainnet ? selectedToken.mainnet : selectedToken.sepolia;
       
-      // ⚡ FIX 1: Slow down polling to prevent rate-limits and infinite loading
       const publicClient = createPublicClient({ 
           chain: activeChain, 
           transport: http(),
@@ -506,24 +508,29 @@ export default function Home() {
       }) as bigint;
 
       if (currentAllowance < valueInWei) {
-          setStatus("Awaiting token approval (One-Time Setup)...");
+          // ⚡ FIX 1: THE USDT "ZERO-RESET" RULE
+          if (currentAllowance > 0n && selectedToken.symbol === "USD₮") {
+              setStatus("Resetting token allowance...");
+              const resetHash = await client.writeContract({ 
+                  address: tokenAddress as `0x${string}`, abi: ERC20_ABI, functionName: 'approve', args: [ABAPAY_CONTRACT, 0n], ...txConfig
+              });
+              await publicClient.waitForTransactionReceipt({ hash: resetHash, timeout: 60000 });
+          }
 
+          setStatus("Awaiting token approval (One-Time Setup)...");
           const largeApproval = parseUnits("100000", selectedToken.decimals); 
 
           const approvalHash = await client.writeContract({ 
-              address: tokenAddress as `0x${string}`, 
-              abi: ERC20_ABI, 
-              functionName: 'approve', 
-              args: [ABAPAY_CONTRACT, largeApproval], 
-              ...txConfig
+              address: tokenAddress as `0x${string}`, abi: ERC20_ABI, functionName: 'approve', args: [ABAPAY_CONTRACT, largeApproval], ...txConfig
           });
 
           setStatus("Mining approval on Celo... Please wait.");
-          
-          // ⚡ FIX 2: Wait strictly for confirmation to prevent "reverted" errors
+
+          // ⚡ FIX 2: WAIT STRICTLY OR TIMEOUT AFTER 60 SECONDS
           const receipt = await publicClient.waitForTransactionReceipt({ 
               hash: approvalHash,
-              confirmations: 1
+              confirmations: 1,
+              timeout: 60000 // Stops infinite loading if the network hangs
           });
 
           if (receipt.status !== "success") {
@@ -610,6 +617,11 @@ export default function Home() {
         newTx.purchased_code = result.purchased_code; newTx.units = result.units; newTx.request_id = result.data?.requestId;
       } else {
         setStatus(`Error: ${result.message || 'Transaction Failed'}`); newTx.status = "FAILED_VENDING";
+        
+        // ⚡ FIX 3: INSTANT RETRY ON FAILURE (Clears the duplicate lock)
+        if (activeCooldownKey) {
+            localStorage.removeItem(activeCooldownKey);
+        }
       }
 
       const updatedHistory = [newTx, ...transactions];
@@ -621,6 +633,12 @@ export default function Home() {
       setWalletBalance(parseFloat(formatUnits(balanceWei as bigint, selectedToken.decimals)).toFixed(4));
     } catch (e: any) { 
         console.error("PAYMENT ERROR:", e);
+
+        // ⚡ FIX 3: INSTANT RETRY ON FAILURE (Clears the duplicate lock)
+        if (activeCooldownKey) {
+            localStorage.removeItem(activeCooldownKey);
+        }
+
         const errorMsg = e.shortMessage || e.message || "Transaction Cancelled.";
         setStatus(`Error: ${errorMsg.slice(0, 40)}...`); 
     } finally { 
