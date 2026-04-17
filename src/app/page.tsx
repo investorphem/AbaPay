@@ -446,7 +446,7 @@ export default function Home() {
     });
   };
 
-    // ⚡ EXECUTING THE BLOCKCHAIN PAYMENT AFTER CONFIRMATION ⚡
+      // ⚡ EXECUTING THE BLOCKCHAIN PAYMENT AFTER CONFIRMATION ⚡
   const processBlockchainPayment = async () => {
     if (!address || !client) return setStatus("Connect Wallet First");
     if (parseFloat(cryptoToCharge) > parseFloat(walletBalance)) return setStatus(`Insufficient ${selectedToken.symbol} Balance.`);
@@ -487,55 +487,40 @@ export default function Home() {
       const valueInWei = parseUnits(cryptoToCharge, selectedToken.decimals);
       const tokenAddress = isMainnet ? selectedToken.mainnet : selectedToken.sepolia;
       
-      const ethProvider = typeof window !== "undefined" ? (window as any).ethereum : null;
       const publicClient = createPublicClient({ 
           chain: activeChain, 
-          transport: ethProvider ? custom(ethProvider) : http(),
-          pollingInterval: 3000 
+          // ⚡ CACHE BUSTING 1: Force HTTP transport to never store old data
+          transport: http(undefined, { fetchOptions: { cache: 'no-store' } }),
+          pollingInterval: 4000 
       });
-
-      const waitForReceiptSafe = async (hash: string, loadingMsg: string) => {
-          setStatus(loadingMsg);
-          const receiptPromise = publicClient.waitForTransactionReceipt({ hash: hash as `0x${string}`, confirmations: 1 });
-          const timeoutPromise = new Promise((_, reject) => setTimeout(() => reject(new Error("Timeout: Wallet took too long to confirm.")), 60000));
-          const receipt: any = await Promise.race([receiptPromise, timeoutPromise]);
-          if (receipt && receipt.status !== "success") throw new Error("Transaction reverted on the blockchain.");
-          return receipt;
-      };
-
-      // ⚡ THE MINIPAY GAS ADAPTER FIX ⚡
-      // Maps tokens to their 18-decimal Celo Gas Adapters so MiniPay doesn't crash on 0 CELO balances
-      let feeAdapter = GAS_CURRENCY; 
-      if (isMainnet) {
-        if (selectedToken.symbol === "USD₮") feeAdapter = "0x0e2a3e05bc9a16f5292a6170456a710cb89c6f72"; 
-        else if (selectedToken.symbol === "USDC") feeAdapter = "0x2F25deB3848C207fc8E0c34035B3Ba7fC157602B"; 
-        else if (selectedToken.symbol === "cUSD") feeAdapter = "0x765DE816845861e75A25fCA122bb6898B8B1282a";
-      } else {
-        if (selectedToken.symbol === "USDC") feeAdapter = "0x4822e58de6f5e485eF90df51C41CE01721331dC0"; 
-      }
 
       const isMiniPay = typeof window !== "undefined" && !!(window as any).ethereum?.isMiniPay;
       const txConfig: any = { account: address as `0x${string}` };
-      if (isMiniPay) {
-          txConfig.feeCurrency = feeAdapter as `0x${string}`;
+      
+      // Do NOT set feeCurrency for MiniPay to prevent "Permission Denied" relayer errors
+      if (!isMiniPay) {
+          txConfig.feeCurrency = GAS_CURRENCY as `0x${string}`;
       }
 
-      setStatus("Checking permissions...");
+      setStatus("Verifying live blockchain permissions...");
+      
+      // ⚡ CACHE BUSTING 2: The 'blockTag: latest' forces Viem to ignore the false positive and check the real chain
       const currentAllowance = await publicClient.readContract({
           address: tokenAddress as `0x${string}`,
           abi: ERC20_ABI,
           functionName: 'allowance',
-          args: [address, ABAPAY_CONTRACT]
+          args: [address, ABAPAY_CONTRACT],
+          blockTag: 'latest'
       }) as bigint;
 
       if (currentAllowance < valueInWei) {
-          // ⚡ USDT ZERO-RESET RULE WITH VERCEL-SAFE BigInt(0) ⚡
+          // ⚡ USDT ZERO-RESET RULE (Vercel Safe BigInt)
           if (currentAllowance > BigInt(0) && selectedToken.symbol === "USD₮") {
-              setStatus("Awaiting token reset...");
+              setStatus("Resetting token allowance...");
               const resetHash = await client.writeContract({ 
                   address: tokenAddress as `0x${string}`, abi: ERC20_ABI, functionName: 'approve', args: [ABAPAY_CONTRACT, BigInt(0)], ...txConfig
               });
-              await waitForReceiptSafe(resetHash, "Mining reset on Celo... Please wait.");
+              await publicClient.waitForTransactionReceipt({ hash: resetHash });
           }
 
           setStatus("Awaiting token approval (One-Time Setup)...");
@@ -545,10 +530,19 @@ export default function Home() {
               address: tokenAddress as `0x${string}`, abi: ERC20_ABI, functionName: 'approve', args: [ABAPAY_CONTRACT, largeApproval], ...txConfig
           });
 
-          await waitForReceiptSafe(approvalHash, "Mining approval on Celo... Please wait.");
+          setStatus("Mining approval on Celo... Please wait.");
+          
+          // Anti-Hang Timeout to prevent "Loading Forever"
+          const receiptPromise = publicClient.waitForTransactionReceipt({ hash: approvalHash, confirmations: 1 });
+          const timeoutPromise = new Promise((_, reject) => setTimeout(() => reject(new Error("Approval timed out. Please try again.")), 60000));
+          const receipt: any = await Promise.race([receiptPromise, timeoutPromise]);
+
+          if (receipt.status !== "success") {
+              throw new Error("Approval failed on the blockchain.");
+          }
 
           setStatus("Approval confirmed! Syncing state...");
-          await new Promise(resolve => setTimeout(resolve, 2000));
+          await new Promise(resolve => setTimeout(resolve, 3000)); // 3 second pause so the Celo nodes can catch up
       }
 
       setStatus("Please sign the final payment...");
@@ -637,25 +631,24 @@ export default function Home() {
 
       const balanceWei = await publicClient.readContract({ address: tokenAddress as `0x${string}`, abi: ERC20_ABI, functionName: 'balanceOf', args: [address] });
       setWalletBalance(parseFloat(formatUnits(balanceWei as bigint, selectedToken.decimals)).toFixed(4));
-        } catch (e: any) { 
+    } catch (e: any) { 
         console.error("PAYMENT ERROR:", e);
         if (activeCooldownKey) {
             localStorage.removeItem(activeCooldownKey);
         }
         
-        // 🚨 MOBILE DEBUGGER HACK 🚨
-        // This will force the raw, unedited relayer error to pop up on your phone screen
-        const deepError = e.details || (e.cause?.message) || e.shortMessage || e.message || "Unknown";
-        const metaMessages = e.metaMessages ? e.metaMessages.join("\n") : "";
-        
-        alert(`MINIPAY RAW ERROR:\n\n${deepError}\n\n${metaMessages}`);
+        // Clean error messages for the UI
+        let errorMsg = e.shortMessage || e.message || "Transaction Cancelled.";
+        if (errorMsg.includes("allowance") || errorMsg.includes("RPC")) {
+             errorMsg = "Blockchain Sync Error. Please try again to reset approval.";
+        }
 
-        setStatus(`Error: ${deepError.slice(0, 40)}...`); 
+        setStatus(`Error: ${errorMsg.slice(0, 50)}...`); 
     } finally { 
- 
         setIsProcessing(false); 
     }
   };
+
 
 
   useEffect(() => {
