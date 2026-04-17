@@ -36,8 +36,10 @@ export default function Home() {
   const [customerName, setCustomerName] = useState<string | null>(null);
   const [isVerifying, setIsVerifying] = useState(false);
 
+  // ⚡ CONFIRMATION MODAL STATE ⚡
   const [isConfirmModalOpen, setIsConfirmModalOpen] = useState(false);
 
+  // ⚡ BENEFICIARIES STATE
   const [beneficiaries, setBeneficiaries] = useState<Record<string, {account: string, name: string | null}[]>>({});
   const [activeDeleteAccount, setActiveDeleteAccount] = useState<string | null>(null);
   const pressTimer = useRef<NodeJS.Timeout | null>(null);
@@ -102,6 +104,10 @@ export default function Home() {
   const activeChain = isMainnet ? celo : celoSepolia;
   const ABAPAY_CONTRACT = process.env.NEXT_PUBLIC_ABAPAY_ADDRESS as `0x${string}`;
 
+  const GAS_CURRENCY = isMainnet 
+    ? "0x765DE816845861e75A25fCA122bb6898B8B1282a" 
+    : "0xdE9e4C3ce781b4bA68120d6261cbad65ce0aB00b";
+
   const indexOfLastItem = currentPage * ITEMS_PER_PAGE;
   const indexOfFirstItem = indexOfLastItem - ITEMS_PER_PAGE;
   const currentTransactions = transactions.slice(indexOfFirstItem, indexOfLastItem);
@@ -134,27 +140,53 @@ export default function Home() {
     return { cryptoToCharge: crypto.toFixed(4), currentFee: fee };
   }, [nairaAmount, exchangeRate, activeService, activeTab]);
 
+  // ⚡ CALCULATE NAIRA EQUIVALENT BALANCE ⚡
   const walletBalanceNaira = useMemo(() => {
     const bal = parseFloat(walletBalance);
     if (isNaN(bal)) return "0.00";
     return (bal * exchangeRate).toLocaleString('en-NG', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
   }, [walletBalance, exchangeRate]);
 
+  // ⚡ GENERATE CONFIRMATION MODAL DETAILS ⚡
   const checkoutDetails = useMemo(() => {
-    let title = ""; let recipient = accountNumber; let recipientLabel = "Recipient";
-    if (activeTab === "bank") { title = `Transfer to ${selectedBank?.name || "Bank"}`; recipient = `${accountNumber}`; recipientLabel = "Account"; } 
-    else if (activeTab === "education") { title = EDUCATION_PROVIDERS.find(p => p.serviceID === educationProvider)?.displayName || "Education"; recipient = educationProvider === "jamb" ? accountNumber : customerPhone; recipientLabel = educationProvider === "jamb" ? "Profile ID" : "Phone Number"; } 
-    else {
-      if (activeService.id === "AIRTIME") { title = `${telecomProvider.toUpperCase()} Airtime`; recipient = accountNumber; recipientLabel = "Phone Number"; } 
-      else if (activeService.id === "INTERNET") { title = `${currentInternet?.displayName || "Data"} Plan`; recipient = accountNumber; recipientLabel = internetProvider === 'smile-direct' ? "Email Account" : internetProvider === 'spectranet' ? "Spectranet ID" : "Phone Number"; } 
-      else if (activeService.id === "ELECTRICITY") { title = `${currentDisco?.displayName || "Electricity"} (${meterType})`; recipient = accountNumber; recipientLabel = "Meter No"; } 
-      else if (activeService.id === "CABLE") { title = `${currentCable?.displayName || "Cable TV"}`; recipient = accountNumber; recipientLabel = "Smartcard / IUC"; }
+    let title = "";
+    let recipient = accountNumber;
+    let recipientLabel = "Recipient";
+
+    if (activeTab === "bank") {
+      title = `Transfer to ${selectedBank?.name || "Bank"}`;
+      recipient = `${accountNumber}`;
+      recipientLabel = "Account";
+    } else if (activeTab === "education") {
+      title = EDUCATION_PROVIDERS.find(p => p.serviceID === educationProvider)?.displayName || "Education";
+      recipient = educationProvider === "jamb" ? accountNumber : customerPhone;
+      recipientLabel = educationProvider === "jamb" ? "Profile ID" : "Phone Number";
+    } else {
+      if (activeService.id === "AIRTIME") {
+         title = `${telecomProvider.toUpperCase()} Airtime`;
+         recipient = accountNumber;
+         recipientLabel = "Phone Number";
+      } else if (activeService.id === "INTERNET") {
+         title = `${currentInternet?.displayName || "Data"} Plan`;
+         recipient = accountNumber;
+         recipientLabel = internetProvider === 'smile-direct' ? "Email Account" : internetProvider === 'spectranet' ? "Spectranet ID" : "Phone Number";
+      } else if (activeService.id === "ELECTRICITY") {
+         title = `${currentDisco?.displayName || "Electricity"} (${meterType})`;
+         recipient = accountNumber;
+         recipientLabel = "Meter No";
+      } else if (activeService.id === "CABLE") {
+         title = `${currentCable?.displayName || "Cable TV"}`;
+         recipient = accountNumber;
+         recipientLabel = "Smartcard / IUC";
+      }
     }
+
     return { title, recipient, recipientLabel };
   }, [activeTab, activeService, selectedBank, educationProvider, telecomProvider, currentInternet, internetProvider, currentDisco, meterType, currentCable, accountNumber, customerName, customerPhone]);
 
   const filteredInternetDataPlans = useMemo(() => {
     if (!internetVariations || !Array.isArray(internetVariations) || internetVariations.length === 0) return [];
+
     let strictVariations = internetVariations;
     if (internetProvider.includes('mtn')) strictVariations = internetVariations.filter(p => p.variation_code.toLowerCase().includes('mtn'));
     else if (internetProvider.includes('airtel')) strictVariations = internetVariations.filter(p => p.variation_code.toLowerCase().includes('airtel'));
@@ -162,39 +194,73 @@ export default function Home() {
     else if (internetProvider.includes('9mobile')) strictVariations = internetVariations.filter(p => p.variation_code.toLowerCase().includes('9mobile'));
     else if (internetProvider === 'spectranet') strictVariations = internetVariations.filter(p => p.variation_code.toLowerCase().includes('spectranet'));
     else if (internetProvider === 'smile-direct') strictVariations = internetVariations.filter(p => p.variation_code.toLowerCase().includes('smile'));
+
     if (internetProvider === 'spectranet' || internetProvider === 'smile-direct') return strictVariations;
+
     return strictVariations.filter(plan => {
-      const name = (plan.name || "").toLowerCase(); let category = "Monthly"; 
+      const name = (plan.name || "").toLowerCase();
+      let category = "Monthly"; 
+
       if (name.includes('broadband') || name.includes('router') || name.includes('5g') || name.includes('hynet') || name.includes('unlimited')) category = "Broadband";
       else if (name.includes('social') || name.includes('whatsapp') || name.includes('ig') || name.includes('instagram') || name.includes('tiktok') || name.includes('youtube') || name.includes('facebook') || name.includes('opera') || name.includes('xot')) category = "Social";
       else if (name.includes('60 day') || name.includes('90 day') || name.includes('120 day') || name.includes('year') || name.includes('365') || name.includes('mega') || name.includes('3 month') || name.includes('2 month') || name.includes('quarterly') || name.includes('annual')) category = "Mega";
       else if (name.includes('month') || name.includes('30 day')) category = "Monthly";
       else if (name.includes('week') || name.includes('7 day') || name.includes('14 day') || name.includes('weekend')) category = "Weekly";
       else if (name.includes('1 day') || name.includes('2 day') || name.includes('3 day') || name.includes('daily') || name.includes('24 hrs') || name.includes('24hrs') || name.includes('night') || name.includes('hourly')) category = "Daily";
+
       return category === activeDataCategory;
     }).sort((a, b) => parseFloat(a.variation_amount || "0") - parseFloat(b.variation_amount || "0"));
   }, [internetVariations, activeDataCategory, internetProvider]);
 
   const isFormValid = useMemo(() => {
     const amount = parseFloat(nairaAmount);
+
     if (!nairaAmount || isNaN(amount)) return false;
-    if (!isFixedPlan) { const activeMinAmount = (activeTab === "pay" && activeService.id === "ELECTRICITY") ? dynamicElecMin : dynamicMinAmount; if (amount < activeMinAmount || amount > dynamicMaxAmount) return false; }
+
+    if (!isFixedPlan) {
+        const activeMinAmount = (activeTab === "pay" && activeService.id === "ELECTRICITY") ? dynamicElecMin : dynamicMinAmount;
+        if (amount < activeMinAmount || amount > dynamicMaxAmount) return false;
+    }
+
     if (activeTab === "bank") return accountNumber.length === 10 && customerName !== null && selectedBank !== null && customerPhone.length >= 10;
-    if (activeTab === "education") { if (educationProvider === "jamb") return accountNumber.length >= 10 && customerName !== null && selectedEducationPlan !== null && customerPhone.length >= 10; return selectedEducationPlan !== null && customerPhone.length >= 10; }
+
+    if (activeTab === "education") {
+      if (educationProvider === "jamb") return accountNumber.length >= 10 && customerName !== null && selectedEducationPlan !== null && customerPhone.length >= 10;
+      return selectedEducationPlan !== null && customerPhone.length >= 10;
+    }
+
     if (activeTab === "pay") {
       if (activeService.id === "AIRTIME") return accountNumber.length === 11 && accountNumber.startsWith("0");
-      if (activeService.id === "INTERNET") { if (internetProvider === 'smile-direct') return internetAccountId !== null && selectedInternetPlan !== null && customerPhone.length >= 10; else if (internetProvider === 'spectranet') return accountNumber.length >= 5 && selectedInternetPlan !== null; else return accountNumber.length === 11 && accountNumber.startsWith("0") && selectedInternetPlan !== null; }
+      if (activeService.id === "INTERNET") {
+        if (internetProvider === 'smile-direct') return internetAccountId !== null && selectedInternetPlan !== null && customerPhone.length >= 10;
+        else if (internetProvider === 'spectranet') return accountNumber.length >= 5 && selectedInternetPlan !== null;
+        else return accountNumber.length === 11 && accountNumber.startsWith("0") && selectedInternetPlan !== null;
+      }
       if (activeService.id === "ELECTRICITY") return accountNumber.length >= 10 && customerName !== null && customerPhone.length >= 10;
-      if (activeService.id === "CABLE") { if (cableProvider === "showmax") return accountNumber.length >= 11 && selectedCablePlan !== null; if (accountNumber.length < 10 || customerName === null) return false; if (['dstv', 'gotv'].includes(cableProvider) && cableSubscriptionType === 'change' && !selectedCablePlan) return false; if (!['dstv', 'gotv'].includes(cableProvider) && !selectedCablePlan) return false; return true; }
+      if (activeService.id === "CABLE") {
+        if (cableProvider === "showmax") return accountNumber.length >= 11 && selectedCablePlan !== null;
+        if (accountNumber.length < 10 || customerName === null) return false;
+        if (['dstv', 'gotv'].includes(cableProvider) && cableSubscriptionType === 'change' && !selectedCablePlan) return false;
+        if (!['dstv', 'gotv'].includes(cableProvider) && !selectedCablePlan) return false;
+        return true;
+      }
     }
     return false;
   }, [accountNumber, nairaAmount, activeService, customerName, dynamicMinAmount, dynamicMaxAmount, dynamicElecMin, cableSubscriptionType, selectedCablePlan, selectedBank, selectedInternetPlan, internetAccountId, customerPhone, internetProvider, activeTab, cableProvider, selectedEducationPlan, educationProvider, isFixedPlan]);
 
-  const showToast = (title: string, message: string, type: 'success' | 'error' = 'success') => { setToast({ title, message, type }); setTimeout(() => setToast(null), 5000); };
+  const showToast = (title: string, message: string, type: 'success' | 'error' = 'success') => {
+    setToast({ title, message, type });
+    setTimeout(() => setToast(null), 5000);
+  };
 
   const handleProviderChange = (newProvider: string, type: 'internet' | 'telecom' | 'cable' | 'elec' | 'bank' | 'education') => {
     setNairaAmount(""); setAccountNumber(""); setCustomerName(null); setCustomerPhone(""); setMeterAddress(null); setDynamicElecMin(1000); setMeterAccountType(null);
-    if (type === 'internet') { setInternetVariations([]); setInternetProvider(newProvider); setSelectedInternetPlan(null); setInternetAccountId(null); } 
+    if (type === 'internet') { 
+        setInternetVariations([]); 
+        setInternetProvider(newProvider); 
+        setSelectedInternetPlan(null); 
+        setInternetAccountId(null); 
+    } 
     else if (type === 'telecom') { setTelecomProvider(newProvider); } 
     else if (type === 'cable') { setCableProvider(newProvider); setSelectedCablePlan(null); setCableCurrentBouquet(null); setCableRenewAmount(null); setCableSubscriptionType("renew"); } 
     else if (type === 'elec') { setElecProvider(newProvider); } 
@@ -203,10 +269,17 @@ export default function Home() {
   };
 
   const handleResetService = (s: any) => {
-    setActiveService(s); setAccountNumber(""); setCustomerName(null); setNairaAmount(""); setCustomerPhone(""); setCableCurrentBouquet(null); setCableRenewAmount(null); setSelectedCablePlan(null); setCableSubscriptionType("renew"); setSelectedBank(null); setSelectedInternetPlan(null); setInternetAccountId(null); setSelectedEducationPlan(null); setInternetVariations([]); setMeterAddress(null); setDynamicElecMin(1000); setMeterAccountType(null);
+    setActiveService(s); setAccountNumber(""); setCustomerName(null); setNairaAmount(""); setCustomerPhone(""); 
+    setCableCurrentBouquet(null); setCableRenewAmount(null); setSelectedCablePlan(null);
+    setCableSubscriptionType("renew"); setSelectedBank(null); setSelectedInternetPlan(null); setInternetAccountId(null);
+    setSelectedEducationPlan(null); setInternetVariations([]); setMeterAddress(null); setDynamicElecMin(1000); setMeterAccountType(null);
   };
 
-  const handleTabSwitch = (tab: "pay" | "bank" | "education" | "history") => { setActiveTab(tab); setCustomerPhone(""); handleResetService(SERVICES[0]); };
+  const handleTabSwitch = (tab: "pay" | "bank" | "education" | "history") => {
+    setActiveTab(tab);
+    setCustomerPhone("");
+    handleResetService(SERVICES[0]);
+  };
 
   const openSelectionModal = (type: 'standard' | 'token' | 'provider' | 'country' | 'bank', title: string, options: any[], callback: (value: string) => void) => {
     setModalType(type as any); setModalTitle(title); setModalOptions(options); setModalCallback(() => callback); setIsSelectionModalOpen(true);
@@ -219,57 +292,111 @@ export default function Home() {
 
   const handleShareReceipt = async () => {
     const receiptText = `🧾 AbaPay Receipt\n\nDate: ${selectedReceipt?.date}\nStatus: ${selectedReceipt?.status}\nProduct: ${selectedReceipt?.network} ${selectedReceipt?.service}\nRecipient: ${selectedReceipt?.account}\nAmount Paid: ₦${selectedReceipt?.amountNaira}\nCrypto Used: ${selectedReceipt?.amountCrypto} ${selectedReceipt?.tokenUsed}\nTx Hash: ${selectedReceipt?.txHash}\n\nSecured by Celo Network`;
-    if (navigator.share) { try { await navigator.share({ title: 'Receipt', text: receiptText }); } catch (err) {} } else { try { await navigator.clipboard.writeText(receiptText); showToast("Copied!", "Receipt details copied to clipboard.", "success"); } catch (err) {} }
+    if (navigator.share) { try { await navigator.share({ title: 'Receipt', text: receiptText }); } catch (err) {} } 
+    else { try { await navigator.clipboard.writeText(receiptText); showToast("Copied!", "Receipt details copied to clipboard.", "success"); } catch (err) {} }
   };
 
   const handleSendSupport = async () => {
     if (!supportMessage.trim()) return showToast("Error", "Please enter a message.", "error");
     setIsSendingSupport(true);
     try {
-      const formData = new FormData(); formData.append("message", supportMessage);
+      const formData = new FormData();
+      formData.append("message", supportMessage);
       if (address) formData.append("userAddress", address);
       if (supportTxHash) formData.append("txHash", supportTxHash);
       if (supportFile) formData.append("file", supportFile);
-      const res = await fetch('/api/support', { method: 'POST', body: formData });
+
+      const res = await fetch('/api/support', {
+        method: 'POST',
+        body: formData
+      });
       const data = await res.json();
-      if (data.success) { showToast("Ticket Sent", data.message, "success"); setIsSupportOpen(false); setSupportMessage(""); setSupportFile(null); } else { showToast("Error", data.message || "Failed to send ticket", "error"); }
-    } catch (e) { showToast("Error", "Network error. Failed to send ticket.", "error"); } finally { setIsSendingSupport(false); }
+      if (data.success) {
+        showToast("Ticket Sent", data.message, "success");
+        setIsSupportOpen(false);
+        setSupportMessage("");
+        setSupportFile(null);
+      } else {
+        showToast("Error", data.message || "Failed to send ticket", "error");
+      }
+    } catch (e) {
+      showToast("Error", "Network error. Failed to send ticket.", "error");
+    } finally {
+      setIsSendingSupport(false);
+    }
   };
 
   const fetchBanksManual = async () => {
     setIsFetchingBanks(true);
     try {
-      const res = await fetch(`/api/variations?serviceID=bank-deposit`); const data = await res.json();
+      const res = await fetch(`/api/variations?serviceID=bank-deposit`);
+      const data = await res.json();
+
       if (data.code === '011' || !data.content || !data.content.variations) {
-        setBankVariations([ { variation_code: 'access', name: 'ACCESS BANK PLC' }, { variation_code: 'firstbank', name: 'FIRST BANK OF NIGERIA PLC' }, { variation_code: 'gtb', name: 'GTBANK PLC' }, { variation_code: 'opay', name: 'OPAY' }, { variation_code: 'moniepoint', name: 'MONIEPOINT MICROFINANCE BANK' }, { variation_code: 'uba', name: 'UBA - UNITED BANK FOR AFRICA PLC' }, { variation_code: 'zenith', name: 'ZENITH BANK PLC' } ]); return;
+        setBankVariations([
+            { variation_code: 'access', name: 'ACCESS BANK PLC' },
+            { variation_code: 'firstbank', name: 'FIRST BANK OF NIGERIA PLC' },
+            { variation_code: 'gtb', name: 'GTBANK PLC' },
+            { variation_code: 'opay', name: 'OPAY' },
+            { variation_code: 'moniepoint', name: 'MONIEPOINT MICROFINANCE BANK' },
+            { variation_code: 'uba', name: 'UBA - UNITED BANK FOR AFRICA PLC' },
+            { variation_code: 'zenith', name: 'ZENITH BANK PLC' }
+        ]);
+        return;
       }
+
       let banksArr = extractVtpassArray(data);
-      if (banksArr && Array.isArray(banksArr) && banksArr.length > 0) { setBankVariations(banksArr.sort((a: any, b: any) => (a.name || "").localeCompare(b.name || ""))); } else { throw new Error("Empty"); }
+      if (banksArr && Array.isArray(banksArr) && banksArr.length > 0) {
+        setBankVariations(banksArr.sort((a: any, b: any) => (a.name || "").localeCompare(b.name || "")));
+      } else { 
+        throw new Error("Empty");
+      }
     } catch (e) {
-      setBankVariations([ { variation_code: 'access', name: 'ACCESS BANK PLC' }, { variation_code: 'gtb', name: 'GTBANK PLC' }, { variation_code: 'opay', name: 'OPAY' }, { variation_code: 'moniepoint', name: 'MONIEPOINT MICROFINANCE BANK' }, { variation_code: 'zenith', name: 'ZENITH BANK PLC' } ]);
-    } finally { setIsFetchingBanks(false); }
+      setBankVariations([
+        { variation_code: 'access', name: 'ACCESS BANK PLC' },
+        { variation_code: 'gtb', name: 'GTBANK PLC' },
+        { variation_code: 'opay', name: 'OPAY' },
+        { variation_code: 'moniepoint', name: 'MONIEPOINT MICROFINANCE BANK' },
+        { variation_code: 'zenith', name: 'ZENITH BANK PLC' }
+      ]);
+    } finally { 
+      setIsFetchingBanks(false); 
+    }
   };
 
   const verifyMerchant = async () => {
-    setIsVerifying(true); setCustomerName(null); setCableCurrentBouquet(null); setCableRenewAmount(null); setInternetAccountId(null); setMeterAddress(null); setDynamicElecMin(1000); setMeterAccountType(null); 
+    setIsVerifying(true); setCustomerName(null); setCableCurrentBouquet(null); setCableRenewAmount(null); setInternetAccountId(null);
+    setMeterAddress(null); setDynamicElecMin(1000); setMeterAccountType(null); 
+
     try {
         let serviceID = ""; let reqType = undefined;
-        if (activeTab === "bank") { serviceID = "bank-deposit"; reqType = selectedBank?.variation_code; } 
-        else if (activeTab === "education" && educationProvider === "jamb") { serviceID = "jamb"; reqType = selectedEducationPlan?.variation_code; } 
-        else { serviceID = activeService.id === "ELECTRICITY" ? elecProvider : activeService.id === "INTERNET" ? internetProvider : cableProvider; reqType = activeService.id === "ELECTRICITY" ? meterType : undefined; }
+
+        if (activeTab === "bank") { 
+          serviceID = "bank-deposit"; reqType = selectedBank?.variation_code; 
+        } else if (activeTab === "education" && educationProvider === "jamb") {
+          serviceID = "jamb"; reqType = selectedEducationPlan?.variation_code;
+        } else { 
+          serviceID = activeService.id === "ELECTRICITY" ? elecProvider : activeService.id === "INTERNET" ? internetProvider : cableProvider; 
+          reqType = activeService.id === "ELECTRICITY" ? meterType : undefined; 
+        }
 
         const res = await fetch(`/api/verify`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ billersCode: accountNumber, serviceID: serviceID, type: reqType }) });
         const data = await res.json();
 
         if (data.code === '000') {
           setCustomerName(data.content.Customer_Name || data.content.account_name || data.content.name);
+
           if (data.content.Address) setMeterAddress(data.content.Address);
           if (data.content.Min_Purchase_Amount) setDynamicElecMin(Number(data.content.Min_Purchase_Amount));
           if (data.content.Customer_Account_Type) setMeterAccountType(data.content.Customer_Account_Type);
+
           if (activeTab === "pay" && activeService.id === "INTERNET" && internetProvider === "smile-direct") setInternetAccountId(data.content.AccountId || data.content.account_id);
           if (activeTab === "pay" && activeService.id === "CABLE") {
             setCableCurrentBouquet(data.content.Current_Bouquet || "Unknown Package");
-            if (data.content.Renewal_Amount && ['dstv', 'gotv'].includes(cableProvider)) { setCableRenewAmount(data.content.Renewal_Amount); if (cableSubscriptionType === "renew") setNairaAmount(data.content.Renewal_Amount.toString()); }
+            if (data.content.Renewal_Amount && ['dstv', 'gotv'].includes(cableProvider)) {
+              setCableRenewAmount(data.content.Renewal_Amount);
+              if (cableSubscriptionType === "renew") setNairaAmount(data.content.Renewal_Amount.toString());
+            }
           }
         } else { setStatus("Account could not be verified."); }
     } catch (e) {}
@@ -289,23 +416,37 @@ export default function Home() {
   };
 
   const saveBeneficiary = (account: string, name: string | null) => {
-    if (!address) return; const key = getCurrentProviderKey(); if (!key) return;
+    if (!address) return; 
+    const key = getCurrentProviderKey();
+    if (!key) return;
+
     setBeneficiaries(prev => {
-      const currentList = prev[key] || []; const filteredList = currentList.filter(b => b.account !== account);
+      const currentList = prev[key] || [];
+      const filteredList = currentList.filter(b => b.account !== account);
       const newList = [{ account, name }, ...filteredList].slice(0, 4); 
-      const newStorage = { ...prev, [key]: newList }; localStorage.setItem(`abapay_beneficiaries_${address}`, JSON.stringify(newStorage)); return newStorage;
+
+      const newStorage = { ...prev, [key]: newList };
+      localStorage.setItem(`abapay_beneficiaries_${address}`, JSON.stringify(newStorage));
+      return newStorage;
     });
   };
 
   const removeBeneficiary = (accountToRemove: string) => {
-    if (!address) return; const key = getCurrentProviderKey(); if (!key) return;
+    if (!address) return;
+    const key = getCurrentProviderKey();
+    if (!key) return;
+
     setBeneficiaries(prev => {
-      const currentList = prev[key] || []; const newList = currentList.filter(b => b.account !== accountToRemove);
-      const newStorage = { ...prev, [key]: newList }; localStorage.setItem(`abapay_beneficiaries_${address}`, JSON.stringify(newStorage)); return newStorage;
+      const currentList = prev[key] || [];
+      const newList = currentList.filter(b => b.account !== accountToRemove);
+
+      const newStorage = { ...prev, [key]: newList };
+      localStorage.setItem(`abapay_beneficiaries_${address}`, JSON.stringify(newStorage));
+      return newStorage;
     });
   };
 
-  // ⚡ EXECUTING THE BLOCKCHAIN PAYMENT WITH STATE POLLING ⚡
+  // ⚡ EXECUTING THE BLOCKCHAIN PAYMENT AFTER CONFIRMATION ⚡
   const processBlockchainPayment = async () => {
     if (!address || !client) return setStatus("Connect Wallet First");
     if (parseFloat(cryptoToCharge) > parseFloat(walletBalance)) return setStatus(`Insufficient ${selectedToken.symbol} Balance.`);
@@ -315,9 +456,11 @@ export default function Home() {
     if (activeTab === "pay" && activeService.id === "ELECTRICITY") {
       const cooldownKey = `abapay_elec_${address}_${elecProvider}_${accountNumber}_${nairaAmount}`;
       const lastTxTime = localStorage.getItem(cooldownKey);
+
       if (lastTxTime) {
         const timeSinceLast = new Date().getTime() - parseInt(lastTxTime);
         const FIVE_MINUTES = 5 * 60 * 1000;
+
         if (timeSinceLast < FIVE_MINUTES) {
           const minutesLeft = Math.ceil((FIVE_MINUTES - timeSinceLast) / 60000);
           setStatus("Duplicate detected. Please wait.");
@@ -344,12 +487,37 @@ export default function Home() {
       const valueInWei = parseUnits(cryptoToCharge, selectedToken.decimals);
       const tokenAddress = isMainnet ? selectedToken.mainnet : selectedToken.sepolia;
       
+      const ethProvider = typeof window !== "undefined" ? (window as any).ethereum : null;
       const publicClient = createPublicClient({ 
           chain: activeChain, 
-          transport: http()
+          transport: ethProvider ? custom(ethProvider) : http(),
+          pollingInterval: 3000 
       });
 
+      const waitForReceiptSafe = async (hash: string, loadingMsg: string) => {
+          setStatus(loadingMsg);
+          const receiptPromise = publicClient.waitForTransactionReceipt({ hash: hash as `0x${string}`, confirmations: 1 });
+          const timeoutPromise = new Promise((_, reject) => setTimeout(() => reject(new Error("Timeout: Wallet took too long to confirm.")), 60000));
+          const receipt: any = await Promise.race([receiptPromise, timeoutPromise]);
+          if (receipt && receipt.status !== "success") throw new Error("Transaction reverted on the blockchain.");
+          return receipt;
+      };
+
+      // ⚡ THE MINIPAY "FEE ABSTRACTION" GAS ADAPTER FIX ⚡
+      let feeAdapter = GAS_CURRENCY; 
+      if (isMainnet) {
+        if (selectedToken.symbol === "USD₮") feeAdapter = "0x0e2a3e05bc9a16f5292a6170456a710cb89c6f72"; 
+        else if (selectedToken.symbol === "USDC") feeAdapter = "0x2F25deB3848C207fc8E0c34035B3Ba7fC157602B"; 
+        else if (selectedToken.symbol === "cUSD") feeAdapter = "0x765DE816845861e75A25fCA122bb6898B8B1282a";
+      } else {
+        if (selectedToken.symbol === "USDC") feeAdapter = "0x4822e58de6f5e485eF90df51C41CE01721331dC0"; 
+      }
+
+      const isMiniPay = typeof window !== "undefined" && !!(window as any).ethereum?.isMiniPay;
       const txConfig: any = { account: address as `0x${string}` };
+      if (isMiniPay) {
+          txConfig.feeCurrency = feeAdapter as `0x${string}`;
+      }
 
       setStatus("Checking permissions...");
       const currentAllowance = await publicClient.readContract({
@@ -360,49 +528,26 @@ export default function Home() {
       }) as bigint;
 
       if (currentAllowance < valueInWei) {
+          // ⚡ USDT Zero-Reset Rule
           if (currentAllowance > BigInt(0) && selectedToken.symbol === "USD₮") {
               setStatus("Awaiting token reset...");
-              await client.writeContract({ 
+              const resetHash = await client.writeContract({ 
                   address: tokenAddress as `0x${string}`, abi: ERC20_ABI, functionName: 'approve', args: [ABAPAY_CONTRACT, BigInt(0)], ...txConfig
               });
-              
-              // ⚡ State Polling Loop: Waits strictly for the reset to hit the blockchain
-              let resetAllowance = currentAllowance;
-              let resetAttempts = 0;
-              while (resetAllowance > BigInt(0) && resetAttempts < 15) {
-                  await new Promise(resolve => setTimeout(resolve, 3000));
-                  resetAllowance = await publicClient.readContract({
-                      address: tokenAddress as `0x${string}`, abi: ERC20_ABI, functionName: 'allowance', args: [address, ABAPAY_CONTRACT]
-                  }) as bigint;
-                  resetAttempts++;
-              }
+              await waitForReceiptSafe(resetHash, "Mining reset on Celo... Please wait.");
           }
 
           setStatus("Awaiting token approval (One-Time Setup)...");
           const largeApproval = parseUnits("100000", selectedToken.decimals); 
 
-          await client.writeContract({ 
+          const approvalHash = await client.writeContract({ 
               address: tokenAddress as `0x${string}`, abi: ERC20_ABI, functionName: 'approve', args: [ABAPAY_CONTRACT, largeApproval], ...txConfig
           });
 
-          setStatus("Mining approval on Celo... Please wait.");
-
-          // ⚡ State Polling Loop: Immune to MiniPay hash tracking issues
-          let newAllowance = BigInt(0);
-          let attempts = 0;
-          while (newAllowance < valueInWei && attempts < 20) {
-              await new Promise(resolve => setTimeout(resolve, 3000));
-              newAllowance = await publicClient.readContract({
-                  address: tokenAddress as `0x${string}`, abi: ERC20_ABI, functionName: 'allowance', args: [address, ABAPAY_CONTRACT]
-              }) as bigint;
-              attempts++;
-          }
-
-          if (newAllowance < valueInWei) {
-              throw new Error("Approval confirmation timed out. Please try again.");
-          }
+          await waitForReceiptSafe(approvalHash, "Mining approval on Celo... Please wait.");
 
           setStatus("Approval confirmed! Syncing state...");
+          await new Promise(resolve => setTimeout(resolve, 2000));
       }
 
       setStatus("Please sign the final payment...");
@@ -1250,7 +1395,7 @@ export default function Home() {
                         <div className="bg-red-50 border border-red-200 p-3 rounded-xl mt-2 flex items-center gap-2 animate-in fade-in">
                             <AlertTriangle size={16} className="text-red-500 shrink-0" />
                             <p className="text-xs font-black text-red-600">
-                                {parseFloat(nairaAmount) < dynamicMinAmount ? `Amount is below the minimum of ₦${dynamicMinAmount.toLocaleString()}` : `Amount exceeds the maximum of ₦${dynamicMaxAmount.toLocaleString()}`}
+                                {parseFloat(nairaAmount) < dynamicMinAmount ? `Amount is below the minimum of ₦${currentMinDisplay.toLocaleString()}` : `Amount exceeds the maximum of ₦${dynamicMaxAmount.toLocaleString()}`}
                             </p>
                         </div>
                     )}
