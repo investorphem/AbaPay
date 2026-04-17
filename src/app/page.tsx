@@ -487,8 +487,6 @@ export default function Home() {
       const valueInWei = parseUnits(cryptoToCharge, selectedToken.decimals);
       const tokenAddress = isMainnet ? selectedToken.mainnet : selectedToken.sepolia;
       
-      // ⚡ FIX 1: Use the wallet's internal RPC! MiniPay uses a meta-tx relayer. 
-      // Public nodes don't recognize MiniPay's tracking hashes, but the wallet itself does!
       const ethProvider = typeof window !== "undefined" ? (window as any).ethereum : null;
       const publicClient = createPublicClient({ 
           chain: activeChain, 
@@ -496,15 +494,29 @@ export default function Home() {
           pollingInterval: 3000 
       });
 
-      // ⚡ FIX 2: A strictly-timed wait function that guarantees it never hangs forever
       const waitForReceiptSafe = async (hash: string, loadingMsg: string) => {
           setStatus(loadingMsg);
           const receiptPromise = publicClient.waitForTransactionReceipt({ hash: hash as `0x${string}`, confirmations: 1 });
-          // Hard 45-second timeout to prevent infinite loading if the network drops
           const timeoutPromise = new Promise((_, reject) => setTimeout(() => reject(new Error("Timeout: Wallet took too long to confirm.")), 45000));
           const receipt: any = await Promise.race([receiptPromise, timeoutPromise]);
           if (receipt && receipt.status !== "success") throw new Error("Transaction reverted on the blockchain.");
           return receipt;
+      };
+
+      // ⚡ FIX: The Celo Gas Adapter Router
+      // Celo gas requires 18 decimals. USDT/USDC only have 6. We MUST use Celo's official adapter addresses!
+      let feeAdapter = GAS_CURRENCY; 
+      if (isMainnet) {
+        if (selectedToken.symbol === "USD₮") feeAdapter = "0x0e2a3e05bc9a16f5292a6170456a710cb89c6f72";
+        else if (selectedToken.symbol === "USDC") feeAdapter = "0x2F25deB3848C207fc8E0c34035B3Ba7fC157602B";
+        else if (selectedToken.symbol === "cUSD") feeAdapter = "0x765DE816845861e75A25fCA122bb6898B8B1282a";
+      } else {
+        if (selectedToken.symbol === "USDC") feeAdapter = "0x4822e58de6f5e485eF90df51C41CE01721331dC0";
+      }
+
+      const txConfig = {
+         account: address,
+         feeCurrency: feeAdapter as `0x${string}`
       };
 
       setStatus("Checking permissions...");
@@ -515,24 +527,20 @@ export default function Home() {
           args: [address, ABAPAY_CONTRACT]
       }) as bigint;
 
-            if (currentAllowance < valueInWei) {
-          // ⚡ FIX 3: USDT Strict "Zero-Reset" Rule
-          // If you have a small allowance, USDT requires you to reset it to 0 before approving 100k!
+      if (currentAllowance < valueInWei) {
           if (currentAllowance > BigInt(0) && selectedToken.symbol === "USD₮") {
               setStatus("Awaiting token reset...");
               const resetHash = await client.writeContract({ 
-                  address: tokenAddress as `0x${string}`, abi: ERC20_ABI, functionName: 'approve', args: [ABAPAY_CONTRACT, BigInt(0)], account: address
+                  address: tokenAddress as `0x${string}`, abi: ERC20_ABI, functionName: 'approve', args: [ABAPAY_CONTRACT, BigInt(0)], ...txConfig
               });
               await waitForReceiptSafe(resetHash, "Mining reset on Celo... Please wait.");
           }
 
-
-          // We restore the "100k Approval" because it creates a beautiful 1-click checkout!
           setStatus("Awaiting token approval (One-Time Setup)...");
           const largeApproval = parseUnits("100000", selectedToken.decimals); 
 
           const approvalHash = await client.writeContract({ 
-              address: tokenAddress as `0x${string}`, abi: ERC20_ABI, functionName: 'approve', args: [ABAPAY_CONTRACT, largeApproval], account: address
+              address: tokenAddress as `0x${string}`, abi: ERC20_ABI, functionName: 'approve', args: [ABAPAY_CONTRACT, largeApproval], ...txConfig
           });
 
           await waitForReceiptSafe(approvalHash, "Mining approval on Celo... Please wait.");
@@ -569,12 +577,13 @@ export default function Home() {
         } else { vtpassServiceID = telecomProvider; displayNetwork = telecomProvider; }
       }
 
+      // ⚡ RESTORED THE txConfig SO MINIPAY KNOWS WHICH GAS TO USE
       const hash = await client.writeContract({ 
           address: ABAPAY_CONTRACT, 
           abi: ABAPAY_ABI, 
           functionName: 'payBill', 
           args: [tokenAddress, vtpassServiceID, payloadBillersCode, valueInWei], 
-          account: address
+          ...txConfig
       });
       setStatus(`${selectedToken.symbol} Secured. Processing...`);
 
@@ -617,9 +626,6 @@ export default function Home() {
         newTx.purchased_code = result.purchased_code; newTx.units = result.units; newTx.request_id = result.data?.requestId;
       } else {
         setStatus(`Error: ${result.message || 'Transaction Failed'}`); newTx.status = "FAILED_VENDING";
-        
-        // ⚡ FIX 4: INSTANT RETRY ON FAILURE
-        // If the backend fails, we instantly clear the duplicate lock so they can retry.
         if (activeCooldownKey) localStorage.removeItem(activeCooldownKey);
       }
 
@@ -632,13 +638,9 @@ export default function Home() {
       setWalletBalance(parseFloat(formatUnits(balanceWei as bigint, selectedToken.decimals)).toFixed(4));
     } catch (e: any) { 
         console.error("PAYMENT ERROR:", e);
-        
-        // ⚡ FIX 4: INSTANT RETRY ON FAILURE
-        // If you click "Reject" in MiniPay or the transaction errors, it instantly clears the duplicate lock!
         if (activeCooldownKey) {
             localStorage.removeItem(activeCooldownKey);
         }
-
         const errorMsg = e.shortMessage || e.message || "Transaction Cancelled.";
         setStatus(`Error: ${errorMsg.slice(0, 40)}...`); 
     } finally { 
