@@ -503,78 +503,11 @@ export default function Home() {
           return receipt;
       };
 
-       // ⚡ EXECUTING THE BLOCKCHAIN PAYMENT AFTER CONFIRMATION ⚡
-  const processBlockchainPayment = async () => {
-    if (!address || !client) return setStatus("Connect Wallet First");
-    if (parseFloat(cryptoToCharge) > parseFloat(walletBalance)) return setStatus(`Insufficient ${selectedToken.symbol} Balance.`);
-
-    let activeCooldownKey: string | null = null; 
-
-    if (activeTab === "pay" && activeService.id === "ELECTRICITY") {
-      const cooldownKey = `abapay_elec_${address}_${elecProvider}_${accountNumber}_${nairaAmount}`;
-      const lastTxTime = localStorage.getItem(cooldownKey);
-
-      if (lastTxTime) {
-        const timeSinceLast = new Date().getTime() - parseInt(lastTxTime);
-        const FIVE_MINUTES = 5 * 60 * 1000;
-
-        if (timeSinceLast < FIVE_MINUTES) {
-          const minutesLeft = Math.ceil((FIVE_MINUTES - timeSinceLast) / 60000);
-          setStatus("Duplicate detected. Please wait.");
-          showToast("Duplicate Protection", `You just purchased ₦${nairaAmount} for this exact meter recently. Please wait ${minutesLeft} min(s) to avoid double-billing.`, "error");
-          return; 
-        }
-      }
-      localStorage.setItem(cooldownKey, new Date().getTime().toString());
-      activeCooldownKey = cooldownKey; 
-    }
-
-    setIsProcessing(true);
-    setStatus("Initiating Blockchain Escrow...");
-
-    try {
-      try {
-        const currentChainId = await client.getChainId();
-        if (currentChainId !== activeChain.id) {
-          setStatus("Switching wallet to Celo network...");
-          await client.switchChain({ id: activeChain.id });
-        }
-      } catch (switchError) { await client.addChain({ chain: activeChain }); }
-
-      const valueInWei = parseUnits(cryptoToCharge, selectedToken.decimals);
-      const tokenAddress = isMainnet ? selectedToken.mainnet : selectedToken.sepolia;
-      
-      const ethProvider = typeof window !== "undefined" ? (window as any).ethereum : null;
-      const publicClient = createPublicClient({ 
-          chain: activeChain, 
-          transport: ethProvider ? custom(ethProvider) : http(),
-          pollingInterval: 3000 
-      });
-
-      const waitForReceiptSafe = async (hash: string, loadingMsg: string) => {
-          setStatus(loadingMsg);
-          const receiptPromise = publicClient.waitForTransactionReceipt({ hash: hash as `0x${string}`, confirmations: 1 });
-          const timeoutPromise = new Promise((_, reject) => setTimeout(() => reject(new Error("Timeout: Wallet took too long to confirm.")), 60000));
-          const receipt: any = await Promise.race([receiptPromise, timeoutPromise]);
-          if (receipt && receipt.status !== "success") throw new Error("Transaction reverted on the blockchain.");
-          return receipt;
-      };
-
-      // ⚡ THE MINIPAY GAS ADAPTER FIX ⚡
-      // Maps tokens to their 18-decimal Celo Gas Adapters so MiniPay doesn't crash on 0 CELO balances
-      let feeAdapter = GAS_CURRENCY; 
-      if (isMainnet) {
-        if (selectedToken.symbol === "USD₮") feeAdapter = "0x0e2a3e05bc9a16f5292a6170456a710cb89c6f72"; 
-        else if (selectedToken.symbol === "USDC") feeAdapter = "0x2F25deB3848C207fc8E0c34035B3Ba7fC157602B"; 
-        else if (selectedToken.symbol === "cUSD") feeAdapter = "0x765DE816845861e75A25fCA122bb6898B8B1282a";
-      } else {
-        if (selectedToken.symbol === "USDC") feeAdapter = "0x4822e58de6f5e485eF90df51C41CE01721331dC0"; 
-      }
-
+      // ⚡ THE MINIPAY "FEE ABSTRACTION" FIX ⚡
       const isMiniPay = typeof window !== "undefined" && !!(window as any).ethereum?.isMiniPay;
       const txConfig: any = { account: address as `0x${string}` };
       if (isMiniPay) {
-          txConfig.feeCurrency = feeAdapter as `0x${string}`;
+          txConfig.feeCurrency = tokenAddress as `0x${string}`;
       }
 
       setStatus("Checking permissions...");
@@ -586,7 +519,6 @@ export default function Home() {
       }) as bigint;
 
       if (currentAllowance < valueInWei) {
-          // ⚡ USDT ZERO-RESET RULE WITH VERCEL-SAFE BigInt(0) ⚡
           if (currentAllowance > BigInt(0) && selectedToken.symbol === "USD₮") {
               setStatus("Awaiting token reset...");
               const resetHash = await client.writeContract({ 
@@ -705,7 +637,6 @@ export default function Home() {
         setIsProcessing(false); 
     }
   };
-
 
   useEffect(() => {
     const fallbackTimer = setTimeout(() => setIsInitiallyLoading(false), 2000);
@@ -1983,4 +1914,4 @@ export default function Home() {
       </div>
     </main>
   );
-    }
+}
