@@ -486,7 +486,7 @@ export default function Home() {
 
       const valueInWei = parseUnits(cryptoToCharge, selectedToken.decimals);
       const tokenAddress = isMainnet ? selectedToken.mainnet : selectedToken.sepolia;
-      
+
       const ethProvider = typeof window !== "undefined" ? (window as any).ethereum : null;
       const publicClient = createPublicClient({ 
           chain: activeChain, 
@@ -503,11 +503,69 @@ export default function Home() {
           return receipt;
       };
 
-      // ⚡ THE MINIPAY "FEE ABSTRACTION" FIX ⚡
+   // ⚡ EXECUTING THE BLOCKCHAIN PAYMENT AFTER CONFIRMATION ⚡
+  const processBlockchainPayment = async () => {
+    if (!address || !client) return setStatus("Connect Wallet First");
+    if (parseFloat(cryptoToCharge) > parseFloat(walletBalance)) return setStatus(`Insufficient ${selectedToken.symbol} Balance.`);
+
+    let activeCooldownKey: string | null = null; 
+
+    if (activeTab === "pay" && activeService.id === "ELECTRICITY") {
+      const cooldownKey = `abapay_elec_${address}_${elecProvider}_${accountNumber}_${nairaAmount}`;
+      const lastTxTime = localStorage.getItem(cooldownKey);
+
+      if (lastTxTime) {
+        const timeSinceLast = new Date().getTime() - parseInt(lastTxTime);
+        const FIVE_MINUTES = 5 * 60 * 1000;
+
+        if (timeSinceLast < FIVE_MINUTES) {
+          const minutesLeft = Math.ceil((FIVE_MINUTES - timeSinceLast) / 60000);
+          setStatus("Duplicate detected. Please wait.");
+          showToast("Duplicate Protection", `You just purchased ₦${nairaAmount} for this exact meter recently. Please wait ${minutesLeft} min(s) to avoid double-billing.`, "error");
+          return; 
+        }
+      }
+      localStorage.setItem(cooldownKey, new Date().getTime().toString());
+      activeCooldownKey = cooldownKey; 
+    }
+
+    setIsProcessing(true);
+    setStatus("Initiating Blockchain Escrow...");
+
+    try {
+      try {
+        const currentChainId = await client.getChainId();
+        if (currentChainId !== activeChain.id) {
+          setStatus("Switching wallet to Celo network...");
+          await client.switchChain({ id: activeChain.id });
+        }
+      } catch (switchError) { await client.addChain({ chain: activeChain }); }
+
+      const valueInWei = parseUnits(cryptoToCharge, selectedToken.decimals);
+      const tokenAddress = isMainnet ? selectedToken.mainnet : selectedToken.sepolia;
+      
+      // ⚡ MINIPAY FIX 1: Use internal wallet transport so MiniPay doesn't hang
+      const ethProvider = typeof window !== "undefined" ? (window as any).ethereum : null;
+      const publicClient = createPublicClient({ 
+          chain: activeChain, 
+          transport: ethProvider ? custom(ethProvider) : http(),
+          pollingInterval: 3000 
+      });
+
+      // ⚡ MINIPAY FIX 2: Gas Adapter Router (Fixes "Unknown RPC Error" when CELO balance is 0)
+      let feeAdapter = GAS_CURRENCY; 
+      if (isMainnet) {
+        if (selectedToken.symbol === "USD₮") feeAdapter = "0x0e2a3e05bc9a16f5292a6170456a710cb89c6f72"; 
+        else if (selectedToken.symbol === "USDC") feeAdapter = "0x2F25deB3848C207fc8E0c34035B3Ba7fC157602B"; 
+        else if (selectedToken.symbol === "cUSD") feeAdapter = "0x765DE816845861e75A25fCA122bb6898B8B1282a";
+      } else {
+        if (selectedToken.symbol === "USDC") feeAdapter = "0x4822e58de6f5e485eF90df51C41CE01721331dC0"; 
+      }
+
       const isMiniPay = typeof window !== "undefined" && !!(window as any).ethereum?.isMiniPay;
       const txConfig: any = { account: address as `0x${string}` };
       if (isMiniPay) {
-          txConfig.feeCurrency = tokenAddress as `0x${string}`;
+          txConfig.feeCurrency = feeAdapter as `0x${string}`;
       }
 
       setStatus("Checking permissions...");
@@ -519,12 +577,14 @@ export default function Home() {
       }) as bigint;
 
       if (currentAllowance < valueInWei) {
+          // ⚡ USDT Zero-Reset Rule with TypeScript safe BigInt(0)
           if (currentAllowance > BigInt(0) && selectedToken.symbol === "USD₮") {
               setStatus("Awaiting token reset...");
               const resetHash = await client.writeContract({ 
                   address: tokenAddress as `0x${string}`, abi: ERC20_ABI, functionName: 'approve', args: [ABAPAY_CONTRACT, BigInt(0)], ...txConfig
               });
-              await waitForReceiptSafe(resetHash, "Mining reset on Celo... Please wait.");
+              setStatus("Mining reset on Celo... Please wait.");
+              await publicClient.waitForTransactionReceipt({ hash: resetHash });
           }
 
           setStatus("Awaiting token approval (One-Time Setup)...");
@@ -534,7 +594,8 @@ export default function Home() {
               address: tokenAddress as `0x${string}`, abi: ERC20_ABI, functionName: 'approve', args: [ABAPAY_CONTRACT, largeApproval], ...txConfig
           });
 
-          await waitForReceiptSafe(approvalHash, "Mining approval on Celo... Please wait.");
+          setStatus("Mining approval on Celo... Please wait.");
+          await publicClient.waitForTransactionReceipt({ hash: approvalHash });
 
           setStatus("Approval confirmed! Syncing state...");
           await new Promise(resolve => setTimeout(resolve, 2000));
@@ -638,72 +699,6 @@ export default function Home() {
     }
   };
 
-  useEffect(() => {
-    const fallbackTimer = setTimeout(() => setIsInitiallyLoading(false), 2000);
-    return () => clearTimeout(fallbackTimer);
-  }, []);
-
-  useEffect(() => {
-    if (status && !isProcessing) { const timer = setTimeout(() => setStatus(""), 5000); return () => clearTimeout(timer); }
-  }, [status, isProcessing]);
-
-  useEffect(() => {
-    async function initSystem() {
-      try { const { data: settingsData } = await supabase.from('platform_settings').select('exchange_rate').eq('id', 1).single(); if (settingsData && settingsData.exchange_rate) setExchangeRate(Number(settingsData.exchange_rate)); } catch (consoleError) {}
-      try {
-        if (typeof window !== "undefined" && (window as any).ethereum) {
-          const eth = (window as any).ethereum;
-          const walletClient = createWalletClient({ chain: activeChain, transport: custom(eth) });
-          walletClient.requestAddresses().then(([acc]) => { setAddress(acc); setClient(walletClient); }).catch((e) => console.log("Connection deferred"));
-        }
-      } catch (e) {}
-    }
-    initSystem();
-  }, [activeChain]);
-
-  useEffect(() => {
-    if (!address) {
-      setTransactions([]);
-      return;
-    }
-    try {
-      const savedLocalHistory = localStorage.getItem(`abapay_history_${address}`);
-      if (savedLocalHistory) setTransactions(JSON.parse(savedLocalHistory));
-    } catch (e) {}
-
-    async function fetchCloudHistory() {
-      try {
-        const sixMonthsAgo = new Date(); sixMonthsAgo.setMonth(sixMonthsAgo.getMonth() - 6);
-        const { data } = await supabase.from('transactions').select('*').eq('wallet_address', address).gte('created_at', sixMonthsAgo.toISOString()).order('created_at', { ascending: false });
-
-        if (data && data.length > 0) {
-          const cloudHistory = data.map((tx: any) => ({ 
-             id: tx.tx_hash.slice(0, 8), date: new Date(tx.created_at).toLocaleString(), status: tx.status, 
-             amountNaira: tx.amount_naira.toString(), amountCrypto: tx.amount_usdt.toString(), 
-             tokenUsed: tx.token_used || "USD₮", service: tx.service_category, network: tx.network, 
-             txHash: tx.tx_hash, account: tx.account_number, refund_hash: tx.refund_hash, 
-             purchased_code: tx.purchased_code, request_id: tx.request_id, units: tx.units 
-          }));
-
-          setTransactions(cloudHistory); 
-          localStorage.setItem(`abapay_history_${address}`, JSON.stringify(cloudHistory));
-        }
-      } catch (e) {}
-    }
-    fetchCloudHistory();
-  }, [address]);
-
-  useEffect(() => {
-    if (!address) {
-      setBeneficiaries({});
-      return; 
-    }
-    try {
-      const saved = localStorage.getItem(`abapay_beneficiaries_${address}`);
-      if (saved) setBeneficiaries(JSON.parse(saved));
-      else setBeneficiaries({});
-    } catch (e) {}
-  }, [address]);
 
   useEffect(() => {
     async function fetchBalance() {
