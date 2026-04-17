@@ -446,7 +446,7 @@ export default function Home() {
     });
   };
 
-  // ⚡ EXECUTING THE BLOCKCHAIN PAYMENT AFTER CONFIRMATION ⚡
+    // ⚡ EXECUTING THE BLOCKCHAIN PAYMENT AFTER CONFIRMATION ⚡
   const processBlockchainPayment = async () => {
     if (!address || !client) return setStatus("Connect Wallet First");
     if (parseFloat(cryptoToCharge) > parseFloat(walletBalance)) return setStatus(`Insufficient ${selectedToken.symbol} Balance.`);
@@ -503,11 +503,21 @@ export default function Home() {
           return receipt;
       };
 
-      // ⚡ THE MINIPAY "FEE ABSTRACTION" FIX ⚡
+      // ⚡ THE MINIPAY GAS ADAPTER FIX ⚡
+      // Maps tokens to their 18-decimal Celo Gas Adapters so MiniPay doesn't crash on 0 CELO balances
+      let feeAdapter = GAS_CURRENCY; 
+      if (isMainnet) {
+        if (selectedToken.symbol === "USD₮") feeAdapter = "0x0e2a3e05bc9a16f5292a6170456a710cb89c6f72"; 
+        else if (selectedToken.symbol === "USDC") feeAdapter = "0x2F25deB3848C207fc8E0c34035B3Ba7fC157602B"; 
+        else if (selectedToken.symbol === "cUSD") feeAdapter = "0x765DE816845861e75A25fCA122bb6898B8B1282a";
+      } else {
+        if (selectedToken.symbol === "USDC") feeAdapter = "0x4822e58de6f5e485eF90df51C41CE01721331dC0"; 
+      }
+
       const isMiniPay = typeof window !== "undefined" && !!(window as any).ethereum?.isMiniPay;
       const txConfig: any = { account: address as `0x${string}` };
       if (isMiniPay) {
-          txConfig.feeCurrency = tokenAddress as `0x${string}`;
+          txConfig.feeCurrency = feeAdapter as `0x${string}`;
       }
 
       setStatus("Checking permissions...");
@@ -519,6 +529,7 @@ export default function Home() {
       }) as bigint;
 
       if (currentAllowance < valueInWei) {
+          // ⚡ USDT ZERO-RESET RULE WITH VERCEL-SAFE BigInt(0) ⚡
           if (currentAllowance > BigInt(0) && selectedToken.symbol === "USD₮") {
               setStatus("Awaiting token reset...");
               const resetHash = await client.writeContract({ 
@@ -637,6 +648,7 @@ export default function Home() {
         setIsProcessing(false); 
     }
   };
+
 
   useEffect(() => {
     const fallbackTimer = setTimeout(() => setIsInitiallyLoading(false), 2000);
