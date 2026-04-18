@@ -3,6 +3,10 @@ import { getHeaders } from '@/lib/vtpass';
 import { sendAbaPaySms } from '@/lib/messaging';
 import { sendTelegramAlert } from '@/lib/telegram'; 
 import { supabaseAdmin as supabase } from '@/utils/supabase'; 
+import { Resend } from 'resend'; // ⚡ ADDED RESEND IMPORT
+
+// ⚡ INITIALIZE RESEND (Make sure RESEND_API_KEY is in your Vercel Environment Variables)
+const resend = new Resend(process.env.RESEND_API_KEY);
 
 const error_messages: Record<string, string> = {
     "011": "Invalid arguments. Please check your phone/meter number and try again.",
@@ -90,7 +94,6 @@ export async function POST(req: Request) {
       meter_account_type: meter_account_type || null 
     };
 
-    // ⚡ FIX: Changed from .insert to .upsert to prevent duplicate key crashes
     const { error: dbError } = await supabase.from('transactions').upsert(dbPayload, { onConflict: 'tx_hash' });
 
     if (dbError) {
@@ -250,8 +253,54 @@ export async function POST(req: Request) {
             units: vendedUnits 
         }).eq('tx_hash', txHash);
 
-        try { await sendAbaPaySms(vtpassPayload.phone, `Purchase Successful! Ref: ${alertTokenRef}. Amt: ₦${vendAmount}`); } catch (e) {}
-        try { await sendTelegramAlert(`✅ *SALE SUCCESSFUL*\n🛒 *Product:* ${network} ${serviceCategory}\n💰 *Naira:* ₦${vendAmount}\n🪙 *Asset:* ${amount} ${tokenSymbol || 'USD₮'}\n👤 *User:* ${billersCode || phone}\n⛽ *Fee:* ₦${serviceFee}\n🧾 *Ref:* ${alertTokenRef}`); } catch (e) {}
+        // ⚡ NON-BLOCKING NOTIFICATION SYSTEM (TELEGRAM + SMS + EMAIL) ⚡
+        const notifications = [];
+
+        // 1. Telegram
+        notifications.push(
+          sendTelegramAlert(`✅ *SALE SUCCESSFUL*\n🛒 *Product:* ${network} ${serviceCategory}\n💰 *Naira:* ₦${vendAmount}\n🪙 *Asset:* ${amount} ${tokenSymbol || 'USD₮'}\n👤 *User:* ${billersCode || phone}\n⛽ *Fee:* ₦${serviceFee}\n🧾 *Ref:* ${alertTokenRef}`)
+        );
+
+        // 2. SMS (Uses your existing AbaPay SMS lib)
+        notifications.push(
+          sendAbaPaySms(vtpassPayload.phone, `Purchase Successful! Ref: ${alertTokenRef}. Amt: ₦${vendAmount}`)
+        );
+
+        // 3. Email (If the user provided an email address)
+        if (email) {
+          const emailPromise = resend.emails.send({
+            from: 'AbaPay <receipts@abapays.com>', // Update this to your verified domain in Resend
+            to: email,
+            subject: `AbaPay Receipt - ${network} ${serviceCategory}`,
+            html: `
+                <div style="font-family: sans-serif; max-width: 600px; margin: 0 auto; padding: 20px; border: 1px solid #eaeaea; border-radius: 10px;">
+                    <h2 style="color: #333;">Transaction Successful ⚡</h2>
+                    <p>Thank you for using AbaPay! Here is your receipt for <strong>${network} ${serviceCategory}</strong>:</p>
+                    
+                    <div style="background-color: #f9f9f9; padding: 15px; border-radius: 8px; margin: 20px 0;">
+                        <p style="margin: 5px 0;"><strong>Amount Paid:</strong> ₦${vendAmount}</p>
+                        <p style="margin: 5px 0;"><strong>Crypto Charged:</strong> ${amount} ${tokenSymbol}</p>
+                        <p style="margin: 5px 0;"><strong>Account/Phone:</strong> ${billersCode || phone}</p>
+                    </div>
+                    
+                    ${dbPurchasedCode ? `
+                    <p style="margin-top: 20px; font-weight: bold;">Your PIN / Token is:</p>
+                    <div style="background-color: #e0f2fe; color: #0284c7; padding: 15px; text-align: center; font-size: 24px; letter-spacing: 2px; font-weight: bold; border-radius: 8px; margin: 10px 0;">
+                        ${dbPurchasedCode}
+                    </div>
+                    ` : `
+                    <p style="margin-top: 20px;"><strong>Reference ID:</strong> ${alertTokenRef}</p>
+                    `}
+                    
+                    <p style="color: #555; font-size: 14px; margin-top: 30px;">You can always view your full transaction history inside the AbaPay app.</p>
+                </div>
+            `
+          });
+          notifications.push(emailPromise);
+        }
+
+        // Fire all notifications simultaneously without crashing if one fails
+        Promise.allSettled(notifications).catch(err => console.error("Notification Error:", err));
 
         return NextResponse.json({
           success: true,
