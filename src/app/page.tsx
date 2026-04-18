@@ -29,6 +29,7 @@ export default function Home() {
   const [nairaAmount, setNairaAmount] = useState(""); 
   const [accountNumber, setAccountNumber] = useState("");
   const [customerPhone, setCustomerPhone] = useState("");
+  const [customerEmail, setCustomerEmail] = useState(""); // ⚡ ADDED EMAIL STATE
   const [status, setStatus] = useState("");
 
   const [activeTab, setActiveTab] = useState<"pay" | "bank" | "education" | "history">("pay");
@@ -254,7 +255,7 @@ export default function Home() {
   };
 
   const handleProviderChange = (newProvider: string, type: 'internet' | 'telecom' | 'cable' | 'elec' | 'bank' | 'education') => {
-    setNairaAmount(""); setAccountNumber(""); setCustomerName(null); setCustomerPhone(""); setMeterAddress(null); setDynamicElecMin(1000); setMeterAccountType(null);
+    setNairaAmount(""); setAccountNumber(""); setCustomerName(null); setCustomerPhone(""); setCustomerEmail(""); setMeterAddress(null); setDynamicElecMin(1000); setMeterAccountType(null);
     if (type === 'internet') { 
         setInternetVariations([]); 
         setInternetProvider(newProvider); 
@@ -269,7 +270,7 @@ export default function Home() {
   };
 
   const handleResetService = (s: any) => {
-    setActiveService(s); setAccountNumber(""); setCustomerName(null); setNairaAmount(""); setCustomerPhone(""); 
+    setActiveService(s); setAccountNumber(""); setCustomerName(null); setNairaAmount(""); setCustomerPhone(""); setCustomerEmail(""); 
     setCableCurrentBouquet(null); setCableRenewAmount(null); setSelectedCablePlan(null);
     setCableSubscriptionType("renew"); setSelectedBank(null); setSelectedInternetPlan(null); setInternetAccountId(null);
     setSelectedEducationPlan(null); setInternetVariations([]); setMeterAddress(null); setDynamicElecMin(1000); setMeterAccountType(null);
@@ -278,6 +279,7 @@ export default function Home() {
   const handleTabSwitch = (tab: "pay" | "bank" | "education" | "history") => {
     setActiveTab(tab);
     setCustomerPhone("");
+    setCustomerEmail("");
     handleResetService(SERVICES[0]);
   };
 
@@ -446,7 +448,7 @@ export default function Home() {
     });
   };
 
-            // ⚡ EXECUTING THE BLOCKCHAIN PAYMENT AFTER CONFIRMATION ⚡
+  // ⚡ EXECUTING THE BLOCKCHAIN PAYMENT AFTER CONFIRMATION ⚡
   const processBlockchainPayment = async () => {
     if (!address || !client) return setStatus("Connect Wallet First");
     if (parseFloat(cryptoToCharge) > parseFloat(walletBalance)) return setStatus(`Insufficient ${selectedToken.symbol} Balance.`);
@@ -486,7 +488,7 @@ export default function Home() {
 
       const valueInWei = parseUnits(cryptoToCharge, selectedToken.decimals);
       const tokenAddress = isMainnet ? selectedToken.mainnet : selectedToken.sepolia;
-      
+
       const publicClient = createPublicClient({ 
           chain: activeChain, 
           transport: http(undefined, { fetchOptions: { cache: 'no-store' } }),
@@ -495,7 +497,6 @@ export default function Home() {
 
       const isMiniPay = typeof window !== "undefined" && !!(window as any).ethereum?.isMiniPay;
 
-      // ⚡ NAKED PAYLOAD: No hardcoded gas. We let the wallet simulate it.
       const txConfig: any = {
           account: address as `0x${string}`
       };
@@ -505,7 +506,7 @@ export default function Home() {
       }
 
       setStatus("Verifying live blockchain permissions...");
-      
+
       const currentAllowance = await publicClient.readContract({
           address: tokenAddress as `0x${string}`,
           abi: ERC20_ABI,
@@ -531,7 +532,7 @@ export default function Home() {
           });
 
           setStatus("Mining approval on Celo... Please wait.");
-          
+
           const receiptPromise = publicClient.waitForTransactionReceipt({ hash: approvalHash, confirmations: 1 });
           const timeoutPromise = new Promise((_, reject) => setTimeout(() => reject(new Error("Approval timed out. Please try again.")), 60000));
           const receipt: any = await Promise.race([receiptPromise, timeoutPromise]);
@@ -572,8 +573,6 @@ export default function Home() {
         } else { vtpassServiceID = telecomProvider; displayNetwork = telecomProvider; }
       }
 
-      // ⚡ NONCE DESYNC FIX ⚡
-      // Fetch the absolute live transaction count from the blockchain to bypass MiniPay's broken cache
       const realNonce = await publicClient.getTransactionCount({ 
           address: address as `0x${string}`,
           blockTag: 'latest'
@@ -584,11 +583,12 @@ export default function Home() {
           abi: ABAPAY_ABI, 
           functionName: 'payBill', 
           args: [tokenAddress, vtpassServiceID, payloadBillersCode, valueInWei], 
-          nonce: realNonce, // Force MiniPay to use the correct math
+          nonce: realNonce, 
           ...txConfig
       });
       setStatus(`${selectedToken.symbol} Secured. Processing...`);
 
+      // ⚡ BACKEND PAYLOAD UPDATED WITH EMAIL
       const backendPayload = {
         serviceID: vtpassServiceID, 
         serviceCategory: uiCategory, 
@@ -600,6 +600,7 @@ export default function Home() {
         txHash: hash, 
         variation_code: finalVariationCode, 
         phone: customerPhone || accountNumber, 
+        email: customerEmail, // ⚡ PASSING EMAIL TO BACKEND
         wallet_address: address, 
         subscription_type: activeTab === "pay" && activeService.id === "CABLE" && ['dstv', 'gotv'].includes(cableProvider) ? cableSubscriptionType : undefined,
         meter_account_type: meterAccountType 
@@ -612,7 +613,7 @@ export default function Home() {
 
       saveBeneficiary(accountNumber, customerName);
 
-      setAccountNumber(""); setNairaAmount(""); setCustomerPhone(""); setCustomerName(null); setSelectedCablePlan(null); setCableCurrentBouquet(null); setSelectedBank(null); setSelectedInternetPlan(null); setInternetAccountId(null); setSelectedEducationPlan(null);
+      setAccountNumber(""); setNairaAmount(""); setCustomerPhone(""); setCustomerEmail(""); setCustomerName(null); setSelectedCablePlan(null); setCableCurrentBouquet(null); setSelectedBank(null); setSelectedInternetPlan(null); setInternetAccountId(null); setSelectedEducationPlan(null);
       setMeterAddress(null); setDynamicElecMin(1000); setMeterAccountType(null);
 
       if (result.success) {
@@ -643,7 +644,7 @@ export default function Home() {
         if (activeCooldownKey) {
             localStorage.removeItem(activeCooldownKey);
         }
-        
+
         const errorMsg = e.shortMessage || e.message || "Transaction Cancelled.";
 
         setStatus(`Error: ${errorMsg.slice(0, 40)}...`); 
@@ -651,7 +652,6 @@ export default function Home() {
         setIsProcessing(false); 
     }
   };
-
 
   useEffect(() => {
     const fallbackTimer = setTimeout(() => setIsInitiallyLoading(false), 2000);
@@ -1220,6 +1220,15 @@ export default function Home() {
                     />
                 </div>
 
+                <div className="animate-in fade-in mt-3">
+                     <input 
+                        type="email" placeholder="Email Address (Optional for Receipt)"
+                        className="w-full bg-slate-50 border border-slate-100 p-5 rounded-2xl font-bold text-slate-700 outline-none focus:border-emerald-500 transition-colors"
+                        value={customerEmail}
+                        onChange={(e) => setCustomerEmail(e.target.value)}
+                    />
+                </div>
+
                 {status && (
                     <div className={`p-5 rounded-2xl border flex items-center gap-4 animate-in fade-in shadow-sm ${status.includes('Success') || status.includes('Secured') || status.includes('Initiating') ? 'bg-emerald-50 border-emerald-100 text-emerald-800' : 'bg-blue-50 border-blue-100 text-blue-800'}`}>
                         {status.includes('Success') ? <CheckCircle2 size={24}/> : <Loader2 size={24} className="animate-spin"/>}
@@ -1411,7 +1420,17 @@ export default function Home() {
                         type="tel" placeholder="Sender's Phone (Receipt)"
                         maxLength={11}
                         className="w-full bg-slate-50 border border-slate-100 p-5 rounded-2xl font-bold text-slate-700 outline-none focus:border-emerald-500 transition-colors"
+                        value={customerPhone}
                         onChange={(e) => setCustomerPhone(e.target.value.replace(/[^0-9]/g, ''))}
+                    />
+                </div>
+
+                <div className="animate-in fade-in mt-3">
+                     <input 
+                        type="email" placeholder="Email Address (Optional for Receipt)"
+                        className="w-full bg-slate-50 border border-slate-100 p-5 rounded-2xl font-bold text-slate-700 outline-none focus:border-emerald-500 transition-colors"
+                        value={customerEmail}
+                        onChange={(e) => setCustomerEmail(e.target.value)}
                     />
                 </div>
 
@@ -1878,10 +1897,20 @@ export default function Home() {
                             type="tel" placeholder="SMS Phone Number"
                             maxLength={11}
                             className="w-full bg-slate-50 border border-slate-100 p-5 rounded-2xl font-bold text-slate-700 outline-none"
+                            value={customerPhone}
                             onChange={(e) => setCustomerPhone(e.target.value.replace(/[^0-9]/g, ''))}
                         />
                     </div>
                 )}
+
+                <div className="animate-in fade-in mt-3">
+                     <input 
+                        type="email" placeholder="Email Address (Optional for Receipt)"
+                        className="w-full bg-slate-50 border border-slate-100 p-5 rounded-2xl font-bold text-slate-700 outline-none focus:border-emerald-500 transition-colors"
+                        value={customerEmail}
+                        onChange={(e) => setCustomerEmail(e.target.value)}
+                    />
+                </div>
 
                 {status && (
                     <div className={`p-5 rounded-2xl border flex items-center gap-4 animate-in fade-in shadow-sm ${status.includes('Success') || status.includes('Secured') || status.includes('Initiating') ? 'bg-emerald-50 border-emerald-100 text-emerald-800' : status.includes('Processing') ? 'bg-orange-50 border-orange-100 text-orange-800' : 'bg-blue-50 border-blue-100 text-blue-800'}`}>
