@@ -53,7 +53,7 @@ export function ReceiptModal({ receipt, isMainnet, onClose, onSupport }: any) {
   const isElectricity = receipt.service?.toUpperCase() === 'ELECTRICITY' || receipt.service === 'Electricity';
   const isEducation = receipt.service === 'Education PIN' || receipt.service?.toUpperCase().includes('WAEC') || receipt.service?.toUpperCase().includes('JAMB');
 
-  // 📸 EXACT LOGIC FROM YOUR WORKING SNIPPET
+  // 📸 SHARE RECEIPT AS IMAGE (Using your exact dynamic import logic)
   const handleShareImage = async () => {
     setIsSharing(true);
     const receiptElement = document.getElementById('printable-receipt');
@@ -63,9 +63,29 @@ export function ReceiptModal({ receipt, isMainnet, onClose, onSupport }: any) {
         return;
     }
 
+    const fallbackText = `🧾 AbaPay Receipt\n\nService: ${receipt.network} ${receipt.service}\nAmount: ₦${receipt.amountNaira}\nStatus: ${receipt.status}\nAccount: ${receipt.account}\nRef: ${receipt.id}\n${hasPin ? `\nPIN/TOKEN: ${receipt.purchased_code}` : ''}\n\nSecured by Celo ⚡`;
+    const isMiniPay = typeof window !== "undefined" && !!(window as any).ethereum?.isMiniPay;
+
+    // MiniPay still rejects native files, so we keep the text bypass for Opera
+    if (isMiniPay) {
+      try {
+        if (navigator.share) await navigator.share({ title: 'AbaPay Receipt', text: fallbackText });
+        else { await navigator.clipboard.writeText(fallbackText); alert("Receipt details copied to clipboard!"); }
+      } catch (e) { console.log("Share canceled in MiniPay"); }
+      setIsSharing(false);
+      return; 
+    }
+
     try {
+      // ⚡ DYNAMIC IMPORT AS REQUESTED ⚡
       const html2canvas = (await import('html2canvas')).default;
-      const canvas = await html2canvas(receiptElement, { scale: 2, backgroundColor: '#ffffff' });
+      
+      const canvas = await html2canvas(receiptElement, { 
+          scale: 2, 
+          backgroundColor: '#ffffff',
+          useCORS: true // Keeps external images (like your logo) from breaking the canvas
+      });
+      
       const dataUrl = canvas.toDataURL('image/png');
       const blob = await (await fetch(dataUrl)).blob();
       const file = new File([blob], `AbaPay_Receipt_${receipt.id}.png`, { type: 'image/png' });
@@ -86,9 +106,7 @@ export function ReceiptModal({ receipt, isMainnet, onClose, onSupport }: any) {
     } catch (error) {
       console.error('Error generating image:', error);
       
-      // ⚡ TEXT FALLBACK (Runs if Opera Mini entirely rejects the file creation)
-      const fallbackText = `🧾 AbaPay Receipt\n\nService: ${receipt.network} ${receipt.service}\nAmount: ₦${receipt.amountNaira}\nStatus: ${receipt.status}\nAccount: ${receipt.account}\nRef: ${receipt.id}\n${hasPin ? `\nPIN/TOKEN: ${receipt.purchased_code}` : ''}\n\nSecured by Celo ⚡`;
-      
+      // ⚡ TEXT FALLBACK
       try {
         if (navigator.share) {
             await navigator.share({ title: 'AbaPay Receipt', text: fallbackText });
@@ -108,7 +126,7 @@ export function ReceiptModal({ receipt, isMainnet, onClose, onSupport }: any) {
     <div className="fixed inset-0 z-[60] bg-slate-900/80 backdrop-blur-md flex justify-center items-center p-6 animate-in fade-in" onClick={onClose}>
        <div className="bg-white w-full max-w-sm rounded-[2.5rem] overflow-hidden shadow-2xl animate-in zoom-in-95" onClick={(e) => e.stopPropagation()}>
 
-          {/* ⚡ THE CAPTURE AREA (Now uses the ID from your snippet) ⚡ */}
+          {/* ⚡ THE CAPTURE AREA ⚡ */}
           <div id="printable-receipt" className="bg-white">
             <div className="bg-emerald-600 p-8 text-white text-center relative">
                <button data-html2canvas-ignore="true" onClick={onClose} className="absolute top-4 right-4 bg-white/20 p-1.5 rounded-full hover:bg-white/30 transition-colors"><XCircle size={20}/></button>
