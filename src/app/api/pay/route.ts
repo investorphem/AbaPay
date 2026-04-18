@@ -3,10 +3,10 @@ import { getHeaders } from '@/lib/vtpass';
 import { sendAbaPaySms } from '@/lib/messaging';
 import { sendTelegramAlert } from '@/lib/telegram'; 
 import { supabaseAdmin as supabase } from '@/utils/supabase'; 
-import { Resend } from 'resend'; // ⚡ ADDED RESEND IMPORT
+import { Resend } from 'resend'; 
 
-// ⚡ INITIALIZE RESEND (Make sure RESEND_API_KEY is in your Vercel Environment Variables)
-const resend = new Resend(process.env.RESEND_API_KEY);
+// ⚡ BUILD FIX: Provide a dummy string so Next.js doesn't crash during deployment
+const resend = new Resend(process.env.RESEND_API_KEY || "re_dummy_key_for_build");
 
 const error_messages: Record<string, string> = {
     "011": "Invalid arguments. Please check your phone/meter number and try again.",
@@ -79,6 +79,7 @@ export async function POST(req: Request) {
     const vendAmount = requestedNaira; 
     const vtRequestId = getStrictRequestId();
 
+    // ⚡ DB PAYLOAD FIX: Added customer_email
     const dbPayload = {
       tx_hash: txHash,
       request_id: vtRequestId,
@@ -91,7 +92,8 @@ export async function POST(req: Request) {
       status: 'PROCESSING',
       wallet_address: wallet_address || "UNKNOWN",
       token_used: tokenSymbol,
-      meter_account_type: meter_account_type || null 
+      meter_account_type: meter_account_type || null,
+      customer_email: email || null 
     };
 
     const { error: dbError } = await supabase.from('transactions').upsert(dbPayload, { onConflict: 'tx_hash' });
@@ -299,8 +301,8 @@ export async function POST(req: Request) {
           notifications.push(emailPromise);
         }
 
-        // Fire all notifications simultaneously without crashing if one fails
-        Promise.allSettled(notifications).catch(err => console.error("Notification Error:", err));
+        // ⚡ SERVERLESS FIX: Added 'await' so Vercel waits for notifications to send before sleeping
+        await Promise.allSettled(notifications).catch(err => console.error("Notification Error:", err));
 
         return NextResponse.json({
           success: true,
