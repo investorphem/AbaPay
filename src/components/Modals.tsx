@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import React, { useRef } from "react";
 import { CheckCircle2, ExternalLink, Share2, HelpCircle, XCircle, Loader2 } from "lucide-react";
 import { SUPPORTED_COUNTRIES, SUPPORTED_TOKENS } from "@/constants";
 
@@ -45,45 +45,35 @@ export function PrivacyModal({ isOpen, onClose }: any) {
 }
 
 export function ReceiptModal({ receipt, isMainnet, onClose, onSupport }: any) {
-  const [isSharing, setIsSharing] = useState(false);
-
   if (!receipt) return null;
 
   const hasPin = receipt.status === 'SUCCESS' && receipt.purchased_code && receipt.purchased_code !== "Vended Successfully";
   const isElectricity = receipt.service?.toUpperCase() === 'ELECTRICITY' || receipt.service === 'Electricity';
   const isEducation = receipt.service === 'Education PIN' || receipt.service?.toUpperCase().includes('WAEC') || receipt.service?.toUpperCase().includes('JAMB');
 
-  // 📸 SHARE RECEIPT AS IMAGE (Using your exact dynamic import logic)
+  // 📸 EXACT LOGIC FROM YOUR WORKING SNIPPET
   const handleShareImage = async () => {
-    setIsSharing(true);
     const receiptElement = document.getElementById('printable-receipt');
-    
-    if (!receiptElement) {
-        setIsSharing(false);
-        return;
-    }
+    if (!receiptElement) return;
 
     const fallbackText = `🧾 AbaPay Receipt\n\nService: ${receipt.network} ${receipt.service}\nAmount: ₦${receipt.amountNaira}\nStatus: ${receipt.status}\nAccount: ${receipt.account}\nRef: ${receipt.id}\n${hasPin ? `\nPIN/TOKEN: ${receipt.purchased_code}` : ''}\n\nSecured by Celo ⚡`;
     const isMiniPay = typeof window !== "undefined" && !!(window as any).ethereum?.isMiniPay;
 
-    // MiniPay still rejects native files, so we keep the text bypass for Opera
     if (isMiniPay) {
       try {
         if (navigator.share) await navigator.share({ title: 'AbaPay Receipt', text: fallbackText });
         else { await navigator.clipboard.writeText(fallbackText); alert("Receipt details copied to clipboard!"); }
       } catch (e) { console.log("Share canceled in MiniPay"); }
-      setIsSharing(false);
       return; 
     }
 
     try {
-      // ⚡ DYNAMIC IMPORT AS REQUESTED ⚡
       const html2canvas = (await import('html2canvas')).default;
       
+      // ⚡ REMOVED useCORS: true to perfectly match your working snippet and prevent crashes
       const canvas = await html2canvas(receiptElement, { 
           scale: 2, 
-          backgroundColor: '#ffffff',
-          useCORS: true // Keeps external images (like your logo) from breaking the canvas
+          backgroundColor: '#ffffff'
       });
       
       const dataUrl = canvas.toDataURL('image/png');
@@ -117,8 +107,6 @@ export function ReceiptModal({ receipt, isMainnet, onClose, onSupport }: any) {
       } catch (fallbackErr) {
          console.log("Fallback failed.");
       }
-    } finally {
-      setIsSharing(false);
     }
   };
 
@@ -203,11 +191,9 @@ export function ReceiptModal({ receipt, isMainnet, onClose, onSupport }: any) {
              <div className="flex gap-2">
                 <button 
                   onClick={handleShareImage} 
-                  disabled={isSharing}
-                  className="flex-1 py-4 bg-slate-900 hover:bg-slate-800 disabled:bg-slate-700 text-white rounded-2xl text-xs font-black uppercase tracking-widest flex items-center justify-center gap-2 transition-colors active:scale-95 shadow-xl shadow-slate-900/20"
+                  className="flex-1 py-4 bg-slate-900 hover:bg-slate-800 text-white rounded-2xl text-xs font-black uppercase tracking-widest flex items-center justify-center gap-2 transition-colors active:scale-95 shadow-xl shadow-slate-900/20"
                 >
-                  {isSharing ? <Loader2 size={16} className="animate-spin"/> : <Share2 size={16}/>} 
-                  {isSharing ? 'PREPARING...' : 'SHARE'}
+                  <Share2 size={16}/> SHARE
                 </button>
                 {receipt.status !== 'SUCCESS' && receipt.status !== 'REFUNDED' && (
                    <button onClick={onSupport} className="flex-1 py-4 bg-orange-100 hover:bg-orange-200 text-orange-700 rounded-2xl text-xs font-black uppercase tracking-widest flex items-center justify-center gap-2 transition-colors active:scale-95"><HelpCircle size={16}/> Support</button>
