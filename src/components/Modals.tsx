@@ -1,4 +1,4 @@
-import React, { useRef } from "react";
+import React, { useRef, useState, useEffect } from "react";
 import html2canvas from "html2canvas";
 import { CheckCircle2, ExternalLink, Share2, HelpCircle, XCircle, Loader2 } from "lucide-react";
 import { SUPPORTED_COUNTRIES, SUPPORTED_TOKENS } from "@/constants";
@@ -47,83 +47,97 @@ export function PrivacyModal({ isOpen, onClose }: any) {
 
 export function ReceiptModal({ receipt, isMainnet, onClose, onSupport }: any) {
   const receiptRef = useRef<HTMLDivElement>(null);
+  const [readyFile, setReadyFile] = useState<File | null>(null);
+  const [isGenerating, setIsGenerating] = useState(true);
+
+  // ⚡ BACKGROUND IMAGE GENERATOR ⚡
+  useEffect(() => {
+    if (!receipt || !receiptRef.current) return;
+
+    const generateImage = async () => {
+      try {
+        const canvas = await html2canvas(receiptRef.current!, { 
+            backgroundColor: '#ffffff', 
+            scale: 2, 
+            useCORS: true,
+            logging: false
+        });
+
+        canvas.toBlob((blob) => {
+          if (blob) {
+            const file = new File([blob], `AbaPay_Receipt_${receipt.id}.png`, { type: 'image/png' });
+            setReadyFile(file);
+          }
+          setIsGenerating(false);
+        }, 'image/png');
+      } catch (e) {
+        setIsGenerating(false);
+      }
+    };
+
+    const timer = setTimeout(generateImage, 500);
+    return () => clearTimeout(timer);
+  }, [receipt]);
 
   if (!receipt) return null;
 
-  // ⚡ DYNAMIC PIN DETECTION ⚡
   const hasPin = receipt.status === 'SUCCESS' && receipt.purchased_code && receipt.purchased_code !== "Vended Successfully";
   const isElectricity = receipt.service?.toUpperCase() === 'ELECTRICITY' || receipt.service === 'Electricity';
   const isEducation = receipt.service === 'Education PIN' || receipt.service?.toUpperCase().includes('WAEC') || receipt.service?.toUpperCase().includes('JAMB');
 
-  const handleShareImage = async () => {
+  const handleShare = async () => {
     const fallbackText = `🧾 AbaPay Receipt\n\nService: ${receipt.network} ${receipt.service}\nAmount: ₦${receipt.amountNaira}\nStatus: ${receipt.status}\nAccount: ${receipt.account}\nRef: ${receipt.id}\n${hasPin ? `\nPIN/TOKEN: ${receipt.purchased_code}` : ''}\n\nSecured by Celo ⚡`;
 
-    if (!receiptRef.current) return;
-    
-    try {
-      // ⚡ FIX 1: Lowered scale to 1 to prevent MiniPay memory crashes
-      const canvas = await html2canvas(receiptRef.current, { 
-          backgroundColor: '#ffffff', 
-          scale: 1, 
-          useCORS: true,
-          logging: false
-      });
+    const isMiniPay = typeof window !== "undefined" && !!(window as any).ethereum?.isMiniPay;
 
-      canvas.toBlob(async (blob) => {
-        if (!blob) throw new Error("Blob failed");
-        const file = new File([blob], `AbaPay_Receipt_${receipt.id}.png`, { type: 'image/png' });
+    // ⚡ MINIPAY TEXT BYPASS
+    if (isMiniPay) {
+      try {
+        if (navigator.share) await navigator.share({ title: 'AbaPay Receipt', text: fallbackText });
+        else { await navigator.clipboard.writeText(fallbackText); alert("Receipt details copied to clipboard!"); }
+      } catch (e) { console.log("Share canceled"); }
+      return; 
+    }
 
-        if (navigator.canShare && navigator.canShare({ files: [file] })) {
-          try {
-            await navigator.share({
-              files: [file],
-              title: 'AbaPay Receipt',
-              text: 'Here is my AbaPay transaction receipt!',
-            });
-            return; 
-          } catch (err) { console.log("Share canceled"); return; }
-        }
-
-        // Fallback for Opera / MiniPay saving to gallery
+    // ⚡ INSTANT NATIVE IMAGE SHARE 
+    if (readyFile && navigator.canShare && navigator.canShare({ files: [readyFile] })) {
         try {
-            const imageUrl = URL.createObjectURL(blob);
+            await navigator.share({
+                files: [readyFile],
+                title: 'AbaPay Receipt',
+                text: 'Here is my AbaPay transaction receipt!',
+            });
+            return;
+        } catch (err: any) {
+            if (err.name === 'AbortError') return; 
+        }
+    }
+
+    // ⚡ FALLBACKS
+    try {
+        if (readyFile) {
+            const imageUrl = URL.createObjectURL(readyFile);
             const link = document.createElement('a');
             link.href = imageUrl;
-            link.download = `AbaPay_Receipt_${receipt.id}.png`;
+            link.download = readyFile.name;
             document.body.appendChild(link);
             link.click();
             document.body.removeChild(link);
             URL.revokeObjectURL(imageUrl);
-            alert("Receipt saved to your gallery!");
-        } catch (downloadErr) {
-            // If gallery save fails, share text
-            if (navigator.share) await navigator.share({ title: 'Receipt', text: fallbackText });
-        }
-
-      }, 'image/png');
-
-    } catch (error) {
-      console.error("Canvas Error:", error);
-      
-      // ⚡ FIX 2: THE ULTIMATE FALLBACK - If image fails entirely, share the text instantly
-      try {
-        if (navigator.share) {
+            alert("Receipt saved to your device!");
+        } else if (navigator.share) {
             await navigator.share({ title: 'AbaPay Receipt', text: fallbackText });
         } else {
             await navigator.clipboard.writeText(fallbackText);
             alert("Receipt details copied to clipboard!");
         }
-      } catch (fallbackErr) {
-         console.log("Everything failed.");
-      }
-    }
+    } catch (e) { console.log("Fallback failed"); }
   };
 
   return (
     <div className="fixed inset-0 z-[60] bg-slate-900/80 backdrop-blur-md flex justify-center items-center p-6 animate-in fade-in" onClick={onClose}>
        <div className="bg-white w-full max-w-sm rounded-[2.5rem] overflow-hidden shadow-2xl animate-in zoom-in-95" onClick={(e) => e.stopPropagation()}>
-          
-          {/* ⚡ THE CAPTURE AREA ⚡ */}
+
           <div ref={receiptRef} className="bg-white">
             <div className="bg-emerald-600 p-8 text-white text-center relative">
                <button data-html2canvas-ignore="true" onClick={onClose} className="absolute top-4 right-4 bg-white/20 p-1.5 rounded-full hover:bg-white/30 transition-colors"><XCircle size={20}/></button>
@@ -131,7 +145,7 @@ export function ReceiptModal({ receipt, isMainnet, onClose, onSupport }: any) {
                <h2 className="text-xl font-black tracking-tight">Payment Receipt</h2>
                <p className="text-emerald-100 text-xs font-bold uppercase tracking-widest mt-1">AbaPay Secured</p>
             </div>
-            
+
             <div className="p-8 space-y-4">
                <div className="flex justify-between border-b border-slate-100 pb-3">
                   <span className="text-slate-400 text-[10px] font-bold uppercase tracking-wider">Status</span>
@@ -171,7 +185,6 @@ export function ReceiptModal({ receipt, isMainnet, onClose, onSupport }: any) {
                   </div>
                </div>
 
-               {/* ⚡ EDU & ELEC PIN RENDERER ⚡ */}
                {hasPin && (
                  <div className="mt-4 bg-emerald-50 border-2 border-emerald-200 rounded-xl p-4 text-center">
                     <p className="text-[10px] font-black text-emerald-700 uppercase tracking-widest mb-1">{isElectricity ? 'Meter Token PIN' : 'Purchased Education PIN'}</p>
@@ -193,12 +206,18 @@ export function ReceiptModal({ receipt, isMainnet, onClose, onSupport }: any) {
                </div>
             </div>
           </div>
-          
-          {/* ⚡ BUTTONS (Excluded from Image Capture) ⚡ */}
+
           <div className="px-8 pb-8 space-y-3">
              <button onClick={() => window.open(`https://${isMainnet?'':'sepolia.'}celoscan.io/tx/${receipt.txHash}`)} className="w-full py-3 bg-slate-50 hover:bg-slate-100 rounded-xl text-[10px] font-black uppercase tracking-widest text-slate-500 flex items-center justify-center gap-2 transition-colors">Verify on Celoscan <ExternalLink size={12}/></button>
              <div className="flex gap-2">
-                <button onClick={handleShareImage} className="flex-1 py-4 bg-slate-900 hover:bg-slate-800 text-white rounded-2xl text-xs font-black uppercase tracking-widest flex items-center justify-center gap-2 transition-colors active:scale-95 shadow-xl shadow-slate-900/20"><Share2 size={16}/> Share</button>
+                <button 
+                  onClick={handleShare} 
+                  disabled={isGenerating}
+                  className="flex-1 py-4 bg-slate-900 hover:bg-slate-800 disabled:bg-slate-700 disabled:cursor-not-allowed text-white rounded-2xl text-xs font-black uppercase tracking-widest flex items-center justify-center gap-2 transition-all active:scale-95 shadow-xl shadow-slate-900/20"
+                >
+                  {isGenerating ? <Loader2 size={16} className="animate-spin" /> : <Share2 size={16}/>} 
+                  {isGenerating ? 'PREPARING...' : 'SHARE'}
+                </button>
                 {receipt.status !== 'SUCCESS' && receipt.status !== 'REFUNDED' && (
                    <button onClick={onSupport} className="flex-1 py-4 bg-orange-100 hover:bg-orange-200 text-orange-700 rounded-2xl text-xs font-black uppercase tracking-widest flex items-center justify-center gap-2 transition-colors active:scale-95"><HelpCircle size={16}/> Support</button>
                 )}
