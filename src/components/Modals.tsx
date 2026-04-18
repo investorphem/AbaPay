@@ -1,5 +1,4 @@
-import React, { useRef, useState } from "react";
-import html2canvas from "html2canvas";
+import React, { useState } from "react";
 import { CheckCircle2, ExternalLink, Share2, HelpCircle, XCircle, Loader2 } from "lucide-react";
 import { SUPPORTED_COUNTRIES, SUPPORTED_TOKENS } from "@/constants";
 
@@ -46,7 +45,6 @@ export function PrivacyModal({ isOpen, onClose }: any) {
 }
 
 export function ReceiptModal({ receipt, isMainnet, onClose, onSupport }: any) {
-  const receiptRef = useRef<HTMLDivElement>(null);
   const [isSharing, setIsSharing] = useState(false);
 
   if (!receipt) return null;
@@ -55,31 +53,19 @@ export function ReceiptModal({ receipt, isMainnet, onClose, onSupport }: any) {
   const isElectricity = receipt.service?.toUpperCase() === 'ELECTRICITY' || receipt.service === 'Electricity';
   const isEducation = receipt.service === 'Education PIN' || receipt.service?.toUpperCase().includes('WAEC') || receipt.service?.toUpperCase().includes('JAMB');
 
+  // 📸 EXACT LOGIC FROM YOUR WORKING SNIPPET
   const handleShareImage = async () => {
-    const fallbackText = `🧾 AbaPay Receipt\n\nService: ${receipt.network} ${receipt.service}\nAmount: ₦${receipt.amountNaira}\nStatus: ${receipt.status}\nAccount: ${receipt.account}\nRef: ${receipt.id}\n${hasPin ? `\nPIN/TOKEN: ${receipt.purchased_code}` : ''}\n\nSecured by Celo ⚡`;
-
-    const isMiniPay = typeof window !== "undefined" && !!(window as any).ethereum?.isMiniPay;
-
-    // ⚡ MINIPAY FALLBACK (Opera still rejects files natively)
-    if (isMiniPay) {
-      try {
-        if (navigator.share) await navigator.share({ title: 'AbaPay Receipt', text: fallbackText });
-        else { await navigator.clipboard.writeText(fallbackText); alert("Receipt details copied to clipboard!"); }
-      } catch (e) { console.log("Share canceled in MiniPay"); }
-      return; 
+    setIsSharing(true);
+    const receiptElement = document.getElementById('printable-receipt');
+    
+    if (!receiptElement) {
+        setIsSharing(false);
+        return;
     }
 
-    if (!receiptRef.current) return;
-    setIsSharing(true);
-
     try {
-      // ⚡ EXACT LOGIC FROM YOUR WORKING CODE ⚡
-      const canvas = await html2canvas(receiptRef.current, { 
-          scale: 2, 
-          backgroundColor: '#ffffff', 
-          useCORS: true 
-      });
-      
+      const html2canvas = (await import('html2canvas')).default;
+      const canvas = await html2canvas(receiptElement, { scale: 2, backgroundColor: '#ffffff' });
       const dataUrl = canvas.toDataURL('image/png');
       const blob = await (await fetch(dataUrl)).blob();
       const file = new File([blob], `AbaPay_Receipt_${receipt.id}.png`, { type: 'image/png' });
@@ -98,8 +84,11 @@ export function ReceiptModal({ receipt, isMainnet, onClose, onSupport }: any) {
         alert('Receipt downloaded successfully!');
       }
     } catch (error) {
-      console.error("Canvas Error:", error);
-      // Final Fallback
+      console.error('Error generating image:', error);
+      
+      // ⚡ TEXT FALLBACK (Runs if Opera Mini entirely rejects the file creation)
+      const fallbackText = `🧾 AbaPay Receipt\n\nService: ${receipt.network} ${receipt.service}\nAmount: ₦${receipt.amountNaira}\nStatus: ${receipt.status}\nAccount: ${receipt.account}\nRef: ${receipt.id}\n${hasPin ? `\nPIN/TOKEN: ${receipt.purchased_code}` : ''}\n\nSecured by Celo ⚡`;
+      
       try {
         if (navigator.share) {
             await navigator.share({ title: 'AbaPay Receipt', text: fallbackText });
@@ -108,7 +97,7 @@ export function ReceiptModal({ receipt, isMainnet, onClose, onSupport }: any) {
             alert("Receipt details copied to clipboard!");
         }
       } catch (fallbackErr) {
-         console.log("Everything failed.");
+         console.log("Fallback failed.");
       }
     } finally {
       setIsSharing(false);
@@ -119,8 +108,8 @@ export function ReceiptModal({ receipt, isMainnet, onClose, onSupport }: any) {
     <div className="fixed inset-0 z-[60] bg-slate-900/80 backdrop-blur-md flex justify-center items-center p-6 animate-in fade-in" onClick={onClose}>
        <div className="bg-white w-full max-w-sm rounded-[2.5rem] overflow-hidden shadow-2xl animate-in zoom-in-95" onClick={(e) => e.stopPropagation()}>
 
-          {/* ⚡ THE CAPTURE AREA ⚡ */}
-          <div ref={receiptRef} className="bg-white">
+          {/* ⚡ THE CAPTURE AREA (Now uses the ID from your snippet) ⚡ */}
+          <div id="printable-receipt" className="bg-white">
             <div className="bg-emerald-600 p-8 text-white text-center relative">
                <button data-html2canvas-ignore="true" onClick={onClose} className="absolute top-4 right-4 bg-white/20 p-1.5 rounded-full hover:bg-white/30 transition-colors"><XCircle size={20}/></button>
                <CheckCircle2 size={48} className="mx-auto mb-3 opacity-90" />
@@ -195,12 +184,12 @@ export function ReceiptModal({ receipt, isMainnet, onClose, onSupport }: any) {
              <button onClick={() => window.open(`https://${isMainnet?'':'sepolia.'}celoscan.io/tx/${receipt.txHash}`)} className="w-full py-3 bg-slate-50 hover:bg-slate-100 rounded-xl text-[10px] font-black uppercase tracking-widest text-slate-500 flex items-center justify-center gap-2 transition-colors">Verify on Celoscan <ExternalLink size={12}/></button>
              <div className="flex gap-2">
                 <button 
-                   onClick={handleShareImage} 
-                   disabled={isSharing}
-                   className="flex-1 py-4 bg-slate-900 hover:bg-slate-800 disabled:bg-slate-700 text-white rounded-2xl text-xs font-black uppercase tracking-widest flex items-center justify-center gap-2 transition-colors active:scale-95 shadow-xl shadow-slate-900/20"
+                  onClick={handleShareImage} 
+                  disabled={isSharing}
+                  className="flex-1 py-4 bg-slate-900 hover:bg-slate-800 disabled:bg-slate-700 text-white rounded-2xl text-xs font-black uppercase tracking-widest flex items-center justify-center gap-2 transition-colors active:scale-95 shadow-xl shadow-slate-900/20"
                 >
-                   {isSharing ? <Loader2 size={16} className="animate-spin"/> : <Share2 size={16}/>} 
-                   {isSharing ? 'PREPARING...' : 'SHARE'}
+                  {isSharing ? <Loader2 size={16} className="animate-spin"/> : <Share2 size={16}/>} 
+                  {isSharing ? 'PREPARING...' : 'SHARE'}
                 </button>
                 {receipt.status !== 'SUCCESS' && receipt.status !== 'REFUNDED' && (
                    <button onClick={onSupport} className="flex-1 py-4 bg-orange-100 hover:bg-orange-200 text-orange-700 rounded-2xl text-xs font-black uppercase tracking-widest flex items-center justify-center gap-2 transition-colors active:scale-95"><HelpCircle size={16}/> Support</button>
@@ -212,7 +201,6 @@ export function ReceiptModal({ receipt, isMainnet, onClose, onSupport }: any) {
     </div>
   );
 }
-
 
 export function SelectionModal({
   isOpen, onClose, title, type, options, onSelect, isFetchingBanks, selectedValue, onRetryBanks
