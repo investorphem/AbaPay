@@ -56,17 +56,21 @@ export function ReceiptModal({ receipt, isMainnet, onClose, onSupport }: any) {
   const isEducation = receipt.service === 'Education PIN' || receipt.service?.toUpperCase().includes('WAEC') || receipt.service?.toUpperCase().includes('JAMB');
 
   const handleShareImage = async () => {
+    const fallbackText = `🧾 AbaPay Receipt\n\nService: ${receipt.network} ${receipt.service}\nAmount: ₦${receipt.amountNaira}\nStatus: ${receipt.status}\nAccount: ${receipt.account}\nRef: ${receipt.id}\n${hasPin ? `\nPIN/TOKEN: ${receipt.purchased_code}` : ''}\n\nSecured by Celo ⚡`;
+
     if (!receiptRef.current) return;
     
     try {
+      // ⚡ FIX 1: Lowered scale to 1 to prevent MiniPay memory crashes
       const canvas = await html2canvas(receiptRef.current, { 
           backgroundColor: '#ffffff', 
-          scale: 2, 
-          useCORS: true 
+          scale: 1, 
+          useCORS: true,
+          logging: false
       });
 
       canvas.toBlob(async (blob) => {
-        if (!blob) return;
+        if (!blob) throw new Error("Blob failed");
         const file = new File([blob], `AbaPay_Receipt_${receipt.id}.png`, { type: 'image/png' });
 
         if (navigator.canShare && navigator.canShare({ files: [file] })) {
@@ -74,26 +78,44 @@ export function ReceiptModal({ receipt, isMainnet, onClose, onSupport }: any) {
             await navigator.share({
               files: [file],
               title: 'AbaPay Receipt',
-              text: `Transaction Receipt from AbaPay. Ref: ${receipt.id}`,
+              text: 'Here is my AbaPay transaction receipt!',
             });
             return; 
-          } catch (err) { console.log("Share canceled"); }
+          } catch (err) { console.log("Share canceled"); return; }
         }
 
-        // Fallback for MiniPay / Opera
-        const imageUrl = URL.createObjectURL(blob);
-        const link = document.createElement('a');
-        link.href = imageUrl;
-        link.download = `AbaPay_Receipt_${receipt.id}.png`;
-        document.body.appendChild(link);
-        link.click();
-        document.body.removeChild(link);
-        URL.revokeObjectURL(imageUrl);
-        alert("Receipt saved to your gallery!");
+        // Fallback for Opera / MiniPay saving to gallery
+        try {
+            const imageUrl = URL.createObjectURL(blob);
+            const link = document.createElement('a');
+            link.href = imageUrl;
+            link.download = `AbaPay_Receipt_${receipt.id}.png`;
+            document.body.appendChild(link);
+            link.click();
+            document.body.removeChild(link);
+            URL.revokeObjectURL(imageUrl);
+            alert("Receipt saved to your gallery!");
+        } catch (downloadErr) {
+            // If gallery save fails, share text
+            if (navigator.share) await navigator.share({ title: 'Receipt', text: fallbackText });
+        }
+
       }, 'image/png');
 
     } catch (error) {
-      alert("Failed to generate image.");
+      console.error("Canvas Error:", error);
+      
+      // ⚡ FIX 2: THE ULTIMATE FALLBACK - If image fails entirely, share the text instantly
+      try {
+        if (navigator.share) {
+            await navigator.share({ title: 'AbaPay Receipt', text: fallbackText });
+        } else {
+            await navigator.clipboard.writeText(fallbackText);
+            alert("Receipt details copied to clipboard!");
+        }
+      } catch (fallbackErr) {
+         console.log("Everything failed.");
+      }
     }
   };
 
@@ -187,6 +209,7 @@ export function ReceiptModal({ receipt, isMainnet, onClose, onSupport }: any) {
     </div>
   );
 }
+
 
 export function SelectionModal({
   isOpen, onClose, title, type, options, onSelect, isFetchingBanks, selectedValue, onRetryBanks
