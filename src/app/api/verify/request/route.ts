@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
-import { supabase } from '@/lib/supabase'; // Adjust based on your setup
+import { supabaseAdmin as supabase } from '@/utils/supabase'; // ⚡ FIXED IMPORT
 import { sendWhatsAppOTP } from '@/lib/whatsapp';
+
 
 export async function POST(req: Request) {
     try {
