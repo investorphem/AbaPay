@@ -617,7 +617,7 @@ export default function Home() {
       setAccountNumber(""); setNairaAmount(""); setCustomerPhone(""); setCustomerEmail(""); setCustomerName(null); setSelectedCablePlan(null); setCableCurrentBouquet(null); setSelectedBank(null); setSelectedInternetPlan(null); setInternetAccountId(null); setSelectedEducationPlan(null);
       setMeterAddress(null); setDynamicElecMin(1000); setMeterAccountType(null);
 
-      if (result.success) {
+            if (result.success) {
         if (result.message && result.message.toLowerCase().includes("processing")) {
            setStatus("Transaction Processing...");
            newTx.status = "PENDING";
@@ -625,13 +625,21 @@ export default function Home() {
         } else {
            setStatus("Success! Token/Ref Dispatched."); 
            newTx.status = "SUCCESS"; 
-           showToast("Transaction Successful", "Your transaction has been successfully processed.", "success");
+           
+           // ⚡ THE NEW TOAST WITH CUSTOM EVENT TRIGGER ⚡
+           if (result.earnedPoints && result.earnedPoints > 0) {
+               window.dispatchEvent(new CustomEvent('abapoints-awarded', { detail: result.earnedPoints }));
+               showToast("Transaction Successful", `Payment confirmed! You earned +${result.earnedPoints.toFixed(2).replace(/\.00$/, '')} AbaPoints ✨`, "success");
+           } else {
+               showToast("Transaction Successful", "Your transaction has been successfully processed.", "success");
+           }
         }
         newTx.purchased_code = result.purchased_code; newTx.units = result.units; newTx.request_id = result.data?.requestId;
       } else {
         setStatus(`Error: ${result.message || 'Transaction Failed'}`); newTx.status = "FAILED_VENDING";
         if (activeCooldownKey) localStorage.removeItem(activeCooldownKey);
       }
+
 
       const updatedHistory = [newTx, ...transactions];
       setTransactions(updatedHistory); 
