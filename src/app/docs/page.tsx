@@ -4,14 +4,15 @@ import { useState } from "react";
 import Link from "next/link";
 import { 
   ArrowLeft, ShieldCheck, Zap, Globe, 
-  Lock, Wallet, RefreshCw, ChevronDown, BookOpen
+  Lock, Wallet, RefreshCw, ChevronDown, BookOpen,
+  Star, Gift, Smartphone, Share2, HelpCircle
 } from "lucide-react";
 
 export default function DocsPage() {
   return (
     <main className="min-h-screen bg-slate-50 text-slate-900 font-sans p-4 flex flex-col items-center pb-20">
       <div className="w-full max-w-2xl">
-        
+
         {/* HEADER */}
         <div className="flex items-center justify-between bg-white p-4 rounded-3xl shadow-sm border border-slate-100 mb-6 sticky top-4 z-10">
           <Link href="/" className="flex items-center gap-2 text-slate-500 hover:text-emerald-600 transition-colors bg-slate-50 p-2 rounded-xl">
@@ -25,7 +26,7 @@ export default function DocsPage() {
         </div>
 
         <div className="space-y-6">
-          
+
           {/* THE VISION */}
           <section className="bg-white border border-slate-100 rounded-[2.5rem] p-8 shadow-sm animate-in fade-in zoom-in-95">
             <div className="bg-emerald-50 w-14 h-14 rounded-2xl flex items-center justify-center mb-6 border border-emerald-100">
@@ -59,26 +60,109 @@ export default function DocsPage() {
             </div>
           </section>
 
+          {/* ABAPOINTS & REWARDS */}
+          <section className="bg-white border border-slate-100 rounded-[2.5rem] p-8 shadow-sm animate-in fade-in slide-in-from-bottom-4">
+            <h2 className="text-xl font-black mb-6 tracking-tight flex items-center gap-2">
+              <Star className="text-purple-500" size={20} /> AbaPoints & Rewards
+            </h2>
+            <p className="text-slate-600 font-medium mb-6 leading-relaxed">
+              AbaPoints (⚡) are our way of rewarding loyal users. You can see your live AbaPoints balance glowing in the top right corner of the app next to your region selector.
+            </p>
+
+            <div className="bg-purple-50 border border-purple-100 p-6 rounded-3xl mb-6">
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-4">
+                <h3 className="text-sm font-black text-purple-900 uppercase tracking-widest">Earning Ratio</h3>
+                <p className="text-2xl font-black text-emerald-600 bg-white px-4 py-2 rounded-2xl shadow-sm border border-purple-100">₦1,000 = <span className="text-purple-600">1.00 Point</span></p>
+              </div>
+              <p className="text-sm text-purple-800 font-medium">Points are calculated automatically based on your total transaction volume. Spend ₦500? You earn 0.50 points instantly!</p>
+            </div>
+
+            <div className="bg-slate-50 border border-slate-100 p-5 rounded-2xl flex items-start gap-4">
+              <Gift className="text-purple-500 shrink-0 mt-0.5" size={20} />
+              <div>
+                 <h4 className="text-sm font-black text-slate-900">Future Utility Plans</h4>
+                 <p className="text-sm text-slate-600 mt-1 leading-relaxed font-medium">
+                   Keep stacking your points! In future updates, you will be able to redeem AbaPoints for free Airtime/Data, use them to cover transaction fees, or qualify for exclusive ecosystem airdrops.
+                 </p>
+              </div>
+            </div>
+          </section>
+
+          {/* MANAGING BENEFICIARIES */}
+          <section className="bg-white border border-slate-100 rounded-[2.5rem] p-8 shadow-sm animate-in fade-in slide-in-from-bottom-4">
+             <h2 className="text-xl font-black mb-6 tracking-tight flex items-center gap-2">
+              <Smartphone className="text-blue-500" size={20} /> Saved Beneficiaries (Recents)
+            </h2>
+            <p className="text-slate-600 font-medium mb-6 leading-relaxed">
+               Typing the same meter number or phone number every time is stressful. AbaPay automatically saves your successful transactions as "Recent" shortcuts right below the input field.
+            </p>
+
+            <div className="bg-blue-50 border border-blue-100 p-6 rounded-3xl">
+               <h4 className="text-sm font-black text-blue-900 mb-3">How to Delete a Saved Number</h4>
+               <p className="text-sm text-blue-800 font-medium leading-relaxed mb-4">
+                 Did you save a number by mistake or no longer need it? You can easily remove it from your recents list:
+               </p>
+               <div className="flex flex-col gap-3">
+                  <div className="flex items-center gap-4 text-sm text-blue-900 font-medium bg-white px-5 py-4 rounded-2xl border border-blue-100 shadow-sm">
+                     <span className="bg-blue-100 text-blue-700 font-black w-6 h-6 flex items-center justify-center rounded-full shrink-0">1</span>
+                     <p><strong>Press and hold</strong> (Long-press) on the saved name/number pill for 1 second.</p>
+                  </div>
+                  <div className="flex items-center gap-4 text-sm text-blue-900 font-medium bg-white px-5 py-4 rounded-2xl border border-blue-100 shadow-sm">
+                     <span className="bg-blue-100 text-blue-700 font-black w-6 h-6 flex items-center justify-center rounded-full shrink-0">2</span>
+                     <p>The pill will turn red and say "Delete". Click it to remove it forever!</p>
+                  </div>
+               </div>
+            </div>
+          </section>
+
+          {/* RECEIPTS & SUPPORT */}
+          <section className="bg-white border border-slate-100 rounded-[2.5rem] p-8 shadow-sm animate-in fade-in slide-in-from-bottom-4">
+             <h2 className="text-xl font-black mb-6 tracking-tight flex items-center gap-2">
+              <Share2 className="text-orange-500" size={20} /> Receipts & Support
+            </h2>
+            <div className="space-y-4">
+              <div className="bg-slate-50 p-5 rounded-3xl border border-slate-100">
+                <h4 className="text-sm font-black text-slate-800 mb-2">Sharing Your Receipt</h4>
+                <p className="text-sm text-slate-600 font-medium leading-relaxed">
+                  Click the dark "SHARE" button at the bottom of any successful transaction receipt. AbaPay will automatically generate a beautiful, clean image of your receipt that you can send directly to WhatsApp, Telegram, or save to your phone's gallery.
+                </p>
+                <p className="text-[11px] font-bold text-slate-400 mt-3 uppercase tracking-wider">
+                  Note: The dopamine "+AbaPoints" animation happens on the app screen to celebrate your purchase, but it is intentionally hidden from the final receipt image so your receipts look professional when shared.
+                </p>
+              </div>
+
+              <div className="bg-orange-50 p-5 rounded-3xl border border-orange-100 flex items-start gap-4">
+                <HelpCircle className="text-orange-500 shrink-0 mt-0.5" size={20} />
+                <div>
+                   <h4 className="text-sm font-black text-orange-900 mb-1">In-App Support System</h4>
+                   <p className="text-sm text-orange-800 font-medium leading-relaxed">
+                     Did a transaction fail or is a token delayed? Click the "Support" button on any receipt to instantly send a ticket, complete with your transaction hash, directly to our admin ops center.
+                   </p>
+                </div>
+              </div>
+            </div>
+          </section>
+
           {/* SECURITY & FAILSAFES */}
           <section className="bg-white border border-slate-100 rounded-[2.5rem] p-8 shadow-sm animate-in fade-in slide-in-from-bottom-4">
              <h2 className="text-xl font-black mb-6 tracking-tight flex items-center gap-2">
-              <ShieldCheck className="text-blue-500" size={20} /> Security & Failsafes
+              <ShieldCheck className="text-emerald-500" size={20} /> Security & Failsafes
             </h2>
             <p className="text-slate-600 font-medium mb-6">
               African utility networks can occasionally experience downtime. AbaPay is built with <strong className="text-slate-900">Defensive Programming</strong> to ensure you never lose money to a dropped connection.
             </p>
             <ul className="space-y-4">
-              <li className="bg-slate-50 p-4 rounded-2xl border border-slate-100">
+              <li className="bg-slate-50 p-5 rounded-2xl border border-slate-100">
                 <strong className="block text-sm font-black text-slate-800 mb-1">Strict Token Requirements</strong>
-                <span className="text-sm text-slate-600">If a provider claims "Success" but fails to generate your 20-digit Electricity Token, our system refuses to accept it. Your transaction goes into a PENDING state while our Requery Engine safely hunts down your token.</span>
+                <span className="text-sm text-slate-600 font-medium leading-relaxed">If a provider claims "Success" but fails to generate your 20-digit Electricity Token, our system refuses to accept it. Your transaction goes into a PENDING state while our Requery Engine safely hunts down your token.</span>
               </li>
-              <li className="bg-slate-50 p-4 rounded-2xl border border-slate-100">
+              <li className="bg-slate-50 p-5 rounded-2xl border border-slate-100">
                 <strong className="block text-sm font-black text-slate-800 mb-1">Rate Mismatch Protection</strong>
-                <span className="text-sm text-slate-600">Our platform locks in your exchange rate at the moment of the transaction. If you underpay due to slippage, the smart contract instantly reverts the transaction to protect your funds.</span>
+                <span className="text-sm text-slate-600 font-medium leading-relaxed">Our platform locks in your exchange rate at the moment of the transaction. If you underpay due to slippage, the smart contract instantly reverts the transaction to protect your funds.</span>
               </li>
-              <li className="bg-slate-50 p-4 rounded-2xl border border-slate-100">
+              <li className="bg-slate-50 p-5 rounded-2xl border border-slate-100">
                 <strong className="block text-sm font-black text-slate-800 mb-1">Guaranteed Auto-Refunds</strong>
-                <span className="text-sm text-slate-600">If a utility provider is completely offline and rejects the payment, your transaction is FAILED. Because funds are held in escrow, you become immediately eligible for a crypto refund.</span>
+                <span className="text-sm text-slate-600 font-medium leading-relaxed">If a utility provider is completely offline and rejects the payment, your transaction is FAILED. Because funds are held in escrow, you become immediately eligible for a crypto refund.</span>
               </li>
             </ul>
           </section>
@@ -131,13 +215,13 @@ function FAQItem({ q, a }: { q: string, a: string }) {
     <div className="border border-slate-100 rounded-2xl overflow-hidden bg-slate-50 transition-all">
       <button 
         onClick={() => setIsOpen(!isOpen)} 
-        className="w-full text-left p-4 flex justify-between items-center hover:bg-slate-100 transition-colors"
+        className="w-full text-left p-5 flex justify-between items-center hover:bg-slate-100 transition-colors"
       >
         <span className="font-bold text-sm text-slate-800 pr-4">{q}</span>
         <ChevronDown size={18} className={`text-slate-400 transition-transform duration-300 shrink-0 ${isOpen ? 'rotate-180' : ''}`} />
       </button>
       <div className={`overflow-hidden transition-all duration-300 ease-in-out ${isOpen ? 'max-h-48 opacity-100' : 'max-h-0 opacity-0'}`}>
-        <p className="p-4 pt-0 text-sm text-slate-600 leading-relaxed font-medium">
+        <p className="p-5 pt-0 text-sm text-slate-600 leading-relaxed font-medium">
           {a}
         </p>
       </div>
