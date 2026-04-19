@@ -51,10 +51,6 @@ export function ReceiptModal({ receipt, isMainnet, onClose, onSupport }: any) {
   const isElectricity = receipt.service?.toUpperCase() === 'ELECTRICITY' || receipt.service === 'Electricity';
   const isEducation = receipt.service === 'Education PIN' || receipt.service?.toUpperCase().includes('WAEC') || receipt.service?.toUpperCase().includes('JAMB');
 
-  // ⚡ ABAPOINTS CALCULATION (1 point per ₦1000 spent, only on SUCCESS)
-  const earnedPoints = receipt.status === 'SUCCESS' ? Math.floor(Number(receipt.amountNaira) / 1000) : 0;
-
-  // 📸 EXACT LOGIC FROM YOUR WORKING SNIPPET
   const handleShareImage = async () => {
     const receiptElement = document.getElementById('printable-receipt');
     if (!receiptElement) return;
@@ -73,7 +69,6 @@ export function ReceiptModal({ receipt, isMainnet, onClose, onSupport }: any) {
     try {
       const html2canvas = (await import('html2canvas')).default;
 
-      // ⚡ REMOVED useCORS: true to perfectly match your working snippet and prevent crashes
       const canvas = await html2canvas(receiptElement, { 
           scale: 2, 
           backgroundColor: '#ffffff'
@@ -98,8 +93,6 @@ export function ReceiptModal({ receipt, isMainnet, onClose, onSupport }: any) {
       }
     } catch (error) {
       console.error('Error generating image:', error);
-
-      // ⚡ TEXT FALLBACK
       try {
         if (navigator.share) {
             await navigator.share({ title: 'AbaPay Receipt', text: fallbackText });
@@ -117,7 +110,6 @@ export function ReceiptModal({ receipt, isMainnet, onClose, onSupport }: any) {
     <div className="fixed inset-0 z-[60] bg-slate-900/80 backdrop-blur-md flex justify-center items-center p-6 animate-in fade-in" onClick={onClose}>
        <div className="bg-white w-full max-w-sm rounded-[2.5rem] overflow-hidden shadow-2xl animate-in zoom-in-95" onClick={(e) => e.stopPropagation()}>
 
-          {/* ⚡ THE CAPTURE AREA ⚡ */}
           <div id="printable-receipt" className="bg-white">
             <div className="bg-emerald-600 p-8 text-white text-center relative">
                <button data-html2canvas-ignore="true" onClick={onClose} className="absolute top-4 right-4 bg-white/20 p-1.5 rounded-full hover:bg-white/30 transition-colors"><XCircle size={20}/></button>
@@ -165,15 +157,6 @@ export function ReceiptModal({ receipt, isMainnet, onClose, onSupport }: any) {
                   </div>
                </div>
 
-               {/* ⚡ ABAPOINTS DOPAMINE HIT INJECTION ⚡ */}
-               {earnedPoints > 0 && (
-                 <div className="mt-4 flex items-center justify-center bg-green-50 border border-green-200 text-green-700 py-2.5 px-4 rounded-xl shadow-sm animate-pulse">
-                    <span className="text-lg mr-2">✨</span>
-                    <span className="text-xs font-black uppercase tracking-wide">You earned +{earnedPoints} AbaPoints!</span>
-                 </div>
-               )}
-
-               {/* ⚡ EDU & ELEC PIN RENDERER ⚡ */}
                {hasPin && (
                  <div className="mt-4 bg-emerald-50 border-2 border-emerald-200 rounded-xl p-4 text-center">
                     <p className="text-[10px] font-black text-emerald-700 uppercase tracking-widest mb-1">{isElectricity ? 'Meter Token PIN' : 'Purchased Education PIN'}</p>
@@ -196,7 +179,6 @@ export function ReceiptModal({ receipt, isMainnet, onClose, onSupport }: any) {
             </div>
           </div>
 
-          {/* ⚡ BUTTONS (Excluded from Image Capture) ⚡ */}
           <div className="px-8 pb-8 space-y-3">
              <button onClick={() => window.open(`https://${isMainnet?'':'sepolia.'}celoscan.io/tx/${receipt.txHash}`)} className="w-full py-3 bg-slate-50 hover:bg-slate-100 rounded-xl text-[10px] font-black uppercase tracking-widest text-slate-500 flex items-center justify-center gap-2 transition-colors">Verify on Celoscan <ExternalLink size={12}/></button>
              <div className="flex gap-2">
