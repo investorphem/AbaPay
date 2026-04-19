@@ -33,12 +33,17 @@ export async function GET(req: Request) {
             return NextResponse.json({ points: 0, isLinked: false });
         }
 
+        // ⚡ TYPE FIX: Safely handle the joined data whether TS thinks it's an array or an object
+        const masterProfile: any = Array.isArray(data.abapay_users) 
+            ? data.abapay_users[0] 
+            : data.abapay_users;
+
         // If they are linked to a master profile, return the master points
-        if (data.abapay_users) {
+        if (masterProfile) {
             return NextResponse.json({ 
-                points: data.abapay_users.total_points, 
+                points: masterProfile.total_points, 
                 isLinked: true,
-                phoneMasked: data.abapay_users.verified_phone.replace(/.(?=.{4})/g, '*') // e.g., *******5678
+                phoneMasked: masterProfile.verified_phone.replace(/.(?=.{4})/g, '*') // e.g., *******5678
             });
         }
 
