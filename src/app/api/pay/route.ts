@@ -255,7 +255,7 @@ export async function POST(req: Request) {
             units: vendedUnits 
         }).eq('tx_hash', txHash);
 
-        // ⚡ NON-BLOCKING NOTIFICATION SYSTEM (TELEGRAM + SMS + EMAIL) ⚡
+        // ⚡ NON-BLOCKING NOTIFICATION & POINTS SYSTEM ⚡
         const notifications = [];
 
         // 1. Telegram
@@ -299,6 +299,18 @@ export async function POST(req: Request) {
             `
           });
           notifications.push(emailPromise);
+        }
+
+        // 4. ⚡ ABAPOINTS SYSTEM (1 Point per ₦1000 spent) ⚡
+        const earnedPoints = Math.floor(vendAmount / 1000);
+        if (earnedPoints > 0 && wallet_address) {
+            const pointsPromise = supabase.rpc('award_transaction_points', { 
+                target_wallet: wallet_address.toLowerCase(), 
+                points_to_add: earnedPoints 
+            }).then(({ error }) => {
+                if (error) console.error("Error distributing points:", error);
+            });
+            notifications.push(pointsPromise);
         }
 
         // ⚡ SERVERLESS FIX: Added 'await' so Vercel waits for notifications to send before sleeping
