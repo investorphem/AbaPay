@@ -11,6 +11,9 @@ import {
 } from "lucide-react";
 import { supabase } from "@/utils/supabase";
 
+// ⚡ IMPORTED PROVIDERS FOR GRANULAR KILL SWITCHES
+import { TELECOM_PROVIDERS, INTERNET_PROVIDERS, ELECTRICITY_DISCOS, CABLE_PROVIDERS_LIST, EDUCATION_PROVIDERS } from "@/constants";
+
 const ABAPAY_ADMIN_ABI = [
   {"inputs":[],"name":"owner","outputs":[{"internalType":"address","name":"","type":"address"}],"stateMutability":"view","type":"function"},
   {"inputs":[{"internalType":"address","name":"tokenAddress","type":"address"}],"name":"withdrawFunds","outputs":[],"stateMutability":"nonpayable","type":"function"},
@@ -52,6 +55,7 @@ export default function AdminDashboard() {
   const [dbTransactions, setDbTransactions] = useState<any[]>([]);
   const [dbUsers, setDbUsers] = useState<any[]>([]); 
   const [dbWallets, setDbWallets] = useState<any[]>([]); 
+  const [allWalletsMap, setAllWalletsMap] = useState<any[]>([]); // ⚡ FOR LEDGER MAPPING
   
   const [isFetching, setIsFetching] = useState(false);
   const [searchTerm, setSearchTerm] = useState("");
@@ -66,10 +70,7 @@ export default function AdminDashboard() {
   const [newExchangeRate, setNewExchangeRate] = useState<string>("");
   const [isUpdatingRate, setIsUpdatingRate] = useState(false);
 
-  // ⚡ KILL SWITCHES STATE
-  const [killSwitches, setKillSwitches] = useState<Record<string, boolean>>({
-      AIRTIME: true, INTERNET: true, ELECTRICITY: true, CABLE: true, EDUCATION: true, BANK: true
-  });
+  const [killSwitches, setKillSwitches] = useState<Record<string, boolean>>({});
   const [isUpdatingSwitches, setIsUpdatingSwitches] = useState(false);
 
   const isMainnet = process.env.NEXT_PUBLIC_NETWORK === "celo";
@@ -124,7 +125,6 @@ export default function AdminDashboard() {
     initAdmin();
   }, [activeChain, ABAPAY_CONTRACT]);
 
-  // ⚡ CENTRALIZED FETCHING FROM SECURE API ⚡
   const refreshAllData = async () => {
     setIsFetching(true);
     await fetchOnChainBalances();
@@ -137,6 +137,7 @@ export default function AdminDashboard() {
             setDbTransactions(data.transactions);
             setDbUsers(data.users);
             setDbWallets(data.wallets);
+            setAllWalletsMap(data.allWallets || []);
             if (data.settings) {
                 setCurrentExchangeRate(data.settings.exchange_rate.toString());
                 setNewExchangeRate(data.settings.exchange_rate.toString());
@@ -162,7 +163,6 @@ export default function AdminDashboard() {
     } catch (e) {} finally { setIsUpdatingRate(false); }
   };
 
-  // ⚡ MANUAL POINT ADJUSTMENT LOGIC ⚡
   const handleAdjustPoints = async (isUser: boolean, id: string, currentPoints: number) => {
       const input = prompt(`Update AbaPoints for ${isUser ? 'Phone' : 'Wallet'} ${id}:\nCurrent Points: ${currentPoints}`, currentPoints.toString());
       if (input === null) return; 
@@ -184,10 +184,9 @@ export default function AdminDashboard() {
       } catch (e) { alert("Network error."); }
   };
 
-  // ⚡ KILL SWITCH TOGGLE LOGIC ⚡
-  const toggleKillSwitch = async (service: string) => {
+  const toggleKillSwitch = async (serviceKey: string, newValue: boolean) => {
       setIsUpdatingSwitches(true);
-      const newSwitches = { ...killSwitches, [service]: !killSwitches[service] };
+      const newSwitches = { ...killSwitches, [serviceKey]: newValue };
       setKillSwitches(newSwitches); 
 
       try {
@@ -343,6 +342,15 @@ export default function AdminDashboard() {
     const a = document.createElement('a'); a.href = url; a.download = `AbaPay_Report_${timeFilter}.csv`; a.click();
   };
 
+  // ⚡ GRANULAR KILL SWITCH GROUPS ⚡
+  const switchGroups = [
+      { title: "Airtime", master: "MASTER_AIRTIME", providers: TELECOM_PROVIDERS.map(p => ({ id: `AIRTIME_${p}`, name: p.toUpperCase() })) },
+      { title: "Internet Data", master: "MASTER_INTERNET", providers: INTERNET_PROVIDERS.map(p => ({ id: `INTERNET_${p.serviceID}`, name: p.displayName })) },
+      { title: "Electricity", master: "MASTER_ELECTRICITY", providers: ELECTRICITY_DISCOS.map(p => ({ id: `ELEC_${p.serviceID}`, name: p.displayName })) },
+      { title: "Cable TV", master: "MASTER_CABLE", providers: CABLE_PROVIDERS_LIST.map(p => ({ id: `CABLE_${p.serviceID}`, name: p.displayName })) },
+      { title: "Education", master: "MASTER_EDUCATION", providers: EDUCATION_PROVIDERS.map(p => ({ id: `EDU_${p.serviceID}`, name: p.displayName })) }
+  ];
+
   return (
     <main className="min-h-screen bg-[#070709] text-slate-200 p-4 md:p-8">
       <div className="max-w-6xl mx-auto">
@@ -412,7 +420,7 @@ export default function AdminDashboard() {
               </button>
             </div>
 
-            {/* ⚡ IDENTITY & POINTS TAB ⚡ */}
+            {/* IDENTITY TAB */}
             {activeTab === 'identity' && (
               <div className="bg-[#111114] border border-slate-800 rounded-3xl p-6 animate-in fade-in">
                  <div className="flex flex-col md:flex-row justify-between items-start md:items-center mb-6 gap-4">
@@ -495,7 +503,7 @@ export default function AdminDashboard() {
               </div>
             )}
 
-            {/* ⚡ SYSTEM CONTROLS & KILL SWITCHES TAB ⚡ */}
+            {/* SYSTEM CONTROLS (RATE & KILL SWITCHES) */}
             {activeTab === 'system' && (
               <div className="bg-[#111114] border border-slate-800 rounded-3xl p-8 animate-in fade-in">
                  
@@ -527,31 +535,55 @@ export default function AdminDashboard() {
                     </div>
                  </div>
 
-                 {/* Provider Kill Switches */}
+                 {/* ⚡ GRANULAR KILL SWITCHES UI ⚡ */}
                  <div className="flex items-center gap-3 mb-6">
                     <div className="bg-red-500/10 p-3 rounded-full"><Power className="text-red-400" size={24}/></div>
                     <div>
                       <h2 className="text-xl font-black text-white">Provider Kill Switches</h2>
-                      <p className="text-xs font-bold text-slate-500 uppercase tracking-widest mt-1">Instantly disable failing API services</p>
+                      <p className="text-xs font-bold text-slate-500 uppercase tracking-widest mt-1">Surgically disable failing API services</p>
                     </div>
                  </div>
 
-                 <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
-                    {Object.keys(killSwitches).map((service) => (
-                        <div key={service} className={`p-5 rounded-2xl border flex items-center justify-between transition-colors ${killSwitches[service] ? 'bg-slate-900 border-slate-800' : 'bg-red-500/5 border-red-500/20'}`}>
-                            <div>
-                                <h4 className="font-black text-white">{service}</h4>
-                                <p className={`text-[10px] font-bold uppercase tracking-widest mt-1 ${killSwitches[service] ? 'text-emerald-500' : 'text-red-500'}`}>{killSwitches[service] ? 'Operational' : 'Disabled'}</p>
+                 <div className="space-y-6">
+                    {switchGroups.map((group) => {
+                        // Check if the master switch exists, default to true
+                        const isMasterOn = killSwitches[group.master] !== false;
+                        
+                        return (
+                            <div key={group.master} className="bg-slate-900 border border-slate-800 rounded-2xl overflow-hidden">
+                                {/* MASTER HEADER */}
+                                <div className="bg-slate-800/50 p-5 flex items-center justify-between border-b border-slate-800">
+                                    <h3 className="font-black text-white text-lg">{group.title}</h3>
+                                    <button 
+                                        onClick={() => toggleKillSwitch(group.master, !isMasterOn)}
+                                        disabled={isUpdatingSwitches}
+                                        className={`relative inline-flex h-7 w-12 items-center rounded-full transition-colors disabled:opacity-50 ${isMasterOn ? 'bg-emerald-500' : 'bg-slate-700'}`}
+                                    >
+                                        <span className={`inline-block h-5 w-5 transform rounded-full bg-white transition-transform ${isMasterOn ? 'translate-x-6' : 'translate-x-1'}`} />
+                                    </button>
+                                </div>
+                                
+                                {/* SUB PROVIDERS GRID */}
+                                <div className={`grid grid-cols-2 md:grid-cols-4 gap-4 p-5 ${!isMasterOn ? 'opacity-30 pointer-events-none grayscale' : ''}`}>
+                                    {group.providers.map(provider => {
+                                        const isSubOn = killSwitches[provider.id] !== false;
+                                        return (
+                                            <div key={provider.id} className="flex items-center justify-between p-3 rounded-xl border border-slate-800 bg-slate-950">
+                                                <span className="text-xs font-bold text-slate-300 truncate pr-2">{provider.name}</span>
+                                                <button 
+                                                    onClick={() => toggleKillSwitch(provider.id, !isSubOn)}
+                                                    disabled={isUpdatingSwitches}
+                                                    className={`relative inline-flex h-5 w-9 shrink-0 items-center rounded-full transition-colors ${isSubOn ? 'bg-emerald-500/50' : 'bg-slate-800'}`}
+                                                >
+                                                    <span className={`inline-block h-3 w-3 transform rounded-full transition-transform ${isSubOn ? 'translate-x-5 bg-emerald-400' : 'translate-x-1 bg-slate-500'}`} />
+                                                </button>
+                                            </div>
+                                        )
+                                    })}
+                                </div>
                             </div>
-                            <button 
-                                onClick={() => toggleKillSwitch(service)}
-                                disabled={isUpdatingSwitches}
-                                className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors disabled:opacity-50 ${killSwitches[service] ? 'bg-emerald-500' : 'bg-slate-700'}`}
-                            >
-                                <span className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${killSwitches[service] ? 'translate-x-6' : 'translate-x-1'}`} />
-                            </button>
-                        </div>
-                    ))}
+                        )
+                    })}
                  </div>
 
               </div>
@@ -580,7 +612,8 @@ export default function AdminDashboard() {
                   <table className="w-full text-left text-sm">
                     <thead>
                       <tr className="text-slate-500 border-b border-slate-800 text-[10px] uppercase">
-                        <th className="pb-4 px-2">Details (Date & Wallet)</th>
+                        <th className="pb-4 px-2">Details</th>
+                        <th className="pb-4 px-2">User Details</th>{/* ⚡ NEW COLUMN ⚡ */}
                         <th className="pb-4 px-2">Utility Vended</th>
                         <th className="pb-4 px-2">Provider Data</th>
                         <th className="pb-4 px-2">Financials</th>
@@ -588,14 +621,25 @@ export default function AdminDashboard() {
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-slate-800">
-                      {currentTransactions.map((tx) => (
+                      {currentTransactions.map((tx) => {
+                        
+                        // ⚡ FIND VERIFIED PHONE NUMBER LOGIC ⚡
+                        const walletInfo = allWalletsMap.find(w => w.wallet_address?.toLowerCase() === tx.wallet_address?.toLowerCase());
+                        const verifiedPhone = walletInfo?.abapay_users?.verified_phone || "N/A";
+
+                        return (
                         <tr key={tx.id} className="hover:bg-slate-900/40">
                           
-                          {/* ⚡ UPDATED: ADDED WALLET TO DETAILS COLUMN ⚡ */}
-                          <td className="py-4 px-2 min-w-[180px]">
+                          {/* REVERTED DETAILS COLUMN */}
+                          <td className="py-4 px-2 min-w-[120px]">
                             <p className="text-white font-medium text-xs mb-1">{new Date(tx.created_at).toLocaleString()}</p>
-                            <p className="text-[10px] text-slate-500 font-mono">Wallet: <span className="text-slate-400">{tx.wallet_address?.slice(0,6)}...{tx.wallet_address?.slice(-4)}</span></p>
                             <a href={`https://${isMainnet ? '' : 'sepolia.'}celoscan.io/tx/${tx.tx_hash}`} target="_blank" className="text-[9px] text-emerald-400 hover:underline flex items-center gap-1 mt-1 font-mono tracking-wider">Hash: {tx.tx_hash.slice(0, 8)}... <ExternalLink size={8} /></a>
+                          </td>
+
+                          {/* ⚡ NEW: DEDICATED USER DETAILS COLUMN ⚡ */}
+                          <td className="py-4 px-2 min-w-[150px]">
+                             <p className="text-[10px] text-slate-300 font-mono">Wallet: {tx.wallet_address ? `${tx.wallet_address.slice(0,6)}...${tx.wallet_address.slice(-4)}` : 'N/A'}</p>
+                             <p className={`text-[10px] mt-1 font-bold ${verifiedPhone !== 'N/A' ? 'text-emerald-500' : 'text-slate-600'}`}>Phone: {verifiedPhone}</p>
                           </td>
 
                           <td className="py-4 px-2 min-w-[180px]">
@@ -655,7 +699,7 @@ export default function AdminDashboard() {
                             </div>
                           </td>
                         </tr>
-                      ))}
+                      )})}
                     </tbody>
                   </table>
 
