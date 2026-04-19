@@ -12,7 +12,9 @@ import {
 import { supabase } from "@/utils/supabase";
 
 // ⚡ IMPORTED PROVIDERS FOR GRANULAR KILL SWITCHES
-import { TELECOM_PROVIDERS, INTERNET_PROVIDERS, ELECTRICITY_DISCOS, CABLE_PROVIDERS_LIST, EDUCATION_PROVIDERS } from "@/constants";
+import { TELECOM_PROVIDERS, INTERNET_PROVIDERS, CABLE_PROVIDERS_LIST, EDUCATION_PROVIDERS } from "@/constants";
+import { ELECTRICITY_DISCOS } from "../discos"; // ⚡ Pulled from your separate discos file!
+
 
 const ABAPAY_ADMIN_ABI = [
   {"inputs":[],"name":"owner","outputs":[{"internalType":"address","name":"","type":"address"}],"stateMutability":"view","type":"function"},
