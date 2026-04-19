@@ -51,6 +51,9 @@ export function ReceiptModal({ receipt, isMainnet, onClose, onSupport }: any) {
   const isElectricity = receipt.service?.toUpperCase() === 'ELECTRICITY' || receipt.service === 'Electricity';
   const isEducation = receipt.service === 'Education PIN' || receipt.service?.toUpperCase().includes('WAEC') || receipt.service?.toUpperCase().includes('JAMB');
 
+  // ⚡ ABAPOINTS CALCULATION (1 point per ₦1000 spent, only on SUCCESS)
+  const earnedPoints = receipt.status === 'SUCCESS' ? Math.floor(Number(receipt.amountNaira) / 1000) : 0;
+
   // 📸 EXACT LOGIC FROM YOUR WORKING SNIPPET
   const handleShareImage = async () => {
     const receiptElement = document.getElementById('printable-receipt');
@@ -69,13 +72,13 @@ export function ReceiptModal({ receipt, isMainnet, onClose, onSupport }: any) {
 
     try {
       const html2canvas = (await import('html2canvas')).default;
-      
+
       // ⚡ REMOVED useCORS: true to perfectly match your working snippet and prevent crashes
       const canvas = await html2canvas(receiptElement, { 
           scale: 2, 
           backgroundColor: '#ffffff'
       });
-      
+
       const dataUrl = canvas.toDataURL('image/png');
       const blob = await (await fetch(dataUrl)).blob();
       const file = new File([blob], `AbaPay_Receipt_${receipt.id}.png`, { type: 'image/png' });
@@ -95,7 +98,7 @@ export function ReceiptModal({ receipt, isMainnet, onClose, onSupport }: any) {
       }
     } catch (error) {
       console.error('Error generating image:', error);
-      
+
       // ⚡ TEXT FALLBACK
       try {
         if (navigator.share) {
@@ -161,6 +164,14 @@ export function ReceiptModal({ receipt, isMainnet, onClose, onSupport }: any) {
                      <p className="text-slate-400 text-[9px] font-bold">{receipt.amountCrypto} {receipt.tokenUsed || 'USD₮'}</p>
                   </div>
                </div>
+
+               {/* ⚡ ABAPOINTS DOPAMINE HIT INJECTION ⚡ */}
+               {earnedPoints > 0 && (
+                 <div className="mt-4 flex items-center justify-center bg-green-50 border border-green-200 text-green-700 py-2.5 px-4 rounded-xl shadow-sm animate-pulse">
+                    <span className="text-lg mr-2">✨</span>
+                    <span className="text-xs font-black uppercase tracking-wide">You earned +{earnedPoints} AbaPoints!</span>
+                 </div>
+               )}
 
                {/* ⚡ EDU & ELEC PIN RENDERER ⚡ */}
                {hasPin && (
