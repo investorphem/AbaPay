@@ -2,12 +2,12 @@
 
 import { useState, useEffect, useMemo } from "react";
 import { createWalletClient, createPublicClient, custom, http, formatUnits, parseUnits } from "viem";
-import { celo, celoSepolia } from "viem/chains"; // ⚡ IMPORTED DIRECTLY TO MATCH FRONTEND
+import { celo, celoSepolia } from "viem/chains"; 
 import { 
   Lock, ArrowDownToLine, Wallet, ShieldAlert, Activity, 
   Database, RefreshCcw, Globe, Zap, ExternalLink, 
   Search, Download, Users, BarChart3, Banknote,
-  ChevronLeft, ChevronRight, Loader2, Save, Gauge, RefreshCw
+  ChevronLeft, ChevronRight, Loader2, Save, Gauge, RefreshCw, Smartphone, Star
 } from "lucide-react";
 import { supabase } from "@/utils/supabase";
 
@@ -30,13 +30,15 @@ const TOKENS = {
 
 const ITEMS_PER_PAGE = 10;
 
+type TimeFilter = 'TODAY' | 'WEEK' | 'MONTH' | 'ALL';
+
 export default function AdminDashboard() {
   const [address, setAddress] = useState<string | null>(null);
   const [client, setClient] = useState<any>(null);
-  
+
   const [isOwner, setIsOwner] = useState<boolean | null>(null);
-  const [isAuthenticating, setIsAuthenticating] = useState(true); // ⚡ NEW LOADING STATE
-  const [authError, setAuthError] = useState(""); // ⚡ NEW ERROR TRACKER
+  const [isAuthenticating, setIsAuthenticating] = useState(true); 
+  const [authError, setAuthError] = useState(""); 
 
   const [usdtVaultBalance, setUsdtVaultBalance] = useState("0.00");
   const [usdcVaultBalance, setUsdcVaultBalance] = useState("0.00");
@@ -46,13 +48,19 @@ export default function AdminDashboard() {
   const [smsBalance, setSmsBalance] = useState("0");    
   const [status, setStatus] = useState("");
   const [activeTab, setActiveTab] = useState("analytics");
+  const [timeFilter, setTimeFilter] = useState<TimeFilter>('ALL'); // ⚡ TIME FILTER STATE
 
   const [dbTransactions, setDbTransactions] = useState<any[]>([]);
+  const [dbUsers, setDbUsers] = useState<any[]>([]); // ⚡ VERIFIED USERS
+  const [dbWallets, setDbWallets] = useState<any[]>([]); // ⚡ UNLINKED WALLETS
+  
   const [isFetching, setIsFetching] = useState(false);
   const [searchTerm, setSearchTerm] = useState("");
+  const [identitySearchTerm, setIdentitySearchTerm] = useState(""); // ⚡ SEARCH FOR IDENTITY TAB
   const [filterStatus, setFilterStatus] = useState("ALL");
 
   const [currentPage, setCurrentPage] = useState(1);
+  const [identityCurrentPage, setIdentityCurrentPage] = useState(1);
   const [processingRefundId, setProcessingRefundId] = useState<string | null>(null);
   const [isRequeryingId, setIsRequeryingId] = useState<string | null>(null); 
 
@@ -62,7 +70,7 @@ export default function AdminDashboard() {
 
   const isMainnet = process.env.NEXT_PUBLIC_NETWORK === "celo";
   const isLive = process.env.NEXT_PUBLIC_APP_MODE === "live";
-  const activeChain = isMainnet ? celo : celoSepolia; // ⚡ UPDATED TO USE VIEM CHAINS
+  const activeChain = isMainnet ? celo : celoSepolia; 
   const ABAPAY_CONTRACT = process.env.NEXT_PUBLIC_ABAPAY_ADDRESS as `0x${string}`;
 
   useEffect(() => {
@@ -76,7 +84,6 @@ export default function AdminDashboard() {
           setAddress(account);
           setClient(walletClient);
 
-          // ⚡ NEW: AUTO-SWITCH NETWORK LOGIC FOR ADMINS ⚡
           try {
             const currentChainId = await walletClient.getChainId();
             if (currentChainId !== activeChain.id) {
@@ -118,40 +125,26 @@ export default function AdminDashboard() {
 
   const refreshAllData = async () => {
     setIsFetching(true);
-    await Promise.all([fetchCloudLedger(), fetchOnChainBalances(), fetchVtPassHealth(), fetchExchangeRate()]);
+    await Promise.all([fetchCloudLedger(), fetchOnChainBalances(), fetchVtPassHealth(), fetchExchangeRate(), fetchIdentities()]);
     setIsFetching(false);
   };
 
   const fetchExchangeRate = async () => {
-    const { data, error } = await supabase
-      .from('platform_settings')
-      .select('exchange_rate')
-      .eq('id', 1)
-      .single();
-
+    const { data, error } = await supabase.from('platform_settings').select('exchange_rate').eq('id', 1).single();
     if (data) {
       setCurrentExchangeRate(data.exchange_rate.toString());
       setNewExchangeRate(data.exchange_rate.toString());
     } else if (error) {
-      console.error("Error fetching rate", error);
       setCurrentExchangeRate("Error");
     }
   };
 
   const updateExchangeRate = async () => {
     if (!newExchangeRate || isNaN(Number(newExchangeRate))) return alert("Invalid rate");
-
     setIsUpdatingRate(true);
-
     try {
-      const res = await fetch('/api/admin/rate', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ newRate: newExchangeRate })
-      });
-
+      const res = await fetch('/api/admin/rate', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ newRate: newExchangeRate }) });
       const data = await res.json();
-
       if (data.success) {
         alert("Rate successfully updated globally!");
         setCurrentExchangeRate(newExchangeRate);
@@ -167,7 +160,6 @@ export default function AdminDashboard() {
 
   const fetchOnChainBalances = async () => {
     const publicClient = createPublicClient({ chain: activeChain, transport: http() });
-
     try {
       const usdtBal = await publicClient.readContract({ address: (isMainnet ? TOKENS["USD₮"].mainnet : TOKENS["USD₮"].sepolia) as `0x${string}`, abi: ERC20_ABI, functionName: 'balanceOf', args: [ABAPAY_CONTRACT] }) as bigint;
       setUsdtVaultBalance(formatUnits(usdtBal, TOKENS["USD₮"].decimals));
@@ -192,6 +184,17 @@ export default function AdminDashboard() {
   const fetchCloudLedger = async () => {
     const { data, error } = await supabase.from('transactions').select('*').order('created_at', { ascending: false });
     if (!error) setDbTransactions(data || []);
+  };
+
+  // ⚡ FETCH IDENTITY & POINTS DATA ⚡
+  const fetchIdentities = async () => {
+    // Get Verified Users
+    const { data: usersData } = await supabase.from('abapay_users').select('*').order('total_points', { ascending: false });
+    if (usersData) setDbUsers(usersData);
+
+    // Get Unlinked Wallets
+    const { data: walletsData } = await supabase.from('wallet_links').select('*').is('user_id', null).order('unclaimed_points', { ascending: false });
+    if (walletsData) setDbWallets(walletsData);
   };
 
   const handleWithdrawal = async (tokenSymbol: 'USD₮' | 'USDC' | 'cUSD') => {
@@ -308,11 +311,30 @@ export default function AdminDashboard() {
 
   const currentVaultTotal = parseFloat(usdtVaultBalance || "0") + parseFloat(usdcVaultBalance || "0") + parseFloat(cusdVaultBalance || "0");
 
-  const analytics = useMemo(() => {
-    const successTx = dbTransactions.filter(tx => tx.status === "SUCCESS");
+  // ⚡ TIME FILTERING LOGIC ⚡
+  const timeFilteredTransactions = useMemo(() => {
+    const now = new Date();
+    return dbTransactions.filter(tx => {
+      const txDate = new Date(tx.created_at);
+      if (timeFilter === 'TODAY') {
+        return txDate.toDateString() === now.toDateString();
+      }
+      if (timeFilter === 'WEEK') {
+        const weekAgo = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000);
+        return txDate >= weekAgo;
+      }
+      if (timeFilter === 'MONTH') {
+        return txDate.getMonth() === now.getMonth() && txDate.getFullYear() === now.getFullYear();
+      }
+      return true; // ALL
+    });
+  }, [dbTransactions, timeFilter]);
 
-    const totalDeposited = dbTransactions.reduce((acc, tx) => acc + (parseFloat(tx.amount_usdt) || 0), 0);
-    const totalRefunded = dbTransactions.filter(tx => tx.status === "REFUNDED").reduce((acc, tx) => acc + (parseFloat(tx.amount_usdt) || 0), 0);
+  const analytics = useMemo(() => {
+    const successTx = timeFilteredTransactions.filter(tx => tx.status === "SUCCESS");
+
+    const totalDeposited = timeFilteredTransactions.reduce((acc, tx) => acc + (parseFloat(tx.amount_usdt) || 0), 0);
+    const totalRefunded = timeFilteredTransactions.filter(tx => tx.status === "REFUNDED").reduce((acc, tx) => acc + (parseFloat(tx.amount_usdt) || 0), 0);
 
     return {
       vol: successTx.reduce((acc, tx) => acc + Number(tx.amount_naira || 0), 0),
@@ -322,10 +344,10 @@ export default function AdminDashboard() {
       totalDeposited,
       totalRefunded
     };
-  }, [dbTransactions]);
+  }, [timeFilteredTransactions]);
 
   const filteredTx = useMemo(() => {
-    return dbTransactions.filter(tx => {
+    return timeFilteredTransactions.filter(tx => {
       const searchLower = searchTerm.toLowerCase();
       const matchesSearch = (tx.account_number || "").includes(searchTerm) || 
                             (tx.network || "").toLowerCase().includes(searchLower) ||
@@ -334,24 +356,27 @@ export default function AdminDashboard() {
       const matchesStatus = filterStatus === "ALL" || tx.status === filterStatus;
       return matchesSearch && matchesStatus;
     });
-  }, [dbTransactions, searchTerm, filterStatus]);
+  }, [timeFilteredTransactions, searchTerm, filterStatus]);
 
-  useEffect(() => {
-    setCurrentPage(1);
-  }, [searchTerm, filterStatus]);
+  // ⚡ IDENTITY FILTERING ⚡
+  const filteredIdentities = useMemo(() => {
+      const searchLower = identitySearchTerm.toLowerCase();
+      const matchedUsers = dbUsers.filter(u => u.verified_phone.includes(searchLower));
+      const matchedWallets = dbWallets.filter(w => w.wallet_address.toLowerCase().includes(searchLower));
+      return { users: matchedUsers, wallets: matchedWallets };
+  }, [dbUsers, dbWallets, identitySearchTerm]);
+
+  useEffect(() => { setCurrentPage(1); }, [searchTerm, filterStatus, timeFilter]);
 
   const totalPages = Math.ceil(filteredTx.length / ITEMS_PER_PAGE);
-  const currentTransactions = filteredTx.slice(
-    (currentPage - 1) * ITEMS_PER_PAGE,
-    currentPage * ITEMS_PER_PAGE
-  );
+  const currentTransactions = filteredTx.slice((currentPage - 1) * ITEMS_PER_PAGE, currentPage * ITEMS_PER_PAGE);
 
   const exportCSV = () => {
     const headers = "Date,Status,Network,Service,Account,Naira,Crypto,Token Used,Transaction ID,Units,Token PIN,Hash\n";
     const rows = filteredTx.map(tx => `${tx.created_at},${tx.status},${tx.network},${tx.service_category},${tx.account_number},${tx.amount_naira},${tx.amount_usdt},${tx.token_used || 'USD₮'},${tx.request_id || 'N/A'},${tx.units || 'N/A'},${tx.purchased_code || 'N/A'},${tx.tx_hash}`).join("\n");
     const blob = new Blob([headers + rows], { type: 'text/csv' });
     const url = window.URL.createObjectURL(blob);
-    const a = document.createElement('a'); a.href = url; a.download = `AbaPay_Report.csv`; a.click();
+    const a = document.createElement('a'); a.href = url; a.download = `AbaPay_Report_${timeFilter}.csv`; a.click();
   };
 
   return (
@@ -370,13 +395,23 @@ export default function AdminDashboard() {
               <span className="px-2 py-0.5 rounded text-[10px] font-bold border bg-purple-500/10 text-purple-400 border-purple-500/20">{isMainnet ? 'MAINNET' : 'SEPOLIA'}</span>
             </div>
           </div>
-          <button onClick={refreshAllData} className="flex items-center gap-2 bg-slate-900 border border-slate-800 px-5 py-2.5 rounded-xl hover:bg-slate-800 active:scale-95">
-            <RefreshCcw size={18} className={isFetching ? 'animate-spin text-emerald-500' : 'text-slate-400'} />
-            <span className="text-sm font-bold">Synchronize Systems</span>
-          </button>
+          
+          {/* ⚡ TIME FILTER TOGGLE ⚡ */}
+          {!isAuthenticating && isOwner && (
+            <div className="flex items-center gap-2 bg-slate-900 border border-slate-800 p-1 rounded-xl">
+               {(['TODAY', 'WEEK', 'MONTH', 'ALL'] as TimeFilter[]).map(tf => (
+                 <button 
+                    key={tf} 
+                    onClick={() => setTimeFilter(tf)}
+                    className={`px-4 py-1.5 rounded-lg text-[10px] font-black uppercase tracking-widest transition-all ${timeFilter === tf ? 'bg-emerald-500/20 text-emerald-400' : 'text-slate-500 hover:text-slate-300'}`}
+                 >
+                    {tf}
+                 </button>
+               ))}
+            </div>
+          )}
         </div>
 
-        {/* ⚡ UPDATED SECURITY RENDER BLOCK ⚡ */}
         {isAuthenticating ? (
           <div className="py-40 text-center bg-slate-900/30 border border-dashed border-slate-800 rounded-3xl flex flex-col items-center animate-in fade-in">
              <Loader2 size={48} className="text-emerald-500 mb-4 animate-spin" />
@@ -393,19 +428,102 @@ export default function AdminDashboard() {
         ) : (
           <div className="space-y-6">
 
-            {/* STATS */}
+            {/* STATS (Filters apply to Profit & Vault values!) */}
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
-              <StatBox label="VTpass Wallet" value={`₦${vtBalance}`} sub="Naira Float" color="text-white" icon={<Banknote size={16}/>} />
-              <StatBox label="Blockchain Vaults" value={`$${currentVaultTotal.toFixed(2)}`} sub="Total Locked Assets" color="text-emerald-500" icon={<Wallet size={16}/>} />
-              <StatBox label="Admin Profit" value={`₦${analytics.fees.toLocaleString()}`} sub="Fee Accrued" color="text-blue-400" icon={<BarChart3 size={16}/>} />
+              <StatBox label="VTpass Wallet" value={`₦${vtBalance}`} sub="Live Naira Float" color="text-white" icon={<Banknote size={16}/>} />
+              <StatBox label={`Vaults (${timeFilter})`} value={`$${currentVaultTotal.toFixed(2)}`} sub="Total Locked Assets" color="text-emerald-500" icon={<Wallet size={16}/>} />
+              <StatBox label={`Profit (${timeFilter})`} value={`₦${analytics.fees.toLocaleString()}`} sub="Service Fees Accrued" color="text-blue-400" icon={<BarChart3 size={16}/>} />
               <StatBox label="SMS Health" value={`${smsBalance} Units`} sub="Messaging Units" color="text-orange-400" icon={<Activity size={16}/>} />
             </div>
 
-            <div className="bg-[#111114] p-1.5 rounded-2xl border border-slate-800 inline-flex gap-1 overflow-x-auto max-w-full">
-              {['analytics', 'pricing', 'ledger', 'vault'].map((t) => (
-                <button key={t} onClick={() => setActiveTab(t)} className={`px-6 py-2 rounded-xl text-xs font-black uppercase transition-all ${activeTab === t ? 'bg-slate-800 text-emerald-400' : 'text-slate-500'}`}>{t}</button>
-              ))}
+            {/* ⚡ ADDED 'IDENTITY' TO TABS ⚡ */}
+            <div className="bg-[#111114] p-1.5 rounded-2xl border border-slate-800 flex justify-between items-center max-w-full">
+              <div className="flex gap-1 overflow-x-auto no-scrollbar pr-4">
+                  {['analytics', 'pricing', 'ledger', 'vault', 'identity'].map((t) => (
+                    <button key={t} onClick={() => setActiveTab(t)} className={`px-6 py-2 rounded-xl text-xs font-black uppercase transition-all whitespace-nowrap ${activeTab === t ? 'bg-slate-800 text-emerald-400' : 'text-slate-500 hover:text-slate-300'}`}>{t}</button>
+                  ))}
+              </div>
+              <button onClick={refreshAllData} className="hidden md:flex items-center justify-center p-2 rounded-xl bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-500 transition-colors shrink-0" title="Force Refresh All Data">
+                 <RefreshCcw size={16} className={isFetching ? 'animate-spin' : ''} />
+              </button>
             </div>
+
+            {/* ⚡ IDENTITY & POINTS TAB ⚡ */}
+            {activeTab === 'identity' && (
+              <div className="bg-[#111114] border border-slate-800 rounded-3xl p-6 animate-in fade-in">
+                 <div className="flex flex-col md:flex-row justify-between items-start md:items-center mb-6 gap-4">
+                    <div className="flex items-center gap-3">
+                       <div className="bg-purple-500/10 p-3 rounded-full"><Star className="text-purple-400" size={24}/></div>
+                       <div>
+                         <h2 className="text-xl font-black text-white">Identity & Loyalty</h2>
+                         <p className="text-xs font-bold text-slate-500 uppercase tracking-widest mt-1">AbaPoints Database</p>
+                       </div>
+                    </div>
+                    <div className="relative w-full md:w-64">
+                       <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-600" size={14} />
+                       <input type="text" placeholder="Search phone or wallet..." className="w-full bg-slate-900 border border-slate-800 rounded-lg pl-10 pr-4 py-2 text-xs focus:border-purple-500 outline-none" value={identitySearchTerm} onChange={(e) => setIdentitySearchTerm(e.target.value)} />
+                    </div>
+                 </div>
+
+                 <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                    {/* Verified Users Table */}
+                    <div className="bg-slate-900 border border-slate-800 rounded-2xl overflow-hidden">
+                       <div className="bg-slate-800/50 p-4 border-b border-slate-800 flex justify-between items-center">
+                          <h3 className="text-sm font-black text-slate-300 flex items-center gap-2"><Smartphone size={16} className="text-emerald-500"/> Verified Profiles</h3>
+                          <span className="bg-slate-800 text-slate-400 text-[10px] font-bold px-2 py-1 rounded">{filteredIdentities.users.length} Users</span>
+                       </div>
+                       <div className="max-h-[500px] overflow-y-auto p-2">
+                           {filteredIdentities.users.length === 0 ? (
+                               <p className="text-center text-xs text-slate-500 py-10 italic">No verified users found.</p>
+                           ) : (
+                               <div className="divide-y divide-slate-800/50">
+                                   {filteredIdentities.users.map(u => (
+                                       <div key={u.id} className="p-3 flex justify-between items-center hover:bg-slate-800/30 transition-colors rounded-lg">
+                                           <div>
+                                               <p className="font-mono font-bold text-slate-300 text-sm">{u.verified_phone}</p>
+                                               <p className="text-[9px] text-slate-500 uppercase tracking-widest mt-0.5">Joined: {new Date(u.created_at).toLocaleDateString()}</p>
+                                           </div>
+                                           <div className="text-right">
+                                               <p className="font-black text-emerald-400 text-lg leading-none">{Number(u.total_points).toFixed(2)}</p>
+                                               <p className="text-[8px] font-black text-slate-500 uppercase tracking-widest mt-1">Total Points</p>
+                                           </div>
+                                       </div>
+                                   ))}
+                               </div>
+                           )}
+                       </div>
+                    </div>
+
+                    {/* Unlinked Wallets Table */}
+                    <div className="bg-slate-900 border border-slate-800 rounded-2xl overflow-hidden">
+                       <div className="bg-slate-800/50 p-4 border-b border-slate-800 flex justify-between items-center">
+                          <h3 className="text-sm font-black text-slate-300 flex items-center gap-2"><Wallet size={16} className="text-slate-500"/> Unclaimed Wallets</h3>
+                          <span className="bg-slate-800 text-slate-400 text-[10px] font-bold px-2 py-1 rounded">{filteredIdentities.wallets.length} Wallets</span>
+                       </div>
+                       <div className="max-h-[500px] overflow-y-auto p-2">
+                           {filteredIdentities.wallets.length === 0 ? (
+                               <p className="text-center text-xs text-slate-500 py-10 italic">No unlinked wallets found.</p>
+                           ) : (
+                               <div className="divide-y divide-slate-800/50">
+                                   {filteredIdentities.wallets.map(w => (
+                                       <div key={w.wallet_address} className="p-3 flex justify-between items-center hover:bg-slate-800/30 transition-colors rounded-lg">
+                                           <div>
+                                               <p className="font-mono font-medium text-slate-400 text-xs">{w.wallet_address.slice(0, 8)}...{w.wallet_address.slice(-6)}</p>
+                                               <p className="text-[9px] text-slate-500 uppercase tracking-widest mt-1">Pending Verification</p>
+                                           </div>
+                                           <div className="text-right">
+                                               <p className="font-black text-slate-300 text-lg leading-none">{Number(w.unclaimed_points).toFixed(2)}</p>
+                                               <p className="text-[8px] font-black text-slate-500 uppercase tracking-widest mt-1">Unclaimed</p>
+                                           </div>
+                                       </div>
+                                   ))}
+                               </div>
+                           )}
+                       </div>
+                    </div>
+                 </div>
+              </div>
+            )}
 
             {/* PRICING ENGINE TAB */}
             {activeTab === 'pricing' && (
@@ -605,14 +723,14 @@ export default function AdminDashboard() {
                <div className="space-y-6 animate-in fade-in">
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                     <div className="bg-[#111114] border border-slate-800 rounded-3xl p-6">
-                      <h3 className="text-xs font-black uppercase text-slate-500 mb-6 flex items-center gap-2"><Users size={14}/> User Acquisition</h3>
+                      <h3 className="text-xs font-black uppercase text-slate-500 mb-6 flex items-center gap-2"><Users size={14}/> User Acquisition ({timeFilter})</h3>
                       <div className="flex items-baseline gap-2">
                         <span className="text-4xl font-black">{analytics.users}</span>
                         <span className="text-emerald-500 text-xs font-bold">Total Unique Wallets</span>
                       </div>
                     </div>
                     <div className="bg-[#111114] border border-slate-800 rounded-3xl p-6">
-                      <h3 className="text-xs font-black uppercase text-slate-500 mb-6 flex items-center gap-2"><Activity size={14}/> Transaction Volume</h3>
+                      <h3 className="text-xs font-black uppercase text-slate-500 mb-6 flex items-center gap-2"><Activity size={14}/> Transaction Volume ({timeFilter})</h3>
                       <div className="flex items-baseline gap-2">
                         <span className="text-4xl font-black">₦{analytics.vol.toLocaleString()}</span>
                         <span className="text-slate-500 text-xs">Gross Vended Value</span>
@@ -625,7 +743,7 @@ export default function AdminDashboard() {
                         <div className="bg-emerald-500/10 p-3 rounded-full"><Database className="text-emerald-400" size={24}/></div>
                         <div>
                           <h2 className="text-xl font-black text-white">Smart Contract Accounting</h2>
-                          <p className="text-xs font-bold text-slate-500 uppercase tracking-widest mt-1">Lifetime Volume & Treasury Flow</p>
+                          <p className="text-xs font-bold text-slate-500 uppercase tracking-widest mt-1">Filtered by: {timeFilter}</p>
                         </div>
                      </div>
 
@@ -633,17 +751,17 @@ export default function AdminDashboard() {
                         <div className="border-l-2 border-emerald-500 pl-4">
                            <p className="text-[10px] font-black text-slate-500 uppercase tracking-widest mb-1">Total Crypto Received</p>
                            <p className="text-3xl font-black text-white">${analytics.totalDeposited.toFixed(2)}</p>
-                           <p className="text-[10px] text-slate-500 mt-1">All-time lifetime deposits</p>
+                           <p className="text-[10px] text-slate-500 mt-1">Deposits for this period</p>
                         </div>
                         <div className="border-l-2 border-blue-500 pl-4">
                            <p className="text-[10px] font-black text-slate-500 uppercase tracking-widest mb-1">Total Processed Refunds</p>
                            <p className="text-3xl font-black text-white">${analytics.totalRefunded.toFixed(2)}</p>
-                           <p className="text-[10px] text-slate-500 mt-1">Crypto returned to users</p>
+                           <p className="text-[10px] text-slate-500 mt-1">Crypto returned for this period</p>
                         </div>
                         <div className="border-l-2 border-purple-500 pl-4 bg-purple-500/5 -ml-4 pl-8 py-2 rounded-r-xl">
-                           <p className="text-[10px] font-black text-purple-400 uppercase tracking-widest mb-1">Total Admin Withdrawals</p>
-                           <p className="text-3xl font-black text-purple-400">${Math.max(0, analytics.totalDeposited - analytics.totalRefunded - currentVaultTotal).toFixed(2)}</p>
-                           <p className="text-[10px] text-purple-400 mt-1">Crypto swept to treasury</p>
+                           <p className="text-[10px] font-black text-purple-400 uppercase tracking-widest mb-1">Est. Treasury Flow</p>
+                           <p className="text-3xl font-black text-purple-400">${Math.max(0, analytics.totalDeposited - analytics.totalRefunded).toFixed(2)}</p>
+                           <p className="text-[10px] text-purple-400 mt-1">Net deposits for this period</p>
                         </div>
                      </div>
                   </div>
