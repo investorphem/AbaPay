@@ -5,7 +5,6 @@ import { sendTelegramAlert } from '@/lib/telegram';
 import { supabaseAdmin as supabase } from '@/utils/supabase'; 
 import { Resend } from 'resend'; 
 
-// ⚡ BUILD FIX: Provide a dummy string so Next.js doesn't crash during deployment
 const resend = new Resend(process.env.RESEND_API_KEY || "re_dummy_key_for_build");
 
 const error_messages: Record<string, string> = {
@@ -79,7 +78,6 @@ export async function POST(req: Request) {
     const vendAmount = requestedNaira; 
     const vtRequestId = getStrictRequestId();
 
-    // ⚡ DB PAYLOAD FIX: Added customer_email
     const dbPayload = {
       tx_hash: txHash,
       request_id: vtRequestId,
@@ -255,36 +253,30 @@ export async function POST(req: Request) {
             units: vendedUnits 
         }).eq('tx_hash', txHash);
 
-        // ⚡ NON-BLOCKING NOTIFICATION & POINTS SYSTEM ⚡
         const notifications = [];
 
-        // 1. Telegram
         notifications.push(
           sendTelegramAlert(`✅ *SALE SUCCESSFUL*\n🛒 *Product:* ${network} ${serviceCategory}\n💰 *Naira:* ₦${vendAmount}\n🪙 *Asset:* ${amount} ${tokenSymbol || 'USD₮'}\n👤 *User:* ${billersCode || phone}\n⛽ *Fee:* ₦${serviceFee}\n🧾 *Ref:* ${alertTokenRef}`)
         );
 
-        // 2. SMS (Uses your existing AbaPay SMS lib)
         notifications.push(
           sendAbaPaySms(vtpassPayload.phone, `Purchase Successful! Ref: ${alertTokenRef}. Amt: ₦${vendAmount}`)
         );
 
-        // 3. Email (If the user provided an email address)
         if (email) {
           const emailPromise = resend.emails.send({
-            from: 'AbaPay <receipts@abapays.com>', // Update this to your verified domain in Resend
+            from: 'AbaPay <receipts@abapays.com>',
             to: email,
             subject: `AbaPay Receipt - ${network} ${serviceCategory}`,
             html: `
                 <div style="font-family: sans-serif; max-width: 600px; margin: 0 auto; padding: 20px; border: 1px solid #eaeaea; border-radius: 10px;">
                     <h2 style="color: #333;">Transaction Successful ⚡</h2>
                     <p>Thank you for using AbaPay! Here is your receipt for <strong>${network} ${serviceCategory}</strong>:</p>
-                    
                     <div style="background-color: #f9f9f9; padding: 15px; border-radius: 8px; margin: 20px 0;">
                         <p style="margin: 5px 0;"><strong>Amount Paid:</strong> ₦${vendAmount}</p>
                         <p style="margin: 5px 0;"><strong>Crypto Charged:</strong> ${amount} ${tokenSymbol}</p>
                         <p style="margin: 5px 0;"><strong>Account/Phone:</strong> ${billersCode || phone}</p>
                     </div>
-                    
                     ${dbPurchasedCode ? `
                     <p style="margin-top: 20px; font-weight: bold;">Your PIN / Token is:</p>
                     <div style="background-color: #e0f2fe; color: #0284c7; padding: 15px; text-align: center; font-size: 24px; letter-spacing: 2px; font-weight: bold; border-radius: 8px; margin: 10px 0;">
@@ -293,16 +285,15 @@ export async function POST(req: Request) {
                     ` : `
                     <p style="margin-top: 20px;"><strong>Reference ID:</strong> ${alertTokenRef}</p>
                     `}
-                    
-                    <p style="color: #555; font-size: 14px; margin-top: 30px;">You can always view your full transaction history inside the AbaPay app.</p>
                 </div>
             `
           });
           notifications.push(emailPromise);
         }
 
-        // 4. ⚡ ABAPOINTS SYSTEM (1 Point per ₦1000 spent) ⚡
-        const earnedPoints = Math.floor(vendAmount / 1000);
+        // ⚡ DECIMAL / VOLUME ABAPOINTS SYSTEM ⚡
+        const earnedPoints = Number((vendAmount / 1000).toFixed(2));
+        
         if (earnedPoints > 0 && wallet_address) {
             const pointsPromise = supabase.rpc('award_transaction_points', { 
                 target_wallet: wallet_address.toLowerCase(), 
@@ -313,7 +304,6 @@ export async function POST(req: Request) {
             notifications.push(pointsPromise);
         }
 
-        // ⚡ SERVERLESS FIX: Added 'await' so Vercel waits for notifications to send before sleeping
         await Promise.allSettled(notifications).catch(err => console.error("Notification Error:", err));
 
         return NextResponse.json({
@@ -321,13 +311,12 @@ export async function POST(req: Request) {
           message: "Transaction Successful!",
           purchased_code: dbPurchasedCode, 
           units: vendedUnits, 
+          earnedPoints: earnedPoints, // ⚡ PASS TO FRONTEND
           data: { vendedToken: alertTokenRef, vendAmount, requestId: payData.requestId, units: vendedUnits }
         });
 
       } else if (actualStatus === 'pending' || actualStatus === 'initiated' || payData.code === '099') {
         await supabase.from('transactions').update({ status: 'PENDING' }).eq('tx_hash', txHash);
-        try { await sendTelegramAlert(`⏳ *TRANSACTION PENDING*\n🛒 *Product:* ${network} ${serviceCategory}\n👤 *User:* ${billersCode || phone}\n⚠️ Network delayed. Awaiting final delivery confirmation from VTpass.`); } catch (e) {}
-
         return NextResponse.json({
           success: true, 
           message: "Transaction is processing. Your utility will be delivered shortly.",
@@ -335,22 +324,16 @@ export async function POST(req: Request) {
         });
       } else {
         await supabase.from('transactions').update({ status: 'FAILED_VENDING' }).eq('tx_hash', txHash);
-        try { await sendTelegramAlert(`🚨 *VENDING FAILED (Inner Status)*\nHash: \`${txHash}\`\nStatus: ${actualStatus}`); } catch (e) {}
-
         return NextResponse.json({ success: false, message: "Transaction failed at the provider network level.", code: "INNER_FAIL" }, { status: 502 });
       }
 
     } else {
       await supabase.from('transactions').update({ status: 'FAILED_VENDING' }).eq('tx_hash', txHash);
-      const rawAdminError = payData.response_description || 'Unknown Provider Error';
-      try { await sendTelegramAlert(`🚨 *VENDING REJECTED*\n🛒 *Product:* ${network} ${serviceCategory}\n👤 *User:* ${billersCode || phone}\n❌ *VTpass Code:* ${payData.code}\n🛑 *Real Error:* ${rawAdminError}\n🔗 *Hash:* \`${txHash}\``); } catch (e) {}
-
       const friendlyMessage = error_messages[payData.code as string] || "Utility vending failed at the provider level. Please contact support.";
       return NextResponse.json({ success: false, message: friendlyMessage, code: payData.code }, { status: 502 });
     }
 
   } catch (error: any) {
-    console.error("Payment Engine Failure:", error.message);
     return NextResponse.json({ success: false, code: "SYSTEM_CRASH", message: "Internal Server Error" }, { status: 500 });
   }
 }
