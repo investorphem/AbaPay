@@ -7,7 +7,7 @@ import {
   Lock, ArrowDownToLine, Wallet, ShieldAlert, Activity, 
   Database, RefreshCcw, Globe, Zap, ExternalLink, 
   Search, Download, Users, BarChart3, Banknote,
-  ChevronLeft, ChevronRight, Loader2, Save, Gauge, RefreshCw, Smartphone, Star
+  ChevronLeft, ChevronRight, Loader2, Save, Gauge, RefreshCw, Smartphone, Star, Edit3, Power
 } from "lucide-react";
 import { supabase } from "@/utils/supabase";
 
@@ -29,7 +29,6 @@ const TOKENS = {
 };
 
 const ITEMS_PER_PAGE = 10;
-
 type TimeFilter = 'TODAY' | 'WEEK' | 'MONTH' | 'ALL';
 
 export default function AdminDashboard() {
@@ -48,25 +47,30 @@ export default function AdminDashboard() {
   const [smsBalance, setSmsBalance] = useState("0");    
   const [status, setStatus] = useState("");
   const [activeTab, setActiveTab] = useState("analytics");
-  const [timeFilter, setTimeFilter] = useState<TimeFilter>('ALL'); // ⚡ TIME FILTER STATE
+  const [timeFilter, setTimeFilter] = useState<TimeFilter>('ALL'); 
 
   const [dbTransactions, setDbTransactions] = useState<any[]>([]);
-  const [dbUsers, setDbUsers] = useState<any[]>([]); // ⚡ VERIFIED USERS
-  const [dbWallets, setDbWallets] = useState<any[]>([]); // ⚡ UNLINKED WALLETS
+  const [dbUsers, setDbUsers] = useState<any[]>([]); 
+  const [dbWallets, setDbWallets] = useState<any[]>([]); 
   
   const [isFetching, setIsFetching] = useState(false);
   const [searchTerm, setSearchTerm] = useState("");
-  const [identitySearchTerm, setIdentitySearchTerm] = useState(""); // ⚡ SEARCH FOR IDENTITY TAB
+  const [identitySearchTerm, setIdentitySearchTerm] = useState(""); 
   const [filterStatus, setFilterStatus] = useState("ALL");
 
   const [currentPage, setCurrentPage] = useState(1);
-  const [identityCurrentPage, setIdentityCurrentPage] = useState(1);
   const [processingRefundId, setProcessingRefundId] = useState<string | null>(null);
   const [isRequeryingId, setIsRequeryingId] = useState<string | null>(null); 
 
   const [currentExchangeRate, setCurrentExchangeRate] = useState<string>("Loading...");
   const [newExchangeRate, setNewExchangeRate] = useState<string>("");
   const [isUpdatingRate, setIsUpdatingRate] = useState(false);
+
+  // ⚡ KILL SWITCHES STATE
+  const [killSwitches, setKillSwitches] = useState<Record<string, boolean>>({
+      AIRTIME: true, INTERNET: true, ELECTRICITY: true, CABLE: true, EDUCATION: true, BANK: true
+  });
+  const [isUpdatingSwitches, setIsUpdatingSwitches] = useState(false);
 
   const isMainnet = process.env.NEXT_PUBLIC_NETWORK === "celo";
   const isLive = process.env.NEXT_PUBLIC_APP_MODE === "live";
@@ -86,9 +90,7 @@ export default function AdminDashboard() {
 
           try {
             const currentChainId = await walletClient.getChainId();
-            if (currentChainId !== activeChain.id) {
-              await walletClient.switchChain({ id: activeChain.id });
-            }
+            if (currentChainId !== activeChain.id) await walletClient.switchChain({ id: activeChain.id });
           } catch (switchError) {
              try { await walletClient.addChain({ chain: activeChain }); } catch(e) {}
           }
@@ -108,9 +110,8 @@ export default function AdminDashboard() {
             setAuthError("The connected wallet is not the owner of this contract.");
           }
         } catch (error) { 
-          console.error("Admin init failed", error); 
           setIsOwner(false);
-          setAuthError("Failed to read Smart Contract. Check NEXT_PUBLIC_ABAPAY_ADDRESS in your .env");
+          setAuthError("Failed to read Smart Contract.");
         } finally {
           setIsAuthenticating(false);
         }
@@ -123,20 +124,29 @@ export default function AdminDashboard() {
     initAdmin();
   }, [activeChain, ABAPAY_CONTRACT]);
 
+  // ⚡ CENTRALIZED FETCHING FROM SECURE API ⚡
   const refreshAllData = async () => {
     setIsFetching(true);
-    await Promise.all([fetchCloudLedger(), fetchOnChainBalances(), fetchVtPassHealth(), fetchExchangeRate(), fetchIdentities()]);
-    setIsFetching(false);
-  };
-
-  const fetchExchangeRate = async () => {
-    const { data, error } = await supabase.from('platform_settings').select('exchange_rate').eq('id', 1).single();
-    if (data) {
-      setCurrentExchangeRate(data.exchange_rate.toString());
-      setNewExchangeRate(data.exchange_rate.toString());
-    } else if (error) {
-      setCurrentExchangeRate("Error");
+    await fetchOnChainBalances();
+    await fetchVtPassHealth();
+    
+    try {
+        const res = await fetch('/api/admin/data');
+        const data = await res.json();
+        if (data.success) {
+            setDbTransactions(data.transactions);
+            setDbUsers(data.users);
+            setDbWallets(data.wallets);
+            if (data.settings) {
+                setCurrentExchangeRate(data.settings.exchange_rate.toString());
+                setNewExchangeRate(data.settings.exchange_rate.toString());
+                if (data.settings.kill_switches) setKillSwitches(data.settings.kill_switches);
+            }
+        }
+    } catch (error) {
+        console.error("Failed to sync backend data.");
     }
+    setIsFetching(false);
   };
 
   const updateExchangeRate = async () => {
@@ -148,14 +158,46 @@ export default function AdminDashboard() {
       if (data.success) {
         alert("Rate successfully updated globally!");
         setCurrentExchangeRate(newExchangeRate);
-      } else {
-        alert(`Failed to update rate: ${data.message}`);
       }
-    } catch (e) {
-      alert("Network error while updating rate.");
-    } finally {
-      setIsUpdatingRate(false);
-    }
+    } catch (e) {} finally { setIsUpdatingRate(false); }
+  };
+
+  // ⚡ MANUAL POINT ADJUSTMENT LOGIC ⚡
+  const handleAdjustPoints = async (isUser: boolean, id: string, currentPoints: number) => {
+      const input = prompt(`Update AbaPoints for ${isUser ? 'Phone' : 'Wallet'} ${id}:\nCurrent Points: ${currentPoints}`, currentPoints.toString());
+      if (input === null) return; 
+
+      const newPoints = parseFloat(input);
+      if (isNaN(newPoints) || newPoints < 0) return alert("Invalid points value.");
+
+      try {
+          const res = await fetch('/api/admin/action', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ action: 'ADJUST_POINTS', payload: { isUser, id, newPoints } })
+          });
+          const data = await res.json();
+          if (data.success) {
+              alert("Points successfully updated!");
+              refreshAllData(); 
+          } else alert("Failed to update points.");
+      } catch (e) { alert("Network error."); }
+  };
+
+  // ⚡ KILL SWITCH TOGGLE LOGIC ⚡
+  const toggleKillSwitch = async (service: string) => {
+      setIsUpdatingSwitches(true);
+      const newSwitches = { ...killSwitches, [service]: !killSwitches[service] };
+      setKillSwitches(newSwitches); 
+
+      try {
+          await fetch('/api/admin/action', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ action: 'UPDATE_KILL_SWITCHES', payload: { switches: newSwitches } })
+          });
+      } catch (e) { alert("Network error updating switches."); }
+      finally { setIsUpdatingSwitches(false); }
   };
 
   const fetchOnChainBalances = async () => {
@@ -169,7 +211,7 @@ export default function AdminDashboard() {
 
       const cusdBal = await publicClient.readContract({ address: (isMainnet ? TOKENS["cUSD"].mainnet : TOKENS["cUSD"].sepolia) as `0x${string}`, abi: ERC20_ABI, functionName: 'balanceOf', args: [ABAPAY_CONTRACT] }) as bigint;
       setCusdVaultBalance(formatUnits(cusdBal, TOKENS["cUSD"].decimals));
-    } catch (error) { console.error("Failed to fetch vault balances", error); }
+    } catch (error) { console.error("Failed to fetch vault balances"); }
   };
 
   const fetchVtPassHealth = async () => {
@@ -181,38 +223,15 @@ export default function AdminDashboard() {
     } catch (e) { console.error("Failed to fetch VTpass health"); }
   };
 
-  const fetchCloudLedger = async () => {
-    const { data, error } = await supabase.from('transactions').select('*').order('created_at', { ascending: false });
-    if (!error) setDbTransactions(data || []);
-  };
-
-  // ⚡ FETCH IDENTITY & POINTS DATA ⚡
-  const fetchIdentities = async () => {
-    // Get Verified Users
-    const { data: usersData } = await supabase.from('abapay_users').select('*').order('total_points', { ascending: false });
-    if (usersData) setDbUsers(usersData);
-
-    // Get Unlinked Wallets
-    const { data: walletsData } = await supabase.from('wallet_links').select('*').is('user_id', null).order('unclaimed_points', { ascending: false });
-    if (walletsData) setDbWallets(walletsData);
-  };
-
   const handleWithdrawal = async (tokenSymbol: 'USD₮' | 'USDC' | 'cUSD') => {
     if (!client || !address) return;
     const balanceToCheck = tokenSymbol === 'USD₮' ? usdtVaultBalance : tokenSymbol === 'USDC' ? usdcVaultBalance : cusdVaultBalance;
-
     if (parseFloat(balanceToCheck) <= 0) return setStatus(`The ${tokenSymbol} Vault is already empty.`);
     setStatus(`Withdrawing ${tokenSymbol}...`);
 
     try {
       const tokenAddr = isMainnet ? TOKENS[tokenSymbol].mainnet : TOKENS[tokenSymbol].sepolia;
-      const hash = await client.writeContract({
-        address: ABAPAY_CONTRACT,
-        abi: ABAPAY_ADMIN_ABI,
-        functionName: 'withdrawFunds',
-        args: [tokenAddr], 
-        account: address,
-      });
+      const hash = await client.writeContract({ address: ABAPAY_CONTRACT, abi: ABAPAY_ADMIN_ABI, functionName: 'withdrawFunds', args: [tokenAddr], account: address });
       setStatus(`Success! Hash: ${hash.slice(0, 10)}`);
       setTimeout(() => refreshAllData(), 5000);
     } catch (error) { setStatus("Rejected or Insufficient Gas."); }
@@ -221,14 +240,10 @@ export default function AdminDashboard() {
   const handleRefund = async (tx: any) => {
     try {
       if (!client || !address) return alert("Connect your Admin Wallet first.");
-
       setProcessingRefundId(tx.id);
 
       const rawAmount = parseFloat(tx.amount_usdt);
-
-      if (isNaN(rawAmount) || rawAmount <= 0) {
-          throw new Error("Invalid crypto amount found in database.");
-      }
+      if (isNaN(rawAmount) || rawAmount <= 0) throw new Error("Invalid crypto amount found in database.");
 
       const tokenSymbol = tx.tokenUsed || tx.token_used || "USD₮"; 
       const tokenData = TOKENS[tokenSymbol as keyof typeof TOKENS];
@@ -236,103 +251,53 @@ export default function AdminDashboard() {
 
       const tokenAddr = isMainnet ? tokenData.mainnet : tokenData.sepolia;
       const decimals = tokenData.decimals;
-
       const cleanAmountString = rawAmount.toFixed(decimals);
       const valueInWei = parseUnits(cleanAmountString, decimals);
 
-      const refundHash = await client.writeContract({
-        address: ABAPAY_CONTRACT as `0x${string}`,
-        abi: ABAPAY_ADMIN_ABI,
-        functionName: 'refundUser',
-        args: [tokenAddr, tx.wallet_address, valueInWei],
-        account: address,
-      });
+      const refundHash = await client.writeContract({ address: ABAPAY_CONTRACT as `0x${string}`, abi: ABAPAY_ADMIN_ABI, functionName: 'refundUser', args: [tokenAddr, tx.wallet_address, valueInWei], account: address });
 
       const publicClient = createPublicClient({ chain: activeChain, transport: http() });
       const receipt = await publicClient.waitForTransactionReceipt({ hash: refundHash });
+      if (receipt.status !== 'success') throw new Error("Transaction reverted. Vault does not have enough balance.");
 
-      if (receipt.status !== 'success') {
-          throw new Error("Transaction reverted. The Vault does not have enough balance.");
-      }
-
-      const dbRes = await fetch('/api/admin/refund', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ id: tx.id, refundHash })
-      });
-
-      if (dbRes.ok) {
-        alert(`Refund confirmed on-chain! Hash: ${refundHash}`);
-        fetchCloudLedger(); 
-        fetchOnChainBalances(); 
-      } else {
-        alert("Crypto refunded successfully, but backend failed to update the database status.");
-      }
-
-    } catch (error: any) {
-      console.error(error);
-      alert(`Refund Failed: ${error.message || "Execution Reverted. Please check Vault Balance."}`);
-    } finally {
-      setProcessingRefundId(null);
-    }
+      const dbRes = await fetch('/api/admin/refund', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id: tx.id, refundHash }) });
+      if (dbRes.ok) { alert(`Refund confirmed on-chain! Hash: ${refundHash}`); refreshAllData(); } 
+      else alert("Crypto refunded successfully, but backend failed to update the database status.");
+    } catch (error: any) { alert(`Refund Failed: ${error.message || "Execution Reverted."}`); } 
+    finally { setProcessingRefundId(null); }
   };
 
   const handleRequery = async (tx: any) => {
     if (!tx.request_id) return alert("This transaction has no Provider Request ID to query.");
     setIsRequeryingId(tx.id);
-
     try {
-      const res = await fetch('/api/requery', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ request_id: tx.request_id, tx_hash: tx.tx_hash })
-      });
+      const res = await fetch('/api/requery', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ request_id: tx.request_id, tx_hash: tx.tx_hash }) });
       const data = await res.json();
-
       if (data.success) {
-        if (data.status === 'SUCCESS') {
-           alert("✅ Transaction was successfully delivered by the provider!");
-           fetchCloudLedger(); 
-        } else if (data.status === 'FAILED_VENDING') {
-           alert("❌ Provider rejected the transaction. It is now marked for a refund.");
-           fetchCloudLedger();
-        } else {
-           alert("⏳ Provider is still processing it. Check back later.");
-        }
-      } else {
-        alert(`Error: ${data.message}`);
-      }
-    } catch (error) {
-      alert("Network error while checking status.");
-    } finally {
-      setIsRequeryingId(null);
-    }
+        if (data.status === 'SUCCESS') alert("✅ Transaction was successfully delivered by the provider!");
+        else if (data.status === 'FAILED_VENDING') alert("❌ Provider rejected the transaction. It is now marked for a refund.");
+        else alert("⏳ Provider is still processing it. Check back later.");
+        refreshAllData(); 
+      } else alert(`Error: ${data.message}`);
+    } catch (error) { alert("Network error while checking status."); } 
+    finally { setIsRequeryingId(null); }
   };
 
   const currentVaultTotal = parseFloat(usdtVaultBalance || "0") + parseFloat(usdcVaultBalance || "0") + parseFloat(cusdVaultBalance || "0");
 
-  // ⚡ TIME FILTERING LOGIC ⚡
   const timeFilteredTransactions = useMemo(() => {
     const now = new Date();
     return dbTransactions.filter(tx => {
       const txDate = new Date(tx.created_at);
-      if (timeFilter === 'TODAY') {
-        return txDate.toDateString() === now.toDateString();
-      }
-      if (timeFilter === 'WEEK') {
-        const weekAgo = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000);
-        return txDate >= weekAgo;
-      }
-      if (timeFilter === 'MONTH') {
-        return txDate.getMonth() === now.getMonth() && txDate.getFullYear() === now.getFullYear();
-      }
-      return true; // ALL
+      if (timeFilter === 'TODAY') return txDate.toDateString() === now.toDateString();
+      if (timeFilter === 'WEEK') return txDate >= new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000);
+      if (timeFilter === 'MONTH') return txDate.getMonth() === now.getMonth() && txDate.getFullYear() === now.getFullYear();
+      return true; 
     });
   }, [dbTransactions, timeFilter]);
 
   const analytics = useMemo(() => {
     const successTx = timeFilteredTransactions.filter(tx => tx.status === "SUCCESS");
-
     const totalDeposited = timeFilteredTransactions.reduce((acc, tx) => acc + (parseFloat(tx.amount_usdt) || 0), 0);
     const totalRefunded = timeFilteredTransactions.filter(tx => tx.status === "REFUNDED").reduce((acc, tx) => acc + (parseFloat(tx.amount_usdt) || 0), 0);
 
@@ -358,7 +323,6 @@ export default function AdminDashboard() {
     });
   }, [timeFilteredTransactions, searchTerm, filterStatus]);
 
-  // ⚡ IDENTITY FILTERING ⚡
   const filteredIdentities = useMemo(() => {
       const searchLower = identitySearchTerm.toLowerCase();
       const matchedUsers = dbUsers.filter(u => u.verified_phone.includes(searchLower));
@@ -396,7 +360,6 @@ export default function AdminDashboard() {
             </div>
           </div>
           
-          {/* ⚡ TIME FILTER TOGGLE ⚡ */}
           {!isAuthenticating && isOwner && (
             <div className="flex items-center gap-2 bg-slate-900 border border-slate-800 p-1 rounded-xl">
                {(['TODAY', 'WEEK', 'MONTH', 'ALL'] as TimeFilter[]).map(tf => (
@@ -428,7 +391,7 @@ export default function AdminDashboard() {
         ) : (
           <div className="space-y-6">
 
-            {/* STATS (Filters apply to Profit & Vault values!) */}
+            {/* STATS */}
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
               <StatBox label="VTpass Wallet" value={`₦${vtBalance}`} sub="Live Naira Float" color="text-white" icon={<Banknote size={16}/>} />
               <StatBox label={`Vaults (${timeFilter})`} value={`$${currentVaultTotal.toFixed(2)}`} sub="Total Locked Assets" color="text-emerald-500" icon={<Wallet size={16}/>} />
@@ -436,11 +399,12 @@ export default function AdminDashboard() {
               <StatBox label="SMS Health" value={`${smsBalance} Units`} sub="Messaging Units" color="text-orange-400" icon={<Activity size={16}/>} />
             </div>
 
-            {/* ⚡ ADDED 'IDENTITY' TO TABS ⚡ */}
             <div className="bg-[#111114] p-1.5 rounded-2xl border border-slate-800 flex justify-between items-center max-w-full">
               <div className="flex gap-1 overflow-x-auto no-scrollbar pr-4">
-                  {['analytics', 'pricing', 'ledger', 'vault', 'identity'].map((t) => (
-                    <button key={t} onClick={() => setActiveTab(t)} className={`px-6 py-2 rounded-xl text-xs font-black uppercase transition-all whitespace-nowrap ${activeTab === t ? 'bg-slate-800 text-emerald-400' : 'text-slate-500 hover:text-slate-300'}`}>{t}</button>
+                  {['analytics', 'system', 'ledger', 'vault', 'identity'].map((t) => (
+                    <button key={t} onClick={() => setActiveTab(t)} className={`px-6 py-2 rounded-xl text-xs font-black uppercase transition-all whitespace-nowrap ${activeTab === t ? 'bg-slate-800 text-emerald-400' : 'text-slate-500 hover:text-slate-300'}`}>
+                        {t === 'system' ? 'Controls' : t}
+                    </button>
                   ))}
               </div>
               <button onClick={refreshAllData} className="hidden md:flex items-center justify-center p-2 rounded-xl bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-500 transition-colors shrink-0" title="Force Refresh All Data">
@@ -466,7 +430,7 @@ export default function AdminDashboard() {
                  </div>
 
                  <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-                    {/* Verified Users Table */}
+                    {/* Verified Users */}
                     <div className="bg-slate-900 border border-slate-800 rounded-2xl overflow-hidden">
                        <div className="bg-slate-800/50 p-4 border-b border-slate-800 flex justify-between items-center">
                           <h3 className="text-sm font-black text-slate-300 flex items-center gap-2"><Smartphone size={16} className="text-emerald-500"/> Verified Profiles</h3>
@@ -478,14 +442,17 @@ export default function AdminDashboard() {
                            ) : (
                                <div className="divide-y divide-slate-800/50">
                                    {filteredIdentities.users.map(u => (
-                                       <div key={u.id} className="p-3 flex justify-between items-center hover:bg-slate-800/30 transition-colors rounded-lg">
+                                       <div key={u.id} className="p-3 flex justify-between items-center hover:bg-slate-800/30 transition-colors rounded-lg group">
                                            <div>
                                                <p className="font-mono font-bold text-slate-300 text-sm">{u.verified_phone}</p>
                                                <p className="text-[9px] text-slate-500 uppercase tracking-widest mt-0.5">Joined: {new Date(u.created_at).toLocaleDateString()}</p>
                                            </div>
-                                           <div className="text-right">
-                                               <p className="font-black text-emerald-400 text-lg leading-none">{Number(u.total_points).toFixed(2)}</p>
-                                               <p className="text-[8px] font-black text-slate-500 uppercase tracking-widest mt-1">Total Points</p>
+                                           <div className="flex items-center gap-4">
+                                               <div className="text-right">
+                                                   <p className="font-black text-emerald-400 text-lg leading-none">{Number(u.total_points).toFixed(2)}</p>
+                                                   <p className="text-[8px] font-black text-slate-500 uppercase tracking-widest mt-1">Total Points</p>
+                                               </div>
+                                               <button onClick={() => handleAdjustPoints(true, u.id, u.total_points)} className="opacity-0 group-hover:opacity-100 p-2 bg-slate-800 rounded-lg hover:bg-slate-700 text-slate-400 transition-all"><Edit3 size={14}/></button>
                                            </div>
                                        </div>
                                    ))}
@@ -494,7 +461,7 @@ export default function AdminDashboard() {
                        </div>
                     </div>
 
-                    {/* Unlinked Wallets Table */}
+                    {/* Unlinked Wallets */}
                     <div className="bg-slate-900 border border-slate-800 rounded-2xl overflow-hidden">
                        <div className="bg-slate-800/50 p-4 border-b border-slate-800 flex justify-between items-center">
                           <h3 className="text-sm font-black text-slate-300 flex items-center gap-2"><Wallet size={16} className="text-slate-500"/> Unclaimed Wallets</h3>
@@ -506,14 +473,17 @@ export default function AdminDashboard() {
                            ) : (
                                <div className="divide-y divide-slate-800/50">
                                    {filteredIdentities.wallets.map(w => (
-                                       <div key={w.wallet_address} className="p-3 flex justify-between items-center hover:bg-slate-800/30 transition-colors rounded-lg">
+                                       <div key={w.wallet_address} className="p-3 flex justify-between items-center hover:bg-slate-800/30 transition-colors rounded-lg group">
                                            <div>
                                                <p className="font-mono font-medium text-slate-400 text-xs">{w.wallet_address.slice(0, 8)}...{w.wallet_address.slice(-6)}</p>
                                                <p className="text-[9px] text-slate-500 uppercase tracking-widest mt-1">Pending Verification</p>
                                            </div>
-                                           <div className="text-right">
-                                               <p className="font-black text-slate-300 text-lg leading-none">{Number(w.unclaimed_points).toFixed(2)}</p>
-                                               <p className="text-[8px] font-black text-slate-500 uppercase tracking-widest mt-1">Unclaimed</p>
+                                           <div className="flex items-center gap-4">
+                                               <div className="text-right">
+                                                   <p className="font-black text-slate-300 text-lg leading-none">{Number(w.unclaimed_points).toFixed(2)}</p>
+                                                   <p className="text-[8px] font-black text-slate-500 uppercase tracking-widest mt-1">Unclaimed</p>
+                                               </div>
+                                               <button onClick={() => handleAdjustPoints(false, w.wallet_address, w.unclaimed_points)} className="opacity-0 group-hover:opacity-100 p-2 bg-slate-800 rounded-lg hover:bg-slate-700 text-slate-400 transition-all"><Edit3 size={14}/></button>
                                            </div>
                                        </div>
                                    ))}
@@ -525,9 +495,11 @@ export default function AdminDashboard() {
               </div>
             )}
 
-            {/* PRICING ENGINE TAB */}
-            {activeTab === 'pricing' && (
+            {/* ⚡ SYSTEM CONTROLS & KILL SWITCHES TAB ⚡ */}
+            {activeTab === 'system' && (
               <div className="bg-[#111114] border border-slate-800 rounded-3xl p-8 animate-in fade-in">
+                 
+                 {/* Exchange Rate */}
                  <div className="flex items-center gap-3 mb-6">
                     <div className="bg-blue-500/10 p-3 rounded-full"><Gauge className="text-blue-400" size={24}/></div>
                     <div>
@@ -536,36 +508,52 @@ export default function AdminDashboard() {
                     </div>
                  </div>
 
-                 <div className="grid grid-cols-1 md:grid-cols-2 gap-8 bg-slate-900 border border-slate-800 rounded-2xl p-6">
+                 <div className="grid grid-cols-1 md:grid-cols-2 gap-8 bg-slate-900 border border-slate-800 rounded-2xl p-6 mb-10">
                     <div className="border-r border-slate-800 pr-0 md:pr-6">
                        <p className="text-slate-400 text-xs font-bold uppercase tracking-wider mb-2">Live Exchange Rate</p>
                        <p className="text-5xl font-black text-emerald-400 font-mono tracking-tighter">₦{currentExchangeRate}</p>
-                       <p className="text-xs text-slate-500 mt-2">This is the exact rate currently driving both the frontend App UI and the secure Backend smart contract checks.</p>
                     </div>
-
                     <div>
                        <label className="text-slate-400 text-xs font-bold uppercase tracking-wider mb-2 block">Update Rate</label>
                        <div className="flex flex-col gap-3">
                           <div className="relative">
                             <span className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-500 font-black">₦</span>
-                            <input 
-                              type="number" 
-                              value={newExchangeRate} 
-                              onChange={(e) => setNewExchangeRate(e.target.value)} 
-                              className="w-full bg-slate-950 border border-slate-700 text-white font-black text-2xl py-4 pl-10 pr-4 rounded-xl outline-none focus:border-blue-500 transition-all"
-                            />
+                            <input type="number" value={newExchangeRate} onChange={(e) => setNewExchangeRate(e.target.value)} className="w-full bg-slate-950 border border-slate-700 text-white font-black text-2xl py-4 pl-10 pr-4 rounded-xl outline-none focus:border-blue-500 transition-all"/>
                           </div>
-                          <button 
-                            onClick={updateExchangeRate}
-                            disabled={isUpdatingRate || newExchangeRate === currentExchangeRate}
-                            className="bg-blue-600 hover:bg-blue-500 text-white font-black py-4 rounded-xl flex items-center justify-center gap-2 transition-all disabled:opacity-50 active:scale-95"
-                          >
-                            {isUpdatingRate ? <Loader2 size={18} className="animate-spin"/> : <Save size={18}/>} 
-                            PUBLISH NEW RATE GLOBALLY
+                          <button onClick={updateExchangeRate} disabled={isUpdatingRate || newExchangeRate === currentExchangeRate} className="bg-blue-600 hover:bg-blue-500 text-white font-black py-4 rounded-xl flex items-center justify-center gap-2 transition-all disabled:opacity-50">
+                            {isUpdatingRate ? <Loader2 size={18} className="animate-spin"/> : <Save size={18}/>} PUBLISH NEW RATE
                           </button>
                        </div>
                     </div>
                  </div>
+
+                 {/* Provider Kill Switches */}
+                 <div className="flex items-center gap-3 mb-6">
+                    <div className="bg-red-500/10 p-3 rounded-full"><Power className="text-red-400" size={24}/></div>
+                    <div>
+                      <h2 className="text-xl font-black text-white">Provider Kill Switches</h2>
+                      <p className="text-xs font-bold text-slate-500 uppercase tracking-widest mt-1">Instantly disable failing API services</p>
+                    </div>
+                 </div>
+
+                 <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
+                    {Object.keys(killSwitches).map((service) => (
+                        <div key={service} className={`p-5 rounded-2xl border flex items-center justify-between transition-colors ${killSwitches[service] ? 'bg-slate-900 border-slate-800' : 'bg-red-500/5 border-red-500/20'}`}>
+                            <div>
+                                <h4 className="font-black text-white">{service}</h4>
+                                <p className={`text-[10px] font-bold uppercase tracking-widest mt-1 ${killSwitches[service] ? 'text-emerald-500' : 'text-red-500'}`}>{killSwitches[service] ? 'Operational' : 'Disabled'}</p>
+                            </div>
+                            <button 
+                                onClick={() => toggleKillSwitch(service)}
+                                disabled={isUpdatingSwitches}
+                                className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors disabled:opacity-50 ${killSwitches[service] ? 'bg-emerald-500' : 'bg-slate-700'}`}
+                            >
+                                <span className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${killSwitches[service] ? 'translate-x-6' : 'translate-x-1'}`} />
+                            </button>
+                        </div>
+                    ))}
+                 </div>
+
               </div>
             )}
 
@@ -592,7 +580,7 @@ export default function AdminDashboard() {
                   <table className="w-full text-left text-sm">
                     <thead>
                       <tr className="text-slate-500 border-b border-slate-800 text-[10px] uppercase">
-                        <th className="pb-4 px-2">Details</th>
+                        <th className="pb-4 px-2">Details (Date & Wallet)</th>
                         <th className="pb-4 px-2">Utility Vended</th>
                         <th className="pb-4 px-2">Provider Data</th>
                         <th className="pb-4 px-2">Financials</th>
@@ -602,14 +590,20 @@ export default function AdminDashboard() {
                     <tbody className="divide-y divide-slate-800">
                       {currentTransactions.map((tx) => (
                         <tr key={tx.id} className="hover:bg-slate-900/40">
-                          <td className="py-4 px-2 min-w-[150px]">
-                            <p className="text-white font-medium text-xs">{new Date(tx.created_at).toLocaleString()}</p>
-                            <a href={`https://${isMainnet ? '' : 'sepolia.'}celoscan.io/tx/${tx.tx_hash}`} target="_blank" className="text-[9px] text-emerald-400 hover:underline flex items-center gap-1 mt-1 font-mono tracking-wider">{tx.tx_hash.slice(0, 14)}... <ExternalLink size={8} /></a>
+                          
+                          {/* ⚡ UPDATED: ADDED WALLET TO DETAILS COLUMN ⚡ */}
+                          <td className="py-4 px-2 min-w-[180px]">
+                            <p className="text-white font-medium text-xs mb-1">{new Date(tx.created_at).toLocaleString()}</p>
+                            <p className="text-[10px] text-slate-500 font-mono">Wallet: <span className="text-slate-400">{tx.wallet_address?.slice(0,6)}...{tx.wallet_address?.slice(-4)}</span></p>
+                            <a href={`https://${isMainnet ? '' : 'sepolia.'}celoscan.io/tx/${tx.tx_hash}`} target="_blank" className="text-[9px] text-emerald-400 hover:underline flex items-center gap-1 mt-1 font-mono tracking-wider">Hash: {tx.tx_hash.slice(0, 8)}... <ExternalLink size={8} /></a>
                           </td>
+
                           <td className="py-4 px-2 min-w-[180px]">
                             <p className="text-slate-200 font-bold uppercase">{tx.network || 'N/A'}</p>
-                            <p className="text-[10px] text-slate-500 uppercase tracking-wider mt-0.5">{tx.service_category} • {tx.account_number}</p>
+                            <p className="text-[10px] text-slate-500 uppercase tracking-wider mt-0.5">{tx.service_category}</p>
+                            <p className="text-[10px] text-blue-400 font-mono mt-1 font-bold">Acct/Ph: {tx.account_number}</p>
                           </td>
+
                           <td className="py-4 px-2 min-w-[180px]">
                             <p className="text-slate-300 font-mono text-[10px] tracking-wider mb-0.5">ID: {tx.request_id || 'N/A'}</p>
                             {(tx.service_category === 'ELECTRICITY' || tx.service_category === 'EDUCATION') && tx.status === 'SUCCESS' ? (
