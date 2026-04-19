@@ -4,7 +4,9 @@ import { useEffect, useState } from 'react';
 
 export default function PointsBadge({ walletAddress }: { walletAddress: string | undefined }) {
     const [points, setPoints] = useState<number | null>(null);
+    const [showPoints, setShowPoints] = useState(true);
 
+    // 1. Fetch the points from the database
     useEffect(() => {
         if (!walletAddress) return;
 
@@ -24,13 +26,26 @@ export default function PointsBadge({ walletAddress }: { walletAddress: string |
         fetchPoints();
     }, [walletAddress]);
 
-    // Don't render anything if the wallet isn't connected or points haven't loaded
+    // 2. The Toggle Interval (Switches text every 3 seconds)
+    useEffect(() => {
+        const interval = setInterval(() => {
+            setShowPoints((prev) => !prev);
+        }, 3000);
+        
+        return () => clearInterval(interval);
+    }, []);
+
+    // Don't render until points are loaded
     if (!walletAddress || points === null) return null;
 
     return (
-        <div className="flex items-center gap-1.5 bg-green-100 text-green-800 border border-green-200 px-3 py-1 rounded-full font-bold text-sm shadow-sm transition-all hover:scale-105">
-            <span>⚡</span>
-            <span>{points} Points</span>
+        <div className="flex items-center justify-center min-w-[90px] h-8 bg-green-900/10 border border-green-500/50 rounded-full px-3 text-xs font-bold text-green-600 shadow-[0_0_10px_rgba(34,197,94,0.4)] transition-all duration-300">
+            <span className={`transition-opacity duration-500 ${showPoints ? 'opacity-100' : 'opacity-0 hidden'}`}>
+                ⚡ {points} 
+            </span>
+            <span className={`transition-opacity duration-500 ${!showPoints ? 'opacity-100' : 'opacity-0 hidden'}`}>
+                ✨ AbaPoints
+            </span>
         </div>
     );
 }
