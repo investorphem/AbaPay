@@ -294,9 +294,15 @@ export async function POST(req: Request) {
           sendTelegramAlert(`✅ *SALE SUCCESSFUL*\n🛒 *Product:* ${network} ${serviceCategory}\n💰 *Naira:* ₦${vendAmount}\n🪙 *Asset:* ${amount} ${tokenSymbol || 'USD₮'}\n👤 *User:* ${billersCode || phone}\n⛽ *Fee:* ₦${serviceFee}\n🧾 *Ref:* ${alertTokenRef}`)
         );
 
-        notifications.push(
-          sendAbaPaySms(vtpassPayload.phone, `Purchase Successful! Ref: ${alertTokenRef}. Amt: ₦${vendAmount}`)
-        );
+        // ⚡ ONLY SEND SMS FOR TOKENS/PINS TO SAVE COST ⚡
+        if (serviceCategory === 'ELECTRICITY' || serviceCategory === 'EDUCATION') {
+          const typeLabel = serviceCategory === 'ELECTRICITY' ? 'Token' : 'PIN';
+          const networkDisplay = network || serviceCategory; 
+          
+          notifications.push(
+            sendAbaPaySms(phone || billersCode, `AbaPay: Your ${networkDisplay} ${typeLabel} is ${alertTokenRef}. Amount: N${vendAmount}. Thank you.`)
+          );
+        }
 
         if (email) {
           const emailPromise = resend.emails.send({
