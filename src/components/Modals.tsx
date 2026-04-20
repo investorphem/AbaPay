@@ -254,27 +254,43 @@ export function SelectionModal({
                </button>
              ))}
 
-             {type === 'provider' && (options as any[]).map(provider => (
-                <button key={provider.serviceID} onClick={() => { onSelect(provider.serviceID); onClose(); }} className="w-full text-left p-4 rounded-2xl font-bold text-slate-700 bg-white border hover:bg-slate-50 transition-all flex justify-between items-center group hover:border-slate-300">
+                          {type === 'provider' && (options as any[]).map(provider => (
+                <button 
+                  key={provider.serviceID} 
+                  disabled={provider.disabled}
+                  onClick={() => { if (!provider.disabled) { onSelect(provider.serviceID); onClose(); } }} 
+                  className={`w-full text-left p-4 rounded-2xl font-bold transition-all flex justify-between items-center group ${provider.disabled ? 'bg-slate-50 border border-slate-100 opacity-60 grayscale cursor-not-allowed' : 'text-slate-700 bg-white border hover:bg-slate-50 hover:border-slate-300'}`}
+                >
                     <div className="flex items-center gap-4">
-                        <div className="w-12 h-12 shrink-0 rounded-full border border-slate-100 bg-white p-0.5 flex items-center justify-center shadow-sm overflow-hidden group-hover:shadow-md transition-shadow">
+                        <div className="w-12 h-12 shrink-0 rounded-full border border-slate-100 bg-white p-0.5 flex items-center justify-center shadow-sm overflow-hidden">
                             <img src={provider.logo || '/logo.png'} alt={provider.displayName} className="w-full h-full object-contain" onError={(e) => { e.currentTarget.src = '/logo.png'; }} />
                         </div>
-                        <div><span className="text-sm font-black text-slate-900 tracking-tight">{provider.displayName}</span></div>
+                        <div className="flex flex-col">
+                            <span className={`text-sm font-black tracking-tight ${provider.disabled ? 'text-slate-500' : 'text-slate-900'}`}>{provider.displayName}</span>
+                            {provider.disabled && <span className="text-[9px] font-bold text-red-500 uppercase tracking-widest mt-0.5">Temporarily Offline</span>}
+                        </div>
                     </div>
-                    {selectedValue === provider.serviceID && <CheckCircle2 size={20} className="text-emerald-500"/>}
+                    {selectedValue === provider.serviceID && !provider.disabled && <CheckCircle2 size={20} className="text-emerald-500"/>}
                 </button>
              ))}
 
              {type === 'standard' && (options as any[]).map(provider => (
-                <button key={provider.serviceID} onClick={() => { onSelect(provider.serviceID); onClose(); }} className="w-full text-left p-4 rounded-2xl font-bold text-slate-700 bg-white border hover:bg-slate-50 transition-all flex justify-between items-center group hover:border-emerald-300">
+                <button 
+                  key={provider.serviceID} 
+                  disabled={provider.disabled}
+                  onClick={() => { if (!provider.disabled) { onSelect(provider.serviceID); onClose(); } }} 
+                  className={`w-full text-left p-4 rounded-2xl font-bold transition-all flex justify-between items-center group ${provider.disabled ? 'bg-slate-50 border border-slate-100 opacity-60 grayscale cursor-not-allowed' : 'text-slate-700 bg-white border hover:bg-slate-50 hover:border-emerald-300'}`}
+                >
                     <div className="flex items-center gap-4">
-                        <div className="w-12 h-12 shrink-0 rounded-full border border-slate-100 bg-white p-0.5 flex items-center justify-center shadow-sm overflow-hidden group-hover:shadow-md transition-shadow">
+                        <div className="w-12 h-12 shrink-0 rounded-full border border-slate-100 bg-white p-0.5 flex items-center justify-center shadow-sm overflow-hidden">
                             <img src={provider.logo || '/logo.png'} alt={provider.displayName} className="w-full h-full object-contain" onError={(e) => { e.currentTarget.src = '/logo.png'; }} />
                         </div>
-                        <div><span className="text-sm font-black text-slate-900 tracking-tight uppercase">{provider.displayName}</span></div>
+                        <div className="flex flex-col">
+                            <span className={`text-sm font-black tracking-tight uppercase ${provider.disabled ? 'text-slate-500' : 'text-slate-900'}`}>{provider.displayName}</span>
+                            {provider.disabled && <span className="text-[9px] font-bold text-red-500 uppercase tracking-widest mt-0.5">Temporarily Offline</span>}
+                        </div>
                     </div>
-                    {selectedValue === provider.serviceID && <CheckCircle2 size={20} className="text-emerald-500"/>}
+                    {selectedValue === provider.serviceID && !provider.disabled && <CheckCircle2 size={20} className="text-emerald-500"/>}
                 </button>
              ))}
           </div>
