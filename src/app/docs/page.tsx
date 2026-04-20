@@ -6,7 +6,7 @@ import {
   ArrowLeft, ShieldCheck, Zap, Globe, 
   Lock, Wallet, ChevronDown, BookOpen,
   Star, Gift, Smartphone, Share2, HelpCircle,
-  Twitter, Send // ⚡ ADDED SOCIAL ICONS
+  Send // ⚡ Twitter removed from here
 } from "lucide-react";
 
 export default function DocsPage() {
@@ -183,9 +183,9 @@ export default function DocsPage() {
 
         </div>
 
-        {/* ⚡ UPDATED FOOTER WITH CIRCULAR SOCIAL ICONS ⚡ */}
+        {/* ⚡ FOOTER WITH NATIVE SVG TWITTER ICON ⚡ */}
         <footer className="mt-12 w-full pt-8 pb-4 flex flex-col items-center gap-4">
-          
+
           <div className="flex items-center gap-4 mb-2">
             <a 
               href="https://twitter.com/AbaPay" 
@@ -193,7 +193,10 @@ export default function DocsPage() {
               rel="noopener noreferrer" 
               className="w-12 h-12 rounded-full border-2 border-slate-200 bg-white flex items-center justify-center text-slate-500 hover:text-emerald-600 hover:border-emerald-200 hover:bg-emerald-50 transition-all shadow-sm group"
             >
-              <Twitter size={20} className="group-hover:scale-110 transition-transform" />
+              {/* ⚡ Native SVG Twitter/X Replacement ⚡ */}
+              <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="group-hover:scale-110 transition-transform">
+                <path d="M22 4s-.7 2.1-2 3.4c1.6 10-9.4 17.3-18 11.6 2.2.1 4.4-.6 6-2C3 15.5.5 9.6 3 5c2.2 2.6 5.6 4.1 9 4-.9-4.2 4-6.6 7-3.8 1.1 0 3-1.2 3-1.2z"></path>
+              </svg>
             </a>
             <a 
               href="https://t.me/AbaPay" 
@@ -201,7 +204,7 @@ export default function DocsPage() {
               rel="noopener noreferrer" 
               className="w-12 h-12 rounded-full border-2 border-slate-200 bg-white flex items-center justify-center text-slate-500 hover:text-emerald-600 hover:border-emerald-200 hover:bg-emerald-50 transition-all shadow-sm group"
             >
-              {/* Added slight margin adjustments to center the paper plane perfectly */}
+              {/* Send icon perfectly mimics Telegram's vibe */}
               <Send size={20} className="ml-[-2px] mt-[2px] group-hover:scale-110 transition-transform" /> 
             </a>
           </div>
