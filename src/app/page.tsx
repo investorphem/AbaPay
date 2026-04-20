@@ -1967,7 +1967,7 @@ export default function Home() {
           {/* ⚡ SOCIAL ICONS ADDED TO MAIN APP ⚡ */}
           <div className="flex items-center gap-4">
             <a 
-              href="https://twitter.com/AbaPay" 
+              href="https://x.com/AbaPays" 
               target="_blank" 
               rel="noopener noreferrer" 
               className="w-12 h-12 rounded-full border-2 border-slate-200 bg-white flex items-center justify-center text-slate-500 hover:text-emerald-600 hover:border-emerald-200 hover:bg-emerald-50 transition-all shadow-sm group"
@@ -1977,7 +1977,7 @@ export default function Home() {
               </svg>
             </a>
             <a 
-              href="https://t.me/AbaPay" 
+              href="https://t.me/AbaPays" 
               target="_blank" 
               rel="noopener noreferrer" 
               className="w-12 h-12 rounded-full border-2 border-slate-200 bg-white flex items-center justify-center text-slate-500 hover:text-emerald-600 hover:border-emerald-200 hover:bg-emerald-50 transition-all shadow-sm group"
