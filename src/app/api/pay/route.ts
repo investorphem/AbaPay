@@ -65,7 +65,7 @@ export async function POST(req: Request) {
     } = body;
 
     const appMode = process.env.NEXT_PUBLIC_APP_MODE || "sandbox";
-    const baseUrl = appMode === "live" ? "https://vtpass.com/api" : "https://sandbox.vtpass.com/api";
+    const baseUrl = appMode === "live" ? "https://live.vtpass.com/api" : "https://sandbox.vtpass.com/api";
 
     if (processedTransactions.has(txHash)) {
       return NextResponse.json({ success: false, code: "DUPLICATE_HASH", message: "Duplicate hash blocked." }, { status: 400 });
@@ -197,7 +197,21 @@ export async function POST(req: Request) {
       payData = await payRes.json();
     } catch (e: any) {
       await supabase.from('transactions').update({ status: 'FAILED_VTPASS_CRASH' }).eq('tx_hash', txHash);
-      return NextResponse.json({ success: false, code: "VTPASS_CRASH", message: "Network timeout while contacting provider." }, { status: 502 });
+      
+      // ⚡ 1. TELEGRAM FAILURE ALERT & 200 HTTP STATUS
+      try { await sendTelegramAlert(`❌ *NETWORK CRASH (LIVE)*\n🛒 *Product:* ${network} ${serviceCategory}\n👤 *User:* ${billersCode || phone}\n⚠️ Connection to VTpass timed out completely.`); } catch (err) {}
+      
+      return NextResponse.json({ success: false, code: "VTPASS_CRASH", message: "Network timeout while contacting provider." }, { status: 200 }); // Status 200 so UI Toast works!
+    }
+
+    // ⚡ 2. STRICT LIVE-MODE ERROR GUARD
+    if (!payData.content || !payData.content.transactions) {
+        await supabase.from('transactions').update({ status: 'FAILED_VENDING' }).eq('tx_hash', txHash);
+        const friendlyMessage = error_messages[payData.code as string] || "VTpass rejected the transaction payload. Admin notified.";
+        
+        try { await sendTelegramAlert(`❌ *VTPASS REJECTION*\n🛒 *Product:* ${network} ${serviceCategory}\n👤 *User:* ${billersCode || phone}\n🚨 *Error:* Code ${payData.code} - ${friendlyMessage}\n💵 Please refund user from Admin panel.`); } catch (err) {}
+
+        return NextResponse.json({ success: false, message: friendlyMessage, code: payData.code }, { status: 200 }); // Status 200!
     }
 
     if (payData.code === '000' || payData.code === '099') {
@@ -291,9 +305,8 @@ export async function POST(req: Request) {
           notifications.push(emailPromise);
         }
 
-        // ⚡ DECIMAL / VOLUME ABAPOINTS SYSTEM ⚡
         const earnedPoints = Number((vendAmount / 1000).toFixed(2));
-        
+
         if (earnedPoints > 0 && wallet_address) {
             const pointsPromise = supabase.rpc('award_transaction_points', { 
                 target_wallet: wallet_address.toLowerCase(), 
@@ -311,7 +324,7 @@ export async function POST(req: Request) {
           message: "Transaction Successful!",
           purchased_code: dbPurchasedCode, 
           units: vendedUnits, 
-          earnedPoints: earnedPoints, // ⚡ PASS TO FRONTEND
+          earnedPoints: earnedPoints, 
           data: { vendedToken: alertTokenRef, vendAmount, requestId: payData.requestId, units: vendedUnits }
         });
 
@@ -324,13 +337,21 @@ export async function POST(req: Request) {
         });
       } else {
         await supabase.from('transactions').update({ status: 'FAILED_VENDING' }).eq('tx_hash', txHash);
-        return NextResponse.json({ success: false, message: "Transaction failed at the provider network level.", code: "INNER_FAIL" }, { status: 502 });
+        
+        // ⚡ 3. ADDED TELEGRAM ALERT & STATUS 200 FOR INNER STATUS FAILURE
+        try { await sendTelegramAlert(`❌ *TX FAILED AT PROVIDER*\n🛒 *Product:* ${network} ${serviceCategory}\n👤 *User:* ${billersCode || phone}\n⚠️ VTpass returned an explicit failed status.`); } catch (err) {}
+        
+        return NextResponse.json({ success: false, message: "Transaction failed at the provider network level.", code: "INNER_FAIL" }, { status: 200 }); // Status 200!
       }
 
     } else {
       await supabase.from('transactions').update({ status: 'FAILED_VENDING' }).eq('tx_hash', txHash);
       const friendlyMessage = error_messages[payData.code as string] || "Utility vending failed at the provider level. Please contact support.";
-      return NextResponse.json({ success: false, message: friendlyMessage, code: payData.code }, { status: 502 });
+      
+      // ⚡ 4. ADDED TELEGRAM ALERT & STATUS 200 FOR CODE REJECTION
+      try { await sendTelegramAlert(`❌ *VENDING REJECTED*\n🛒 *Product:* ${network} ${serviceCategory}\n👤 *User:* ${billersCode || phone}\n🚨 *Error:* Code ${payData.code} - ${friendlyMessage}`); } catch (err) {}
+      
+      return NextResponse.json({ success: false, message: friendlyMessage, code: payData.code }, { status: 200 }); // Status 200!
     }
 
   } catch (error: any) {
