@@ -212,21 +212,16 @@ export function SelectionModal({
           </div>
           <div className="space-y-2.5 max-h-[50vh] overflow-y-auto pr-1">
 
+             {/* ⚡ COUNTRY SELECTOR WITH SAFE FLAG IMAGE ⚡ */}
              {type === 'country' && SUPPORTED_COUNTRIES.map(country => (
                <button key={country.code} disabled={country.disabled} onClick={() => { if (!country.disabled) { onSelect(country.code); onClose(); } }}
                  className={`w-full text-left p-4 rounded-xl font-bold text-sm transition-all flex justify-between items-center ${country.disabled ? 'bg-slate-50 border border-slate-100 text-slate-400 cursor-not-allowed' : 'text-slate-700 bg-slate-50 border border-slate-100 hover:border-emerald-300 hover:bg-emerald-50/50'}`}>
-                 <div className="flex items-center gap-3">             {type === 'country' && SUPPORTED_COUNTRIES.map(country => (
-               <button key={country.code} disabled={country.disabled} onClick={() => { if (!country.disabled) { onSelect(country.code); onClose(); } }}
-                 className={`w-full text-left p-4 rounded-xl font-bold text-sm transition-all flex justify-between items-center ${country.disabled ? 'bg-slate-50 border border-slate-100 text-slate-400 cursor-not-allowed' : 'text-slate-700 bg-slate-50 border border-slate-100 hover:border-emerald-300 hover:bg-emerald-50/50'}`}>
                  <div className="flex items-center gap-3">
-                   
-                   {/* ⚡ REPLACED EMOJI WITH UNIVERSAL FLAG IMAGE ⚡ */}
                    <img 
                      src={`https://flagcdn.com/w40/${country.code.toLowerCase()}.png`} 
                      alt={country.name} 
                      className={`w-7 h-auto rounded-sm shadow-sm ${country.disabled ? 'opacity-50 grayscale' : ''}`} 
                    />
-                   
                    <span className={`font-black ${country.disabled ? 'text-slate-400' : 'text-slate-800'}`}>{country.name}</span>
                  </div>
                  {selectedValue === country.code && <CheckCircle2 size={18} className="text-emerald-500"/>}
