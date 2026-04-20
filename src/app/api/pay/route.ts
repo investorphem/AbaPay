@@ -7,7 +7,6 @@ import { Resend } from 'resend';
 
 const resend = new Resend(process.env.RESEND_API_KEY || "re_dummy_key_for_build");
 
-// ⚡ ALL ERRORS ARE NOW 100% USER-FRIENDLY & HIDE TECHNICAL JARGON
 const error_messages: Record<string, string> = {
     "011": "Invalid details provided. Please check your phone/meter number and try again.",
     "012": "This product is currently unavailable.",
@@ -21,8 +20,8 @@ const error_messages: Record<string, string> = {
     "022": "Service is temporarily undergoing maintenance. Please try again later.",
     "023": "Service is temporarily undergoing maintenance. Please try again later.",
     "024": "Service is temporarily undergoing maintenance. Please try again later.",
-    "027": "Service is temporarily undergoing maintenance. Please try again later.", // Hides IP Whitelist error
-    "028": "This specific product is temporarily unavailable. Please try another service.", // Hides Product Whitelist error
+    "027": "Service is temporarily undergoing maintenance. Please try again later.", 
+    "028": "This specific product is temporarily unavailable. Please try another service.", 
     "030": "Provider network is currently down. Please try again.",
     "034": "Service is currently suspended by the provider. Please try again later.",
     "035": "Service is inactive at the moment. Please try again later.",
@@ -109,7 +108,11 @@ export async function POST(req: Request) {
       .single();
 
     if (settingsError || !settingsData) {
-      await supabase.from('transactions').update({ status: 'FAILED_RATE_FETCH' }).eq('tx_hash', txHash);
+      await supabase.from('transactions').update({ 
+          status: 'FAILED_RATE_FETCH', 
+          error_code: 'SYS_RATE', 
+          api_response: 'Failed to fetch platform exchange rate.' 
+      }).eq('tx_hash', txHash);
       return NextResponse.json({ success: false, code: "SYSTEM_ERROR", message: "Failed to fetch platform exchange rate." }, { status: 500 });
     }
 
@@ -119,7 +122,11 @@ export async function POST(req: Request) {
     const expectedCryptoStr = requiredCrypto.toFixed(4);
 
     if (parseFloat(amount) < parseFloat(expectedCryptoStr)) {
-        await supabase.from('transactions').update({ status: 'FAILED_FUNDS_MISMATCH' }).eq('tx_hash', txHash);
+        await supabase.from('transactions').update({ 
+            status: 'FAILED_FUNDS_MISMATCH',
+            error_code: 'FUNDS_MISMATCH',
+            api_response: `Paid ${amount}, Expected ${expectedCryptoStr}`
+        }).eq('tx_hash', txHash);
         try { await sendTelegramAlert(`🚨 *RATE MISMATCH / UNDERPAYMENT*\nUser: ${wallet_address}\nHash: \`${txHash}\`\nThey paid: ${amount} ${tokenSymbol}. We expected: ${expectedCryptoStr} based on rate ₦${baseRate}.`); } catch (e) {}
         return NextResponse.json({ success: false, code: "FUNDS", message: "Insufficient crypto paid. Admin has been notified." }, { status: 400 });
     }
@@ -137,7 +144,11 @@ export async function POST(req: Request) {
 
       const verifyData = await verifyRes.json();
       if (verifyData.code !== '000') {
-        await supabase.from('transactions').update({ status: 'FAILED_VERIFICATION' }).eq('tx_hash', txHash);
+        await supabase.from('transactions').update({ 
+            status: 'FAILED_VERIFICATION',
+            error_code: verifyData.code,
+            api_response: verifyData.content?.error || "Merchant verification failed"
+        }).eq('tx_hash', txHash);
         return NextResponse.json({ success: false, code: "VERIFY_FAIL", message: error_messages.FAILED_VERIFICATION }, { status: 400 });
       }
     }
@@ -198,21 +209,29 @@ export async function POST(req: Request) {
       });
       payData = await payRes.json();
     } catch (e: any) {
-      await supabase.from('transactions').update({ status: 'FAILED_VTPASS_CRASH' }).eq('tx_hash', txHash);
+      // ⚡ TRACK FETCH TIMEOUT / CRASH
+      await supabase.from('transactions').update({ 
+          status: 'FAILED_VTPASS_CRASH',
+          error_code: '502_TIMEOUT',
+          api_response: e.message || 'Fetch failed entirely'
+      }).eq('tx_hash', txHash);
       try { await sendTelegramAlert(`❌ *NETWORK CRASH (LIVE)*\n🛒 *Product:* ${network} ${serviceCategory}\n👤 *User:* ${billersCode || phone}\n⚠️ Connection to VTpass timed out completely.`); } catch (err) {}
       return NextResponse.json({ success: false, code: "VTPASS_CRASH", message: "Network timeout while contacting provider. Please try again." }, { status: 200 }); 
     }
 
+    // ⚡ TRACK VTPASS REJECTIONS (e.g. 027, 011)
     if (!payData.content || !payData.content.transactions) {
-        await supabase.from('transactions').update({ status: 'FAILED_VENDING' }).eq('tx_hash', txHash);
-        
         const friendlyMessage = error_messages[payData.code as string] || "Service is temporarily undergoing maintenance. Please try again later.";
         const rawTechnicalError = payData.response_description || payData.content?.errors || "Unknown VTpass Rejection";
 
-        // ⚡ TELEGRAM gets the RAW technical error (e.g. IP Not Whitelisted)
+        await supabase.from('transactions').update({ 
+            status: 'FAILED_VENDING',
+            error_code: payData.code,
+            api_response: rawTechnicalError
+        }).eq('tx_hash', txHash);
+
         try { await sendTelegramAlert(`❌ *VTPASS REJECTION*\n🛒 *Product:* ${network} ${serviceCategory}\n👤 *User:* ${billersCode || phone}\n🚨 *Admin Error:* Code ${payData.code} - ${rawTechnicalError}\n🗣 *User Saw:* ${friendlyMessage}`); } catch (err) {}
 
-        // ⚡ FRONTEND gets the FRIENDLY error (e.g. Undergoing Maintenance)
         return NextResponse.json({ success: false, message: friendlyMessage, code: payData.code }, { status: 200 }); 
     }
 
@@ -338,15 +357,27 @@ export async function POST(req: Request) {
           data: { vendedToken: "Processing...", vendAmount, requestId: payData.requestId }
         });
       } else {
-        await supabase.from('transactions').update({ status: 'FAILED_VENDING' }).eq('tx_hash', txHash);
-        try { await sendTelegramAlert(`❌ *TX FAILED AT PROVIDER*\n🛒 *Product:* ${network} ${serviceCategory}\n👤 *User:* ${billersCode || phone}\n⚠️ VTpass returned an explicit failed status.`); } catch (err) {}
+        // ⚡ TRACK INNER STATUS FAILURES (e.g., 'failed', 'reversed')
+        await supabase.from('transactions').update({ 
+            status: 'FAILED_VENDING',
+            error_code: payData.code,
+            api_response: `Inner Status: ${actualStatus}`
+        }).eq('tx_hash', txHash);
+
+        try { await sendTelegramAlert(`❌ *TX FAILED AT PROVIDER*\n🛒 *Product:* ${network} ${serviceCategory}\n👤 *User:* ${billersCode || phone}\n⚠️ VTpass returned an explicit failed status (${actualStatus}).`); } catch (err) {}
         return NextResponse.json({ success: false, message: "The provider network is currently unstable. Please try again.", code: "INNER_FAIL" }, { status: 200 }); 
       }
 
     } else {
-      await supabase.from('transactions').update({ status: 'FAILED_VENDING' }).eq('tx_hash', txHash);
+      // ⚡ TRACK ANY OTHER OUTER CODE FAILURES
       const friendlyMessage = error_messages[payData.code as string] || "Service is temporarily undergoing maintenance. Please try again later.";
       const rawTechnicalError = payData.response_description || payData.content?.errors || "Unknown VTpass Rejection";
+
+      await supabase.from('transactions').update({ 
+          status: 'FAILED_VENDING',
+          error_code: payData.code,
+          api_response: rawTechnicalError
+      }).eq('tx_hash', txHash);
 
       try { await sendTelegramAlert(`❌ *VENDING REJECTED*\n🛒 *Product:* ${network} ${serviceCategory}\n👤 *User:* ${billersCode || phone}\n🚨 *Admin Error:* Code ${payData.code} - ${rawTechnicalError}\n🗣 *User Saw:* ${friendlyMessage}`); } catch (err) {}
 
