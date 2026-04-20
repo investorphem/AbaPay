@@ -4,8 +4,9 @@ import { useState } from "react";
 import Link from "next/link";
 import { 
   ArrowLeft, ShieldCheck, Zap, Globe, 
-  Lock, Wallet, RefreshCw, ChevronDown, BookOpen,
-  Star, Gift, Smartphone, Share2, HelpCircle
+  Lock, Wallet, ChevronDown, BookOpen,
+  Star, Gift, Smartphone, Share2, HelpCircle,
+  Twitter, Send // ⚡ ADDED SOCIAL ICONS
 } from "lucide-react";
 
 export default function DocsPage() {
@@ -182,7 +183,29 @@ export default function DocsPage() {
 
         </div>
 
+        {/* ⚡ UPDATED FOOTER WITH CIRCULAR SOCIAL ICONS ⚡ */}
         <footer className="mt-12 w-full pt-8 pb-4 flex flex-col items-center gap-4">
+          
+          <div className="flex items-center gap-4 mb-2">
+            <a 
+              href="https://twitter.com/AbaPay" 
+              target="_blank" 
+              rel="noopener noreferrer" 
+              className="w-12 h-12 rounded-full border-2 border-slate-200 bg-white flex items-center justify-center text-slate-500 hover:text-emerald-600 hover:border-emerald-200 hover:bg-emerald-50 transition-all shadow-sm group"
+            >
+              <Twitter size={20} className="group-hover:scale-110 transition-transform" />
+            </a>
+            <a 
+              href="https://t.me/AbaPay" 
+              target="_blank" 
+              rel="noopener noreferrer" 
+              className="w-12 h-12 rounded-full border-2 border-slate-200 bg-white flex items-center justify-center text-slate-500 hover:text-emerald-600 hover:border-emerald-200 hover:bg-emerald-50 transition-all shadow-sm group"
+            >
+              {/* Added slight margin adjustments to center the paper plane perfectly */}
+              <Send size={20} className="ml-[-2px] mt-[2px] group-hover:scale-110 transition-transform" /> 
+            </a>
+          </div>
+
           <div className="flex items-center gap-2.5 bg-white px-4 py-1.5 rounded-full shadow-sm border border-slate-200">
              <ShieldCheck size={16} className="text-emerald-600" />
              <span className="text-[11px] font-bold text-slate-500 uppercase tracking-widest">Secured by Celo Network</span>
