@@ -660,15 +660,24 @@ export default function AdminDashboard() {
                             <p className="text-[10px] text-emerald-500 font-mono">${(tx.amount_usdt || tx.amount_crypto || 0).toString()} {tx.token_used || 'USD₮'}</p>
                           </td>
                           <td className="py-4 px-2">
-                            <div className="flex flex-col items-start gap-2">
-                              <span className={`text-[9px] font-black px-2 py-1 rounded tracking-widest uppercase ${
-                                tx.status === 'SUCCESS' ? 'bg-emerald-500/10 text-emerald-500' : 
-                                tx.status === 'REFUNDED' ? 'bg-blue-500/10 text-blue-400' :
-                                tx.status === 'PENDING' ? 'bg-orange-500/10 text-orange-400' : 
-                                'bg-red-500/10 text-red-500'
-                              }`}>
-                                {tx.status}
-                              </span>
+  <div className="flex flex-col items-start gap-2">
+    <span className={`text-[9px] font-black px-2 py-1 rounded tracking-widest uppercase ${
+      tx.status === 'SUCCESS' ? 'bg-emerald-500/10 text-emerald-500' : 
+      tx.status === 'REFUNDED' ? 'bg-blue-500/10 text-blue-400' :
+      tx.status === 'PENDING' ? 'bg-orange-500/10 text-orange-400' : 
+      'bg-red-500/10 text-red-500'
+    }`}>
+      {tx.status}
+    </span>
+
+    {/* ⚡ NEW: SHOW RAW API ERROR CODE IN THE ADMIN DASHBOARD ⚡ */}
+    {tx.error_code && (
+        <span className="text-[8px] font-mono text-red-400 bg-red-500/5 border border-red-500/10 px-1.5 py-0.5 rounded">
+            API Code: {tx.error_code}
+        </span>
+    )}
+
+    {/* ... (Refund and Requery buttons stay the same below this) */}
 
                               {tx.status === 'PENDING' && (
                                 <button 
