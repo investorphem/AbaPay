@@ -7,28 +7,29 @@ import { Resend } from 'resend';
 
 const resend = new Resend(process.env.RESEND_API_KEY || "re_dummy_key_for_build");
 
+// ⚡ ALL ERRORS ARE NOW 100% USER-FRIENDLY & HIDE TECHNICAL JARGON
 const error_messages: Record<string, string> = {
-    "011": "Invalid arguments. Please check your phone/meter number and try again.",
-    "012": "This product does not exist or is currently unavailable.",
-    "013": "Amount is below the minimum allowed for this specific utility.",
-    "014": "Request blocked. Transaction exceeds your daily limit with this provider.",
-    "016": "Transaction failed at the provider level. Please verify details and retry.",
+    "011": "Invalid details provided. Please check your phone/meter number and try again.",
+    "012": "This product is currently unavailable.",
+    "013": "Amount is below the minimum allowed.",
+    "014": "Transaction exceeds your daily limit with this provider.",
+    "016": "The provider network is currently unstable. Please try again.",
     "017": "Amount is above the maximum allowed for this product.",
-    "018": "Service is temporarily unavailable at the provider node. Try again shortly.", 
+    "018": "Service is temporarily unavailable. Try again shortly.", 
     "019": "Duplicate transaction detected. Please wait 30 seconds before retrying.",
-    "021": "Authentication with the utility provider failed. AbaPay admins are investigating.",
-    "022": "Authentication with the utility provider failed. AbaPay admins are investigating.",
-    "023": "Authentication with the utility provider failed. AbaPay admins are investigating.",
-    "024": "Authentication with the utility provider failed. AbaPay admins are investigating.",
-    "027": "IP Not Whitelisted. AbaPay admins are currently resolving this with the provider.",
-    "028": "Product is not whitelisted on your account. Admins have been notified.",
+    "021": "Service is temporarily undergoing maintenance. Please try again later.",
+    "022": "Service is temporarily undergoing maintenance. Please try again later.",
+    "023": "Service is temporarily undergoing maintenance. Please try again later.",
+    "024": "Service is temporarily undergoing maintenance. Please try again later.",
+    "027": "Service is temporarily undergoing maintenance. Please try again later.", // Hides IP Whitelist error
+    "028": "This specific product is temporarily unavailable. Please try another service.", // Hides Product Whitelist error
     "030": "Provider network is currently down. Please try again.",
-    "034": "Service with this provider is currently suspended. Please try again later.",
+    "034": "Service is currently suspended by the provider. Please try again later.",
     "035": "Service is inactive at the moment. Please try again later.",
-    "041": "An error occurred with the vending node. AbaPay will re-vend or refund.",
-    "089": "The network is currently processing your previous request. Please wait.",
-    "400": "The request payload was malformed. This is a technical error.",
-    "FAILED_VERIFICATION": "Merchant verification failed. The provided meter/account number is invalid."
+    "041": "A network error occurred. Please contact support if your funds were deducted.",
+    "089": "The network is processing your previous request. Please wait.",
+    "400": "Transaction failed due to a system error. Please try again.",
+    "FAILED_VERIFICATION": "Verification failed. The provided meter or account number is invalid."
 };
 
 const processedTransactions = new Set();
@@ -66,7 +67,6 @@ export async function POST(req: Request) {
     } = body;
 
     const appMode = process.env.NEXT_PUBLIC_APP_MODE || "sandbox";
-    // ⚡ FIXED: Correct live API endpoint
     const baseUrl = appMode === "live" ? "https://vtpass.com/api" : "https://sandbox.vtpass.com/api";
 
     if (processedTransactions.has(txHash)) {
@@ -199,21 +199,21 @@ export async function POST(req: Request) {
       payData = await payRes.json();
     } catch (e: any) {
       await supabase.from('transactions').update({ status: 'FAILED_VTPASS_CRASH' }).eq('tx_hash', txHash);
-
-      // ⚡ 1. TELEGRAM FAILURE ALERT & 200 HTTP STATUS
       try { await sendTelegramAlert(`❌ *NETWORK CRASH (LIVE)*\n🛒 *Product:* ${network} ${serviceCategory}\n👤 *User:* ${billersCode || phone}\n⚠️ Connection to VTpass timed out completely.`); } catch (err) {}
-
-      return NextResponse.json({ success: false, code: "VTPASS_CRASH", message: "Network timeout while contacting provider." }, { status: 200 }); // Status 200 so UI Toast works!
+      return NextResponse.json({ success: false, code: "VTPASS_CRASH", message: "Network timeout while contacting provider. Please try again." }, { status: 200 }); 
     }
 
-    // ⚡ 2. STRICT LIVE-MODE ERROR GUARD
     if (!payData.content || !payData.content.transactions) {
         await supabase.from('transactions').update({ status: 'FAILED_VENDING' }).eq('tx_hash', txHash);
-        const friendlyMessage = error_messages[payData.code as string] || "VTpass rejected the transaction payload. Admin notified.";
+        
+        const friendlyMessage = error_messages[payData.code as string] || "Service is temporarily undergoing maintenance. Please try again later.";
+        const rawTechnicalError = payData.response_description || payData.content?.errors || "Unknown VTpass Rejection";
 
-        try { await sendTelegramAlert(`❌ *VTPASS REJECTION*\n🛒 *Product:* ${network} ${serviceCategory}\n👤 *User:* ${billersCode || phone}\n🚨 *Error:* Code ${payData.code} - ${friendlyMessage}\n💵 Please refund user from Admin panel.`); } catch (err) {}
+        // ⚡ TELEGRAM gets the RAW technical error (e.g. IP Not Whitelisted)
+        try { await sendTelegramAlert(`❌ *VTPASS REJECTION*\n🛒 *Product:* ${network} ${serviceCategory}\n👤 *User:* ${billersCode || phone}\n🚨 *Admin Error:* Code ${payData.code} - ${rawTechnicalError}\n🗣 *User Saw:* ${friendlyMessage}`); } catch (err) {}
 
-        return NextResponse.json({ success: false, message: friendlyMessage, code: payData.code }, { status: 200 }); // Status 200!
+        // ⚡ FRONTEND gets the FRIENDLY error (e.g. Undergoing Maintenance)
+        return NextResponse.json({ success: false, message: friendlyMessage, code: payData.code }, { status: 200 }); 
     }
 
     if (payData.code === '000' || payData.code === '099') {
@@ -339,24 +339,21 @@ export async function POST(req: Request) {
         });
       } else {
         await supabase.from('transactions').update({ status: 'FAILED_VENDING' }).eq('tx_hash', txHash);
-
-        // ⚡ 3. ADDED TELEGRAM ALERT & STATUS 200 FOR INNER STATUS FAILURE
         try { await sendTelegramAlert(`❌ *TX FAILED AT PROVIDER*\n🛒 *Product:* ${network} ${serviceCategory}\n👤 *User:* ${billersCode || phone}\n⚠️ VTpass returned an explicit failed status.`); } catch (err) {}
-
-        return NextResponse.json({ success: false, message: "Transaction failed at the provider network level.", code: "INNER_FAIL" }, { status: 200 }); // Status 200!
+        return NextResponse.json({ success: false, message: "The provider network is currently unstable. Please try again.", code: "INNER_FAIL" }, { status: 200 }); 
       }
 
     } else {
       await supabase.from('transactions').update({ status: 'FAILED_VENDING' }).eq('tx_hash', txHash);
-      const friendlyMessage = error_messages[payData.code as string] || "Utility vending failed at the provider level. Please contact support.";
+      const friendlyMessage = error_messages[payData.code as string] || "Service is temporarily undergoing maintenance. Please try again later.";
+      const rawTechnicalError = payData.response_description || payData.content?.errors || "Unknown VTpass Rejection";
 
-      // ⚡ 4. ADDED TELEGRAM ALERT & STATUS 200 FOR CODE REJECTION
-      try { await sendTelegramAlert(`❌ *VENDING REJECTED*\n🛒 *Product:* ${network} ${serviceCategory}\n👤 *User:* ${billersCode || phone}\n🚨 *Error:* Code ${payData.code} - ${friendlyMessage}`); } catch (err) {}
+      try { await sendTelegramAlert(`❌ *VENDING REJECTED*\n🛒 *Product:* ${network} ${serviceCategory}\n👤 *User:* ${billersCode || phone}\n🚨 *Admin Error:* Code ${payData.code} - ${rawTechnicalError}\n🗣 *User Saw:* ${friendlyMessage}`); } catch (err) {}
 
-      return NextResponse.json({ success: false, message: friendlyMessage, code: payData.code }, { status: 200 }); // Status 200!
+      return NextResponse.json({ success: false, message: friendlyMessage, code: payData.code }, { status: 200 }); 
     }
 
   } catch (error: any) {
-    return NextResponse.json({ success: false, code: "SYSTEM_CRASH", message: "Internal Server Error" }, { status: 500 });
+    return NextResponse.json({ success: false, code: "SYSTEM_CRASH", message: "Transaction failed due to a system error. Please try again." }, { status: 500 });
   }
 }
