@@ -1017,7 +1017,18 @@ export default function Home() {
               onClick={() => openSelectionModal('country', "Select Region", SUPPORTED_COUNTRIES, handleCountryChange)}
               className="bg-slate-50 border border-slate-100 hover:border-emerald-200 px-3 py-1.5 rounded-xl flex items-center gap-2 transition-all shadow-sm active:scale-95"
             >
-              <span className="text-lg leading-none">{activeCountry.flag}</span>
+                        <div className="flex items-center gap-2">
+            <PointsBadge walletAddress={address || undefined} />
+            <button 
+              onClick={() => openSelectionModal('country', "Select Region", SUPPORTED_COUNTRIES, handleCountryChange)}
+              className="bg-slate-50 border border-slate-100 hover:border-emerald-200 px-3 py-1.5 rounded-xl flex items-center gap-2 transition-all shadow-sm active:scale-95"
+            >
+              {/* ⚡ REPLACED EMOJI WITH UNIVERSAL FLAG IMAGE ⚡ */}
+              <img 
+                src={`https://flagcdn.com/w40/${activeCountry.code.toLowerCase()}.png`} 
+                alt={activeCountry.code} 
+                className="w-5 h-auto rounded-[2px] shadow-sm" 
+              />
               <span className="text-[10px] font-black text-slate-700 uppercase tracking-widest">{activeCountry.code}</span>
               <ChevronDown size={14} className="text-slate-400" />
             </button>
@@ -1959,7 +1970,7 @@ export default function Home() {
           {/* ⚡ SOCIAL ICONS ADDED TO MAIN APP ⚡ */}
           <div className="flex items-center gap-4">
             <a 
-              href="https://x.com/AbaPays" 
+              href="https://twitter.com/AbaPay" 
               target="_blank" 
               rel="noopener noreferrer" 
               className="w-12 h-12 rounded-full border-2 border-slate-200 bg-white flex items-center justify-center text-slate-500 hover:text-emerald-600 hover:border-emerald-200 hover:bg-emerald-50 transition-all shadow-sm group"
@@ -1969,7 +1980,7 @@ export default function Home() {
               </svg>
             </a>
             <a 
-              href="https://t.me/AbaPays" 
+              href="https://t.me/AbaPay" 
               target="_blank" 
               rel="noopener noreferrer" 
               className="w-12 h-12 rounded-full border-2 border-slate-200 bg-white flex items-center justify-center text-slate-500 hover:text-emerald-600 hover:border-emerald-200 hover:bg-emerald-50 transition-all shadow-sm group"
@@ -1991,4 +2002,7 @@ export default function Home() {
           
           <p className="text-[9px] font-medium text-slate-300 uppercase tracking-[0.2em] mt-1">© 2026 MASONODE TECHNOLOGIES LIMITED • v3.0</p>
         </footer>
-
+      </div>
+    </main>
+  );
+}
