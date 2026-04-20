@@ -33,7 +33,7 @@ export async function POST(req: Request) {
 
     // --- SCENARIO 1: DELAYED SUCCESS ---
     if (code === '000' || innerStatus === 'delivered' || innerStatus === 'successful') {
-        
+
       // If it's already marked success, avoid duplicate notifications
       if (txData.status === 'SUCCESS') {
           return NextResponse.json({ received: true, status: 'already_processed' });
@@ -69,10 +69,15 @@ export async function POST(req: Request) {
         sendTelegramAlert(`✅ *DELAYED SALE SUCCESS (WEBHOOK)*\n🛒 *Product:* ${txData.network} ${txData.service_category}\n💰 *Naira:* ₦${txData.amount_naira}\n👤 *User:* ${txData.account_number}\n🧾 *Ref/Token:* ${alertTokenRef}`)
       );
 
-      // We use the account_number directly here for the SMS
-      notifications.push(
-        sendAbaPaySms(txData.account_number, `AbaPay Success! Ref/Token: ${alertTokenRef}. Amt: ₦${txData.amount_naira}`)
-      );
+      // ⚡ ONLY SEND SMS FOR TOKENS/PINS TO SAVE COST ⚡
+      if (txData.service_category === 'ELECTRICITY' || txData.service_category === 'EDUCATION') {
+        const typeLabel = txData.service_category === 'ELECTRICITY' ? 'Token' : 'PIN';
+        const networkDisplay = txData.network || txData.service_category;
+        
+        notifications.push(
+          sendAbaPaySms(txData.account_number, `AbaPay: Your ${networkDisplay} ${typeLabel} is ${alertTokenRef}. Amount: N${txData.amount_naira}. Thank you.`)
+        );
+      }
 
       if (txData.customer_email) {
         const emailPromise = resend.emails.send({
@@ -118,7 +123,7 @@ export async function POST(req: Request) {
 
     // --- SCENARIO 2: TRANSACTION REVERSAL (BOUNCED) ---
     if (code === '040' || innerStatus === 'reversed' || innerStatus === 'failed') {
-       
+
        if (txData.status === 'REVERSED_NEEDS_REFUND' || txData.status === 'REFUNDED') {
            return NextResponse.json({ received: true, status: 'already_refunded' });
        }
