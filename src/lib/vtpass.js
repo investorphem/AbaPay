@@ -19,19 +19,15 @@ export const generateRequestId = () => {
 };
 
 /**
- * 2. DYNAMIC AUTH HEADERS (UPGRADED TO BASIC AUTH)
- * VTpass Bank Transfers, JAMB, and WAEC require Basic Auth (Email/Password)
- * rather than the legacy Public/Secret keys.
+ * 2. DYNAMIC AUTH HEADERS (LIVE API KEYS)
+ * Upgraded to VTpass Live B2B Auth using API, Public, and Secret keys.
+ * Ensure VTPASS_API_KEY, VTPASS_PUBLIC_KEY, and VTPASS_SECRET_KEY are set securely in Vercel.
  */
 export const getHeaders = () => {
-  const username = process.env.VTPASS_EMAIL || '';
-  const password = process.env.VTPASS_PASSWORD || '';
-
-  // Create the Base64 encoded Basic Auth token
-  const authToken = Buffer.from(`${username}:${password}`).toString('base64');
-
   return {
-    'Authorization': `Basic ${authToken}`,
+    'api-key': process.env.VTPASS_API_KEY || '',
+    'public-key': process.env.VTPASS_PUBLIC_KEY || '',
+    'secret-key': process.env.VTPASS_SECRET_KEY || '',
     'Content-Type': 'application/json'
   };
 };
