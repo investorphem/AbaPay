@@ -1002,7 +1002,9 @@ export default function Home() {
         </div>
       )}
 
-      <div className="w-full max-w-md">
+            <div className="w-full max-w-md">
+        
+        {/* ⚡ THE FIXED TOP HEADER ⚡ */}
         <div className="flex justify-between items-center bg-white p-4 rounded-3xl shadow-sm border border-slate-100 mb-6">
           <div className="flex items-center gap-3">
             <img src="/logo.png" alt="AbaPay" className="h-10 w-auto object-contain" />
@@ -1017,13 +1019,6 @@ export default function Home() {
               onClick={() => openSelectionModal('country', "Select Region", SUPPORTED_COUNTRIES, handleCountryChange)}
               className="bg-slate-50 border border-slate-100 hover:border-emerald-200 px-3 py-1.5 rounded-xl flex items-center gap-2 transition-all shadow-sm active:scale-95"
             >
-                        <div className="flex items-center gap-2">
-            <PointsBadge walletAddress={address || undefined} />
-            <button 
-              onClick={() => openSelectionModal('country', "Select Region", SUPPORTED_COUNTRIES, handleCountryChange)}
-              className="bg-slate-50 border border-slate-100 hover:border-emerald-200 px-3 py-1.5 rounded-xl flex items-center gap-2 transition-all shadow-sm active:scale-95"
-            >
-              {/* ⚡ REPLACED EMOJI WITH UNIVERSAL FLAG IMAGE ⚡ */}
               <img 
                 src={`https://flagcdn.com/w40/${activeCountry.code.toLowerCase()}.png`} 
                 alt={activeCountry.code} 
@@ -1035,12 +1030,14 @@ export default function Home() {
           </div>
         </div>
 
+        {/* THE TABS */}
         <div className="flex gap-2 bg-slate-200/50 p-1.5 rounded-2xl mb-6 shadow-inner overflow-x-auto no-scrollbar">
             <button onClick={() => handleTabSwitch("pay")} className={`flex-1 min-w-[75px] py-3 rounded-xl text-[10px] sm:text-xs font-black transition-all ${activeTab === 'pay' ? 'bg-white text-emerald-600 shadow-xl' : 'text-slate-500 hover:text-slate-700'}`}>BILLS</button>
             <button onClick={() => handleTabSwitch("bank")} className={`flex-1 min-w-[75px] py-3 rounded-xl text-[10px] sm:text-xs font-black transition-all ${activeTab === 'bank' ? 'bg-white text-emerald-600 shadow-xl' : 'text-slate-500 hover:text-slate-700'}`}>TRANSFER</button>
             <button onClick={() => handleTabSwitch("education")} className={`flex-1 min-w-[75px] py-3 rounded-xl text-[10px] sm:text-xs font-black transition-all ${activeTab === 'education' ? 'bg-white text-emerald-600 shadow-xl' : 'text-slate-500 hover:text-slate-700'}`}>EDUCATION</button>
             <button onClick={() => handleTabSwitch("history")} className={`flex-1 min-w-[75px] py-3 rounded-xl text-[10px] sm:text-xs font-black transition-all ${activeTab === 'history' ? 'bg-white text-emerald-600 shadow-xl' : 'text-slate-500 hover:text-slate-700'}`}>HISTORY</button>
         </div>
+
 
         {/* ======================================= */}
         {/* EDUCATION BLOCK */}
