@@ -13,7 +13,7 @@ import { supabase } from "@/utils/supabase";
 
 // ⚡ IMPORTED PROVIDERS FOR GRANULAR KILL SWITCHES
 import { TELECOM_PROVIDERS, INTERNET_PROVIDERS, CABLE_PROVIDERS_LIST, EDUCATION_PROVIDERS } from "@/constants";
-import { ELECTRICITY_DISCOS } from "../discos"; // ⚡ Pulled from your separate discos file!
+import { ELECTRICITY_DISCOS } from "../discos"; 
 
 
 const ABAPAY_ADMIN_ABI = [
@@ -57,8 +57,8 @@ export default function AdminDashboard() {
   const [dbTransactions, setDbTransactions] = useState<any[]>([]);
   const [dbUsers, setDbUsers] = useState<any[]>([]); 
   const [dbWallets, setDbWallets] = useState<any[]>([]); 
-  const [allWalletsMap, setAllWalletsMap] = useState<any[]>([]); // ⚡ FOR LEDGER MAPPING
-  
+  const [allWalletsMap, setAllWalletsMap] = useState<any[]>([]); 
+
   const [isFetching, setIsFetching] = useState(false);
   const [searchTerm, setSearchTerm] = useState("");
   const [identitySearchTerm, setIdentitySearchTerm] = useState(""); 
@@ -131,7 +131,7 @@ export default function AdminDashboard() {
     setIsFetching(true);
     await fetchOnChainBalances();
     await fetchVtPassHealth();
-    
+
     try {
         const res = await fetch('/api/admin/data');
         const data = await res.json();
@@ -344,7 +344,6 @@ export default function AdminDashboard() {
     const a = document.createElement('a'); a.href = url; a.download = `AbaPay_Report_${timeFilter}.csv`; a.click();
   };
 
-  // ⚡ GRANULAR KILL SWITCH GROUPS ⚡
   const switchGroups = [
       { title: "Airtime", master: "MASTER_AIRTIME", providers: TELECOM_PROVIDERS.map(p => ({ id: `AIRTIME_${p}`, name: p.toUpperCase() })) },
       { title: "Internet Data", master: "MASTER_INTERNET", providers: INTERNET_PROVIDERS.map(p => ({ id: `INTERNET_${p.serviceID}`, name: p.displayName })) },
@@ -369,7 +368,7 @@ export default function AdminDashboard() {
               <span className="px-2 py-0.5 rounded text-[10px] font-bold border bg-purple-500/10 text-purple-400 border-purple-500/20">{isMainnet ? 'MAINNET' : 'SEPOLIA'}</span>
             </div>
           </div>
-          
+
           {!isAuthenticating && isOwner && (
             <div className="flex items-center gap-2 bg-slate-900 border border-slate-800 p-1 rounded-xl">
                {(['TODAY', 'WEEK', 'MONTH', 'ALL'] as TimeFilter[]).map(tf => (
@@ -440,7 +439,6 @@ export default function AdminDashboard() {
                  </div>
 
                  <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-                    {/* Verified Users */}
                     <div className="bg-slate-900 border border-slate-800 rounded-2xl overflow-hidden">
                        <div className="bg-slate-800/50 p-4 border-b border-slate-800 flex justify-between items-center">
                           <h3 className="text-sm font-black text-slate-300 flex items-center gap-2"><Smartphone size={16} className="text-emerald-500"/> Verified Profiles</h3>
@@ -471,7 +469,6 @@ export default function AdminDashboard() {
                        </div>
                     </div>
 
-                    {/* Unlinked Wallets */}
                     <div className="bg-slate-900 border border-slate-800 rounded-2xl overflow-hidden">
                        <div className="bg-slate-800/50 p-4 border-b border-slate-800 flex justify-between items-center">
                           <h3 className="text-sm font-black text-slate-300 flex items-center gap-2"><Wallet size={16} className="text-slate-500"/> Unclaimed Wallets</h3>
@@ -505,11 +502,10 @@ export default function AdminDashboard() {
               </div>
             )}
 
-            {/* SYSTEM CONTROLS (RATE & KILL SWITCHES) */}
+            {/* SYSTEM CONTROLS */}
             {activeTab === 'system' && (
               <div className="bg-[#111114] border border-slate-800 rounded-3xl p-8 animate-in fade-in">
-                 
-                 {/* Exchange Rate */}
+
                  <div className="flex items-center gap-3 mb-6">
                     <div className="bg-blue-500/10 p-3 rounded-full"><Gauge className="text-blue-400" size={24}/></div>
                     <div>
@@ -537,7 +533,6 @@ export default function AdminDashboard() {
                     </div>
                  </div>
 
-                 {/* ⚡ GRANULAR KILL SWITCHES UI ⚡ */}
                  <div className="flex items-center gap-3 mb-6">
                     <div className="bg-red-500/10 p-3 rounded-full"><Power className="text-red-400" size={24}/></div>
                     <div>
@@ -548,12 +543,10 @@ export default function AdminDashboard() {
 
                  <div className="space-y-6">
                     {switchGroups.map((group) => {
-                        // Check if the master switch exists, default to true
                         const isMasterOn = killSwitches[group.master] !== false;
-                        
+
                         return (
                             <div key={group.master} className="bg-slate-900 border border-slate-800 rounded-2xl overflow-hidden">
-                                {/* MASTER HEADER */}
                                 <div className="bg-slate-800/50 p-5 flex items-center justify-between border-b border-slate-800">
                                     <h3 className="font-black text-white text-lg">{group.title}</h3>
                                     <button 
@@ -564,8 +557,7 @@ export default function AdminDashboard() {
                                         <span className={`inline-block h-5 w-5 transform rounded-full bg-white transition-transform ${isMasterOn ? 'translate-x-6' : 'translate-x-1'}`} />
                                     </button>
                                 </div>
-                                
-                                {/* SUB PROVIDERS GRID */}
+
                                 <div className={`grid grid-cols-2 md:grid-cols-4 gap-4 p-5 ${!isMasterOn ? 'opacity-30 pointer-events-none grayscale' : ''}`}>
                                     {group.providers.map(provider => {
                                         const isSubOn = killSwitches[provider.id] !== false;
@@ -599,14 +591,19 @@ export default function AdminDashboard() {
                     <Search className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-600" size={16} />
                     <input type="text" placeholder="Search by ID, Account or Wallet..." className="w-full bg-slate-950 border border-slate-800 rounded-xl pl-12 pr-4 py-3 text-sm focus:border-emerald-500 outline-none" value={searchTerm} onChange={(e) => setSearchTerm(e.target.value)} />
                   </div>
+                  
+                  {/* ⚡ UPDATED FILTER DROPDOWN ⚡ */}
                   <select value={filterStatus} onChange={(e) => setFilterStatus(e.target.value)} className="bg-slate-950 border border-slate-800 rounded-xl px-4 py-3 text-sm text-slate-300">
                     <option value="ALL">All Status</option>
                     <option value="SUCCESS">Success</option>
                     <option value="PENDING">Pending</option>
-                    <option value="FAILED_VENDING">Failed</option>
+                    <option value="FAILED_VENDING">Failed (Provider)</option>
+                    <option value="FAILED_VTPASS_CRASH">Failed (Network Crash)</option>
+                    <option value="FAILED_VERIFICATION">Failed (Verification)</option>
+                    <option value="FAILED_FUNDS_MISMATCH">Failed (Rate Mismatch)</option>
                     <option value="REFUNDED">Refunded</option>
-                    <option value="FAILED_FUNDS_MISMATCH">Rate Mismatch</option> 
                   </select>
+                  
                   <button onClick={exportCSV} className="flex items-center gap-2 bg-slate-800 border border-slate-700 px-6 py-3 rounded-xl text-sm font-bold hover:bg-slate-700"><Download size={16} /> Export</button>
                 </div>
 
@@ -615,7 +612,7 @@ export default function AdminDashboard() {
                     <thead>
                       <tr className="text-slate-500 border-b border-slate-800 text-[10px] uppercase">
                         <th className="pb-4 px-2">Details</th>
-                        <th className="pb-4 px-2">User Details</th>{/* ⚡ NEW COLUMN ⚡ */}
+                        <th className="pb-4 px-2">User Details</th>
                         <th className="pb-4 px-2">Utility Vended</th>
                         <th className="pb-4 px-2">Provider Data</th>
                         <th className="pb-4 px-2">Financials</th>
@@ -624,21 +621,18 @@ export default function AdminDashboard() {
                     </thead>
                     <tbody className="divide-y divide-slate-800">
                       {currentTransactions.map((tx) => {
-                        
-                        // ⚡ FIND VERIFIED PHONE NUMBER LOGIC ⚡
+
                         const walletInfo = allWalletsMap.find(w => w.wallet_address?.toLowerCase() === tx.wallet_address?.toLowerCase());
                         const verifiedPhone = walletInfo?.abapay_users?.verified_phone || "N/A";
 
                         return (
                         <tr key={tx.id} className="hover:bg-slate-900/40">
-                          
-                          {/* REVERTED DETAILS COLUMN */}
+
                           <td className="py-4 px-2 min-w-[120px]">
                             <p className="text-white font-medium text-xs mb-1">{new Date(tx.created_at).toLocaleString()}</p>
                             <a href={`https://${isMainnet ? '' : 'sepolia.'}celoscan.io/tx/${tx.tx_hash}`} target="_blank" className="text-[9px] text-emerald-400 hover:underline flex items-center gap-1 mt-1 font-mono tracking-wider">Hash: {tx.tx_hash.slice(0, 8)}... <ExternalLink size={8} /></a>
                           </td>
 
-                          {/* ⚡ NEW: DEDICATED USER DETAILS COLUMN ⚡ */}
                           <td className="py-4 px-2 min-w-[150px]">
                              <p className="text-[10px] text-slate-300 font-mono">Wallet: {tx.wallet_address ? `${tx.wallet_address.slice(0,6)}...${tx.wallet_address.slice(-4)}` : 'N/A'}</p>
                              <p className={`text-[10px] mt-1 font-bold ${verifiedPhone !== 'N/A' ? 'text-emerald-500' : 'text-slate-600'}`}>Phone: {verifiedPhone}</p>
@@ -670,7 +664,6 @@ export default function AdminDashboard() {
                               <span className={`text-[9px] font-black px-2 py-1 rounded tracking-widest uppercase ${
                                 tx.status === 'SUCCESS' ? 'bg-emerald-500/10 text-emerald-500' : 
                                 tx.status === 'REFUNDED' ? 'bg-blue-500/10 text-blue-400' :
-                                tx.status === 'FAILED_FUNDS_MISMATCH' ? 'bg-purple-500/10 text-purple-400' :
                                 tx.status === 'PENDING' ? 'bg-orange-500/10 text-orange-400' : 
                                 'bg-red-500/10 text-red-500'
                               }`}>
@@ -688,7 +681,8 @@ export default function AdminDashboard() {
                                 </button>
                               )}
 
-                              {(tx.status === 'FAILED_VENDING' || tx.status === 'FAILED_FUNDS_MISMATCH') && (
+                              {/* ⚡ UPDATED: ALL FAILED STATUSES GET THE REFUND BUTTON ⚡ */}
+                              {tx.status?.startsWith('FAILED') && (
                                 <button 
                                   onClick={() => handleRefund(tx)}
                                   disabled={processingRefundId === tx.id}
