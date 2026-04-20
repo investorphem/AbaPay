@@ -7,14 +7,14 @@ import Link from "next/link";
 import { 
   ShieldCheck, Zap, AlertTriangle, CheckCircle2, ChevronDown, 
   Loader2, Coins, Briefcase, ListPlus, Users, Landmark, XCircle, 
-  RefreshCw, Tv, GraduationCap, Send // ⚡ ADDED 'Send' HERE
+  RefreshCw, Tv, GraduationCap, Send 
 } from "lucide-react";
 import { supabase } from "@/utils/supabase";
 import { ELECTRICITY_DISCOS } from "./discos"; 
 
 import { ReceiptModal, SelectionModal } from "@/components/Modals";
 import { TermsModal, PrivacyModal } from "@/components/Modals";
-import PointsBadge from "@/components/PointsBadge"; // ⚡ IMPORTED POINTS BADGE
+import PointsBadge from "@/components/PointsBadge"; 
 import { 
   ABAPAY_ABI, ERC20_ABI, SERVICES, CABLE_PROVIDERS_LIST, TELECOM_PROVIDERS, 
   INTERNET_PROVIDERS, SUPPORTED_TOKENS, SUPPORTED_COUNTRIES, PRE_SELECT_AMOUNTS, 
@@ -24,6 +24,9 @@ import {
 import { HistoryTab } from "@/components/HistoryTab";
 
 export default function Home() {
+  // ⚡ ADDED KILL SWITCHES STATE
+  const [killSwitches, setKillSwitches] = useState<Record<string, boolean>>({});
+  
   const [isInitiallyLoading, setIsInitiallyLoading] = useState(true);
 
   const [address, setAddress] = useState<string | null>(null);
@@ -31,7 +34,7 @@ export default function Home() {
   const [nairaAmount, setNairaAmount] = useState(""); 
   const [accountNumber, setAccountNumber] = useState("");
   const [customerPhone, setCustomerPhone] = useState("");
-  const [customerEmail, setCustomerEmail] = useState(""); // ⚡ ADDED EMAIL STATE
+  const [customerEmail, setCustomerEmail] = useState(""); 
   const [status, setStatus] = useState("");
 
   const [activeTab, setActiveTab] = useState<"pay" | "bank" | "education" | "history">("pay");
@@ -143,14 +146,12 @@ export default function Home() {
     return { cryptoToCharge: crypto.toFixed(4), currentFee: fee };
   }, [nairaAmount, exchangeRate, activeService, activeTab]);
 
-  // ⚡ CALCULATE NAIRA EQUIVALENT BALANCE ⚡
   const walletBalanceNaira = useMemo(() => {
     const bal = parseFloat(walletBalance);
     if (isNaN(bal)) return "0.00";
     return (bal * exchangeRate).toLocaleString('en-NG', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
   }, [walletBalance, exchangeRate]);
 
-  // ⚡ GENERATE CONFIRMATION MODAL DETAILS ⚡
   const checkoutDetails = useMemo(() => {
     let title = "";
     let recipient = accountNumber;
@@ -450,7 +451,6 @@ export default function Home() {
     });
   };
 
-  // ⚡ EXECUTING THE BLOCKCHAIN PAYMENT AFTER CONFIRMATION ⚡
   const processBlockchainPayment = async () => {
     if (!address || !client) return setStatus("Connect Wallet First");
     if (parseFloat(cryptoToCharge) > parseFloat(walletBalance)) return setStatus(`Insufficient ${selectedToken.symbol} Balance.`);
@@ -590,7 +590,6 @@ export default function Home() {
       });
       setStatus(`${selectedToken.symbol} Secured. Processing...`);
 
-      // ⚡ BACKEND PAYLOAD UPDATED WITH EMAIL
       const backendPayload = {
         serviceID: vtpassServiceID, 
         serviceCategory: uiCategory, 
@@ -602,7 +601,7 @@ export default function Home() {
         txHash: hash, 
         variation_code: finalVariationCode, 
         phone: customerPhone || accountNumber, 
-        email: customerEmail, // ⚡ PASSING EMAIL TO BACKEND
+        email: customerEmail, 
         wallet_address: address, 
         subscription_type: activeTab === "pay" && activeService.id === "CABLE" && ['dstv', 'gotv'].includes(cableProvider) ? cableSubscriptionType : undefined,
         meter_account_type: meterAccountType 
@@ -626,8 +625,7 @@ export default function Home() {
         } else {
            setStatus("Success! Token/Ref Dispatched."); 
            newTx.status = "SUCCESS"; 
-           
-           // ⚡ THE NEW TOAST WITH CUSTOM EVENT TRIGGER ⚡
+
            if (result.earnedPoints && result.earnedPoints > 0) {
                window.dispatchEvent(new CustomEvent('abapoints-awarded', { detail: result.earnedPoints }));
                showToast("Transaction Successful", `Payment confirmed! You earned +${result.earnedPoints.toFixed(2).replace(/\.00$/, '')} AbaPoints ✨`, "success");
@@ -672,9 +670,17 @@ export default function Home() {
     if (status && !isProcessing) { const timer = setTimeout(() => setStatus(""), 5000); return () => clearTimeout(timer); }
   }, [status, isProcessing]);
 
+  // ⚡ UPDATED useEffect to load both exchange_rate and kill_switches
   useEffect(() => {
     async function initSystem() {
-      try { const { data: settingsData } = await supabase.from('platform_settings').select('exchange_rate').eq('id', 1).single(); if (settingsData && settingsData.exchange_rate) setExchangeRate(Number(settingsData.exchange_rate)); } catch (consoleError) {}
+      try { 
+          const { data: settingsData } = await supabase.from('platform_settings').select('exchange_rate, kill_switches').eq('id', 1).single(); 
+          if (settingsData) {
+              if (settingsData.exchange_rate) setExchangeRate(Number(settingsData.exchange_rate)); 
+              if (settingsData.kill_switches) setKillSwitches(settingsData.kill_switches);
+          }
+      } catch (consoleError) {}
+
       try {
         if (typeof window !== "undefined" && (window as any).ethereum) {
           const eth = (window as any).ethereum;
@@ -1002,8 +1008,8 @@ export default function Home() {
         </div>
       )}
 
-            <div className="w-full max-w-md">
-        
+      <div className="w-full max-w-md">
+
         {/* ⚡ THE FIXED TOP HEADER ⚡ */}
         <div className="flex justify-between items-center bg-white p-4 rounded-3xl shadow-sm border border-slate-100 mb-6">
           <div className="flex items-center gap-3">
@@ -1068,8 +1074,16 @@ export default function Home() {
 
                 <div className="animate-in slide-in-from-left-2 mb-2">
                     <label className="text-[10px] font-black text-slate-400 uppercase mb-3 block">Service</label>
+                    {/* ⚡ APPLIED KILL SWITCH MAPPING ⚡ */}
                     <button 
-                        onClick={() => openSelectionModal('provider', "Select Education Service", EDUCATION_PROVIDERS, (val) => handleProviderChange(val, 'education'))}
+                        onClick={() => {
+                            const optionsWithStatus = EDUCATION_PROVIDERS.map(p => {
+                                const isMasterOff = killSwitches['MASTER_EDUCATION'] === false;
+                                const isProviderOff = killSwitches[`EDU_${p.serviceID}`] === false;
+                                return { ...p, disabled: isMasterOff || isProviderOff };
+                            });
+                            openSelectionModal('provider', "Select Education Service", optionsWithStatus, (val) => handleProviderChange(val, 'education'));
+                        }}
                         className="w-full bg-white border border-slate-200 p-4 rounded-2xl flex justify-between items-center hover:border-emerald-400 transition-colors shadow-sm active:scale-[0.98]"
                     >
                         <div className="flex items-center gap-4">
@@ -1516,9 +1530,17 @@ export default function Home() {
 
                 <div className="animate-in slide-in-from-left-2 mb-2">
                     <label className="text-[10px] font-black text-slate-400 uppercase mb-3 block">Provider</label>
+                    {/* ⚡ APPLIED KILL SWITCH MAPPINGS BELOW ⚡ */}
                     {activeService.id === "INTERNET" ? (
                         <button 
-                            onClick={() => openSelectionModal('provider', "Select Provider", INTERNET_PROVIDERS, (val) => handleProviderChange(val, 'internet'))}
+                            onClick={() => {
+                                const optionsWithStatus = INTERNET_PROVIDERS.map(p => {
+                                    const isMasterOff = killSwitches['MASTER_INTERNET'] === false;
+                                    const isProviderOff = killSwitches[`INTERNET_${p.serviceID}`] === false;
+                                    return { ...p, disabled: isMasterOff || isProviderOff };
+                                });
+                                openSelectionModal('provider', "Select Provider", optionsWithStatus, (val) => handleProviderChange(val, 'internet'));
+                            }}
                             className="w-full bg-white border border-slate-200 p-4 rounded-2xl flex justify-between items-center hover:border-sky-400 transition-colors shadow-sm active:scale-[0.98]"
                         >
                             <div className="flex items-center gap-4">
@@ -1531,7 +1553,14 @@ export default function Home() {
                         </button>
                     ) : activeService.id === "AIRTIME" ? (
                         <button 
-                            onClick={() => openSelectionModal('standard', "Select Network", TELECOM_PROVIDERS.map(p => ({ serviceID: p, displayName: p.toUpperCase(), logo: `/${p}.png` })), (val) => handleProviderChange(val, 'telecom'))}
+                            onClick={() => {
+                                const optionsWithStatus = TELECOM_PROVIDERS.map(p => {
+                                    const isMasterOff = killSwitches['MASTER_AIRTIME'] === false;
+                                    const isProviderOff = killSwitches[`AIRTIME_${p.toLowerCase()}`] === false;
+                                    return { serviceID: p, displayName: p.toUpperCase(), logo: `/${p}.png`, disabled: isMasterOff || isProviderOff };
+                                });
+                                openSelectionModal('standard', "Select Network", optionsWithStatus, (val) => handleProviderChange(val, 'telecom'));
+                            }}
                             className="w-full bg-white border border-slate-200 p-4 rounded-2xl flex justify-between items-center hover:border-emerald-400 transition-colors shadow-sm active:scale-[0.98]"
                         >
                             <div className="flex items-center gap-4">
@@ -1544,7 +1573,14 @@ export default function Home() {
                         </button>
                     ) : activeService.id === "ELECTRICITY" ? (
                         <button 
-                            onClick={() => openSelectionModal('provider', "Select Provider", ELECTRICITY_DISCOS, (val) => handleProviderChange(val, 'elec'))}
+                            onClick={() => {
+                                const optionsWithStatus = ELECTRICITY_DISCOS.map(p => {
+                                    const isMasterOff = killSwitches['MASTER_ELECTRICITY'] === false;
+                                    const isProviderOff = killSwitches[`ELEC_${p.serviceID}`] === false;
+                                    return { ...p, disabled: isMasterOff || isProviderOff };
+                                });
+                                openSelectionModal('provider', "Select Provider", optionsWithStatus, (val) => handleProviderChange(val, 'elec'));
+                            }}
                             className="w-full bg-white border border-slate-200 p-4 rounded-2xl flex justify-between items-center hover:border-orange-400 transition-colors shadow-sm active:scale-[0.98]"
                         >
                             <div className="flex items-center gap-4">
@@ -1557,7 +1593,14 @@ export default function Home() {
                         </button>
                     ) : (
                       <button 
-                        onClick={() => openSelectionModal('provider', "Select Provider", CABLE_PROVIDERS_LIST, (val) => handleProviderChange(val, 'cable'))}
+                        onClick={() => {
+                            const optionsWithStatus = CABLE_PROVIDERS_LIST.map(p => {
+                                const isMasterOff = killSwitches['MASTER_CABLE'] === false;
+                                const isProviderOff = killSwitches[`CABLE_${p.serviceID}`] === false;
+                                return { ...p, disabled: isMasterOff || isProviderOff };
+                            });
+                            openSelectionModal('provider', "Select Provider", optionsWithStatus, (val) => handleProviderChange(val, 'cable'));
+                        }}
                         className="w-full bg-white border border-slate-200 p-4 rounded-2xl flex justify-between items-center hover:border-pink-400 transition-colors shadow-sm active:scale-[0.98]"
                       >
                         <div className="flex items-center gap-4">
@@ -1962,8 +2005,8 @@ export default function Home() {
           />
         )}
 
-                <footer className="mt-12 w-full border-t border-slate-200 pt-8 pb-4 flex flex-col items-center gap-5 animate-in fade-in">
-          
+        <footer className="mt-12 w-full border-t border-slate-200 pt-8 pb-4 flex flex-col items-center gap-5 animate-in fade-in">
+
           {/* ⚡ SOCIAL ICONS ADDED TO MAIN APP ⚡ */}
           <div className="flex items-center gap-4">
             <a 
@@ -1990,13 +2033,13 @@ export default function Home() {
              <ShieldCheck size={16} className="text-emerald-600" />
              <span className="text-[11px] font-bold text-slate-500 uppercase tracking-widest">Secured by Celo Network</span>
           </div>
-          
+
           <div className="flex gap-6">
             <Link href="/docs" className="text-[10px] font-black text-slate-400 hover:text-emerald-600 uppercase transition-colors">Docs & FAQ</Link>
             <Link href="/terms" className="text-[10px] font-black text-slate-400 hover:text-emerald-600 uppercase transition-colors">Terms</Link>
             <Link href="/privacy" className="text-[10px] font-black text-slate-400 hover:text-emerald-600 uppercase transition-colors">Privacy</Link>
           </div>
-          
+
           <p className="text-[9px] font-medium text-slate-300 uppercase tracking-[0.2em] mt-1">© 2026 MASONODE TECHNOLOGIES LIMITED • v3.0</p>
         </footer>
       </div>
