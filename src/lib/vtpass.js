@@ -26,7 +26,7 @@ export const generateRequestId = () => {
 export const getHeaders = () => {
   const username = process.env.VTPASS_EMAIL || '';
   const password = process.env.VTPASS_PASSWORD || '';
-  
+
   // Create the Base64 encoded Basic Auth token
   const authToken = Buffer.from(`${username}:${password}`).toString('base64');
 
