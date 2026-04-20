@@ -24,7 +24,6 @@ import {
 import { HistoryTab } from "@/components/HistoryTab";
 
 export default function Home() {
-  // ⚡ ADDED KILL SWITCHES STATE
   const [killSwitches, setKillSwitches] = useState<Record<string, boolean>>({});
   
   const [isInitiallyLoading, setIsInitiallyLoading] = useState(true);
@@ -42,10 +41,8 @@ export default function Home() {
   const [customerName, setCustomerName] = useState<string | null>(null);
   const [isVerifying, setIsVerifying] = useState(false);
 
-  // ⚡ CONFIRMATION MODAL STATE ⚡
   const [isConfirmModalOpen, setIsConfirmModalOpen] = useState(false);
 
-  // ⚡ BENEFICIARIES STATE
   const [beneficiaries, setBeneficiaries] = useState<Record<string, {account: string, name: string | null}[]>>({});
   const [activeDeleteAccount, setActiveDeleteAccount] = useState<string | null>(null);
   const pressTimer = useRef<NodeJS.Timeout | null>(null);
@@ -122,6 +119,21 @@ export default function Home() {
   const currentDisco = useMemo(() => ELECTRICITY_DISCOS.find(d => d.serviceID === elecProvider), [elecProvider]);
   const currentCable = useMemo(() => CABLE_PROVIDERS_LIST.find(c => c.serviceID === cableProvider), [cableProvider]);
   const currentInternet = useMemo(() => INTERNET_PROVIDERS.find(c => c.serviceID === internetProvider), [internetProvider]);
+
+  // ⚡ 1. ACTIVELY CHECKS IF THE PRE-SELECTED SERVICE IS KILLED
+  const isCurrentServiceDisabled = useMemo(() => {
+      if (!killSwitches) return false;
+      if (activeTab === 'education') {
+          return killSwitches['MASTER_EDUCATION'] === false || killSwitches[`EDU_${educationProvider}`] === false;
+      }
+      if (activeTab === 'pay') {
+          if (activeService.id === "AIRTIME") return killSwitches['MASTER_AIRTIME'] === false || killSwitches[`AIRTIME_${telecomProvider.toLowerCase()}`] === false;
+          if (activeService.id === "INTERNET") return killSwitches['MASTER_INTERNET'] === false || killSwitches[`INTERNET_${internetProvider}`] === false;
+          if (activeService.id === "ELECTRICITY") return killSwitches['MASTER_ELECTRICITY'] === false || killSwitches[`ELEC_${elecProvider}`] === false;
+          if (activeService.id === "CABLE") return killSwitches['MASTER_CABLE'] === false || killSwitches[`CABLE_${cableProvider}`] === false;
+      }
+      return false;
+  }, [killSwitches, activeTab, activeService, educationProvider, telecomProvider, internetProvider, elecProvider, cableProvider]);
 
   const dynamicMinAmount = useMemo(() => {
     if (activeTab === "bank") return 1000;
@@ -207,7 +219,7 @@ export default function Home() {
 
       if (name.includes('broadband') || name.includes('router') || name.includes('5g') || name.includes('hynet') || name.includes('unlimited')) category = "Broadband";
       else if (name.includes('social') || name.includes('whatsapp') || name.includes('ig') || name.includes('instagram') || name.includes('tiktok') || name.includes('youtube') || name.includes('facebook') || name.includes('opera') || name.includes('xot')) category = "Social";
-      else if (name.includes('60 day') || name.includes('90 day') || name.includes('120 day') || name.includes('year') || name.includes('365') || name.includes('mega') || name.includes('3 month') || name.includes('2 month') || name.includes('quarterly') || name.includes('annual')) category = "Mega";
+      else if (name.includes('60 day') || name.includes('90 day') || name.includes('120 day') || name.includes('year') || name.includes('365') || name.includes('mega') || name.includes('3 month') || name.includes('2 month') || name.includes('quarterly') || name.includes('annual')) category = "Monthly";
       else if (name.includes('month') || name.includes('30 day')) category = "Monthly";
       else if (name.includes('week') || name.includes('7 day') || name.includes('14 day') || name.includes('weekend')) category = "Weekly";
       else if (name.includes('1 day') || name.includes('2 day') || name.includes('3 day') || name.includes('daily') || name.includes('24 hrs') || name.includes('24hrs') || name.includes('night') || name.includes('hourly')) category = "Daily";
@@ -217,6 +229,9 @@ export default function Home() {
   }, [internetVariations, activeDataCategory, internetProvider]);
 
   const isFormValid = useMemo(() => {
+    // ⚡ 2. INSTANTLY INVALIDATE THE FORM IF THE PRE-SELECTED PROVIDER IS OFFLINE
+    if (isCurrentServiceDisabled) return false;
+
     const amount = parseFloat(nairaAmount);
 
     if (!nairaAmount || isNaN(amount)) return false;
@@ -250,7 +265,7 @@ export default function Home() {
       }
     }
     return false;
-  }, [accountNumber, nairaAmount, activeService, customerName, dynamicMinAmount, dynamicMaxAmount, dynamicElecMin, cableSubscriptionType, selectedCablePlan, selectedBank, selectedInternetPlan, internetAccountId, customerPhone, internetProvider, activeTab, cableProvider, selectedEducationPlan, educationProvider, isFixedPlan]);
+  }, [accountNumber, nairaAmount, activeService, customerName, dynamicMinAmount, dynamicMaxAmount, dynamicElecMin, cableSubscriptionType, selectedCablePlan, selectedBank, selectedInternetPlan, internetAccountId, customerPhone, internetProvider, activeTab, cableProvider, selectedEducationPlan, educationProvider, isFixedPlan, isCurrentServiceDisabled]);
 
   const showToast = (title: string, message: string, type: 'success' | 'error' = 'success') => {
     setToast({ title, message, type });
@@ -670,16 +685,24 @@ export default function Home() {
     if (status && !isProcessing) { const timer = setTimeout(() => setStatus(""), 5000); return () => clearTimeout(timer); }
   }, [status, isProcessing]);
 
-  // ⚡ UPDATED useEffect to load both exchange_rate and kill_switches
+  // ⚡ 3. ADDED SILENT POLLING EVERY 15 SECONDS SO IT NEVER REQUIRES A RELOAD
   useEffect(() => {
+    let intervalId: NodeJS.Timeout;
+
     async function initSystem() {
-      try { 
-          const { data: settingsData } = await supabase.from('platform_settings').select('exchange_rate, kill_switches').eq('id', 1).single(); 
-          if (settingsData) {
-              if (settingsData.exchange_rate) setExchangeRate(Number(settingsData.exchange_rate)); 
-              if (settingsData.kill_switches) setKillSwitches(settingsData.kill_switches);
-          }
-      } catch (consoleError) {}
+      const fetchSettings = async () => {
+          try { 
+              const { data: settingsData } = await supabase.from('platform_settings').select('exchange_rate, kill_switches').eq('id', 1).single(); 
+              if (settingsData) {
+                  if (settingsData.exchange_rate) setExchangeRate(Number(settingsData.exchange_rate)); 
+                  if (settingsData.kill_switches) setKillSwitches(settingsData.kill_switches);
+              }
+          } catch (consoleError) {}
+      };
+
+      await fetchSettings();
+      // Silently poll the database every 15 seconds!
+      intervalId = setInterval(fetchSettings, 15000); 
 
       try {
         if (typeof window !== "undefined" && (window as any).ethereum) {
@@ -689,7 +712,12 @@ export default function Home() {
         }
       } catch (e) {}
     }
+    
     initSystem();
+
+    return () => {
+        if (intervalId) clearInterval(intervalId);
+    };
   }, [activeChain]);
 
   useEffect(() => {
@@ -1074,7 +1102,6 @@ export default function Home() {
 
                 <div className="animate-in slide-in-from-left-2 mb-2">
                     <label className="text-[10px] font-black text-slate-400 uppercase mb-3 block">Service</label>
-                    {/* ⚡ APPLIED KILL SWITCH MAPPING ⚡ */}
                     <button 
                         onClick={() => {
                             const optionsWithStatus = EDUCATION_PROVIDERS.map(p => {
@@ -1269,13 +1296,14 @@ export default function Home() {
                     </div>
                 )}
 
+                {/* ⚡ 4. UPDATED BUTTON UI FOR EDUCATION TAB */}
                 <button 
                     onClick={() => setIsConfirmModalOpen(true)}
-                    disabled={!isFormValid || isProcessing}
-                    className="w-full bg-slate-900 hover:bg-black text-white font-black py-6 rounded-3xl flex items-center justify-center gap-3.5 transition-all active:scale-95 disabled:opacity-30 shadow-xl shadow-slate-900/20 text-lg tracking-tight"
+                    disabled={!isFormValid || isProcessing || isCurrentServiceDisabled}
+                    className={`w-full text-white font-black py-6 rounded-3xl flex items-center justify-center gap-3.5 transition-all active:scale-95 shadow-xl text-lg tracking-tight ${isCurrentServiceDisabled ? 'bg-slate-300 opacity-50 cursor-not-allowed text-slate-500 shadow-none' : 'bg-slate-900 hover:bg-black disabled:opacity-30 shadow-slate-900/20'}`}
                 >
-                    {isProcessing ? <Loader2 size={24} className="animate-spin text-emerald-400"/> : <ShieldCheck size={24} className="text-emerald-400" />}
-                    {isProcessing ? 'PROCESSING...' : `PAY ${cryptoToCharge} ${selectedToken.symbol}`}
+                    {isProcessing ? <Loader2 size={24} className="animate-spin text-emerald-400"/> : <ShieldCheck size={24} className={isCurrentServiceDisabled ? 'text-slate-400' : 'text-emerald-400'} />}
+                    {isCurrentServiceDisabled ? 'TEMPORARILY OFFLINE' : isProcessing ? 'PROCESSING...' : `PAY ${cryptoToCharge} ${selectedToken.symbol}`}
                 </button>
             </div>
           </div>
@@ -1981,13 +2009,14 @@ export default function Home() {
                     </div>
                 )}
 
+                {/* ⚡ 5. UPDATED BUTTON UI FOR PAY TAB */}
                 <button 
                     onClick={() => setIsConfirmModalOpen(true)}
-                    disabled={isVerifying || !isFormValid || isProcessing}
-                    className="w-full bg-slate-900 hover:bg-black text-white font-black py-6 rounded-3xl flex items-center justify-center gap-3.5 transition-all active:scale-95 disabled:opacity-30 shadow-xl shadow-slate-900/20 text-lg tracking-tight"
+                    disabled={isVerifying || !isFormValid || isProcessing || isCurrentServiceDisabled}
+                    className={`w-full text-white font-black py-6 rounded-3xl flex items-center justify-center gap-3.5 transition-all active:scale-95 shadow-xl text-lg tracking-tight ${isCurrentServiceDisabled ? 'bg-slate-300 opacity-50 cursor-not-allowed text-slate-500 shadow-none' : 'bg-slate-900 hover:bg-black disabled:opacity-30 shadow-slate-900/20'}`}
                 >
-                    {isProcessing ? <Loader2 size={24} className="animate-spin text-emerald-400"/> : <ShieldCheck size={24} className="text-emerald-400" />}
-                    {isProcessing ? 'PROCESSING...' : `PAY ${cryptoToCharge} ${selectedToken.symbol}`}
+                    {isProcessing ? <Loader2 size={24} className="animate-spin text-emerald-400"/> : <ShieldCheck size={24} className={isCurrentServiceDisabled ? 'text-slate-400' : 'text-emerald-400'} />}
+                    {isCurrentServiceDisabled ? 'TEMPORARILY OFFLINE' : isProcessing ? 'PROCESSING...' : `PAY ${cryptoToCharge} ${selectedToken.symbol}`}
                 </button>
             </div>
           </div>
@@ -2007,7 +2036,6 @@ export default function Home() {
 
         <footer className="mt-12 w-full border-t border-slate-200 pt-8 pb-4 flex flex-col items-center gap-5 animate-in fade-in">
 
-          {/* ⚡ SOCIAL ICONS ADDED TO MAIN APP ⚡ */}
           <div className="flex items-center gap-4">
             <a 
               href="https://x.com/AbaPays" 
