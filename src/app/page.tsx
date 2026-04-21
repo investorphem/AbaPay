@@ -1001,16 +1001,21 @@ export default function Home() {
                         {isInternational ? "Product Type" : "Provider"}
                     </label>
 
-                    {isInternational ? (
+                                        {isInternational ? (
                         <>
-                            {/* ⚡ SAFEGUARDED IDS ⚡ */}
                             <button 
                                 onClick={() => {
                                     if (intlProductTypes.length === 0) return;
+                                    
+                                    // ⚡ FIX: Use raw SVG Data URIs so no external files are needed! ⚡
+                                    const getIcon = (name: string) => name.toLowerCase().includes('data') 
+                                        ? "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='24' height='24' viewBox='0 0 24 24' fill='none' stroke='%230ea5e9' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M5 12.55a11 11 0 0 1 14.08 0'/%3E%3Cpath d='M1.42 9a16 16 0 0 1 21.16 0'/%3E%3Cpath d='M8.53 16.11a6 6 0 0 1 6.95 0'/%3E%3Cline x1='12' y1='20' x2='12.01' y2='20'/%3E%3C/svg%3E" 
+                                        : "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='24' height='24' viewBox='0 0 24 24' fill='none' stroke='%2310b981' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpolygon points='13 2 3 14 12 14 11 22 21 10 12 10 13 2'/%3E%3C/svg%3E";
+
                                     openSelectionModal('standard', "Select Type", intlProductTypes.map(p => ({
                                         serviceID: p.product_type_id || p.id || p.name, 
                                         displayName: p.name,
-                                        logo: p.name.toLowerCase().includes('data') ? '/wifi.png' : '/airtime.png'
+                                        logo: getIcon(p.name)
                                     })), (val) => {
                                         setSelectedIntlProduct(intlProductTypes.find(p => (p.product_type_id || p.id || p.name) == val));
                                     });
@@ -1019,8 +1024,14 @@ export default function Home() {
                             >
                                 <div className="flex items-center gap-3">
                                     {selectedIntlProduct && (
-                                       <div className="w-10 h-10 shrink-0 rounded-full border border-slate-100 bg-white flex items-center justify-center shadow-sm overflow-hidden">
-                                           <img src={selectedIntlProduct.name.toLowerCase().includes('data') ? '/wifi.png' : '/airtime.png'} className="w-6 h-6 object-contain" alt="type" />
+                                       <div className="w-10 h-10 shrink-0 rounded-full border border-slate-100 bg-emerald-50/50 flex items-center justify-center shadow-sm overflow-hidden">
+                                           <img 
+                                              src={selectedIntlProduct.name.toLowerCase().includes('data') 
+                                                   ? "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='24' height='24' viewBox='0 0 24 24' fill='none' stroke='%230ea5e9' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M5 12.55a11 11 0 0 1 14.08 0'/%3E%3Cpath d='M1.42 9a16 16 0 0 1 21.16 0'/%3E%3Cpath d='M8.53 16.11a6 6 0 0 1 6.95 0'/%3E%3Cline x1='12' y1='20' x2='12.01' y2='20'/%3E%3C/svg%3E" 
+                                                   : "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='24' height='24' viewBox='0 0 24 24' fill='none' stroke='%2310b981' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpolygon points='13 2 3 14 12 14 11 22 21 10 12 10 13 2'/%3E%3C/svg%3E"} 
+                                              className="w-5 h-5 object-contain" 
+                                              alt="type" 
+                                           />
                                        </div>
                                     )}
                                     <span className="text-sm font-black text-slate-900 tracking-tight uppercase">
@@ -1029,6 +1040,46 @@ export default function Home() {
                                 </div>
                                 {isIntlLoading ? <Loader2 size={16} className="animate-spin"/> : <ChevronDown size={18} className="text-slate-400"/>}
                             </button>
+
+                            {selectedIntlProduct && (
+                                <>
+                                    <label className="text-[10px] font-black text-slate-400 uppercase mb-3 block mt-4">Network Operator</label>
+                                    <button 
+                                        onClick={() => {
+                                            if (intlOperators.length === 0) return;
+                                            openSelectionModal('standard', "Select Network", intlOperators.map(p => ({
+                                                serviceID: p.operator_id || p.id || p.name, 
+                                                displayName: p.name,
+                                                logo: p.operator_image || '/logo.png'
+                                            })), (val) => {
+                                                setSelectedIntlOperator(intlOperators.find(p => (p.operator_id || p.id || p.name) == val));
+                                            });
+                                        }}
+                                        className="w-full bg-white border border-slate-200 p-4 rounded-2xl flex justify-between items-center hover:border-emerald-400 transition-colors shadow-sm"
+                                    >
+                                        <div className="flex items-center gap-3">
+                                            {selectedIntlOperator && (
+                                                <div className="w-10 h-10 shrink-0 rounded-full border border-slate-100 bg-white flex items-center justify-center shadow-sm overflow-hidden">
+                                                    <img 
+                                                       src={selectedIntlOperator.operator_image || '/logo.png'} 
+                                                       alt="operator" 
+                                                       className="w-8 h-8 object-contain" 
+                                                       // ⚡ FIX: Add onError fallback to stop broken images! ⚡
+                                                       onError={(e) => { e.currentTarget.src = '/logo.png'; }} 
+                                                    />
+                                                </div>
+                                            )}
+                                            <span className="text-sm font-black text-slate-900 tracking-tight uppercase">
+                                                {selectedIntlOperator ? selectedIntlOperator.name : (isIntlLoading ? "Loading..." : "Select Operator")}
+                                            </span>
+                                        </div>
+                                        {isIntlLoading ? <Loader2 size={16} className="animate-spin"/> : <ChevronDown size={18} className="text-slate-400"/>}
+                                    </button>
+                                </>
+                            )}
+                        </>
+                    ) : (
+
 
                             {selectedIntlProduct && (
                                 <>
