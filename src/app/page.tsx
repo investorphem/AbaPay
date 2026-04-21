@@ -622,17 +622,38 @@ export default function Home() {
     }
   }, [selectedIntlOperator, selectedIntlProduct, isInternational]);
 
+    // ⚡ UPGRADED INTERNATIONAL COUNTRIES FETCHER ⚡
   useEffect(() => {
-    fetch('/api/intl?action=countries').then(res => res.json()).then(data => {
-        if (data.code === "000" && data.content) {
-            const fetched = data.content.map((c: any) => ({ code: c.code, name: c.country }));
-            const merged = [...SUPPORTED_COUNTRIES.filter(c=>!c.disabled), ...fetched.filter((c:any) => c.code !== "NG")];
-            setIntlCountries(merged);
-        } else {
-            setIntlCountries(SUPPORTED_COUNTRIES.filter(c=>!c.disabled));
-        }
-    }).catch(()=>setIntlCountries(SUPPORTED_COUNTRIES.filter(c=>!c.disabled)));
+    fetch('/api/intl?action=countries')
+      .then(res => res.json())
+      .then(data => {
+          console.log("🌍 VTpass Countries Payload:", data); // Helpful if we need to debug!
+          
+          // Use your super-extractor to grab the array, no matter how VTpass formats it
+          const countriesArr = extractVtpassArray(data);
+          
+          if (countriesArr && countriesArr.length > 0) {
+              const fetched = countriesArr.map((c: any) => ({ 
+                  code: c.code || c.country_code || c.id, 
+                  name: c.name || c.country || c.title 
+              })).filter((c:any) => c.code && c.name); // Ensure no empty objects
+              
+              // Merge local NG with the live VTpass foreign countries
+              const merged = [
+                  ...SUPPORTED_COUNTRIES.filter(c => !c.disabled), 
+                  ...fetched.filter((c:any) => c.code !== "NG")
+              ];
+              setIntlCountries(merged);
+          } else {
+              setIntlCountries(SUPPORTED_COUNTRIES.filter(c => !c.disabled));
+          }
+      })
+      .catch((err) => {
+          console.error("🌍 Countries Fetch Error:", err);
+          setIntlCountries(SUPPORTED_COUNTRIES.filter(c => !c.disabled));
+      });
   }, []);
+
 
   useEffect(() => {
     if (activeTab === "education" && !isInternational) {
