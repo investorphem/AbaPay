@@ -80,7 +80,7 @@ export default function Home() {
   const [intlProductTypes, setIntlProductTypes] = useState<any[]>([]);
   const [intlOperators, setIntlOperators] = useState<any[]>([]);
   const [intlVariations, setIntlVariations] = useState<any[]>([]);
-  const [intlCurrency, setIntlCurrency] = useState<string>(""); // Grabbed directly from VTpass!
+  const [intlCurrency, setIntlCurrency] = useState<string>(""); 
   
   const [selectedIntlProduct, setSelectedIntlProduct] = useState<any>(null);
   const [selectedIntlOperator, setSelectedIntlOperator] = useState<any>(null);
@@ -180,7 +180,6 @@ export default function Home() {
         return (varAmt * rate).toString();
     }
     
-    // Flexible pricing
     const input = parseFloat(intlFlexibleAmount || "0");
     return (input * rate).toString();
   }, [isInternational, selectedIntlVariation, intlFlexibleAmount, nairaAmount]);
@@ -224,7 +223,6 @@ export default function Home() {
   const isFormValid = useMemo(() => {
     if (isCurrentServiceDisabled) return false;
 
-    // ⚡ INTERNATIONAL STRICT VALIDATION ⚡
     if (isInternational) {
         if (!selectedIntlProduct || !selectedIntlOperator || accountNumber.length < 6) return false;
         if (!selectedIntlVariation) return false;
@@ -307,7 +305,6 @@ export default function Home() {
     }
   };
 
-  // ⚡ BENEFICIARY HELPER FUNCTIONS ⚡
   const getCurrentProviderKey = () => {
     if (activeTab === "bank") return selectedBank?.variation_code;
     if (activeTab === "education") return educationProvider;
@@ -677,22 +674,13 @@ export default function Home() {
         fetch(`/api/intl?action=variations&operator_id=${operatorId}&type_id=${typeId}`)
           .then(res => res.json())
           .then(data => {
-              if (data && data.content) {
-                  // Grab currency directly from VTpass!
-                  if (data.content.Currency || data.content.currency) {
-                      setIntlCurrency(data.content.Currency || data.content.currency);
-                  }
-                  
-                  // Extract variations array, avoiding nested objects trap
-                  if (data.content.variations && Array.isArray(data.content.variations)) {
-                      setIntlVariations(data.content.variations);
-                  } else if (Array.isArray(data.content)) {
-                      setIntlVariations(data.content);
-                  } else {
-                      const arr = extractVtpassArray(data);
-                      if (arr && arr.length > 0) setIntlVariations(arr);
-                  }
+              if (data?.content?.Currency || data?.content?.currency) {
+                  setIntlCurrency(data.content.Currency || data.content.currency);
+              } else if (data?.Currency || data?.currency) {
+                  setIntlCurrency(data.Currency || data.currency);
               }
+              const arr = extractVtpassArray(data);
+              if (arr && arr.length > 0) setIntlVariations(arr);
           })
           .catch(()=>setIntlVariations([]))
           .finally(()=>setIsIntlLoading(false));
@@ -938,7 +926,6 @@ export default function Home() {
               onClick={() => openSelectionModal('country', "Select Region", intlCountries.length ? intlCountries : SUPPORTED_COUNTRIES, handleCountryChange)}
               className="bg-slate-50 border border-slate-100 hover:border-emerald-200 px-3 py-1.5 rounded-xl flex items-center gap-2 transition-all shadow-sm active:scale-95"
             >
-              {/* ⚡ UNLOCKED FLAG FOR ALL COUNTRIES ⚡ */}
               <img 
                 src={`https://flagcdn.com/w40/${activeCountry.code.toLowerCase()}.png`} 
                 alt={activeCountry.code} 
@@ -951,14 +938,13 @@ export default function Home() {
           </div>
         </div>
 
-        {/* THE TABS (Grey out foreign) */}
+        {/* THE TABS */}
         <div className="flex gap-2 bg-slate-200/50 p-1.5 rounded-2xl mb-6 shadow-inner overflow-x-auto no-scrollbar">
             <button onClick={() => handleTabSwitch("pay")} className={`flex-1 min-w-[75px] py-3 rounded-xl text-[10px] sm:text-xs font-black transition-all ${activeTab === 'pay' ? 'bg-white text-emerald-600 shadow-xl' : 'text-slate-500 hover:text-slate-700'}`}>BILLS</button>
             <button onClick={() => handleTabSwitch("bank")} disabled={isInternational} className={`flex-1 min-w-[75px] py-3 rounded-xl text-[10px] sm:text-xs font-black transition-all ${isInternational ? 'opacity-30 cursor-not-allowed' : activeTab === 'bank' ? 'bg-white text-emerald-600 shadow-xl' : 'text-slate-500 hover:text-slate-700'}`}>TRANSFER</button>
             <button onClick={() => handleTabSwitch("education")} disabled={isInternational} className={`flex-1 min-w-[75px] py-3 rounded-xl text-[10px] sm:text-xs font-black transition-all ${isInternational ? 'opacity-30 cursor-not-allowed' : activeTab === 'education' ? 'bg-white text-emerald-600 shadow-xl' : 'text-slate-500 hover:text-slate-700'}`}>EDUCATION</button>
             <button onClick={() => handleTabSwitch("history")} className={`flex-1 min-w-[75px] py-3 rounded-xl text-[10px] sm:text-xs font-black transition-all ${activeTab === 'history' ? 'bg-white text-emerald-600 shadow-xl' : 'text-slate-500 hover:text-slate-700'}`}>HISTORY</button>
         </div>
-
 
         {/* ======================================= */}
         {/* PAY BLOCK */}
@@ -1255,7 +1241,7 @@ export default function Home() {
                                      <p className="font-black text-slate-900 text-lg">{selectedIntlVariation.name}</p>
                                      {selectedIntlVariation.fixedPrice !== "Yes" && (
                                          <div className="mt-3 border-t border-emerald-200 pt-3">
-                                            <p className="text-[10px] font-bold text-slate-500 mb-1 uppercase tracking-widest">Enter Amount to Send ({intlCurrency || activeCountry.code})</p>
+                                            <p className="text-[10px] font-bold text-slate-500 mb-1 uppercase tracking-widest">Enter Amount to Send</p>
                                             <input 
                                                 type="number" 
                                                 placeholder="Amount" 
