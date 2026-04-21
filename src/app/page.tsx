@@ -3,11 +3,10 @@
 import React, { useState, useEffect, useMemo, useRef } from "react";
 import { createWalletClient, createPublicClient, custom, http, parseUnits, formatUnits } from "viem";
 import { celo, celoSepolia } from "viem/chains";
-import Link from "next/link";
 import { 
   ShieldCheck, Zap, AlertTriangle, CheckCircle2, ChevronDown, 
   Loader2, Coins, Briefcase, ListPlus, Users, Landmark, XCircle, 
-  RefreshCw, Tv, GraduationCap, Send, Globe
+  RefreshCw, Tv, GraduationCap, Globe
 } from "lucide-react";
 import { supabase } from "@/utils/supabase";
 import { ELECTRICITY_DISCOS } from "./discos"; 
@@ -16,6 +15,7 @@ import { ReceiptModal, SelectionModal } from "@/components/Modals";
 import { TermsModal, PrivacyModal } from "@/components/Modals";
 import PointsBadge from "@/components/PointsBadge"; 
 import DataVariationsUI from "@/components/DataVariationsUI"; 
+import AppFooter from "@/components/AppFooter"; // ⚡ OUR NEW COMPONENT! ⚡
 import { 
   ABAPAY_ABI, ERC20_ABI, SERVICES, CABLE_PROVIDERS_LIST, TELECOM_PROVIDERS, 
   INTERNET_PROVIDERS, SUPPORTED_TOKENS, SUPPORTED_COUNTRIES, PRE_SELECT_AMOUNTS, 
@@ -47,7 +47,6 @@ export default function Home() {
   const pressTimer = useRef<NodeJS.Timeout | null>(null);
   const isLongPress = useRef(false);
 
-  // Local State
   const [meterAddress, setMeterAddress] = useState<string | null>(null);
   const [dynamicElecMin, setDynamicElecMin] = useState<number>(1000);
   const [meterAccountType, setMeterAccountType] = useState<string | null>(null);
@@ -66,7 +65,6 @@ export default function Home() {
   const [educationVariations, setEducationVariations] = useState<any[]>([]);
   const [selectedEducationPlan, setSelectedEducationPlan] = useState<any>(null);
 
-  // Master State
   const [activeCountry, setActiveCountry] = useState<{code: string, name: string, flag?: string}>(SUPPORTED_COUNTRIES[0]);
   const [activeService, setActiveService] = useState(SERVICES[0]);
   const [elecProvider, setElecProvider] = useState(ELECTRICITY_PROVIDER_IDS[0]);
@@ -75,7 +73,6 @@ export default function Home() {
   const [internetProvider, setInternetProvider] = useState(INTERNET_PROVIDERS[0].serviceID);
   const [meterType, setMeterType] = useState<"prepaid" | "postpaid">("prepaid");
 
-  // ⚡ INTERNATIONAL STATE ⚡
   const [intlCountries, setIntlCountries] = useState<any[]>([]);
   const [intlProductTypes, setIntlProductTypes] = useState<any[]>([]);
   const [intlOperators, setIntlOperators] = useState<any[]>([]);
@@ -156,30 +153,23 @@ export default function Home() {
   
   const currentMinDisplay = (activeTab === "pay" && activeService.id === "ELECTRICITY") ? dynamicElecMin : dynamicMinAmount;
 
-  // ⚡ INTERNATIONAL FOREIGN AMOUNT CALCULATOR ⚡
   const displayForeignAmount = useMemo(() => {
-      if (!isInternational) return "0";
-      if (!selectedIntlVariation) return "0";
-      if (selectedIntlVariation.fixedPrice === "Yes") {
-          return parseFloat(selectedIntlVariation.variation_amount || "0").toLocaleString();
-      }
+      if (!isInternational || !selectedIntlVariation) return "0";
+      if (selectedIntlVariation.fixedPrice === "Yes") return parseFloat(selectedIntlVariation.variation_amount || "0").toLocaleString();
       return parseFloat(intlFlexibleAmount || "0").toLocaleString();
   }, [isInternational, selectedIntlVariation, intlFlexibleAmount]);
 
-  // ⚡ INTERNATIONAL NAIRA CALCULATION (Under the hood) ⚡
   const calculatedNairaAmount = useMemo(() => {
     if (!isInternational) return nairaAmount;
     if (!selectedIntlVariation) return "0";
     
     const rate = parseFloat(selectedIntlVariation.variation_rate || "1");
-    
     if (selectedIntlVariation.fixedPrice === "Yes") {
         const charged = parseFloat(selectedIntlVariation.charged_amount || "0");
         if (charged > 0) return charged.toString();
         const varAmt = parseFloat(selectedIntlVariation.variation_amount || "0");
         return (varAmt * rate).toString();
     }
-    
     const input = parseFloat(intlFlexibleAmount || "0");
     return (input * rate).toString();
   }, [isInternational, selectedIntlVariation, intlFlexibleAmount, nairaAmount]);
@@ -223,7 +213,6 @@ export default function Home() {
   const isFormValid = useMemo(() => {
     if (isCurrentServiceDisabled) return false;
 
-    // ⚡ INTERNATIONAL STRICT VALIDATION ⚡
     if (isInternational) {
         if (!selectedIntlProduct || !selectedIntlOperator || accountNumber.length < 6) return false;
         if (!selectedIntlVariation) return false;
@@ -284,7 +273,6 @@ export default function Home() {
     setCableCurrentBouquet(null); setCableRenewAmount(null); setSelectedCablePlan(null);
     setCableSubscriptionType("renew"); setSelectedBank(null); setSelectedInternetPlan(null); setInternetAccountId(null);
     setSelectedEducationPlan(null); setInternetVariations([]); setMeterAddress(null); setDynamicElecMin(1000); setMeterAccountType(null);
-    
     setSelectedIntlProduct(null); setSelectedIntlOperator(null); setSelectedIntlVariation(null); setIntlFlexibleAmount(""); setIntlOperators([]); setIntlVariations([]); setIntlCurrency("");
   };
 
@@ -306,7 +294,6 @@ export default function Home() {
     }
   };
 
-  // ⚡ BENEFICIARY HELPER FUNCTIONS ⚡
   const getCurrentProviderKey = () => {
     if (activeTab === "bank") return selectedBank?.variation_code;
     if (activeTab === "education") return educationProvider;
@@ -383,22 +370,14 @@ export default function Home() {
       const data = await res.json();
 
       if (data.code === '011' || !data.content || !data.content.variations) {
-        setBankVariations([
-            { variation_code: 'access', name: 'ACCESS BANK PLC' }, { variation_code: 'firstbank', name: 'FIRST BANK OF NIGERIA PLC' },
-            { variation_code: 'gtb', name: 'GTBANK PLC' }, { variation_code: 'opay', name: 'OPAY' },
-            { variation_code: 'moniepoint', name: 'MONIEPOINT MICROFINANCE BANK' }, { variation_code: 'uba', name: 'UBA - UNITED BANK FOR AFRICA PLC' },
-            { variation_code: 'zenith', name: 'ZENITH BANK PLC' }
-        ]);
+        setBankVariations([{ variation_code: 'access', name: 'ACCESS BANK PLC' }, { variation_code: 'firstbank', name: 'FIRST BANK OF NIGERIA PLC' }, { variation_code: 'gtb', name: 'GTBANK PLC' }, { variation_code: 'opay', name: 'OPAY' }, { variation_code: 'moniepoint', name: 'MONIEPOINT MICROFINANCE BANK' }, { variation_code: 'uba', name: 'UBA - UNITED BANK FOR AFRICA PLC' }, { variation_code: 'zenith', name: 'ZENITH BANK PLC' }]);
         return;
       }
       let banksArr = extractVtpassArray(data);
       if (banksArr && Array.isArray(banksArr) && banksArr.length > 0) setBankVariations(banksArr.sort((a: any, b: any) => (a.name || "").localeCompare(b.name || "")));
       else throw new Error("Empty");
     } catch (e) {
-      setBankVariations([
-        { variation_code: 'access', name: 'ACCESS BANK PLC' }, { variation_code: 'gtb', name: 'GTBANK PLC' },
-        { variation_code: 'opay', name: 'OPAY' }, { variation_code: 'moniepoint', name: 'MONIEPOINT MICROFINANCE BANK' }, { variation_code: 'zenith', name: 'ZENITH BANK PLC' }
-      ]);
+      setBankVariations([{ variation_code: 'access', name: 'ACCESS BANK PLC' }, { variation_code: 'gtb', name: 'GTBANK PLC' }, { variation_code: 'opay', name: 'OPAY' }, { variation_code: 'moniepoint', name: 'MONIEPOINT MICROFINANCE BANK' }, { variation_code: 'zenith', name: 'ZENITH BANK PLC' }]);
     } finally { setIsFetchingBanks(false); }
   };
 
@@ -1021,7 +1000,6 @@ export default function Home() {
                         />
                         {isVerifying && <p className="text-[10px] text-blue-500 font-bold mt-2 animate-pulse flex items-center gap-1.5"><Loader2 size={12} className="animate-spin"/> Verifying...</p>}
 
-                        {/* ⚡ SAVED BENEFICIARIES UI ⚡ */}
                         {(() => {
                             const key = getCurrentProviderKey();
                             const list = key ? beneficiaries[key] : [];
@@ -1176,7 +1154,7 @@ export default function Home() {
                 <button 
                     onClick={() => setIsConfirmModalOpen(true)}
                     disabled={!isFormValid || isProcessing || isCurrentServiceDisabled}
-                    className={`w-full text-white font-black py-6 rounded-3xl flex items-center justify-center gap-3.5 transition-all active:scale-95 shadow-xl text-lg tracking-tight ${(!isFormValid || isCurrentServiceDisabled) ? 'bg-slate-300 opacity-50 cursor-not-allowed text-slate-500 shadow-none' : 'bg-slate-900 hover:bg-black disabled:opacity-30 shadow-slate-900/20'}`}
+                    className={`w-full text-white font-black py-6 rounded-3xl flex items-center justify-center gap-3.5 transition-all active:scale-95 shadow-xl text-lg tracking-tight ${isCurrentServiceDisabled ? 'bg-slate-300 opacity-50 cursor-not-allowed text-slate-500 shadow-none' : 'bg-slate-900 hover:bg-black disabled:opacity-30 shadow-slate-900/20'}`}
                 >
                     {isProcessing ? <Loader2 size={24} className="animate-spin text-emerald-400"/> : <ShieldCheck size={24} className={isCurrentServiceDisabled ? 'text-slate-400' : 'text-emerald-400'} />}
                     {isCurrentServiceDisabled ? 'TEMPORARILY OFFLINE' : isProcessing ? 'PROCESSING...' : `PAY ${cryptoToCharge} ${selectedToken.symbol}`}
@@ -1313,7 +1291,6 @@ export default function Home() {
                         );
                     })()}
 
-                    {/* ⚡ VERIFIED BLOCK WITH ADDRESS ⚡ */}
                     {customerName && (
                         <div className="mt-2 bg-emerald-500/10 p-4 rounded-xl border border-emerald-500/20 flex items-center gap-3 animate-in fade-in">
                             <CheckCircle2 size={18} className="text-emerald-600 shrink-0" />
@@ -1381,11 +1358,11 @@ export default function Home() {
 
                 <button 
                     onClick={() => setIsConfirmModalOpen(true)}
-                    disabled={isVerifying || !isFormValid || isProcessing || isCurrentServiceDisabled}
-                    className={`w-full text-white font-black py-6 rounded-3xl flex items-center justify-center gap-3.5 transition-all active:scale-95 shadow-xl text-lg tracking-tight ${(!isFormValid || isCurrentServiceDisabled) ? 'bg-slate-300 opacity-50 cursor-not-allowed text-slate-500 shadow-none' : 'bg-slate-900 hover:bg-black disabled:opacity-30 shadow-slate-900/20'}`}
+                    disabled={isVerifying || !isFormValid || isProcessing}
+                    className="w-full bg-slate-900 hover:bg-black text-white font-black py-6 rounded-3xl flex items-center justify-center gap-3.5 transition-all active:scale-95 disabled:opacity-30 shadow-xl shadow-slate-900/20 text-lg tracking-tight"
                 >
-                    {isProcessing ? <Loader2 size={24} className="animate-spin text-emerald-400"/> : <ShieldCheck size={24} className={isCurrentServiceDisabled ? 'text-slate-400' : 'text-emerald-400'} />}
-                    {isCurrentServiceDisabled ? 'TEMPORARILY OFFLINE' : isProcessing ? 'PROCESSING...' : `TRANSFER ${cryptoToCharge} ${selectedToken.symbol}`}
+                    {isProcessing ? <Loader2 size={24} className="animate-spin text-emerald-400"/> : <ShieldCheck size={24} className="text-emerald-400" />}
+                    {isProcessing ? 'PROCESSING...' : `TRANSFER ${cryptoToCharge} ${selectedToken.symbol}`}
                 </button>
             </div>
           </div>
@@ -2009,26 +1986,7 @@ export default function Home() {
           />
         )}
 
-        <footer className="mt-12 w-full border-t border-slate-200 pt-8 pb-4 flex flex-col items-center gap-5 animate-in fade-in">
-          <div className="flex items-center gap-4">
-            <a href="https://x.com/AbaPays" target="_blank" rel="noopener noreferrer" className="w-12 h-12 rounded-full border-2 border-slate-200 bg-white flex items-center justify-center text-slate-500 hover:text-emerald-600 hover:border-emerald-200 hover:bg-emerald-50 transition-all shadow-sm group">
-              <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="group-hover:scale-110 transition-transform"><path d="M22 4s-.7 2.1-2 3.4c1.6 10-9.4 17.3-18 11.6 2.2.1 4.4-.6 6-2C3 15.5.5 9.6 3 5c2.2 2.6 5.6 4.1 9 4-.9-4.2 4-6.6 7-3.8 1.1 0 3-1.2 3-1.2z"></path></svg>
-            </a>
-            <a href="https://t.me/AbaPays" target="_blank" rel="noopener noreferrer" className="w-12 h-12 rounded-full border-2 border-slate-200 bg-white flex items-center justify-center text-slate-500 hover:text-emerald-600 hover:border-emerald-200 hover:bg-emerald-50 transition-all shadow-sm group">
-              <Send size={20} className="ml-[-2px] mt-[2px] group-hover:scale-110 transition-transform" /> 
-            </a>
-          </div>
-          <div className="flex items-center gap-2.5 bg-white px-4 py-1.5 rounded-full shadow-sm border border-slate-100">
-             <ShieldCheck size={16} className="text-emerald-600" />
-             <span className="text-[11px] font-bold text-slate-500 uppercase tracking-widest">Secured by Celo Network</span>
-          </div>
-          <div className="flex gap-6">
-            <Link href="/docs" className="text-[10px] font-black text-slate-400 hover:text-emerald-600 uppercase transition-colors">Docs & FAQ</Link>
-            <Link href="/terms" className="text-[10px] font-black text-slate-400 hover:text-emerald-600 uppercase transition-colors">Terms</Link>
-            <Link href="/privacy" className="text-[10px] font-black text-slate-400 hover:text-emerald-600 uppercase transition-colors">Privacy</Link>
-          </div>
-          <p className="text-[9px] font-medium text-slate-300 uppercase tracking-[0.2em] mt-1">© 2026 MASONODE TECHNOLOGIES LIMITED • v3.0</p>
-        </footer>
+        <AppFooter />
       </div>
     </main>
   );
