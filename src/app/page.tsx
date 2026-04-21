@@ -737,10 +737,27 @@ export default function Home() {
     }
   }, [accountNumber, activeService.id, activeTab, internetProvider, isInternational]);
 
-    // ... your last useEffect is right here ...
-  useEffect(() => {
-    if (activeTab === "bank") { if (accountNumber.length === 10 && selectedBank) verifyMerchant(); else { setCustomerName(null); setMeterAddress(null); setDynamicElecMin(1000); setMeterAccountType(null); } } 
-    // ...
+      useEffect(() => {
+    // ⚡ DEBOUNCER: Wait 800ms after the user stops typing before verifying
+    const timeoutId = setTimeout(() => {
+      if (activeTab === "bank") { 
+          if (accountNumber.length === 10 && selectedBank) verifyMerchant(); 
+          else { setCustomerName(null); setMeterAddress(null); setDynamicElecMin(1000); setMeterAccountType(null); } 
+      } 
+      else if (activeTab === "education" && educationProvider === "jamb") {
+         if (accountNumber.length >= 10 && selectedEducationPlan) verifyMerchant(); 
+         else { setCustomerName(null); setMeterAddress(null); setDynamicElecMin(1000); setMeterAccountType(null); }
+      }
+      else if (activeTab === "pay" && !isInternational) {
+         if (activeService.id === "ELECTRICITY" && accountNumber.length >= 10) verifyMerchant();
+         else if (activeService.id === "CABLE" && cableProvider !== "showmax" && accountNumber.length >= 10) verifyMerchant();
+         else if (activeService.id === "INTERNET" && internetProvider === "smile-direct" && accountNumber.includes('@') && accountNumber.includes('.')) verifyMerchant(); 
+         else { setCustomerName(null); setMeterAddress(null); setDynamicElecMin(1000); setMeterAccountType(null); }
+      }
+    }, 800); // 800 millisecond delay
+
+    // If the user types another number before 800ms, cancel the previous check
+    return () => clearTimeout(timeoutId);
   }, [accountNumber, elecProvider, cableProvider, activeService.id, meterType, selectedBank, internetProvider, activeTab, educationProvider, selectedEducationPlan, isInternational]);
 
   // ⚡ PASTE IT RIGHT HERE ⚡
