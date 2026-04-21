@@ -1,11 +1,9 @@
-// src/components/DataVariationsUI.tsx
 import React, { useState, useMemo } from 'react';
 import { categorizeDataPlan } from '@/lib/dataCategories';
 
-// ⚡ Added TypeScript interface so Vercel is happy
 interface DataVariationsUIProps {
   variations: any[];
-  onSelectPlan: (plan: any) => void; // ⚡ This tells the parent component what the user clicked
+  onSelectPlan: (plan: any) => void;
 }
 
 export default function DataVariationsUI({ variations, onSelectPlan }: DataVariationsUIProps) {
@@ -13,6 +11,8 @@ export default function DataVariationsUI({ variations, onSelectPlan }: DataVaria
 
   const groupedVariations = useMemo(() => {
     const groups: Record<string, any[]> = {};
+    
+    // 1. Group them into tabs
     variations.forEach((plan) => {
       const categoryName = categorizeDataPlan(plan.name, plan.variation_code);
       if (!groups[categoryName]) {
@@ -20,6 +20,12 @@ export default function DataVariationsUI({ variations, onSelectPlan }: DataVaria
       }
       groups[categoryName].push(plan);
     });
+
+    // ⚡ 2. SORT EACH TAB FROM LOWEST TO HIGHEST PRICE ⚡
+    Object.keys(groups).forEach(key => {
+      groups[key].sort((a, b) => parseFloat(a.variation_amount || "0") - parseFloat(b.variation_amount || "0"));
+    });
+
     return groups;
   }, [variations]);
 
@@ -31,7 +37,6 @@ export default function DataVariationsUI({ variations, onSelectPlan }: DataVaria
 
   return (
     <div className="w-full">
-      {/* --- DYNAMIC TABS UI --- */}
       <div className="flex overflow-x-auto space-x-2 pb-2 scrollbar-hide">
         {availableTabs.map((tabName) => (
           <button
@@ -49,12 +54,11 @@ export default function DataVariationsUI({ variations, onSelectPlan }: DataVaria
         ))}
       </div>
 
-      {/* --- LIST THE PLANS FOR THE SELECTED TAB --- */}
       <div className="mt-4 space-y-3 max-h-[400px] overflow-y-auto pr-2">
         {groupedVariations[selectedTab]?.map((plan) => (
           <div 
              key={plan.variation_code} 
-             onClick={() => onSelectPlan(plan)} // ⚡ This is the magic click handler!
+             onClick={() => onSelectPlan(plan)}
              className="p-4 border border-slate-200 rounded-xl hover:border-emerald-500 hover:bg-emerald-50 cursor-pointer transition-all active:scale-[0.98]"
           >
             <p className="font-semibold text-slate-800 text-sm leading-snug">{plan.name}</p>
