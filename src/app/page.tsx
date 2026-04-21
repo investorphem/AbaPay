@@ -1756,6 +1756,198 @@ export default function Home() {
             </div>
           </div>
         )}
+        {/* ======================================= */}
+        {/* EDUCATION BLOCK */}
+        {/* ======================================= */}
+        {activeTab === 'education' && (
+          <div className="bg-white border border-slate-100 rounded-[2.5rem] p-8 shadow-2xl shadow-emerald-900/10 animate-in fade-in zoom-in-95">
+            <div className="space-y-5">
+                <div className="bg-slate-50 border border-slate-100 p-4 rounded-2xl flex justify-between items-center animate-in fade-in">
+                  <div 
+                    className="flex items-center gap-2 cursor-pointer hover:bg-slate-100 p-2 -ml-2 rounded-xl transition-colors" 
+                    onClick={() => openSelectionModal('token', "Select Token", SUPPORTED_TOKENS, (symbol: string) => setSelectedToken(SUPPORTED_TOKENS.find(t => t.symbol === symbol)!))}
+                  >
+                     <img src={selectedToken.logo} alt={selectedToken.symbol} className="w-7 h-7 object-contain rounded-full shadow-sm bg-white" />
+                     <span className="font-black text-slate-800 uppercase text-sm tracking-tight">{selectedToken.symbol}</span>
+                     <ChevronDown size={14} className="text-slate-400"/>
+                  </div>
+                  <div className="text-right">
+                    <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-0.5">Balance</p>
+                    <div className="flex items-center justify-end gap-1.5">
+                      {isFetchingBalance ? <Loader2 size={14} className="animate-spin text-emerald-500"/> : <Coins size={14} className="text-emerald-500"/>}
+                      <div className="flex flex-col items-end">
+                        <p className="font-mono font-black text-sm text-slate-800 leading-none">{walletBalance}</p>
+                        {!isFetchingBalance && <p className="text-[9px] font-bold text-slate-400 mt-1 tracking-tight">≈ ₦{walletBalanceNaira}</p>}
+                      </div>
+                    </div>
+                  </div>
+                </div>
+
+                <div className="animate-in slide-in-from-left-2 mb-2">
+                    <label className="text-[10px] font-black text-slate-400 uppercase mb-3 block">Service</label>
+                    <button 
+                        onClick={() => {
+                            const optionsWithStatus = EDUCATION_PROVIDERS.map(p => {
+                                const isMasterOff = killSwitches['MASTER_EDUCATION'] === false;
+                                const isProviderOff = killSwitches[`EDU_${p.serviceID}`] === false;
+                                return { ...p, disabled: isMasterOff || isProviderOff };
+                            });
+                            openSelectionModal('provider', "Select Education Service", optionsWithStatus, (val: any) => handleProviderChange(val, 'education'));
+                        }}
+                        className="w-full bg-white border border-slate-200 p-4 rounded-2xl flex justify-between items-center hover:border-emerald-400 transition-colors shadow-sm active:scale-[0.98]"
+                    >
+                        <div className="flex items-center gap-4">
+                            <div className="w-12 h-12 shrink-0 rounded-full border border-slate-100 bg-emerald-50 flex items-center justify-center shadow-inner overflow-hidden">
+                                <GraduationCap className="text-emerald-500" size={24} />
+                            </div>
+                            <div>
+                                <span className="text-sm font-black text-slate-900 tracking-tight uppercase">
+                                  {EDUCATION_PROVIDERS.find(p => p.serviceID === educationProvider)?.displayName || 'Select Service'}
+                                </span>
+                            </div>
+                        </div>
+                        <ChevronDown size={18} className="text-slate-400"/>
+                    </button>
+                </div>
+
+                {educationProvider === "jamb" && (
+                    <div className="animate-in fade-in slide-in-from-top-2">
+                        <label className="text-[10px] font-black text-slate-400 uppercase mb-2 flex justify-between">
+                          <span>Profile ID</span>
+                          <span className={accountNumber.length >= 10 ? "text-emerald-500" : "text-slate-400"}>{accountNumber.length}/10</span>
+                        </label>
+                        <input 
+                            type="tel" placeholder="Enter ID"
+                            maxLength={15}
+                            className={`w-full bg-slate-50 border p-5 rounded-2xl font-black text-xl text-slate-800 outline-none transition-all ${
+                              accountNumber.length > 0 && accountNumber.length < 10 ? "border-red-300 focus:border-red-500" : "border-slate-100 focus:border-emerald-500"
+                            }`}
+                            value={accountNumber}
+                            onChange={(e) => setAccountNumber(e.target.value.replace(/[^0-9]/g, ''))}
+                        />
+                        {isVerifying && <p className="text-[10px] text-blue-500 font-bold mt-2 animate-pulse flex items-center gap-1.5"><Loader2 size={12} className="animate-spin"/> Verifying...</p>}
+
+                        {(() => {
+                            const key = getCurrentProviderKey();
+                            const list = key ? beneficiaries[key] : [];
+                            if (!list || list.length === 0) return null;
+                            return (
+                                <div className="flex gap-2 overflow-x-auto no-scrollbar mt-3 animate-in fade-in items-center">
+                                    <span className="text-[9px] font-black uppercase text-slate-400 shrink-0">Recent:</span>
+                                    {list.map((ben: any, idx: number) => (
+                                        <button 
+                                            key={idx}
+                                            onClick={(e) => {
+                                                e.preventDefault();
+                                                setAccountNumber(ben.account);
+                                                if (ben.name) setCustomerName(ben.name);
+                                            }}
+                                            className={`shrink-0 text-[10px] font-black py-1.5 px-3 rounded-full flex items-center gap-1.5 transition-all border outline-none select-none bg-slate-100 text-slate-600 border-slate-200 hover:bg-emerald-50 hover:text-emerald-700 hover:border-emerald-200`}
+                                        >
+                                            <span>{ben.name ? ben.name.split(' ')[0] : ben.account}</span>
+                                        </button>
+                                    ))}
+                                </div>
+                            );
+                        })()}
+
+                        {customerName && (
+                            <div className="mt-2 bg-emerald-500/10 p-4 rounded-xl border border-emerald-500/20 flex items-center gap-3 animate-in fade-in">
+                                <CheckCircle2 size={18} className="text-emerald-600 shrink-0" />
+                                <div className="flex-1">
+                                    <span className="text-sm font-black text-emerald-800 line-clamp-1">{customerName}</span>
+                                    <p className="text-[10px] font-black text-emerald-600 uppercase mt-0.5">Verified</p>
+                                </div>
+                            </div>
+                        )}
+                    </div>
+                )}
+
+                <div className="bg-slate-50 border border-slate-200 rounded-2xl p-4 shadow-sm animate-in fade-in slide-in-from-top-4">
+                  <p className="text-[10px] font-black uppercase tracking-widest text-slate-400 mb-2">Select Plan</p>
+                  {selectedEducationPlan ? (
+                      <div className="relative animate-in zoom-in-95 duration-200 mt-2">
+                          <button onClick={() => { setSelectedEducationPlan(null); setNairaAmount(""); }} className="absolute -top-3 -right-3 bg-slate-200 text-slate-500 hover:text-slate-800 hover:bg-slate-300 rounded-full p-1 transition-all z-10 shadow-sm border border-white">
+                            <XCircle size={16}/>
+                          </button>
+                          <div className="p-4 rounded-2xl border-2 border-emerald-500 bg-emerald-50 shadow-sm text-left">
+                            <p className="font-black text-slate-900 text-sm pr-2">{selectedEducationPlan.name}</p>
+
+                            <div className="pt-2 border-t border-emerald-200/50 flex justify-between items-end">
+                                <div>
+                                   <p className="font-black text-emerald-600 text-xl">₦{parseFloat(selectedEducationPlan.variation_amount || "0").toLocaleString()}</p>
+                                   {currentFee > 0 && <p className="text-[9px] font-black text-orange-500">+₦{currentFee} FEE INCLUDED</p>}
+                                </div>
+                                <p className="text-[10px] text-slate-500 font-bold">{cryptoToCharge} {selectedToken.symbol}</p>
+                            </div>
+                          </div>
+                      </div>
+                  ) : (
+                      <div className="grid grid-cols-1 gap-2 max-h-[30vh] overflow-y-auto pr-1">
+                        {educationVariations.length === 0 ? (
+                          <p className="text-center text-xs font-bold text-slate-400 py-4"><Loader2 className="animate-spin inline-block mr-2" size={14}/> Loading...</p>
+                        ) : (
+                          educationVariations.map((plan: any) => (
+                            <button 
+                              key={plan.variation_code} 
+                              onClick={() => { setSelectedEducationPlan(plan); setNairaAmount(plan.variation_amount ? plan.variation_amount.toString() : "0"); }} 
+                              className="p-3 rounded-xl border border-slate-200 bg-white hover:border-emerald-300 transition-all text-left flex justify-between items-center group"
+                            >
+                              <div className="mr-2">
+                                <p className="font-black text-slate-800 text-xs line-clamp-2">{plan.name}</p>
+                                <p className="text-[9px] text-slate-400 font-bold mt-1">{(parseFloat(plan.variation_amount || "0") / exchangeRate).toFixed(4)} {selectedToken.symbol}</p>
+                              </div>
+                              <p className="font-black text-emerald-600 text-sm group-hover:scale-110 transition-transform shrink-0">₦{parseFloat(plan.variation_amount || "0").toLocaleString()}</p>
+                            </button>
+                          ))
+                        )}
+                      </div>
+                  )}
+                </div>
+
+                <div className="animate-in fade-in">
+                    <label className="text-[10px] font-black text-slate-400 uppercase mb-2 flex justify-between">
+                      <span>SMS Phone</span>
+                      <span className={customerPhone.length >= 10 ? "text-emerald-500" : "text-slate-400"}>{customerPhone.length}/11</span>
+                    </label>
+                    <input 
+                        type="tel" placeholder="08000000000"
+                        maxLength={11}
+                        className={`w-full bg-slate-50 border p-5 rounded-2xl font-black text-xl text-slate-800 outline-none transition-all ${
+                          customerPhone.length > 0 && customerPhone.length < 10 ? "border-red-300 focus:border-red-500" : "border-slate-100 focus:border-emerald-500"
+                        }`}
+                        value={customerPhone}
+                        onChange={(e) => setCustomerPhone(e.target.value.replace(/[^0-9]/g, ''))}
+                    />
+                </div>
+
+                <div className="animate-in fade-in mt-3">
+                     <input 
+                        type="email" placeholder="Email Address (Optional for Receipt)"
+                        className="w-full bg-slate-50 border border-slate-100 p-5 rounded-2xl font-bold text-slate-700 outline-none focus:border-emerald-500 transition-colors"
+                        value={customerEmail}
+                        onChange={(e) => setCustomerEmail(e.target.value)}
+                    />
+                </div>
+
+                {status && (
+                    <div className={`p-5 rounded-2xl border flex items-center gap-4 animate-in fade-in shadow-sm ${status.includes('Success') || status.includes('Secured') || status.includes('Initiating') ? 'bg-emerald-50 border-emerald-100 text-emerald-800' : 'bg-blue-50 border-blue-100 text-blue-800'}`}>
+                        {status.includes('Success') ? <CheckCircle2 size={24}/> : <Loader2 size={24} className="animate-spin"/>}
+                        <p className="text-sm font-black tracking-tight">{status}</p>
+                    </div>
+                )}
+
+                <button 
+                    onClick={() => setIsConfirmModalOpen(true)}
+                    disabled={!isFormValid || isProcessing || isCurrentServiceDisabled}
+                    className={`w-full text-white font-black py-6 rounded-3xl flex items-center justify-center gap-3.5 transition-all active:scale-95 shadow-xl text-lg tracking-tight ${isCurrentServiceDisabled ? 'bg-slate-300 opacity-50 cursor-not-allowed text-slate-500 shadow-none' : 'bg-slate-900 hover:bg-black disabled:opacity-30 shadow-slate-900/20'}`}
+                >
+                    {isProcessing ? <Loader2 size={24} className="animate-spin text-emerald-400"/> : <ShieldCheck size={24} className={isCurrentServiceDisabled ? 'text-slate-400' : 'text-emerald-400'} />}
+                    {isCurrentServiceDisabled ? 'TEMPORARILY OFFLINE' : isProcessing ? 'PROCESSING...' : `PAY ${cryptoToCharge} ${selectedToken.symbol}`}
+                </button>
+            </div>
+          </div>
+        )}
 
         {/* ======================================= */}
         {/* HISTORY BLOCK */}
