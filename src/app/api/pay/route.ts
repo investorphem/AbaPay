@@ -57,13 +57,18 @@ function getStrictRequestId() {
 export async function POST(req: Request) {
   try {
     const body = await req.json();
+    
+    // ⚡ Removed isForeign from destructuring, we will calculate it dynamically
     const { 
       serviceID, serviceCategory, network, billersCode, amount, 
       token: tokenSymbol, txHash, variation_code, phone, 
       nairaAmount, wallet_address, subscription_type = 'change',
-      isForeign, operator_id, country_code, product_type_id, email,
+      operator_id, country_code, product_type_id, email,
       meter_account_type
     } = body;
+
+    // ⚡ DYNAMICALLY CHECK IF INTERNATIONAL
+    const isForeign = serviceID === 'foreign-airtime';
 
     const appMode = process.env.NEXT_PUBLIC_APP_MODE || "sandbox";
     const baseUrl = appMode === "live" ? "https://vtpass.com/api" : "https://sandbox.vtpass.com/api";
@@ -294,11 +299,10 @@ export async function POST(req: Request) {
           sendTelegramAlert(`✅ *SALE SUCCESSFUL*\n🛒 *Product:* ${network} ${serviceCategory}\n💰 *Naira:* ₦${vendAmount}\n🪙 *Asset:* ${amount} ${tokenSymbol || 'USD₮'}\n👤 *User:* ${billersCode || phone}\n⛽ *Fee:* ₦${serviceFee}\n🧾 *Ref:* ${alertTokenRef}`)
         );
 
-        // ⚡ ONLY SEND SMS FOR TOKENS/PINS TO SAVE COST ⚡
         if (serviceCategory === 'ELECTRICITY' || serviceCategory === 'EDUCATION') {
           const typeLabel = serviceCategory === 'ELECTRICITY' ? 'Token' : 'PIN';
           const networkDisplay = network || serviceCategory; 
-          
+
           notifications.push(
             sendAbaPaySms(phone || billersCode, `AbaPay: Your ${networkDisplay} ${typeLabel} is ${alertTokenRef}. Amount: N${vendAmount}. Thank you.`)
           );
@@ -363,7 +367,6 @@ export async function POST(req: Request) {
           data: { vendedToken: "Processing...", vendAmount, requestId: payData.requestId }
         });
       } else {
-        // ⚡ TRACK INNER STATUS FAILURES (e.g., 'failed', 'reversed')
         await supabase.from('transactions').update({ 
             status: 'FAILED_VENDING',
             error_code: payData.code,
@@ -375,7 +378,6 @@ export async function POST(req: Request) {
       }
 
     } else {
-      // ⚡ TRACK ANY OTHER OUTER CODE FAILURES
       const friendlyMessage = error_messages[payData.code as string] || "Service is temporarily undergoing maintenance. Please try again later.";
       const rawTechnicalError = payData.response_description || payData.content?.errors || "Unknown VTpass Rejection";
 
