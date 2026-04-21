@@ -502,12 +502,25 @@ export default function Home() {
       saveBeneficiary(accountNumber, customerName);
       handleResetService(SERVICES[0]);
 
-      if (result.success) {
-        setStatus("Success! Token/Ref Dispatched."); newTx.status = "SUCCESS"; 
-        if (result.earnedPoints) window.dispatchEvent(new CustomEvent('abapoints-awarded', { detail: result.earnedPoints }));
-        showToast("Transaction Successful", "Processed successfully.", "success");
+            if (result.success) {
+        if (result.message && result.message.toLowerCase().includes("processing")) {
+           setStatus("Transaction Processing...");
+           newTx.status = "PENDING";
+           showToast("Transaction Pending", result.message, "success");
+        } else {
+           setStatus("Success! Token/Ref Dispatched."); 
+           newTx.status = "SUCCESS"; 
+
+           if (result.earnedPoints && result.earnedPoints > 0) {
+               window.dispatchEvent(new CustomEvent('abapoints-awarded', { detail: result.earnedPoints }));
+               showToast("Transaction Successful", `Payment confirmed! You earned +${result.earnedPoints.toFixed(2).replace(/\.00$/, '')} AbaPoints ✨`, "success");
+           } else {
+               showToast("Transaction Successful", "Your transaction has been successfully processed.", "success");
+           }
+        }
         newTx.purchased_code = result.purchased_code; newTx.units = result.units; newTx.request_id = result.data?.requestId;
       } else {
+
         setStatus(`Error: ${result.message || 'Transaction Failed'}`); newTx.status = "FAILED_VENDING";
       }
 
@@ -725,19 +738,28 @@ export default function Home() {
     }
   }, [accountNumber, activeService.id, activeTab, internetProvider, isInternational]);
 
+    // ... your last useEffect is right here ...
   useEffect(() => {
     if (activeTab === "bank") { if (accountNumber.length === 10 && selectedBank) verifyMerchant(); else { setCustomerName(null); setMeterAddress(null); setDynamicElecMin(1000); setMeterAccountType(null); } } 
-    else if (activeTab === "education" && educationProvider === "jamb") {
-       if (accountNumber.length >= 10 && selectedEducationPlan) verifyMerchant(); else { setCustomerName(null); setMeterAddress(null); setDynamicElecMin(1000); setMeterAccountType(null); }
-    }
-    else if (activeTab === "pay" && !isInternational) {
-       if (activeService.id === "ELECTRICITY" && accountNumber.length >= 10) verifyMerchant();
-       else if (activeService.id === "CABLE" && cableProvider !== "showmax" && accountNumber.length >= 10) verifyMerchant();
-       else if (activeService.id === "INTERNET" && internetProvider === "smile-direct" && accountNumber.includes('@') && accountNumber.includes('.')) { const timeoutId = setTimeout(() => verifyMerchant(), 1000); return () => clearTimeout(timeoutId); } 
-       else { setCustomerName(null); setMeterAddress(null); setDynamicElecMin(1000); setMeterAccountType(null); }
-    }
+    // ...
   }, [accountNumber, elecProvider, cableProvider, activeService.id, meterType, selectedBank, internetProvider, activeTab, educationProvider, selectedEducationPlan, isInternational]);
 
+  // ⚡ PASTE IT RIGHT HERE ⚡
+  const getCurrentModalValue = () => {
+    if (modalType === 'country') return activeCountry.code;
+    if (modalType === 'bank') return selectedBank?.variation_code;
+    if (modalType === 'token') return selectedToken.symbol;
+    if (modalType === 'provider') {
+      if (activeTab === 'education') return educationProvider;
+      if (activeService.id === 'ELECTRICITY') return elecProvider;
+      if (activeService.id === 'INTERNET') return internetProvider;
+      if (activeService.id === 'CABLE') return cableProvider;
+    }
+    if (modalType === 'standard') return telecomProvider;
+    return null;
+  };
+
+  // The UI starts right below it!
   return (
     <main className="min-h-screen bg-slate-50 text-slate-900 font-sans p-4 flex flex-col items-center pb-20 relative">
       <style>{`@keyframes logoScale { 0%, 100% { transform: scale(1); opacity: 0.9; } 50% { transform: scale(1.1); opacity: 1; } } .animate-logo-scale { animation: logoScale 1.5s ease-in-out infinite; } .no-scrollbar::-webkit-scrollbar { display: none; } .no-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }`}</style>
@@ -1490,6 +1512,24 @@ export default function Home() {
                             type="tel" placeholder="08000000000"
                             maxLength={11}
                             className="w-full bg-slate-50 border border-slate-100 p-5 rounded-2xl font-bold text-slate-700 outline-none focus:border-emerald-500 transition-colors"
+                            value={customerPhone}
+                            onChange={(e) => setCustomerPhone(e.target.value.replace(/[^0-9]/g, ''))}
+                        />
+                    </div>
+                )}
+                {/* ⚡ RESTORED ELECTRICITY SMS FIELD ⚡ */}
+                {(!isInternational && (activeService.id === "ELECTRICITY" || (activeService.id === "INTERNET" && internetProvider === 'smile-direct'))) && (
+                    <div className="animate-in fade-in mt-3">
+                        <label className="text-[10px] font-black text-slate-400 uppercase mb-2 flex justify-between">
+                          <span>SMS Phone (For Token/Receipt)</span>
+                          <span className={customerPhone.length === 11 ? "text-emerald-500" : "text-slate-400"}>{customerPhone.length}/11</span>
+                        </label>
+                        <input 
+                            type="tel" placeholder="08000000000"
+                            maxLength={11}
+                            className={`w-full bg-slate-50 border p-5 rounded-2xl font-black text-xl text-slate-800 outline-none transition-all ${
+                              customerPhone.length > 0 && customerPhone.length < 11 ? "border-red-300 focus:border-red-500" : "border-slate-100 focus:border-emerald-500"
+                            }`}
                             value={customerPhone}
                             onChange={(e) => setCustomerPhone(e.target.value.replace(/[^0-9]/g, ''))}
                         />
