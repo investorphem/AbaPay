@@ -15,17 +15,18 @@ import { ELECTRICITY_DISCOS } from "./discos";
 import { ReceiptModal, SelectionModal } from "@/components/Modals";
 import { TermsModal, PrivacyModal } from "@/components/Modals";
 import PointsBadge from "@/components/PointsBadge"; 
+import DataVariationsUI from "@/components/DataVariationsUI"; // ⚡ IMPORTED NEW UI ⚡
 import { 
   ABAPAY_ABI, ERC20_ABI, SERVICES, CABLE_PROVIDERS_LIST, TELECOM_PROVIDERS, 
   INTERNET_PROVIDERS, SUPPORTED_TOKENS, SUPPORTED_COUNTRIES, PRE_SELECT_AMOUNTS, 
-  ELEC_PRE_SELECT_AMOUNTS, DATA_CATEGORIES, ITEMS_PER_PAGE, extractVtpassArray,
+  ELEC_PRE_SELECT_AMOUNTS, ITEMS_PER_PAGE, extractVtpassArray,
   ELECTRICITY_PROVIDER_IDS, EDUCATION_PROVIDERS
 } from "@/constants";
 import { HistoryTab } from "@/components/HistoryTab";
 
 export default function Home() {
   const [killSwitches, setKillSwitches] = useState<Record<string, boolean>>({});
-  
+
   const [isInitiallyLoading, setIsInitiallyLoading] = useState(true);
 
   const [address, setAddress] = useState<string | null>(null);
@@ -77,7 +78,6 @@ export default function Home() {
   const [telecomProvider, setTelecomProvider] = useState(TELECOM_PROVIDERS[0]);
   const [internetProvider, setInternetProvider] = useState(INTERNET_PROVIDERS[0].serviceID);
   const [meterType, setMeterType] = useState<"prepaid" | "postpaid">("prepaid");
-  const [activeDataCategory, setActiveDataCategory] = useState(DATA_CATEGORIES[0]);
 
   const [selectedReceipt, setSelectedReceipt] = useState<any>(null); 
   const [isTermsOpen, setIsTermsOpen] = useState(false); 
@@ -120,7 +120,6 @@ export default function Home() {
   const currentCable = useMemo(() => CABLE_PROVIDERS_LIST.find(c => c.serviceID === cableProvider), [cableProvider]);
   const currentInternet = useMemo(() => INTERNET_PROVIDERS.find(c => c.serviceID === internetProvider), [internetProvider]);
 
-  // ⚡ 1. ACTIVELY CHECKS IF THE PRE-SELECTED SERVICE IS KILLED
   const isCurrentServiceDisabled = useMemo(() => {
       if (!killSwitches) return false;
       if (activeTab === 'education') {
@@ -200,36 +199,7 @@ export default function Home() {
     return { title, recipient, recipientLabel };
   }, [activeTab, activeService, selectedBank, educationProvider, telecomProvider, currentInternet, internetProvider, currentDisco, meterType, currentCable, accountNumber, customerName, customerPhone]);
 
-  const filteredInternetDataPlans = useMemo(() => {
-    if (!internetVariations || !Array.isArray(internetVariations) || internetVariations.length === 0) return [];
-
-    let strictVariations = internetVariations;
-    if (internetProvider.includes('mtn')) strictVariations = internetVariations.filter(p => p.variation_code.toLowerCase().includes('mtn'));
-    else if (internetProvider.includes('airtel')) strictVariations = internetVariations.filter(p => p.variation_code.toLowerCase().includes('airtel'));
-    else if (internetProvider.includes('glo')) strictVariations = internetVariations.filter(p => p.variation_code.toLowerCase().includes('glo'));
-    else if (internetProvider.includes('9mobile')) strictVariations = internetVariations.filter(p => p.variation_code.toLowerCase().includes('9mobile'));
-    else if (internetProvider === 'spectranet') strictVariations = internetVariations.filter(p => p.variation_code.toLowerCase().includes('spectranet'));
-    else if (internetProvider === 'smile-direct') strictVariations = internetVariations.filter(p => p.variation_code.toLowerCase().includes('smile'));
-
-    if (internetProvider === 'spectranet' || internetProvider === 'smile-direct') return strictVariations;
-
-    return strictVariations.filter(plan => {
-      const name = (plan.name || "").toLowerCase();
-      let category = "Monthly"; 
-
-      if (name.includes('broadband') || name.includes('router') || name.includes('5g') || name.includes('hynet') || name.includes('unlimited')) category = "Broadband";
-      else if (name.includes('social') || name.includes('whatsapp') || name.includes('ig') || name.includes('instagram') || name.includes('tiktok') || name.includes('youtube') || name.includes('facebook') || name.includes('opera') || name.includes('xot')) category = "Social";
-      else if (name.includes('60 day') || name.includes('90 day') || name.includes('120 day') || name.includes('year') || name.includes('365') || name.includes('mega') || name.includes('3 month') || name.includes('2 month') || name.includes('quarterly') || name.includes('annual')) category = "Monthly";
-      else if (name.includes('month') || name.includes('30 day')) category = "Monthly";
-      else if (name.includes('week') || name.includes('7 day') || name.includes('14 day') || name.includes('weekend')) category = "Weekly";
-      else if (name.includes('1 day') || name.includes('2 day') || name.includes('3 day') || name.includes('daily') || name.includes('24 hrs') || name.includes('24hrs') || name.includes('night') || name.includes('hourly')) category = "Daily";
-
-      return category === activeDataCategory;
-    }).sort((a, b) => parseFloat(a.variation_amount || "0") - parseFloat(b.variation_amount || "0"));
-  }, [internetVariations, activeDataCategory, internetProvider]);
-
   const isFormValid = useMemo(() => {
-    // ⚡ 2. INSTANTLY INVALIDATE THE FORM IF THE PRE-SELECTED PROVIDER IS OFFLINE
     if (isCurrentServiceDisabled) return false;
 
     const amount = parseFloat(nairaAmount);
@@ -632,7 +602,7 @@ export default function Home() {
       setAccountNumber(""); setNairaAmount(""); setCustomerPhone(""); setCustomerEmail(""); setCustomerName(null); setSelectedCablePlan(null); setCableCurrentBouquet(null); setSelectedBank(null); setSelectedInternetPlan(null); setInternetAccountId(null); setSelectedEducationPlan(null);
       setMeterAddress(null); setDynamicElecMin(1000); setMeterAccountType(null);
 
-            if (result.success) {
+      if (result.success) {
         if (result.message && result.message.toLowerCase().includes("processing")) {
            setStatus("Transaction Processing...");
            newTx.status = "PENDING";
@@ -653,7 +623,6 @@ export default function Home() {
         setStatus(`Error: ${result.message || 'Transaction Failed'}`); newTx.status = "FAILED_VENDING";
         if (activeCooldownKey) localStorage.removeItem(activeCooldownKey);
       }
-
 
       const updatedHistory = [newTx, ...transactions];
       setTransactions(updatedHistory); 
@@ -685,7 +654,6 @@ export default function Home() {
     if (status && !isProcessing) { const timer = setTimeout(() => setStatus(""), 5000); return () => clearTimeout(timer); }
   }, [status, isProcessing]);
 
-  // ⚡ 3. ADDED SILENT POLLING EVERY 15 SECONDS SO IT NEVER REQUIRES A RELOAD
   useEffect(() => {
     let intervalId: NodeJS.Timeout;
 
@@ -701,7 +669,6 @@ export default function Home() {
       };
 
       await fetchSettings();
-      // Silently poll the database every 15 seconds!
       intervalId = setInterval(fetchSettings, 15000); 
 
       try {
@@ -712,7 +679,7 @@ export default function Home() {
         }
       } catch (e) {}
     }
-    
+
     initSystem();
 
     return () => {
@@ -1296,7 +1263,6 @@ export default function Home() {
                     </div>
                 )}
 
-                {/* ⚡ 4. UPDATED BUTTON UI FOR EDUCATION TAB */}
                 <button 
                     onClick={() => setIsConfirmModalOpen(true)}
                     disabled={!isFormValid || isProcessing || isCurrentServiceDisabled}
@@ -1558,7 +1524,6 @@ export default function Home() {
 
                 <div className="animate-in slide-in-from-left-2 mb-2">
                     <label className="text-[10px] font-black text-slate-400 uppercase mb-3 block">Provider</label>
-                    {/* ⚡ APPLIED KILL SWITCH MAPPINGS BELOW ⚡ */}
                     {activeService.id === "INTERNET" ? (
                         <button 
                             onClick={() => {
@@ -1761,16 +1726,9 @@ export default function Home() {
                     )}
                 </div>
 
+                {/* ⚡ THIS IS THE NEW INTERNET/DATA UI ⚡ */}
                 {activeService.id === "INTERNET" && (
                   <div className="bg-slate-50 border border-slate-200 rounded-2xl p-4 shadow-sm animate-in fade-in slide-in-from-top-4">
-                     {internetProvider !== 'spectranet' && internetProvider !== 'smile-direct' && (
-                       <div className="flex gap-2 mb-4 overflow-x-auto no-scrollbar shadow-inner bg-slate-100 p-1.5 rounded-2xl">
-                          {DATA_CATEGORIES.map(cat => (
-                            <button key={cat} onClick={() => { setActiveDataCategory(cat); setSelectedInternetPlan(null); setNairaAmount(""); }} className={`px-4 py-2.5 rounded-xl text-[11px] font-black uppercase transition-all whitespace-nowrap ${activeDataCategory === cat ? 'bg-white shadow-lg text-purple-600' : 'text-slate-500'}`}>{cat}</button>
-                          ))}
-                        </div>
-                     )}
-
                      {selectedInternetPlan ? (
                         <div className="relative animate-in zoom-in-95 duration-200 mt-2">
                            <button onClick={() => { setSelectedInternetPlan(null); setNairaAmount(""); }} className="absolute -top-3 -right-3 bg-slate-200 text-slate-500 hover:text-slate-800 hover:bg-slate-300 rounded-full p-1 transition-all z-10 shadow-sm border border-white">
@@ -1785,18 +1743,18 @@ export default function Home() {
                            </div>
                         </div>
                      ) : (
-                        <div className="grid grid-cols-1 gap-2 max-h-[30vh] overflow-y-auto pr-1">
+                        <div className="mt-2">
                           {internetVariations.length === 0 ? (
-                            <p className="text-center text-xs font-bold text-slate-400 py-4">No packages available or Service offline.</p>
-                          ) : filteredInternetDataPlans.map((plan) => (
-                                <button key={plan.variation_code} onClick={() => { setSelectedInternetPlan(plan); setNairaAmount(plan.variation_amount ? plan.variation_amount.toString() : "0"); }} className="p-3 rounded-xl border border-slate-200 bg-white hover:border-sky-300 transition-all text-left flex justify-between items-center group">
-                                  <div>
-                                    <p className="font-black text-slate-800 text-xs">{plan.name}</p>
-                                    <p className="text-[9px] text-slate-400 font-bold mt-0.5">{(parseFloat(plan.variation_amount || "0") / exchangeRate).toFixed(4)} {selectedToken.symbol}</p>
-                                  </div>
-                                  <p className="font-black text-sky-600 text-sm group-hover:scale-110 transition-transform">₦{parseFloat(plan.variation_amount || "0").toLocaleString()}</p>
-                                </button>
-                          ))}
+                            <p className="text-center text-xs font-bold text-slate-400 py-4"><Loader2 className="animate-spin inline-block mr-2" size={14}/> Fetching Live Packages...</p>
+                          ) : (
+                             <DataVariationsUI 
+                               variations={internetVariations} 
+                               onSelectPlan={(plan) => {
+                                 setSelectedInternetPlan(plan);
+                                 setNairaAmount(plan.variation_amount ? plan.variation_amount.toString() : "0");
+                               }} 
+                             />
+                          )}
                         </div>
                      )}
                   </div>
@@ -2009,7 +1967,6 @@ export default function Home() {
                     </div>
                 )}
 
-                {/* ⚡ 5. UPDATED BUTTON UI FOR PAY TAB */}
                 <button 
                     onClick={() => setIsConfirmModalOpen(true)}
                     disabled={isVerifying || !isFormValid || isProcessing || isCurrentServiceDisabled}
