@@ -1122,15 +1122,18 @@ export default function Home() {
                     )}
                 </div>
 
-                <div>
+                                <div>
                     <label className="text-[10px] font-black text-slate-400 uppercase mb-2 flex justify-between">
-                      <span>{isInternational ? "Phone No" : activeService.id === "AIRTIME" ? "Phone No" : "Account Number"}</span>
+                      {/* ⚡ DYNAMIC LABEL FIX ⚡ */}
+                      <span>{checkoutDetails.recipientLabel}</span>
+                      
                       {(activeService.id === "AIRTIME" || (activeService.id === "INTERNET" && internetProvider.includes('-data')) || isInternational) && (
                         <span className={accountNumber.length >= (isInternational ? 6 : 11) ? "text-emerald-500" : "text-slate-400"}>
                             {isInternational ? `${accountNumber.length} digits` : `${accountNumber.length}/11`}
                         </span>
                       )}
                     </label>
+
                     <input 
                         type={activeService.id === "INTERNET" && internetProvider === 'smile-direct' ? "email" : "tel"} 
                         placeholder={
