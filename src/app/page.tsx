@@ -520,7 +520,6 @@ export default function Home() {
         }
         newTx.purchased_code = result.purchased_code; newTx.units = result.units; newTx.request_id = result.data?.requestId;
       } else {
-
         setStatus(`Error: ${result.message || 'Transaction Failed'}`); newTx.status = "FAILED_VENDING";
       }
 
@@ -1512,24 +1511,6 @@ export default function Home() {
                             type="tel" placeholder="08000000000"
                             maxLength={11}
                             className="w-full bg-slate-50 border border-slate-100 p-5 rounded-2xl font-bold text-slate-700 outline-none focus:border-emerald-500 transition-colors"
-                            value={customerPhone}
-                            onChange={(e) => setCustomerPhone(e.target.value.replace(/[^0-9]/g, ''))}
-                        />
-                    </div>
-                )}
-                {/* ⚡ RESTORED ELECTRICITY SMS FIELD ⚡ */}
-                {(!isInternational && (activeService.id === "ELECTRICITY" || (activeService.id === "INTERNET" && internetProvider === 'smile-direct'))) && (
-                    <div className="animate-in fade-in mt-3">
-                        <label className="text-[10px] font-black text-slate-400 uppercase mb-2 flex justify-between">
-                          <span>SMS Phone (For Token/Receipt)</span>
-                          <span className={customerPhone.length === 11 ? "text-emerald-500" : "text-slate-400"}>{customerPhone.length}/11</span>
-                        </label>
-                        <input 
-                            type="tel" placeholder="08000000000"
-                            maxLength={11}
-                            className={`w-full bg-slate-50 border p-5 rounded-2xl font-black text-xl text-slate-800 outline-none transition-all ${
-                              customerPhone.length > 0 && customerPhone.length < 11 ? "border-red-300 focus:border-red-500" : "border-slate-100 focus:border-emerald-500"
-                            }`}
                             value={customerPhone}
                             onChange={(e) => setCustomerPhone(e.target.value.replace(/[^0-9]/g, ''))}
                         />
