@@ -26,13 +26,15 @@ export const CABLE_PROVIDERS_LIST = [
   { serviceID: "showmax", displayName: "Showmax", logo: "/showmax.png" },
 ];
 
-export const TELECOM_PROVIDERS = ["mtn", "glo", "9mobile", "airtel"]; 
+// ⚡ CHANGED "9mobile" to "etisalat" to match VTpass legacy database
+export const TELECOM_PROVIDERS = ["mtn", "glo", "etisalat", "airtel"]; 
 
 export const INTERNET_PROVIDERS = [
   { serviceID: "mtn-data", displayName: "MTN Data", logo: "/mtn.png" },
   { serviceID: "glo-data", displayName: "Glo Data", logo: "/glo.png" },
   { serviceID: "airtel-data", displayName: "Airtel Data", logo: "/airtel.png" },
-  { serviceID: "9mobile-data", displayName: "9Mobile Data", logo: "/9mobile.png" },
+  // ⚡ CHANGED "9mobile-data" to "etisalat-data"
+  { serviceID: "etisalat-data", displayName: "9Mobile Data", logo: "/9mobile.png" },
   { serviceID: "smile-direct", displayName: "Smile Network", logo: "/smile.png" },
   { serviceID: "spectranet", displayName: "Spectranet", logo: "/spectranet.png" }
 ];
