@@ -155,13 +155,23 @@ export default function Home() {
   
   const currentMinDisplay = (activeTab === "pay" && activeService.id === "ELECTRICITY") ? dynamicElecMin : dynamicMinAmount;
 
-  // ⚡ INTERNATIONAL NAIRA CALCULATION ⚡
+  // ⚡ FIXED: TRUE NAIRA CONVERSION MATH FOR FOREIGN PRODUCTS ⚡
   const calculatedNairaAmount = useMemo(() => {
     if (!isInternational) return nairaAmount;
     if (!selectedIntlVariation) return "0";
-    if (selectedIntlVariation.fixedPrice === "Yes") return selectedIntlVariation.variation_amount;
     
     const rate = parseFloat(selectedIntlVariation.variation_rate || "1");
+    
+    if (selectedIntlVariation.fixedPrice === "Yes") {
+        // VTpass usually returns 'charged_amount' for the Naira cost. If not, fallback to Variation * Rate.
+        const charged = parseFloat(selectedIntlVariation.charged_amount || "0");
+        if (charged > 0) return charged.toString();
+
+        const varAmt = parseFloat(selectedIntlVariation.variation_amount || "0");
+        return (varAmt * rate).toString();
+    }
+    
+    // Flexible pricing
     const input = parseFloat(intlFlexibleAmount || "0");
     return (input * rate).toString();
   }, [isInternational, selectedIntlVariation, intlFlexibleAmount, nairaAmount]);
@@ -262,12 +272,11 @@ export default function Home() {
     setCableSubscriptionType("renew"); setSelectedBank(null); setSelectedInternetPlan(null); setInternetAccountId(null);
     setSelectedEducationPlan(null); setInternetVariations([]); setMeterAddress(null); setDynamicElecMin(1000); setMeterAccountType(null);
     
-    // Reset Intl
     setSelectedIntlProduct(null); setSelectedIntlOperator(null); setSelectedIntlVariation(null); setIntlFlexibleAmount(""); setIntlOperators([]); setIntlVariations([]);
   };
 
   const handleTabSwitch = (tab: "pay" | "bank" | "education" | "history") => {
-    if (isInternational && tab !== "pay" && tab !== "history") return; // Lockout for Intl
+    if (isInternational && tab !== "pay" && tab !== "history") return; 
     setActiveTab(tab); setCustomerPhone(""); setCustomerEmail(""); handleResetService(SERVICES[0]);
   };
 
@@ -893,7 +902,6 @@ export default function Home() {
               onClick={() => openSelectionModal('country', "Select Region", intlCountries.length ? intlCountries : SUPPORTED_COUNTRIES, handleCountryChange)}
               className="bg-slate-50 border border-slate-100 hover:border-emerald-200 px-3 py-1.5 rounded-xl flex items-center gap-2 transition-all shadow-sm active:scale-95"
             >
-              {/* ⚡ UNLOCKED FLAG FOR ALL COUNTRIES ⚡ */}
               <img 
                 src={`https://flagcdn.com/w40/${activeCountry.code.toLowerCase()}.png`} 
                 alt={activeCountry.code} 
@@ -906,7 +914,7 @@ export default function Home() {
           </div>
         </div>
 
-        {/* THE TABS (Grey out foreign) */}
+        {/* THE TABS */}
         <div className="flex gap-2 bg-slate-200/50 p-1.5 rounded-2xl mb-6 shadow-inner overflow-x-auto no-scrollbar">
             <button onClick={() => handleTabSwitch("pay")} className={`flex-1 min-w-[75px] py-3 rounded-xl text-[10px] sm:text-xs font-black transition-all ${activeTab === 'pay' ? 'bg-white text-emerald-600 shadow-xl' : 'text-slate-500 hover:text-slate-700'}`}>BILLS</button>
             <button onClick={() => handleTabSwitch("bank")} disabled={isInternational} className={`flex-1 min-w-[75px] py-3 rounded-xl text-[10px] sm:text-xs font-black transition-all ${isInternational ? 'opacity-30 cursor-not-allowed' : activeTab === 'bank' ? 'bg-white text-emerald-600 shadow-xl' : 'text-slate-500 hover:text-slate-700'}`}>TRANSFER</button>
@@ -969,19 +977,27 @@ export default function Home() {
 
                     {isInternational ? (
                         <>
-                            {/* ⚡ SAFEGUARDED IDS ⚡ */}
                             <button 
                                 onClick={() => {
                                     if (intlProductTypes.length === 0) return;
-                                    openSelectionModal('standard', "Select Type", intlProductTypes.map(p => ({serviceID: p.product_type_id || p.id || p.name, displayName: p.name})), (val) => {
+                                    openSelectionModal('standard', "Select Type", intlProductTypes.map(p => ({
+                                        serviceID: p.product_type_id || p.id || p.name, 
+                                        displayName: p.name,
+                                        logo: p.name.toLowerCase().includes('data') ? '/wifi.png' : '/airtime.png'
+                                    })), (val) => {
                                         setSelectedIntlProduct(intlProductTypes.find(p => (p.product_type_id || p.id || p.name) == val));
                                     });
                                 }}
                                 className="w-full bg-white border border-slate-200 p-4 rounded-2xl flex justify-between items-center hover:border-emerald-400 transition-colors shadow-sm mb-3"
                             >
-                                <span className="text-sm font-black text-slate-900 tracking-tight uppercase">
-                                    {selectedIntlProduct ? selectedIntlProduct.name : (isIntlLoading ? "Loading..." : "Select Product Type")}
-                                </span>
+                                <div className="flex items-center gap-3">
+                                    <div className="w-10 h-10 shrink-0 rounded-full border border-slate-100 bg-white flex items-center justify-center shadow-sm overflow-hidden">
+                                        <img src={selectedIntlProduct?.name.toLowerCase().includes('data') ? '/wifi.png' : '/airtime.png'} className="w-6 h-6 object-contain" alt="type" />
+                                    </div>
+                                    <span className="text-sm font-black text-slate-900 tracking-tight uppercase">
+                                        {selectedIntlProduct ? selectedIntlProduct.name : (isIntlLoading ? "Loading..." : "Select Product Type")}
+                                    </span>
+                                </div>
                                 {isIntlLoading ? <Loader2 size={16} className="animate-spin"/> : <ChevronDown size={18} className="text-slate-400"/>}
                             </button>
 
@@ -991,16 +1007,20 @@ export default function Home() {
                                     <button 
                                         onClick={() => {
                                             if (intlOperators.length === 0) return;
-                                            openSelectionModal('standard', "Select Network", intlOperators.map(p => ({serviceID: p.operator_id || p.id || p.name, displayName: p.name})), (val) => {
+                                            openSelectionModal('standard', "Select Network", intlOperators.map(p => ({
+                                                serviceID: p.operator_id || p.id || p.name, 
+                                                displayName: p.name,
+                                                logo: p.operator_image || '/logo.png'
+                                            })), (val) => {
                                                 setSelectedIntlOperator(intlOperators.find(p => (p.operator_id || p.id || p.name) == val));
                                             });
                                         }}
                                         className="w-full bg-white border border-slate-200 p-4 rounded-2xl flex justify-between items-center hover:border-emerald-400 transition-colors shadow-sm"
                                     >
                                         <div className="flex items-center gap-3">
-                                            {selectedIntlOperator?.operator_image && (
-                                                <img src={selectedIntlOperator.operator_image} alt="operator" className="w-8 h-8 rounded-full border" />
-                                            )}
+                                            <div className="w-10 h-10 shrink-0 rounded-full border border-slate-100 bg-white flex items-center justify-center shadow-sm overflow-hidden">
+                                                <img src={selectedIntlOperator?.operator_image || '/logo.png'} alt="operator" className="w-8 h-8 object-contain" />
+                                            </div>
                                             <span className="text-sm font-black text-slate-900 tracking-tight uppercase">
                                                 {selectedIntlOperator ? selectedIntlOperator.name : (isIntlLoading ? "Loading..." : "Select Operator")}
                                             </span>
@@ -1074,8 +1094,10 @@ export default function Home() {
                 <div>
                     <label className="text-[10px] font-black text-slate-400 uppercase mb-2 flex justify-between">
                       <span>{isInternational ? "Phone No" : activeService.id === "AIRTIME" ? "Phone No" : "Account Number"}</span>
-                      {(activeService.id === "AIRTIME" || (activeService.id === "INTERNET" && internetProvider.includes('-data'))) && (
-                        <span className={accountNumber.length === 11 ? "text-emerald-500" : "text-slate-400"}>{accountNumber.length}/11</span>
+                      {(activeService.id === "AIRTIME" || (activeService.id === "INTERNET" && internetProvider.includes('-data')) || isInternational) && (
+                        <span className={accountNumber.length >= (isInternational ? 6 : 11) ? "text-emerald-500" : "text-slate-400"}>
+                            {isInternational ? accountNumber.length : `${accountNumber.length}/11`}
+                        </span>
                       )}
                     </label>
                     <input 
@@ -1086,8 +1108,9 @@ export default function Home() {
                             activeService.id === "INTERNET" && internetProvider === 'spectranet' ? "Enter Spectranet ID" : 
                             "Enter Number"
                         }
+                        maxLength={isInternational ? 15 : 11}
                         className={`w-full bg-slate-50 border p-5 rounded-2xl font-black text-xl text-slate-800 outline-none transition-all ${
-                          ((activeService.id === "AIRTIME" || (activeService.id === "INTERNET" && internetProvider.includes('-data'))) && accountNumber.length > 0 && accountNumber.length < 11) ? "border-red-300" : "border-slate-100 focus:border-emerald-500"
+                          ((activeService.id === "AIRTIME" || (activeService.id === "INTERNET" && internetProvider.includes('-data'))) && accountNumber.length > 0 && accountNumber.length < 11 && !isInternational) ? "border-red-300" : "border-slate-100 focus:border-emerald-500"
                         }`}
                         value={accountNumber}
                         onChange={(e) => {
@@ -1208,14 +1231,27 @@ export default function Home() {
                                </div>
                            ) : (
                                <div className="grid grid-cols-1 gap-2 max-h-[30vh] overflow-y-auto pr-1">
-                                  {intlVariations.map((plan) => (
-                                    <button key={plan.variation_code} onClick={() => setSelectedIntlVariation(plan)} className="p-3 rounded-xl border border-slate-200 bg-white hover:border-emerald-300 transition-all text-left flex justify-between items-center group">
-                                      <div>
-                                        <p className="font-black text-slate-800 text-xs">{plan.name}</p>
-                                        <p className="text-[9px] text-slate-400 font-bold mt-0.5">{plan.fixedPrice === "Yes" ? `₦${parseFloat(plan.variation_amount).toLocaleString()}` : "Flexible Amount"}</p>
-                                      </div>
-                                    </button>
-                                  ))}
+                                  {intlVariations.map((plan) => {
+                                      const rate = parseFloat(plan.variation_rate || "1");
+                                      const foreignAmt = parseFloat(plan.variation_amount || "0");
+                                      let displayNairaCost = 0;
+                                      
+                                      if (plan.fixedPrice === "Yes") {
+                                          displayNairaCost = parseFloat(plan.charged_amount || "0");
+                                          if (displayNairaCost <= 0) displayNairaCost = foreignAmt * rate;
+                                      }
+
+                                      return (
+                                        <button key={plan.variation_code} onClick={() => setSelectedIntlVariation(plan)} className="p-3 rounded-xl border border-slate-200 bg-white hover:border-emerald-300 transition-all text-left flex justify-between items-center group">
+                                          <div>
+                                            <p className="font-black text-slate-800 text-xs">{plan.name}</p>
+                                            <p className="text-[9px] text-slate-400 font-bold mt-0.5">
+                                                {plan.fixedPrice === "Yes" ? `Naira Cost: ₦${displayNairaCost.toLocaleString()}` : `Rate: ₦${rate.toLocaleString()} per unit`}
+                                            </p>
+                                          </div>
+                                        </button>
+                                      )
+                                  })}
                                </div>
                            )
                         )}
