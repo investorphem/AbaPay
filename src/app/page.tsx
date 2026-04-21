@@ -995,14 +995,14 @@ export default function Home() {
                   </div>
                 </div>
 
-                {/* ⚡ THE PROVIDER SELECTORS (LOCAL OR INTERNATIONAL) ⚡ */}
+                                {/* ⚡ THE PROVIDER SELECTORS (LOCAL OR INTERNATIONAL) ⚡ */}
                 <div className="animate-in slide-in-from-left-2 mb-2">
                     <label className="text-[10px] font-black text-slate-400 uppercase mb-3 block">
                         {isInternational ? "Product Type" : "Provider"}
                     </label>
 
-                                        {isInternational ? (
-                        <>
+                    {isInternational ? (
+                        <div className="flex flex-col gap-4">
                             <button 
                                 onClick={() => {
                                     if (intlProductTypes.length === 0) return;
@@ -1020,7 +1020,7 @@ export default function Home() {
                                         setSelectedIntlProduct(intlProductTypes.find(p => (p.product_type_id || p.id || p.name) == val));
                                     });
                                 }}
-                                className="w-full bg-white border border-slate-200 p-4 rounded-2xl flex justify-between items-center hover:border-emerald-400 transition-colors shadow-sm mb-3"
+                                className="w-full bg-white border border-slate-200 p-4 rounded-2xl flex justify-between items-center hover:border-emerald-400 transition-colors shadow-sm"
                             >
                                 <div className="flex items-center gap-3">
                                     {selectedIntlProduct && (
@@ -1042,8 +1042,8 @@ export default function Home() {
                             </button>
 
                             {selectedIntlProduct && (
-                                <>
-                                    <label className="text-[10px] font-black text-slate-400 uppercase mb-3 block mt-4">Network Operator</label>
+                                <div className="w-full">
+                                    <label className="text-[10px] font-black text-slate-400 uppercase mb-3 block">Network Operator</label>
                                     <button 
                                         onClick={() => {
                                             if (intlOperators.length === 0) return;
@@ -1075,10 +1075,11 @@ export default function Home() {
                                         </div>
                                         {isIntlLoading ? <Loader2 size={16} className="animate-spin"/> : <ChevronDown size={18} className="text-slate-400"/>}
                                     </button>
-                                </>
+                                </div>
                             )}
-                        </>
+                        </div>
                     ) : (
+
 
 
                             {selectedIntlProduct && (
