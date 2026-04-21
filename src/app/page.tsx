@@ -285,47 +285,136 @@ export default function Home() {
     }
   };
 
-  // ⚡ INTERNATIONAL API FETCHERS ⚡
-  useEffect(() => {
-    fetch('/api/intl?action=countries').then(res => res.json()).then(data => {
-        if (data.code === "000" && data.content) {
-            const fetched = data.content.map((c: any) => ({ code: c.code, name: c.country }));
-            const merged = [...SUPPORTED_COUNTRIES.filter(c=>!c.disabled), ...fetched.filter((c:any) => c.code !== "NG")];
-            setIntlCountries(merged);
-        } else {
-            setIntlCountries(SUPPORTED_COUNTRIES.filter(c=>!c.disabled));
+  // ⚡ BENEFICIARY HELPER FUNCTIONS ⚡
+  const getCurrentProviderKey = () => {
+    if (activeTab === "bank") return selectedBank?.variation_code;
+    if (activeTab === "education") return educationProvider;
+    if (activeTab === "pay") {
+      if (activeService.id === "AIRTIME") return telecomProvider;
+      if (activeService.id === "INTERNET") return internetProvider;
+      if (activeService.id === "ELECTRICITY") return `${elecProvider}-${meterType}`;
+      if (activeService.id === "CABLE") return cableProvider;
+    }
+    return null;
+  };
+
+  const saveBeneficiary = (account: string, name: string | null) => {
+    if (!address) return; 
+    const key = getCurrentProviderKey();
+    if (!key) return;
+
+    setBeneficiaries(prev => {
+      const currentList = prev[key] || [];
+      const filteredList = currentList.filter(b => b.account !== account);
+      const newList = [{ account, name }, ...filteredList].slice(0, 4); 
+
+      const newStorage = { ...prev, [key]: newList };
+      localStorage.setItem(`abapay_beneficiaries_${address}`, JSON.stringify(newStorage));
+      return newStorage;
+    });
+  };
+
+  const removeBeneficiary = (accountToRemove: string) => {
+    if (!address) return;
+    const key = getCurrentProviderKey();
+    if (!key) return;
+
+    setBeneficiaries(prev => {
+      const currentList = prev[key] || [];
+      const newList = currentList.filter(b => b.account !== accountToRemove);
+
+      const newStorage = { ...prev, [key]: newList };
+      localStorage.setItem(`abapay_beneficiaries_${address}`, JSON.stringify(newStorage));
+      return newStorage;
+    });
+  };
+
+  const handleShareReceipt = async () => {
+    const receiptText = `🧾 AbaPay Receipt\n\nDate: ${selectedReceipt?.date}\nStatus: ${selectedReceipt?.status}\nProduct: ${selectedReceipt?.network} ${selectedReceipt?.service}\nRecipient: ${selectedReceipt?.account}\nAmount Paid: ₦${selectedReceipt?.amountNaira}\nCrypto Used: ${selectedReceipt?.amountCrypto} ${selectedReceipt?.tokenUsed}\nTx Hash: ${selectedReceipt?.txHash}\n\nSecured by Celo Network`;
+    if (navigator.share) { try { await navigator.share({ title: 'Receipt', text: receiptText }); } catch (err) {} } 
+    else { try { await navigator.clipboard.writeText(receiptText); showToast("Copied!", "Receipt details copied to clipboard.", "success"); } catch (err) {} }
+  };
+
+  const handleSendSupport = async () => {
+    if (!supportMessage.trim()) return showToast("Error", "Please enter a message.", "error");
+    setIsSendingSupport(true);
+    try {
+      const formData = new FormData();
+      formData.append("message", supportMessage);
+      if (address) formData.append("userAddress", address);
+      if (supportTxHash) formData.append("txHash", supportTxHash);
+      if (supportFile) formData.append("file", supportFile);
+
+      const res = await fetch('/api/support', { method: 'POST', body: formData });
+      const data = await res.json();
+      if (data.success) {
+        showToast("Ticket Sent", data.message, "success");
+        setIsSupportOpen(false); setSupportMessage(""); setSupportFile(null);
+      } else { showToast("Error", data.message || "Failed to send ticket", "error"); }
+    } catch (e) { showToast("Error", "Network error. Failed to send ticket.", "error"); } 
+    finally { setIsSendingSupport(false); }
+  };
+
+  const fetchBanksManual = async () => {
+    setIsFetchingBanks(true);
+    try {
+      const res = await fetch(`/api/variations?serviceID=bank-deposit`);
+      const data = await res.json();
+
+      if (data.code === '011' || !data.content || !data.content.variations) {
+        setBankVariations([
+            { variation_code: 'access', name: 'ACCESS BANK PLC' }, { variation_code: 'firstbank', name: 'FIRST BANK OF NIGERIA PLC' },
+            { variation_code: 'gtb', name: 'GTBANK PLC' }, { variation_code: 'opay', name: 'OPAY' },
+            { variation_code: 'moniepoint', name: 'MONIEPOINT MICROFINANCE BANK' }, { variation_code: 'uba', name: 'UBA - UNITED BANK FOR AFRICA PLC' },
+            { variation_code: 'zenith', name: 'ZENITH BANK PLC' }
+        ]);
+        return;
+      }
+      let banksArr = extractVtpassArray(data);
+      if (banksArr && Array.isArray(banksArr) && banksArr.length > 0) setBankVariations(banksArr.sort((a: any, b: any) => (a.name || "").localeCompare(b.name || "")));
+      else throw new Error("Empty");
+    } catch (e) {
+      setBankVariations([
+        { variation_code: 'access', name: 'ACCESS BANK PLC' }, { variation_code: 'gtb', name: 'GTBANK PLC' },
+        { variation_code: 'opay', name: 'OPAY' }, { variation_code: 'moniepoint', name: 'MONIEPOINT MICROFINANCE BANK' }, { variation_code: 'zenith', name: 'ZENITH BANK PLC' }
+      ]);
+    } finally { setIsFetchingBanks(false); }
+  };
+
+  const verifyMerchant = async () => {
+    setIsVerifying(true); setCustomerName(null); setCableCurrentBouquet(null); setCableRenewAmount(null); setInternetAccountId(null);
+    setMeterAddress(null); setDynamicElecMin(1000); setMeterAccountType(null); 
+
+    try {
+        let serviceID = ""; let reqType = undefined;
+        if (activeTab === "bank") { serviceID = "bank-deposit"; reqType = selectedBank?.variation_code; } 
+        else if (activeTab === "education" && educationProvider === "jamb") { serviceID = "jamb"; reqType = selectedEducationPlan?.variation_code; } 
+        else { 
+          serviceID = activeService.id === "ELECTRICITY" ? elecProvider : activeService.id === "INTERNET" ? internetProvider : cableProvider; 
+          reqType = activeService.id === "ELECTRICITY" ? meterType : undefined; 
         }
-    }).catch(()=>setIntlCountries(SUPPORTED_COUNTRIES.filter(c=>!c.disabled)));
-  }, []);
 
-  useEffect(() => {
-    if (isInternational) {
-        setIsIntlLoading(true);
-        fetch(`/api/intl?action=products&code=${activeCountry.code}`).then(res => res.json()).then(data => {
-            if (data.code === "000" && data.content) setIntlProductTypes(data.content);
-            else setIntlProductTypes([]);
-        }).catch(()=>setIntlProductTypes([])).finally(()=>setIsIntlLoading(false));
-    }
-  }, [activeCountry, isInternational]);
+        const res = await fetch(`/api/verify`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ billersCode: accountNumber, serviceID: serviceID, type: reqType }) });
+        const data = await res.json();
 
-  useEffect(() => {
-    if (isInternational && selectedIntlProduct) {
-        setIsIntlLoading(true); setIntlOperators([]); setIntlVariations([]); setSelectedIntlOperator(null); setSelectedIntlVariation(null);
-        fetch(`/api/intl?action=operators&code=${activeCountry.code}&type_id=${selectedIntlProduct.product_type_id}`).then(res => res.json()).then(data => {
-            if (data.code === "000" && data.content) setIntlOperators(data.content);
-        }).finally(()=>setIsIntlLoading(false));
-    }
-  }, [selectedIntlProduct, activeCountry, isInternational]);
+        if (data.code === '000') {
+          setCustomerName(data.content.Customer_Name || data.content.account_name || data.content.name);
+          if (data.content.Address) setMeterAddress(data.content.Address);
+          if (data.content.Min_Purchase_Amount) setDynamicElecMin(Number(data.content.Min_Purchase_Amount));
+          if (data.content.Customer_Account_Type) setMeterAccountType(data.content.Customer_Account_Type);
 
-  useEffect(() => {
-    if (isInternational && selectedIntlOperator && selectedIntlProduct) {
-        setIsIntlLoading(true); setIntlVariations([]); setSelectedIntlVariation(null);
-        fetch(`/api/intl?action=variations&operator_id=${selectedIntlOperator.operator_id}&type_id=${selectedIntlProduct.product_type_id}`).then(res => res.json()).then(data => {
-            if (data.code === "000" && data.content && data.content.variations) setIntlVariations(data.content.variations);
-        }).finally(()=>setIsIntlLoading(false));
-    }
-  }, [selectedIntlOperator, selectedIntlProduct, isInternational]);
-
+          if (activeTab === "pay" && activeService.id === "INTERNET" && internetProvider === "smile-direct") setInternetAccountId(data.content.AccountId || data.content.account_id);
+          if (activeTab === "pay" && activeService.id === "CABLE") {
+            setCableCurrentBouquet(data.content.Current_Bouquet || "Unknown Package");
+            if (data.content.Renewal_Amount && ['dstv', 'gotv'].includes(cableProvider)) {
+              setCableRenewAmount(data.content.Renewal_Amount);
+              if (cableSubscriptionType === "renew") setNairaAmount(data.content.Renewal_Amount.toString());
+            }
+          }
+        } else { setStatus("Account could not be verified."); }
+    } catch (e) {}
+    setIsVerifying(false);
+  };
 
   const processBlockchainPayment = async () => {
     if (!address || !client) return setStatus("Connect Wallet First");
@@ -338,10 +427,7 @@ export default function Home() {
       const lastTxTime = localStorage.getItem(cooldownKey);
       if (lastTxTime) {
         const timeSinceLast = new Date().getTime() - parseInt(lastTxTime);
-        if (timeSinceLast < 300000) {
-          setStatus("Duplicate detected. Please wait.");
-          return; 
-        }
+        if (timeSinceLast < 300000) { setStatus("Duplicate detected. Please wait."); return; }
       }
       localStorage.setItem(cooldownKey, new Date().getTime().toString());
       activeCooldownKey = cooldownKey; 
@@ -381,10 +467,7 @@ export default function Home() {
       let vtpassServiceID = ""; let displayNetwork = ""; let finalVariationCode = 'prepaid'; let payloadBillersCode = accountNumber; let uiCategory = "";
 
       if (isInternational) {
-          vtpassServiceID = "foreign-airtime";
-          displayNetwork = selectedIntlOperator.name;
-          finalVariationCode = selectedIntlVariation.variation_code;
-          uiCategory = `INTL ${selectedIntlProduct.name.toUpperCase()}`;
+          vtpassServiceID = "foreign-airtime"; displayNetwork = selectedIntlOperator.name; finalVariationCode = selectedIntlVariation.variation_code; uiCategory = `INTL ${selectedIntlProduct.name.toUpperCase()}`;
       } else if (activeTab === "bank") {
         vtpassServiceID = "bank-deposit"; displayNetwork = selectedBank.name; finalVariationCode = selectedBank.variation_code; uiCategory = "BANK";
       } else if (activeTab === "education") {
@@ -402,23 +485,11 @@ export default function Home() {
       setStatus(`Secured. Processing...`);
 
       const backendPayload = {
-        serviceID: vtpassServiceID, 
-        serviceCategory: uiCategory, 
-        network: displayNetwork.toUpperCase(), 
-        billersCode: payloadBillersCode, 
-        amount: cryptoToCharge, 
-        nairaAmount: calculatedNairaAmount, 
-        token: selectedToken.symbol, 
-        txHash: hash, 
-        variation_code: finalVariationCode, 
-        phone: customerPhone || accountNumber, 
-        email: customerEmail, 
-        wallet_address: address, 
+        serviceID: vtpassServiceID, serviceCategory: uiCategory, network: displayNetwork.toUpperCase(), billersCode: payloadBillersCode, amount: cryptoToCharge, 
+        nairaAmount: calculatedNairaAmount, token: selectedToken.symbol, txHash: hash, variation_code: finalVariationCode, 
+        phone: customerPhone || accountNumber, email: customerEmail, wallet_address: address, 
         subscription_type: activeTab === "pay" && activeService.id === "CABLE" && ['dstv', 'gotv'].includes(cableProvider) ? cableSubscriptionType : undefined,
-        meter_account_type: meterAccountType,
-        operator_id: isInternational ? selectedIntlOperator?.operator_id : undefined,
-        country_code: isInternational ? activeCountry.code : undefined,
-        product_type_id: isInternational ? selectedIntlProduct?.product_type_id : undefined
+        meter_account_type: meterAccountType, operator_id: isInternational ? selectedIntlOperator?.operator_id : undefined, country_code: isInternational ? activeCountry.code : undefined, product_type_id: isInternational ? selectedIntlProduct?.product_type_id : undefined
       };
 
       const newTx: any = { id: hash.slice(0,8), date: new Date().toLocaleString(), status: "PENDING", amountNaira: calculatedNairaAmount, amountCrypto: cryptoToCharge, tokenUsed: selectedToken.symbol, service: uiCategory, network: displayNetwork.toUpperCase(), txHash: hash, account: payloadBillersCode };
@@ -479,7 +550,34 @@ export default function Home() {
     return () => { if (intervalId) clearInterval(intervalId); };
   }, [activeChain]);
 
-  useEffect(() => { fetchBanksManual(); }, []);
+  // ⚡ EVENT LISTENERS FOR CLOUD/LOCAL HISTORY & DYNAMIC API FETCHES
+  useEffect(() => {
+    if (!address) { setTransactions([]); return; }
+    try { const savedLocalHistory = localStorage.getItem(`abapay_history_${address}`); if (savedLocalHistory) setTransactions(JSON.parse(savedLocalHistory)); } catch (e) {}
+
+    async function fetchCloudHistory() {
+      try {
+        const sixMonthsAgo = new Date(); sixMonthsAgo.setMonth(sixMonthsAgo.getMonth() - 6);
+        const { data } = await supabase.from('transactions').select('*').eq('wallet_address', address).gte('created_at', sixMonthsAgo.toISOString()).order('created_at', { ascending: false });
+        if (data && data.length > 0) {
+          const cloudHistory = data.map((tx: any) => ({ 
+             id: tx.tx_hash.slice(0, 8), date: new Date(tx.created_at).toLocaleString(), status: tx.status, 
+             amountNaira: tx.amount_naira.toString(), amountCrypto: tx.amount_usdt.toString(), 
+             tokenUsed: tx.token_used || "USD₮", service: tx.service_category, network: tx.network, 
+             txHash: tx.tx_hash, account: tx.account_number, refund_hash: tx.refund_hash, 
+             purchased_code: tx.purchased_code, request_id: tx.request_id, units: tx.units 
+          }));
+          setTransactions(cloudHistory); localStorage.setItem(`abapay_history_${address}`, JSON.stringify(cloudHistory));
+        }
+      } catch (e) {}
+    }
+    fetchCloudHistory();
+  }, [address]);
+
+  useEffect(() => {
+    if (!address) { setBeneficiaries({}); return; }
+    try { const saved = localStorage.getItem(`abapay_beneficiaries_${address}`); if (saved) setBeneficiaries(JSON.parse(saved)); else setBeneficiaries({}); } catch (e) {}
+  }, [address]);
 
   useEffect(() => {
     async function fetchBalance() {
@@ -496,53 +594,50 @@ export default function Home() {
     fetchBalance();
   }, [address, selectedToken, activeChain, isMainnet]);
 
-  // ⚡ EVENT LISTENERS FOR CLOUD/LOCAL HISTORY & DYNAMIC API FETCHES
+  useEffect(() => { fetchBanksManual(); }, []);
+
   useEffect(() => {
-    if (!address) {
-      setTransactions([]);
-      return;
+    if (isInternational) {
+        setIsIntlLoading(true);
+        fetch(`/api/intl?action=products&code=${activeCountry.code}`).then(res => res.json()).then(data => {
+            if (data.code === "000" && data.content) setIntlProductTypes(data.content);
+            else setIntlProductTypes([]);
+        }).catch(()=>setIntlProductTypes([])).finally(()=>setIsIntlLoading(false));
     }
-    try {
-      const savedLocalHistory = localStorage.getItem(`abapay_history_${address}`);
-      if (savedLocalHistory) setTransactions(JSON.parse(savedLocalHistory));
-    } catch (e) {}
+  }, [activeCountry, isInternational]);
 
-    async function fetchCloudHistory() {
-      try {
-        const sixMonthsAgo = new Date(); sixMonthsAgo.setMonth(sixMonthsAgo.getMonth() - 6);
-        const { data } = await supabase.from('transactions').select('*').eq('wallet_address', address).gte('created_at', sixMonthsAgo.toISOString()).order('created_at', { ascending: false });
+  useEffect(() => {
+    if (isInternational && selectedIntlProduct) {
+        setIsIntlLoading(true); setIntlOperators([]); setIntlVariations([]); setSelectedIntlOperator(null); setSelectedIntlVariation(null);
+        fetch(`/api/intl?action=operators&code=${activeCountry.code}&type_id=${selectedIntlProduct.product_type_id}`).then(res => res.json()).then(data => {
+            if (data.code === "000" && data.content) setIntlOperators(data.content);
+        }).finally(()=>setIsIntlLoading(false));
+    }
+  }, [selectedIntlProduct, activeCountry, isInternational]);
 
-        if (data && data.length > 0) {
-          const cloudHistory = data.map((tx: any) => ({ 
-             id: tx.tx_hash.slice(0, 8), date: new Date(tx.created_at).toLocaleString(), status: tx.status, 
-             amountNaira: tx.amount_naira.toString(), amountCrypto: tx.amount_usdt.toString(), 
-             tokenUsed: tx.token_used || "USD₮", service: tx.service_category, network: tx.network, 
-             txHash: tx.tx_hash, account: tx.account_number, refund_hash: tx.refund_hash, 
-             purchased_code: tx.purchased_code, request_id: tx.request_id, units: tx.units 
-          }));
+  useEffect(() => {
+    if (isInternational && selectedIntlOperator && selectedIntlProduct) {
+        setIsIntlLoading(true); setIntlVariations([]); setSelectedIntlVariation(null);
+        fetch(`/api/intl?action=variations&operator_id=${selectedIntlOperator.operator_id}&type_id=${selectedIntlProduct.product_type_id}`).then(res => res.json()).then(data => {
+            if (data.code === "000" && data.content && data.content.variations) setIntlVariations(data.content.variations);
+        }).finally(()=>setIsIntlLoading(false));
+    }
+  }, [selectedIntlOperator, selectedIntlProduct, isInternational]);
 
-          setTransactions(cloudHistory); 
-          localStorage.setItem(`abapay_history_${address}`, JSON.stringify(cloudHistory));
+  useEffect(() => {
+    fetch('/api/intl?action=countries').then(res => res.json()).then(data => {
+        if (data.code === "000" && data.content) {
+            const fetched = data.content.map((c: any) => ({ code: c.code, name: c.country }));
+            const merged = [...SUPPORTED_COUNTRIES.filter(c=>!c.disabled), ...fetched.filter((c:any) => c.code !== "NG")];
+            setIntlCountries(merged);
+        } else {
+            setIntlCountries(SUPPORTED_COUNTRIES.filter(c=>!c.disabled));
         }
-      } catch (e) {}
-    }
-    fetchCloudHistory();
-  }, [address]);
+    }).catch(()=>setIntlCountries(SUPPORTED_COUNTRIES.filter(c=>!c.disabled)));
+  }, []);
 
   useEffect(() => {
-    if (!address) {
-      setBeneficiaries({});
-      return; 
-    }
-    try {
-      const saved = localStorage.getItem(`abapay_beneficiaries_${address}`);
-      if (saved) setBeneficiaries(JSON.parse(saved));
-      else setBeneficiaries({});
-    } catch (e) {}
-  }, [address]);
-
-  useEffect(() => {
-    if (activeTab === "education") {
+    if (activeTab === "education" && !isInternational) {
       const fetchEducation = async () => {
         setEducationVariations([]);
         try {
@@ -550,13 +645,11 @@ export default function Home() {
           const data = await res.json();
           if (data.code === '011') setEducationVariations([]); 
           else setEducationVariations(extractVtpassArray(data) || []);
-        } catch (e) {
-          setEducationVariations([]);
-        }
+        } catch (e) { setEducationVariations([]); }
       };
       fetchEducation();
     }
-  }, [activeTab, educationProvider]);
+  }, [activeTab, educationProvider, isInternational]);
 
   useEffect(() => {
     if (activeTab !== "pay" || isInternational) return;
@@ -616,19 +709,30 @@ export default function Home() {
     }
   }, [accountNumber, elecProvider, cableProvider, activeService.id, meterType, selectedBank, internetProvider, activeTab, educationProvider, selectedEducationPlan, isInternational]);
 
-  const getCurrentModalValue = () => {
-    if (modalType === 'country') return activeCountry.code;
-    if (modalType === 'bank') return selectedBank?.variation_code;
-    if (modalType === 'token') return selectedToken.symbol;
-    if (modalType === 'provider') {
-      if (activeTab === 'education') return educationProvider;
-      if (activeService.id === 'ELECTRICITY') return elecProvider;
-      if (activeService.id === 'INTERNET') return internetProvider;
-      if (activeService.id === 'CABLE') return cableProvider;
-    }
-    if (modalType === 'standard') return telecomProvider;
-    return null;
-  };
+  useEffect(() => {
+    const checkRefunds = async () => {
+      if (activeTab === "history" && transactions.length > 0) {
+        const failedHashes = transactions.filter(tx => tx.status !== 'SUCCESS').map(tx => tx.txHash);
+        if (failedHashes.length === 0) return;
+        try {
+          const { data } = await supabase.from('transactions').select('tx_hash, status, refund_hash').in('tx_hash', failedHashes);
+          if (data && data.length > 0) {
+            let updated = false;
+            const newHistory = transactions.map(tx => {
+              const dbRecord = data.find(r => r.tx_hash === tx.txHash);
+              if (dbRecord && dbRecord.status === 'REFUNDED' && tx.status !== 'REFUNDED') { updated = true; return { ...tx, status: 'REFUNDED', refund_hash: dbRecord.refund_hash }; }
+              return tx;
+            });
+            if (updated && address) { 
+              setTransactions(newHistory); localStorage.setItem(`abapay_history_${address}`, JSON.stringify(newHistory)); 
+            }
+          }
+        } catch(e) {}
+      }
+    };
+    checkRefunds();
+  }, [activeTab, transactions, address]);
+
 
   return (
     <main className="min-h-screen bg-slate-50 text-slate-900 font-sans p-4 flex flex-col items-center pb-20 relative">
@@ -787,7 +891,7 @@ export default function Home() {
           </div>
         </div>
 
-        {/* THE TABS */}
+        {/* THE TABS (Grey out foreign) */}
         <div className="flex gap-2 bg-slate-200/50 p-1.5 rounded-2xl mb-6 shadow-inner overflow-x-auto no-scrollbar">
             <button onClick={() => handleTabSwitch("pay")} className={`flex-1 min-w-[75px] py-3 rounded-xl text-[10px] sm:text-xs font-black transition-all ${activeTab === 'pay' ? 'bg-white text-emerald-600 shadow-xl' : 'text-slate-500 hover:text-slate-700'}`}>BILLS</button>
             <button onClick={() => handleTabSwitch("bank")} disabled={isInternational} className={`flex-1 min-w-[75px] py-3 rounded-xl text-[10px] sm:text-xs font-black transition-all ${isInternational ? 'opacity-30 cursor-not-allowed' : activeTab === 'bank' ? 'bg-white text-emerald-600 shadow-xl' : 'text-slate-500 hover:text-slate-700'}`}>TRANSFER</button>
@@ -795,445 +899,6 @@ export default function Home() {
             <button onClick={() => handleTabSwitch("history")} className={`flex-1 min-w-[75px] py-3 rounded-xl text-[10px] sm:text-xs font-black transition-all ${activeTab === 'history' ? 'bg-white text-emerald-600 shadow-xl' : 'text-slate-500 hover:text-slate-700'}`}>HISTORY</button>
         </div>
 
-
-        {/* ======================================= */}
-        {/* EDUCATION BLOCK */}
-        {/* ======================================= */}
-        {activeTab === 'education' && (
-          <div className="bg-white border border-slate-100 rounded-[2.5rem] p-8 shadow-2xl shadow-emerald-900/10 animate-in fade-in zoom-in-95">
-            <div className="space-y-5">
-                <div className="bg-slate-50 border border-slate-100 p-4 rounded-2xl flex justify-between items-center animate-in fade-in">
-                  <div 
-                    className="flex items-center gap-2 cursor-pointer hover:bg-slate-100 p-2 -ml-2 rounded-xl transition-colors" 
-                    onClick={() => openSelectionModal('token', "Select Token", SUPPORTED_TOKENS, (symbol) => setSelectedToken(SUPPORTED_TOKENS.find(t => t.symbol === symbol)!))}
-                  >
-                     <img src={selectedToken.logo} alt={selectedToken.symbol} className="w-7 h-7 object-contain rounded-full shadow-sm bg-white" />
-                     <span className="font-black text-slate-800 uppercase text-sm tracking-tight">{selectedToken.symbol}</span>
-                     <ChevronDown size={14} className="text-slate-400"/>
-                  </div>
-                  <div className="text-right">
-                    <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-0.5">Balance</p>
-                    <div className="flex items-center justify-end gap-1.5">
-                      {isFetchingBalance ? <Loader2 size={14} className="animate-spin text-emerald-500"/> : <Coins size={14} className="text-emerald-500"/>}
-                      <div className="flex flex-col items-end">
-                        <p className="font-mono font-black text-sm text-slate-800 leading-none">{walletBalance}</p>
-                        {!isFetchingBalance && <p className="text-[9px] font-bold text-slate-400 mt-1 tracking-tight">≈ ₦{walletBalanceNaira}</p>}
-                      </div>
-                    </div>
-                  </div>
-                </div>
-
-                <div className="animate-in slide-in-from-left-2 mb-2">
-                    <label className="text-[10px] font-black text-slate-400 uppercase mb-3 block">Service</label>
-                    <button 
-                        onClick={() => {
-                            const optionsWithStatus = EDUCATION_PROVIDERS.map(p => {
-                                const isMasterOff = killSwitches['MASTER_EDUCATION'] === false;
-                                const isProviderOff = killSwitches[`EDU_${p.serviceID}`] === false;
-                                return { ...p, disabled: isMasterOff || isProviderOff };
-                            });
-                            openSelectionModal('provider', "Select Education Service", optionsWithStatus, (val) => handleProviderChange(val, 'education'));
-                        }}
-                        className="w-full bg-white border border-slate-200 p-4 rounded-2xl flex justify-between items-center hover:border-emerald-400 transition-colors shadow-sm active:scale-[0.98]"
-                    >
-                        <div className="flex items-center gap-4">
-                            <div className="w-12 h-12 shrink-0 rounded-full border border-slate-100 bg-emerald-50 flex items-center justify-center shadow-inner overflow-hidden">
-                                <GraduationCap className="text-emerald-500" size={24} />
-                            </div>
-                            <div>
-                                <span className="text-sm font-black text-slate-900 tracking-tight uppercase">
-                                  {EDUCATION_PROVIDERS.find(p => p.serviceID === educationProvider)?.displayName}
-                                </span>
-                            </div>
-                        </div>
-                        <ChevronDown size={18} className="text-slate-400"/>
-                    </button>
-                </div>
-
-                {educationProvider === "jamb" && (
-                    <div className="animate-in fade-in slide-in-from-top-2">
-                        <label className="text-[10px] font-black text-slate-400 uppercase mb-2 flex justify-between">
-                          <span>Profile ID</span>
-                          <span className={accountNumber.length >= 10 ? "text-emerald-500" : "text-slate-400"}>{accountNumber.length}/10</span>
-                        </label>
-                        <input 
-                            type="tel" placeholder="Enter ID"
-                            maxLength={15}
-                            className={`w-full bg-slate-50 border p-5 rounded-2xl font-black text-xl text-slate-800 outline-none transition-all ${
-                              accountNumber.length > 0 && accountNumber.length < 10 ? "border-red-300 focus:border-red-500" : "border-slate-100 focus:border-emerald-500"
-                            }`}
-                            value={accountNumber}
-                            onChange={(e) => setAccountNumber(e.target.value.replace(/[^0-9]/g, ''))}
-                        />
-                        {isVerifying && <p className="text-[10px] text-blue-500 font-bold mt-2 animate-pulse flex items-center gap-1.5"><Loader2 size={12} className="animate-spin"/> Verifying...</p>}
-
-                        {(() => {
-                            const key = getCurrentProviderKey();
-                            const list = key ? beneficiaries[key] : [];
-                            if (!list || list.length === 0) return null;
-                            return (
-                                <div className="flex gap-2 overflow-x-auto no-scrollbar mt-3 animate-in fade-in items-center">
-                                    <span className="text-[9px] font-black uppercase text-slate-400 shrink-0">Recent:</span>
-                                    {list.map((ben, idx) => (
-                                        <button 
-                                            key={idx}
-                                            onContextMenu={(e) => { e.preventDefault(); e.stopPropagation(); }}
-                                            style={{ WebkitTouchCallout: 'none', WebkitUserSelect: 'none', userSelect: 'none' }}
-                                            onTouchStart={() => {
-                                                isLongPress.current = false;
-                                                pressTimer.current = setTimeout(() => {
-                                                    isLongPress.current = true;
-                                                    setActiveDeleteAccount(ben.account);
-                                                    if (navigator.vibrate) navigator.vibrate(50);
-                                                    setTimeout(() => setActiveDeleteAccount(null), 4000);
-                                                }, 500); 
-                                            }}
-                                            onTouchEnd={() => { if (pressTimer.current) clearTimeout(pressTimer.current); }}
-                                            onTouchMove={() => { if (pressTimer.current) clearTimeout(pressTimer.current); }}
-                                            onMouseDown={() => {
-                                                isLongPress.current = false;
-                                                pressTimer.current = setTimeout(() => {
-                                                    isLongPress.current = true;
-                                                    setActiveDeleteAccount(ben.account);
-                                                    setTimeout(() => setActiveDeleteAccount(null), 4000);
-                                                }, 500); 
-                                            }}
-                                            onMouseUp={() => { if (pressTimer.current) clearTimeout(pressTimer.current); }}
-                                            onMouseLeave={() => { if (pressTimer.current) clearTimeout(pressTimer.current); }}
-                                            onClick={(e) => {
-                                                e.preventDefault();
-                                                if (isLongPress.current) {
-                                                    isLongPress.current = false;
-                                                    return;
-                                                }
-                                                if (activeDeleteAccount === ben.account) {
-                                                    removeBeneficiary(ben.account);
-                                                    setActiveDeleteAccount(null);
-                                                } else {
-                                                    setAccountNumber(ben.account);
-                                                    if (ben.name) setCustomerName(ben.name);
-                                                    setActiveDeleteAccount(null); 
-                                                }
-                                            }}
-                                            className={`shrink-0 text-[10px] font-black py-1.5 px-3 rounded-full flex items-center gap-1.5 transition-all border outline-none select-none ${
-                                                activeDeleteAccount === ben.account 
-                                                ? 'bg-red-50 text-red-600 border-red-200' 
-                                                : 'bg-slate-100 text-slate-600 border-slate-200 hover:bg-emerald-50 hover:text-emerald-700 hover:border-emerald-200' 
-                                            }`}
-                                        >
-                                            {activeDeleteAccount === ben.account ? (
-                                                <><XCircle size={12} className="animate-pulse" /> Delete</>
-                                            ) : (
-                                                <span>{ben.name ? ben.name.split(' ')[0] : ben.account}</span>
-                                            )}
-                                        </button>
-                                    ))}
-                                </div>
-                            );
-                        })()}
-
-                        {customerName && (
-                            <div className="mt-2 bg-emerald-500/10 p-4 rounded-xl border border-emerald-500/20 flex items-center gap-3 animate-in fade-in">
-                                <CheckCircle2 size={18} className="text-emerald-600 shrink-0" />
-                                <div className="flex-1">
-                                    <span className="text-sm font-black text-emerald-800 line-clamp-1">{customerName}</span>
-                                    <p className="text-[10px] font-black text-emerald-600 uppercase mt-0.5">Verified</p>
-                                </div>
-                            </div>
-                        )}
-                    </div>
-                )}
-
-                <div className="bg-slate-50 border border-slate-200 rounded-2xl p-4 shadow-sm animate-in fade-in slide-in-from-top-4">
-                  <p className="text-[10px] font-black uppercase tracking-widest text-slate-400 mb-2">Select Plan</p>
-                  {selectedEducationPlan ? (
-                      <div className="relative animate-in zoom-in-95 duration-200 mt-2">
-                          <button onClick={() => { setSelectedEducationPlan(null); setNairaAmount(""); }} className="absolute -top-3 -right-3 bg-slate-200 text-slate-500 hover:text-slate-800 hover:bg-slate-300 rounded-full p-1 transition-all z-10 shadow-sm border border-white">
-                            <XCircle size={16}/>
-                          </button>
-                          <div className="p-4 rounded-2xl border-2 border-emerald-500 bg-emerald-50 shadow-sm text-left">
-                            <p className="font-black text-slate-900 text-sm pr-2">{selectedEducationPlan.name}</p>
-
-                            <div className="pt-2 border-t border-emerald-200/50 flex justify-between items-end">
-                                <div>
-                                   <p className="font-black text-emerald-600 text-xl">₦{parseFloat(selectedEducationPlan.variation_amount || "0").toLocaleString()}</p>
-                                   {currentFee > 0 && <p className="text-[9px] font-black text-orange-500">+₦{currentFee} FEE INCLUDED</p>}
-                                </div>
-                                <p className="text-[10px] text-slate-500 font-bold">{cryptoToCharge} {selectedToken.symbol}</p>
-                            </div>
-                          </div>
-                      </div>
-                  ) : (
-                      <div className="grid grid-cols-1 gap-2 max-h-[30vh] overflow-y-auto pr-1">
-                        {educationVariations.length === 0 ? (
-                          <p className="text-center text-xs font-bold text-slate-400 py-4"><Loader2 className="animate-spin inline-block mr-2" size={14}/> Loading...</p>
-                        ) : (
-                          educationVariations.map((plan) => (
-                            <button 
-                              key={plan.variation_code} 
-                              onClick={() => { setSelectedEducationPlan(plan); setNairaAmount(plan.variation_amount ? plan.variation_amount.toString() : "0"); }} 
-                              className="p-3 rounded-xl border border-slate-200 bg-white hover:border-emerald-300 transition-all text-left flex justify-between items-center group"
-                            >
-                              <div className="mr-2">
-                                <p className="font-black text-slate-800 text-xs line-clamp-2">{plan.name}</p>
-                                <p className="text-[9px] text-slate-400 font-bold mt-1">{(parseFloat(plan.variation_amount || "0") / exchangeRate).toFixed(4)} {selectedToken.symbol}</p>
-                              </div>
-                              <p className="font-black text-emerald-600 text-sm group-hover:scale-110 transition-transform shrink-0">₦{parseFloat(plan.variation_amount || "0").toLocaleString()}</p>
-                            </button>
-                          ))
-                        )}
-                      </div>
-                  )}
-                </div>
-
-                <div className="animate-in fade-in">
-                    <label className="text-[10px] font-black text-slate-400 uppercase mb-2 flex justify-between">
-                      <span>SMS Phone</span>
-                      <span className={customerPhone.length >= 10 ? "text-emerald-500" : "text-slate-400"}>{customerPhone.length}/11</span>
-                    </label>
-                    <input 
-                        type="tel" placeholder="08000000000"
-                        maxLength={11}
-                        className={`w-full bg-slate-50 border p-5 rounded-2xl font-black text-xl text-slate-800 outline-none transition-all ${
-                          customerPhone.length > 0 && customerPhone.length < 10 ? "border-red-300 focus:border-red-500" : "border-slate-100 focus:border-emerald-500"
-                        }`}
-                        value={customerPhone}
-                        onChange={(e) => setCustomerPhone(e.target.value.replace(/[^0-9]/g, ''))}
-                    />
-                </div>
-
-                <div className="animate-in fade-in mt-3">
-                     <input 
-                        type="email" placeholder="Email Address (Optional for Receipt)"
-                        className="w-full bg-slate-50 border border-slate-100 p-5 rounded-2xl font-bold text-slate-700 outline-none focus:border-emerald-500 transition-colors"
-                        value={customerEmail}
-                        onChange={(e) => setCustomerEmail(e.target.value)}
-                    />
-                </div>
-
-                {status && (
-                    <div className={`p-5 rounded-2xl border flex items-center gap-4 animate-in fade-in shadow-sm ${status.includes('Success') || status.includes('Secured') || status.includes('Initiating') ? 'bg-emerald-50 border-emerald-100 text-emerald-800' : 'bg-blue-50 border-blue-100 text-blue-800'}`}>
-                        {status.includes('Success') ? <CheckCircle2 size={24}/> : <Loader2 size={24} className="animate-spin"/>}
-                        <p className="text-sm font-black tracking-tight">{status}</p>
-                    </div>
-                )}
-
-                <button 
-                    onClick={() => setIsConfirmModalOpen(true)}
-                    disabled={!isFormValid || isProcessing || isCurrentServiceDisabled}
-                    className={`w-full text-white font-black py-6 rounded-3xl flex items-center justify-center gap-3.5 transition-all active:scale-95 shadow-xl text-lg tracking-tight ${isCurrentServiceDisabled ? 'bg-slate-300 opacity-50 cursor-not-allowed text-slate-500 shadow-none' : 'bg-slate-900 hover:bg-black disabled:opacity-30 shadow-slate-900/20'}`}
-                >
-                    {isProcessing ? <Loader2 size={24} className="animate-spin text-emerald-400"/> : <ShieldCheck size={24} className={isCurrentServiceDisabled ? 'text-slate-400' : 'text-emerald-400'} />}
-                    {isCurrentServiceDisabled ? 'TEMPORARILY OFFLINE' : isProcessing ? 'PROCESSING...' : `PAY ${cryptoToCharge} ${selectedToken.symbol}`}
-                </button>
-            </div>
-          </div>
-        )}
-
-        {/* ======================================= */}
-        {/* BANK BLOCK */}
-        {/* ======================================= */}
-        {activeTab === 'bank' && (
-          <div className="bg-white border border-slate-100 rounded-[2.5rem] p-8 shadow-2xl shadow-emerald-900/10 animate-in fade-in zoom-in-95">
-            <div className="space-y-5">
-                <div className="bg-slate-50 border border-slate-100 p-4 rounded-2xl flex justify-between items-center animate-in fade-in">
-                  <div 
-                    className="flex items-center gap-2 cursor-pointer hover:bg-slate-100 p-2 -ml-2 rounded-xl transition-colors" 
-                    onClick={() => openSelectionModal('token', "Select Token", SUPPORTED_TOKENS, (symbol) => setSelectedToken(SUPPORTED_TOKENS.find(t => t.symbol === symbol)!))}
-                  >
-                     <img src={selectedToken.logo} alt={selectedToken.symbol} className="w-7 h-7 object-contain rounded-full shadow-sm bg-white" />
-                     <span className="font-black text-slate-800 uppercase text-sm tracking-tight">{selectedToken.symbol}</span>
-                     <ChevronDown size={14} className="text-slate-400"/>
-                  </div>
-                  <div className="text-right">
-                    <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-0.5">Balance</p>
-                    <div className="flex items-center justify-end gap-1.5">
-                      {isFetchingBalance ? <Loader2 size={14} className="animate-spin text-emerald-500"/> : <Coins size={14} className="text-emerald-500"/>}
-                      <div className="flex flex-col items-end">
-                        <p className="font-mono font-black text-sm text-slate-800 leading-none">{walletBalance}</p>
-                        {!isFetchingBalance && <p className="text-[9px] font-bold text-slate-400 mt-1 tracking-tight">≈ ₦{walletBalanceNaira}</p>}
-                      </div>
-                    </div>
-                  </div>
-                </div>
-
-                <div className="animate-in slide-in-from-left-2 mb-2">
-                    <label className="text-[10px] font-black text-slate-400 uppercase mb-3 block">Bank</label>
-                    <button 
-                        onClick={() => openSelectionModal('bank', "Select Destination Bank", bankVariations, (val: any) => {
-                            const foundBank = bankVariations.find(b => b.variation_code === val);
-                            handleProviderChange(foundBank, 'bank');
-                        })}
-                        className="w-full bg-white border border-slate-200 p-4 rounded-2xl flex justify-between items-center hover:border-blue-400 transition-colors shadow-sm active:scale-[0.98]"
-                    >
-                        <div className="flex items-center gap-4">
-                            <div className="w-12 h-12 shrink-0 rounded-full border border-slate-100 bg-blue-50 flex items-center justify-center shadow-inner">
-                                <Landmark className="text-blue-500" size={20} />
-                            </div>
-                            <span className="text-sm font-black text-slate-900 tracking-tight">{selectedBank ? selectedBank.name : 'Select Bank'}</span>
-                        </div>
-                        <ChevronDown size={18} className="text-slate-400"/>
-                    </button>
-                </div>
-
-                <div>
-                    <label className="text-[10px] font-black text-slate-400 uppercase mb-2 flex justify-between">
-                      <span>Account No</span>
-                      <span className={accountNumber.length === 10 ? "text-emerald-500" : "text-slate-400"}>{accountNumber.length}/10</span>
-                    </label>
-                    <input 
-                        type="tel" placeholder="1234567890"
-                        maxLength={10}
-                        className={`w-full bg-slate-50 border p-5 rounded-2xl font-black text-xl text-slate-800 outline-none transition-all ${
-                          accountNumber.length > 0 && accountNumber.length < 10 ? "border-red-300" : "border-slate-100 focus:border-emerald-500"
-                        }`}
-                        value={accountNumber}
-                        onChange={(e) => setAccountNumber(e.target.value.replace(/[^0-9]/g, ''))}
-                    />
-                    {isVerifying && <p className="text-[10px] text-blue-500 font-bold mt-2 animate-pulse flex items-center gap-1.5"><Loader2 size={12} className="animate-spin"/> Verifying...</p>}
-
-                    {/* ⚡ SAVED BENEFICIARIES UI ⚡ */}
-                    {(() => {
-                        const key = getCurrentProviderKey();
-                        const list = key ? beneficiaries[key] : [];
-                        if (!list || list.length === 0) return null;
-                        return (
-                            <div className="flex gap-2 overflow-x-auto no-scrollbar mt-3 animate-in fade-in items-center">
-                                <span className="text-[9px] font-black uppercase text-slate-400 shrink-0">Recent:</span>
-                                {list.map((ben, idx) => (
-                                    <button 
-                                        key={idx}
-                                        onContextMenu={(e) => { e.preventDefault(); e.stopPropagation(); }}
-                                        style={{ WebkitTouchCallout: 'none', WebkitUserSelect: 'none', userSelect: 'none' }}
-                                        onTouchStart={() => {
-                                            isLongPress.current = false;
-                                            pressTimer.current = setTimeout(() => {
-                                                isLongPress.current = true;
-                                                setActiveDeleteAccount(ben.account);
-                                                if (navigator.vibrate) navigator.vibrate(50);
-                                                setTimeout(() => setActiveDeleteAccount(null), 4000);
-                                            }, 500); 
-                                        }}
-                                        onTouchEnd={() => { if (pressTimer.current) clearTimeout(pressTimer.current); }}
-                                        onTouchMove={() => { if (pressTimer.current) clearTimeout(pressTimer.current); }}
-                                        onMouseDown={() => {
-                                            isLongPress.current = false;
-                                            pressTimer.current = setTimeout(() => {
-                                                isLongPress.current = true;
-                                                setActiveDeleteAccount(ben.account);
-                                                setTimeout(() => setActiveDeleteAccount(null), 4000);
-                                            }, 500); 
-                                        }}
-                                        onMouseUp={() => { if (pressTimer.current) clearTimeout(pressTimer.current); }}
-                                        onMouseLeave={() => { if (pressTimer.current) clearTimeout(pressTimer.current); }}
-                                        onClick={(e) => {
-                                            e.preventDefault();
-                                            if (isLongPress.current) {
-                                                isLongPress.current = false;
-                                                return;
-                                            }
-                                            if (activeDeleteAccount === ben.account) {
-                                                removeBeneficiary(ben.account);
-                                                setActiveDeleteAccount(null);
-                                            } else {
-                                                setAccountNumber(ben.account);
-                                                if (ben.name) setCustomerName(ben.name);
-                                                setActiveDeleteAccount(null); 
-                                            }
-                                        }}
-                                        className={`shrink-0 text-[10px] font-black py-1.5 px-3 rounded-full flex items-center gap-1.5 transition-all border outline-none select-none ${
-                                            activeDeleteAccount === ben.account 
-                                            ? 'bg-red-50 text-red-600 border-red-200' 
-                                            : 'bg-slate-100 text-slate-600 border-slate-200 hover:bg-emerald-50 hover:text-emerald-700 hover:border-emerald-200' 
-                                        }`}
-                                    >
-                                        {activeDeleteAccount === ben.account ? (
-                                            <><XCircle size={12} className="animate-pulse" /> Delete</>
-                                        ) : (
-                                            <span>{ben.name ? ben.name.split(' ')[0] : ben.account}</span>
-                                        )}
-                                    </button>
-                                ))}
-                            </div>
-                        );
-                    })()}
-
-                    {customerName && (
-                        <div className="mt-2 bg-emerald-500/10 p-4 rounded-xl border border-emerald-500/20 flex items-center gap-3 animate-in fade-in">
-                            <CheckCircle2 size={18} className="text-emerald-600 shrink-0" />
-                            <div className="flex-1">
-                                <span className="text-sm font-black text-emerald-800 line-clamp-1">{customerName}</span>
-                                <p className="text-[10px] font-black text-emerald-600 uppercase mt-0.5">Verified</p>
-                            </div>
-                        </div>
-                    )}
-                </div>
-
-                <div>
-                    <label className="text-[10px] font-black text-slate-400 uppercase mb-2 flex justify-between items-center">
-                       <span>Amount</span>
-                       <span className="text-emerald-500 font-black">MIN ₦{dynamicMinAmount.toLocaleString()}</span>
-                    </label>
-                    <div className="relative mb-3">
-                        <input 
-                            type="number" 
-                            placeholder="Amount" 
-                            className="w-full bg-slate-50 border border-slate-100 p-6 rounded-2xl font-black text-3xl text-slate-800 outline-none shadow-inner"
-                            value={nairaAmount}
-                            onChange={(e) => setNairaAmount(e.target.value)}
-                        />
-                        <div className="absolute right-5 top-1/2 -translate-y-1/2 text-right">
-                            <p className="text-sm font-black text-emerald-600">{cryptoToCharge} {selectedToken.symbol}</p>
-                            {currentFee > 0 && <p className="text-[9px] font-black text-orange-500">+₦{currentFee} FEE</p>}
-                        </div>
-                    </div>
-                    {nairaAmount && (parseFloat(nairaAmount) < dynamicMinAmount || parseFloat(nairaAmount) > dynamicMaxAmount) && (
-                        <div className="bg-red-50 border border-red-200 p-3 rounded-xl mt-2 flex items-center gap-2 animate-in fade-in">
-                            <AlertTriangle size={16} className="text-red-500 shrink-0" />
-                            <p className="text-xs font-black text-red-600">
-                                {parseFloat(nairaAmount) < dynamicMinAmount ? `Amount is below the minimum of ₦${dynamicMinAmount.toLocaleString()}` : `Amount exceeds the maximum of ₦${dynamicMaxAmount.toLocaleString()}`}
-                            </p>
-                        </div>
-                    )}
-                </div>
-
-                <div className="animate-in fade-in">
-                     <input 
-                        type="tel" placeholder="Sender's Phone (Receipt)"
-                        maxLength={11}
-                        className="w-full bg-slate-50 border border-slate-100 p-5 rounded-2xl font-bold text-slate-700 outline-none focus:border-emerald-500 transition-colors"
-                        value={customerPhone}
-                        onChange={(e) => setCustomerPhone(e.target.value.replace(/[^0-9]/g, ''))}
-                    />
-                </div>
-
-                <div className="animate-in fade-in mt-3">
-                     <input 
-                        type="email" placeholder="Email Address (Optional for Receipt)"
-                        className="w-full bg-slate-50 border border-slate-100 p-5 rounded-2xl font-bold text-slate-700 outline-none focus:border-emerald-500 transition-colors"
-                        value={customerEmail}
-                        onChange={(e) => setCustomerEmail(e.target.value)}
-                    />
-                </div>
-
-                {status && (
-                    <div className={`p-5 rounded-2xl border flex items-center gap-4 animate-in fade-in shadow-sm ${status.includes('Success') || status.includes('Secured') || status.includes('Initiating') ? 'bg-emerald-50 border-emerald-100 text-emerald-800' : status.includes('Processing') ? 'bg-orange-50 border-orange-100 text-orange-800' : 'bg-blue-50 border-blue-100 text-blue-800'}`}>
-                        {status.includes('Success') ? <CheckCircle2 size={24}/> : <Loader2 size={24} className="animate-spin"/>}
-                        <p className="text-sm font-black tracking-tight">{status}</p>
-                    </div>
-                )}
-
-                <button 
-                    onClick={() => setIsConfirmModalOpen(true)}
-                    disabled={isVerifying || !isFormValid || isProcessing}
-                    className="w-full bg-slate-900 hover:bg-black text-white font-black py-6 rounded-3xl flex items-center justify-center gap-3.5 transition-all active:scale-95 disabled:opacity-30 shadow-xl shadow-slate-900/20 text-lg tracking-tight"
-                >
-                    {isProcessing ? <Loader2 size={24} className="animate-spin text-emerald-400"/> : <ShieldCheck size={24} className="text-emerald-400" />}
-                    {isProcessing ? 'PROCESSING...' : `TRANSFER ${cryptoToCharge} ${selectedToken.symbol}`}
-                </button>
-            </div>
-          </div>
-        )}
 
         {/* ======================================= */}
         {/* PAY BLOCK */}
@@ -1799,39 +1464,23 @@ export default function Home() {
         )}
 
         <footer className="mt-12 w-full border-t border-slate-200 pt-8 pb-4 flex flex-col items-center gap-5 animate-in fade-in">
-
           <div className="flex items-center gap-4">
-            <a 
-              href="https://x.com/AbaPays" 
-              target="_blank" 
-              rel="noopener noreferrer" 
-              className="w-12 h-12 rounded-full border-2 border-slate-200 bg-white flex items-center justify-center text-slate-500 hover:text-emerald-600 hover:border-emerald-200 hover:bg-emerald-50 transition-all shadow-sm group"
-            >
-              <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="group-hover:scale-110 transition-transform">
-                <path d="M22 4s-.7 2.1-2 3.4c1.6 10-9.4 17.3-18 11.6 2.2.1 4.4-.6 6-2C3 15.5.5 9.6 3 5c2.2 2.6 5.6 4.1 9 4-.9-4.2 4-6.6 7-3.8 1.1 0 3-1.2 3-1.2z"></path>
-              </svg>
+            <a href="https://x.com/AbaPays" target="_blank" rel="noopener noreferrer" className="w-12 h-12 rounded-full border-2 border-slate-200 bg-white flex items-center justify-center text-slate-500 hover:text-emerald-600 hover:border-emerald-200 hover:bg-emerald-50 transition-all shadow-sm group">
+              <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="group-hover:scale-110 transition-transform"><path d="M22 4s-.7 2.1-2 3.4c1.6 10-9.4 17.3-18 11.6 2.2.1 4.4-.6 6-2C3 15.5.5 9.6 3 5c2.2 2.6 5.6 4.1 9 4-.9-4.2 4-6.6 7-3.8 1.1 0 3-1.2 3-1.2z"></path></svg>
             </a>
-            <a 
-              href="https://t.me/AbaPays" 
-              target="_blank" 
-              rel="noopener noreferrer" 
-              className="w-12 h-12 rounded-full border-2 border-slate-200 bg-white flex items-center justify-center text-slate-500 hover:text-emerald-600 hover:border-emerald-200 hover:bg-emerald-50 transition-all shadow-sm group"
-            >
+            <a href="https://t.me/AbaPays" target="_blank" rel="noopener noreferrer" className="w-12 h-12 rounded-full border-2 border-slate-200 bg-white flex items-center justify-center text-slate-500 hover:text-emerald-600 hover:border-emerald-200 hover:bg-emerald-50 transition-all shadow-sm group">
               <Send size={20} className="ml-[-2px] mt-[2px] group-hover:scale-110 transition-transform" /> 
             </a>
           </div>
-
           <div className="flex items-center gap-2.5 bg-white px-4 py-1.5 rounded-full shadow-sm border border-slate-100">
              <ShieldCheck size={16} className="text-emerald-600" />
              <span className="text-[11px] font-bold text-slate-500 uppercase tracking-widest">Secured by Celo Network</span>
           </div>
-
           <div className="flex gap-6">
             <Link href="/docs" className="text-[10px] font-black text-slate-400 hover:text-emerald-600 uppercase transition-colors">Docs & FAQ</Link>
             <Link href="/terms" className="text-[10px] font-black text-slate-400 hover:text-emerald-600 uppercase transition-colors">Terms</Link>
             <Link href="/privacy" className="text-[10px] font-black text-slate-400 hover:text-emerald-600 uppercase transition-colors">Privacy</Link>
           </div>
-
           <p className="text-[9px] font-medium text-slate-300 uppercase tracking-[0.2em] mt-1">© 2026 MASONODE TECHNOLOGIES LIMITED • v3.0</p>
         </footer>
       </div>
