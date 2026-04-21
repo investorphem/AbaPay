@@ -223,6 +223,7 @@ export default function Home() {
   const isFormValid = useMemo(() => {
     if (isCurrentServiceDisabled) return false;
 
+    // ⚡ INTERNATIONAL STRICT VALIDATION ⚡
     if (isInternational) {
         if (!selectedIntlProduct || !selectedIntlOperator || accountNumber.length < 6) return false;
         if (!selectedIntlVariation) return false;
@@ -305,6 +306,7 @@ export default function Home() {
     }
   };
 
+  // ⚡ BENEFICIARY HELPER FUNCTIONS ⚡
   const getCurrentProviderKey = () => {
     if (activeTab === "bank") return selectedBank?.variation_code;
     if (activeTab === "education") return educationProvider;
@@ -671,6 +673,7 @@ export default function Home() {
         const operatorId = selectedIntlOperator.operator_id || selectedIntlOperator.id;
         const typeId = selectedIntlProduct.product_type_id || selectedIntlProduct.id;
         setIsIntlLoading(true); setIntlVariations([]); setSelectedIntlVariation(null); setIntlCurrency("");
+        
         fetch(`/api/intl?action=variations&operator_id=${operatorId}&type_id=${typeId}`)
           .then(res => res.json())
           .then(data => {
@@ -938,13 +941,14 @@ export default function Home() {
           </div>
         </div>
 
-        {/* THE TABS */}
+        {/* THE TABS (Grey out foreign) */}
         <div className="flex gap-2 bg-slate-200/50 p-1.5 rounded-2xl mb-6 shadow-inner overflow-x-auto no-scrollbar">
             <button onClick={() => handleTabSwitch("pay")} className={`flex-1 min-w-[75px] py-3 rounded-xl text-[10px] sm:text-xs font-black transition-all ${activeTab === 'pay' ? 'bg-white text-emerald-600 shadow-xl' : 'text-slate-500 hover:text-slate-700'}`}>BILLS</button>
             <button onClick={() => handleTabSwitch("bank")} disabled={isInternational} className={`flex-1 min-w-[75px] py-3 rounded-xl text-[10px] sm:text-xs font-black transition-all ${isInternational ? 'opacity-30 cursor-not-allowed' : activeTab === 'bank' ? 'bg-white text-emerald-600 shadow-xl' : 'text-slate-500 hover:text-slate-700'}`}>TRANSFER</button>
             <button onClick={() => handleTabSwitch("education")} disabled={isInternational} className={`flex-1 min-w-[75px] py-3 rounded-xl text-[10px] sm:text-xs font-black transition-all ${isInternational ? 'opacity-30 cursor-not-allowed' : activeTab === 'education' ? 'bg-white text-emerald-600 shadow-xl' : 'text-slate-500 hover:text-slate-700'}`}>EDUCATION</button>
             <button onClick={() => handleTabSwitch("history")} className={`flex-1 min-w-[75px] py-3 rounded-xl text-[10px] sm:text-xs font-black transition-all ${activeTab === 'history' ? 'bg-white text-emerald-600 shadow-xl' : 'text-slate-500 hover:text-slate-700'}`}>HISTORY</button>
         </div>
+
 
         {/* ======================================= */}
         {/* PAY BLOCK */}
@@ -1544,7 +1548,9 @@ export default function Home() {
           </div>
         )}
 
+        {/* ======================================= */}
         {/* HISTORY BLOCK */}
+        {/* ======================================= */}
         {activeTab === 'history' && (
           <HistoryTab 
             transactions={transactions} 
