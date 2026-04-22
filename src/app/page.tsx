@@ -1001,13 +1001,12 @@ export default function Home() {
                         {isInternational ? "Product Type" : "Provider"}
                     </label>
 
-                    {isInternational ? (
-                        <div className="flex flex-col gap-4">
+                                        {isInternational ? (
+                        <div className="w-full space-y-4">
                             <button 
                                 onClick={() => {
                                     if (intlProductTypes.length === 0) return;
                                     
-                                    // ⚡ FIX: Use raw SVG Data URIs so no external files are needed! ⚡
                                     const getIcon = (name: string) => name.toLowerCase().includes('data') 
                                         ? "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='24' height='24' viewBox='0 0 24 24' fill='none' stroke='%230ea5e9' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M5 12.55a11 11 0 0 1 14.08 0'/%3E%3Cpath d='M1.42 9a16 16 0 0 1 21.16 0'/%3E%3Cpath d='M8.53 16.11a6 6 0 0 1 6.95 0'/%3E%3Cline x1='12' y1='20' x2='12.01' y2='20'/%3E%3C/svg%3E" 
                                         : "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='24' height='24' viewBox='0 0 24 24' fill='none' stroke='%2310b981' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpolygon points='13 2 3 14 12 14 11 22 21 10 12 10 13 2'/%3E%3C/svg%3E";
@@ -1064,7 +1063,6 @@ export default function Home() {
                                                        src={selectedIntlOperator.operator_image || '/logo.png'} 
                                                        alt="operator" 
                                                        className="w-8 h-8 object-contain" 
-                                                       // ⚡ FIX: Add onError fallback to stop broken images! ⚡
                                                        onError={(e) => { e.currentTarget.src = '/logo.png'; }} 
                                                     />
                                                 </div>
@@ -1079,7 +1077,6 @@ export default function Home() {
                             )}
                         </div>
                     ) : (
-
 
 
                             {selectedIntlProduct && (
