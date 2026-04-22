@@ -6,7 +6,7 @@ import {
   ArrowLeft, ShieldCheck, Zap, Globe, 
   Lock, Wallet, ChevronDown, BookOpen,
   Star, Gift, Smartphone, Share2, HelpCircle,
-  Send // ⚡ Twitter removed from here
+  Send 
 } from "lucide-react";
 
 export default function DocsPage() {
@@ -33,10 +33,10 @@ export default function DocsPage() {
             <div className="bg-emerald-50 w-14 h-14 rounded-2xl flex items-center justify-center mb-6 border border-emerald-100">
               <Globe className="text-emerald-500" size={28} />
             </div>
-            <h2 className="text-2xl font-black mb-4 tracking-tight">The Vision: Real-World Utility</h2>
+            <h2 className="text-2xl font-black mb-4 tracking-tight">The Vision: Global Web3 Utility</h2>
             <p className="text-slate-600 leading-relaxed font-medium">
-              AbaPay is a decentralized payment gateway designed to bridge the gap between global Web3 liquidity and local African utility systems. 
-              Traditional utility apps require you to deposit fiat and trust centralized servers. AbaPay reimagines this by allowing users to pay for real-world bills—Electricity, Data, Airtime, Cable TV, and Education PINs—directly from their self-custodial wallets using stablecoins, settled in seconds on the blockchain.
+              AbaPay is a decentralized payment gateway designed to bridge the gap between global Web3 liquidity and real-world utility systems across Africa and the globe. 
+              Traditional utility apps require you to deposit local fiat and trust centralized servers. AbaPay reimagines this by allowing users to pay for real-world bills—International Airtime/Data, domestic Electricity, Cable TV, and Bank Transfers—directly from their self-custodial wallets using stablecoins, settled in seconds on the blockchain.
             </p>
           </section>
 
@@ -48,15 +48,15 @@ export default function DocsPage() {
             <div className="space-y-6">
               <FeatureBlock 
                 icon={<Wallet />} title="No Deposits. No Fiat Wallets." 
-                desc="You never have to 'fund' an AbaPay account. Your money stays securely in your own wallet (MetaMask, Trust Wallet, etc.) until the exact moment you pay a bill."
+                desc="You never have to 'fund' an AbaPay account. Your money stays securely in your own wallet (MetaMask, MiniPay, Trust Wallet, etc.) until the exact moment you pay a bill."
               />
               <FeatureBlock 
                 icon={<Lock />} title="Smart Contract Escrow" 
-                desc="Your crypto isn't blindly sent to an admin. It is locked in our secure Smart Contract on the Celo network. The contract only releases the funds to our treasury after the local utility provider confirms the transaction."
+                desc="Your crypto isn't blindly sent to an admin. It is locked in our secure Smart Contract on the Celo network. The contract only releases the funds to our treasury after the utility provider confirms the transaction."
               />
               <FeatureBlock 
                 icon={<Globe />} title="Borderless Payments" 
-                desc="You do not need a Nigerian bank account to pay bills in Nigeria. Whether you are in Lagos, London, or Los Angeles, as long as you have stablecoins on a supported network, you can vend utilities instantly."
+                desc="You do not need a local bank account to pay bills in supported countries. Whether you are in Lagos, London, or Los Angeles, as long as you have stablecoins, you can top-up phones in Ghana, pay electricity in Nigeria, or send data to Kenya instantly."
               />
             </div>
           </section>
@@ -75,7 +75,7 @@ export default function DocsPage() {
                 <h3 className="text-sm font-black text-purple-900 uppercase tracking-widest">Earning Ratio</h3>
                 <p className="text-2xl font-black text-emerald-600 bg-white px-4 py-2 rounded-2xl shadow-sm border border-purple-100">₦1,000 = <span className="text-purple-600">1.00 Point</span></p>
               </div>
-              <p className="text-sm text-purple-800 font-medium">Points are calculated automatically based on your total transaction volume. Spend ₦500? You earn 0.50 points instantly!</p>
+              <p className="text-sm text-purple-800 font-medium">Points are calculated automatically based on your total transaction volume. Spend the equivalent of ₦500 in any currency? You earn 0.50 points instantly!</p>
             </div>
 
             <div className="bg-slate-50 border border-slate-100 p-5 rounded-2xl flex items-start gap-4">
@@ -95,7 +95,7 @@ export default function DocsPage() {
               <Smartphone className="text-blue-500" size={20} /> Saved Beneficiaries (Recents)
             </h2>
             <p className="text-slate-600 font-medium mb-6 leading-relaxed">
-               Typing the same meter number or phone number every time is stressful. AbaPay automatically saves your successful transactions as "Recent" shortcuts right below the input field.
+               Typing the same meter number or international phone number every time is stressful. AbaPay automatically saves your successful transactions as "Recent" shortcuts right below the input field.
             </p>
 
             <div className="bg-blue-50 border border-blue-100 p-6 rounded-3xl">
@@ -150,20 +150,20 @@ export default function DocsPage() {
               <ShieldCheck className="text-emerald-500" size={20} /> Security & Failsafes
             </h2>
             <p className="text-slate-600 font-medium mb-6">
-              African utility networks can occasionally experience downtime. AbaPay is built with <strong className="text-slate-900">Defensive Programming</strong> to ensure you never lose money to a dropped connection.
+              Domestic and international utility networks can occasionally experience downtime. AbaPay is built with <strong className="text-slate-900">Defensive Programming</strong> to ensure you never lose money to a dropped connection.
             </p>
             <ul className="space-y-4">
               <li className="bg-slate-50 p-5 rounded-2xl border border-slate-100">
                 <strong className="block text-sm font-black text-slate-800 mb-1">Strict Token Requirements</strong>
-                <span className="text-sm text-slate-600 font-medium leading-relaxed">If a provider claims "Success" but fails to generate your 20-digit Electricity Token, our system refuses to accept it. Your transaction goes into a PENDING state while our Requery Engine safely hunts down your token.</span>
+                <span className="text-sm text-slate-600 font-medium leading-relaxed">If a provider claims "Success" but fails to generate your Electricity Token or Airtime PIN, our system refuses to accept it. Your transaction goes into a PENDING state while our Requery Engine safely hunts down your token.</span>
               </li>
               <li className="bg-slate-50 p-5 rounded-2xl border border-slate-100">
                 <strong className="block text-sm font-black text-slate-800 mb-1">Rate Mismatch Protection</strong>
-                <span className="text-sm text-slate-600 font-medium leading-relaxed">Our platform locks in your exchange rate at the moment of the transaction. If you underpay due to slippage, the smart contract instantly reverts the transaction to protect your funds.</span>
+                <span className="text-sm text-slate-600 font-medium leading-relaxed">Our platform locks in your exchange rate at the moment of the transaction. If you underpay due to crypto market slippage, the smart contract instantly reverts the transaction to protect your funds.</span>
               </li>
               <li className="bg-slate-50 p-5 rounded-2xl border border-slate-100">
                 <strong className="block text-sm font-black text-slate-800 mb-1">Guaranteed Auto-Refunds</strong>
-                <span className="text-sm text-slate-600 font-medium leading-relaxed">If a utility provider is completely offline and rejects the payment, your transaction is FAILED. Because funds are held in escrow, you become immediately eligible for a crypto refund.</span>
+                <span className="text-sm text-slate-600 font-medium leading-relaxed">If an international telco or utility provider is completely offline and rejects the payment, your transaction is FAILED. Because funds are held in escrow, you become immediately eligible for a crypto refund.</span>
               </li>
             </ul>
           </section>
@@ -172,11 +172,12 @@ export default function DocsPage() {
           <section className="bg-white border border-slate-100 rounded-[2.5rem] p-8 shadow-sm animate-in fade-in slide-in-from-bottom-4">
             <h2 className="text-xl font-black mb-6 tracking-tight">Frequently Asked Questions</h2>
             <div className="space-y-3">
+              <FAQItem q="Which countries do you support?" a="We support comprehensive utility payments (Electricity, Transfers, Cable TV, Education) in Nigeria, and Mobile Airtime/Data top-ups across 30+ international countries including Ghana, Kenya, South Africa, the US, and the UK." />
               <FAQItem q="What cryptocurrencies do you accept?" a="Currently, AbaPay supports major stablecoins designed for everyday commerce. We accept USD₮ (Tether), USDC, and cUSD natively." />
               <FAQItem q="Which blockchain networks are supported?" a="AbaPay is currently live on the Celo Network, chosen for its blazing-fast transaction speeds, sub-cent gas fees, and mobile-first architecture." />
-              <FAQItem q="Do you charge hidden fees?" a="No. The live Crypto-to-Naira exchange rate is openly displayed. Certain complex utilities (like Electricity Meter Verification or Education PINs) carry a flat ₦100 network fee, which is explicitly shown in your total before you pay." />
+              <FAQItem q="Do you charge hidden fees?" a="No. The live Crypto-to-Fiat exchange rate (e.g., NGN, GHS, KES) is openly displayed. Certain heavy-infrastructure utilities (like Bank Transfers or Electricity) carry a small flat processing fee, which is explicitly shown in your total before you pay. Airtime and Data are completely free of platform fees." />
               <FAQItem q="How long does a transaction take?" a="Because we build on high-speed EVM networks, the blockchain portion confirms in roughly 3 to 5 seconds. The utility delivery typically arrives immediately after block confirmation." />
-              <FAQItem q="What happens if I pay, but my electricity token isn't generated?" a="Utility networks occasionally lag. If this happens, your dashboard will display a 'Transaction Processing' badge. Our backend Requery API will continuously ping the utility provider until they generate your 20-digit token." />
+              <FAQItem q="What happens if I pay, but my electricity token isn't generated?" a="Utility networks occasionally lag. If this happens, your dashboard will display a 'Transaction Processing' badge. Our backend Requery API will continuously ping the utility provider until they generate your token." />
               <FAQItem q="Who controls the funds?" a="You do. AbaPay is a non-custodial gateway. We do not have access to your private keys, and we cannot move your funds without you explicitly signing a transaction in your wallet." />
             </div>
           </section>
@@ -204,7 +205,6 @@ export default function DocsPage() {
               rel="noopener noreferrer" 
               className="w-12 h-12 rounded-full border-2 border-slate-200 bg-white flex items-center justify-center text-slate-500 hover:text-emerald-600 hover:border-emerald-200 hover:bg-emerald-50 transition-all shadow-sm group"
             >
-              {/* Send icon perfectly mimics Telegram's vibe */}
               <Send size={20} className="ml-[-2px] mt-[2px] group-hover:scale-110 transition-transform" /> 
             </a>
           </div>
