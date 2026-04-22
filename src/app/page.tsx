@@ -66,7 +66,7 @@ export default function Home() {
   const [educationVariations, setEducationVariations] = useState<any[]>([]);
   const [selectedEducationPlan, setSelectedEducationPlan] = useState<any>(null);
 
-  const [activeCountry, setActiveCountry] = useState<{code: string, name: string, flag?: string}>(SUPPORTED_COUNTRIES[0]);
+  const [activeCountry, setActiveCountry] = useState<{code: string, name: string, currency?: string, flag?: string}>(SUPPORTED_COUNTRIES[0]);
   const [activeService, setActiveService] = useState(SERVICES[0]);
   const [elecProvider, setElecProvider] = useState(ELECTRICITY_PROVIDER_IDS[0]);
   const [cableProvider, setCableProvider] = useState(CABLE_PROVIDERS_LIST[0].serviceID);
@@ -105,6 +105,7 @@ export default function Home() {
   const [isFetchingBalance, setIsFetchingBalance] = useState(false);
   const [exchangeRate, setExchangeRate] = useState<number>(1550); 
   const [transactions, setTransactions] = useState<any[]>([]);
+  const [globalFiatRates, setGlobalFiatRates] = useState<Record<string, number>>({});
 
   const isMainnet = process.env.NEXT_PUBLIC_NETWORK === "celo";
   const activeChain = isMainnet ? celo : celoSepolia;
@@ -183,11 +184,29 @@ export default function Home() {
     return { cryptoToCharge: crypto.toFixed(4), currentFee: fee };
   }, [calculatedNairaAmount, exchangeRate, activeService, activeTab]);
 
-  const walletBalanceNaira = useMemo(() => {
+  const walletFiatDisplay = useMemo(() => {
     const bal = parseFloat(walletBalance);
     if (isNaN(bal)) return "0.00";
-    return (bal * exchangeRate).toLocaleString('en-NG', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
-  }, [walletBalance, exchangeRate]);
+
+    if (isInternational) {
+        const currencyCode = intlCurrency || (activeCountry as any).currency || activeCountry.code;
+        
+        if (selectedIntlVariation && selectedIntlVariation.variation_rate) {
+            const rate = parseFloat(selectedIntlVariation.variation_rate);
+            const foreignBal = (bal * exchangeRate) / rate;
+            return `${currencyCode} ${foreignBal.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+        }
+        
+        const liveRate = globalFiatRates[currencyCode];
+        if (liveRate) {
+            const foreignBal = bal * liveRate;
+            return `${currencyCode} ${foreignBal.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+        }
+        return `${currencyCode} ...`;
+    }
+    
+    return `₦${(bal * exchangeRate).toLocaleString('en-NG', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+  }, [walletBalance, exchangeRate, isInternational, activeCountry, intlCurrency, selectedIntlVariation, globalFiatRates]);
 
   const checkoutDetails = useMemo(() => {
     let title = ""; let recipient = accountNumber; let recipientLabel = "Recipient";
@@ -259,6 +278,7 @@ export default function Home() {
   };
 
   const handleProviderChange = (newProvider: string, type: 'internet' | 'telecom' | 'cable' | 'elec' | 'bank' | 'education') => {
+    setIsVerifying(false); setStatus(""); 
     setNairaAmount(""); setAccountNumber(""); setCustomerName(null); setCustomerPhone(""); setCustomerEmail(""); setMeterAddress(null); setDynamicElecMin(1000); setMeterAccountType(null);
     if (type === 'internet') { setInternetVariations([]); setInternetProvider(newProvider); setSelectedInternetPlan(null); setInternetAccountId(null); } 
     else if (type === 'telecom') { setTelecomProvider(newProvider); } 
@@ -269,6 +289,7 @@ export default function Home() {
   };
 
   const handleResetService = (s: any) => {
+    setIsVerifying(false); setStatus(""); 
     setActiveService(s); setAccountNumber(""); setCustomerName(null); setNairaAmount(""); setCustomerPhone(""); setCustomerEmail(""); 
     setCableCurrentBouquet(null); setCableRenewAmount(null); setSelectedCablePlan(null);
     setCableSubscriptionType("renew"); setSelectedBank(null); setSelectedInternetPlan(null); setInternetAccountId(null);
@@ -563,6 +584,13 @@ export default function Home() {
   }, [activeChain]);
 
   useEffect(() => {
+    fetch('https://open.er-api.com/v6/latest/USD')
+      .then(res => res.json())
+      .then(data => { if(data && data.rates) setGlobalFiatRates(data.rates); })
+      .catch(() => {});
+  }, []);
+
+  useEffect(() => {
     if (!address) { setTransactions([]); return; }
     try { const savedLocalHistory = localStorage.getItem(`abapay_history_${address}`); if (savedLocalHistory) setTransactions(JSON.parse(savedLocalHistory)); } catch (e) {}
 
@@ -613,7 +641,11 @@ export default function Home() {
       .then(data => {
           const countriesArr = extractVtpassArray(data);
           if (countriesArr && countriesArr.length > 0) {
-              const fetched = countriesArr.map((c: any) => ({ code: c.code || c.country_code || c.id, name: c.name || c.country || c.title })).filter((c:any) => c.code && c.name);
+              const fetched = countriesArr.map((c: any) => ({ 
+                  code: c.code || c.country_code || c.id, 
+                  name: c.name || c.country || c.title,
+                  currency: c.currency || c.currency_code || c.Currency 
+              })).filter((c:any) => c.code && c.name);
               const merged = [...SUPPORTED_COUNTRIES.filter(c=>!c.disabled), ...fetched.filter((c:any) => c.code !== "NG")];
               setIntlCountries(merged);
           } else {
@@ -797,7 +829,7 @@ export default function Home() {
                  <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-2">Total Payable</p>
                  
                  <h2 className="text-4xl font-black text-slate-900 mb-2">
-                    {isInternational ? `${intlCurrency || activeCountry.code} ${displayForeignAmount}` : `₦${(parseFloat(calculatedNairaAmount || "0") + currentFee).toLocaleString()}`}
+                    {isInternational ? `${intlCurrency || activeCountry.currency || activeCountry.code} ${displayForeignAmount}` : `₦${(parseFloat(calculatedNairaAmount || "0") + currentFee).toLocaleString()}`}
                  </h2>
 
                  <div className="flex items-center justify-center gap-1.5 text-emerald-600 font-bold bg-emerald-50 w-max mx-auto px-4 py-1.5 rounded-full text-sm shadow-inner">
@@ -961,7 +993,7 @@ export default function Home() {
                       {isFetchingBalance ? <Loader2 size={14} className="animate-spin text-emerald-500"/> : <Coins size={14} className="text-emerald-500"/>}
                       <div className="flex flex-col items-end">
                         <p className="font-mono font-black text-sm text-slate-800 leading-none">{walletBalance}</p>
-                        {!isFetchingBalance && <p className="text-[9px] font-bold text-slate-400 mt-1 tracking-tight">≈ ₦{walletBalanceNaira}</p>}
+                        {!isFetchingBalance && <p className="text-[9px] font-bold text-slate-400 mt-1 tracking-tight">≈ {walletFiatDisplay}</p>}
                       </div>
                     </div>
                   </div>
@@ -1096,7 +1128,7 @@ export default function Home() {
                             {currentFee > 0 && <p className="text-[9px] font-black text-orange-500">+₦{currentFee} FEE</p>}
                         </div>
                     </div>
-                    {nairaAmount && !isFixedPlan && (parseFloat(nairaAmount) < dynamicMinAmount || parseFloat(nairaAmount) > dynamicMaxAmount) && (
+                    {nairaAmount && (parseFloat(nairaAmount) < dynamicMinAmount || parseFloat(nairaAmount) > dynamicMaxAmount) && (
                         <div className="bg-red-50 border border-red-200 p-3 rounded-xl mt-2 flex items-center gap-2 animate-in fade-in">
                             <AlertTriangle size={16} className="text-red-500 shrink-0" />
                             <p className="text-xs font-black text-red-600">
@@ -1126,7 +1158,7 @@ export default function Home() {
                 </div>
 
                 {status && (
-                    <div className={`p-5 rounded-2xl border flex items-center gap-4 animate-in fade-in shadow-sm ${status.includes('Success') || status.includes('Secured') || status.includes('Initiating') ? 'bg-emerald-50 border-emerald-100 text-emerald-800' : status.includes('Processing') ? 'bg-orange-50 border-orange-100 text-orange-800' : 'bg-blue-50 border-blue-100 text-blue-800'}`}>
+                    <div className={`p-5 rounded-2xl border flex items-center gap-4 animate-in fade-in ${status.includes('Success') ? 'bg-emerald-50 border-emerald-100' : 'bg-blue-50 border-blue-100'}`}>
                         {status.includes('Success') ? <CheckCircle2 size={24}/> : <Loader2 size={24} className="animate-spin"/>}
                         <p className="text-sm font-black tracking-tight">{status}</p>
                     </div>
@@ -1165,7 +1197,7 @@ export default function Home() {
                       {isFetchingBalance ? <Loader2 size={14} className="animate-spin text-emerald-500"/> : <Coins size={14} className="text-emerald-500"/>}
                       <div className="flex flex-col items-end">
                         <p className="font-mono font-black text-sm text-slate-800 leading-none">{walletBalance}</p>
-                        {!isFetchingBalance && <p className="text-[9px] font-bold text-slate-400 mt-1 tracking-tight">≈ ₦{walletBalanceNaira}</p>}
+                        {!isFetchingBalance && <p className="text-[9px] font-bold text-slate-400 mt-1 tracking-tight">≈ {walletFiatDisplay}</p>}
                       </div>
                     </div>
                   </div>
@@ -1222,7 +1254,7 @@ export default function Home() {
                             return (
                                 <div className="flex gap-2 overflow-x-auto no-scrollbar mt-3 animate-in fade-in items-center">
                                     <span className="text-[9px] font-black uppercase text-slate-400 shrink-0">Recent:</span>
-                                    {list.map((ben, idx) => (
+                                    {list.map((ben: any, idx: number) => (
                                         <button 
                                             key={idx}
                                             onClick={(e) => {
@@ -1376,7 +1408,7 @@ export default function Home() {
                       {isFetchingBalance ? <Loader2 size={14} className="animate-spin text-emerald-500"/> : <Coins size={14} className="text-emerald-500"/>}
                       <div className="flex flex-col items-end">
                         <p className="font-mono font-black text-sm text-slate-800 leading-none">{walletBalance}</p>
-                        {!isFetchingBalance && <p className="text-[9px] font-bold text-slate-400 mt-1 tracking-tight">≈ ₦{walletBalanceNaira}</p>}
+                        {!isFetchingBalance && <p className="text-[9px] font-bold text-slate-400 mt-1 tracking-tight">≈ {walletFiatDisplay}</p>}
                       </div>
                     </div>
                   </div>
@@ -1389,7 +1421,7 @@ export default function Home() {
                     </label>
 
                     {isInternational ? (
-                        <div className="flex flex-col gap-4">
+                        <div className="w-full space-y-4">
                             <button 
                                 onClick={() => {
                                     if (intlProductTypes.length === 0) return;
@@ -1663,7 +1695,7 @@ export default function Home() {
                                      )}
                                      <div className="pt-3 mt-2 border-t border-emerald-200/50 flex justify-between items-end">
                                          {/* ⚡ HIDING NGN, SHOWING LOCAL CURRENCY ⚡ */}
-                                         <p className="font-black text-emerald-600 text-xl">{intlCurrency || activeCountry.code} {displayForeignAmount}</p>
+                                         <p className="font-black text-emerald-600 text-xl">{intlCurrency || activeCountry.currency || activeCountry.code} {displayForeignAmount}</p>
                                          <p className="text-[10px] text-slate-500 font-bold">{cryptoToCharge} {selectedToken.symbol}</p>
                                       </div>
                                   </div>
@@ -1689,12 +1721,12 @@ export default function Home() {
                                           <div>
                                             <p className="font-black text-slate-800 text-xs">{plan.name}</p>
                                             <p className="text-[9px] text-slate-400 font-bold mt-0.5">
-                                                {isFixed ? `Cost: ${cryptoCostEstimate} ${selectedToken.symbol}` : `Rate: ~${cryptoRateEstimate} ${selectedToken.symbol} per ${intlCurrency || activeCountry.code}`}
+                                                {isFixed ? `Cost: ${cryptoCostEstimate} ${selectedToken.symbol}` : `Rate: ~${cryptoRateEstimate} ${selectedToken.symbol} per ${intlCurrency || activeCountry.currency || activeCountry.code}`}
                                             </p>
                                           </div>
                                           {/* ⚡ HIDING NGN, SHOWING LOCAL CURRENCY ⚡ */}
                                           <p className="font-black text-emerald-600 text-sm group-hover:scale-110 transition-transform">
-                                            {isFixed ? `${intlCurrency || activeCountry.code} ${foreignAmt.toLocaleString()}` : "Flexible"}
+                                            {isFixed ? `${intlCurrency || activeCountry.currency || activeCountry.code} ${foreignAmt.toLocaleString()}` : "Flexible"}
                                           </p>
                                         </button>
                                       )
