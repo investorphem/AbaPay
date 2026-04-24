@@ -314,8 +314,10 @@ export async function POST(req: Request) {
               <div style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; background-color: #f4f4f5; padding: 40px 0; margin: 0;">
                 <div style="max-width: 600px; margin: 0 auto; background-color: #ffffff; border-radius: 12px; overflow: hidden; box-shadow: 0 4px 6px rgba(0, 0, 0, 0.05);">
                   
-                  <div style="background-color: #000000; padding: 30px; text-align: center;">
-                    <h1 style="color: #ffffff; margin: 0; font-size: 24px; letter-spacing: 1px;">AbaPay</h1>
+                                    <div style="background: linear-gradient(135deg, #18181b 0%, #000000 100%); padding: 40px 30px; text-align: center; border-bottom: 3px solid #10b981;">
+                    
+                    <img src="https://abapays.com/logo.png" alt="AbaPay" style="max-height: 45px; width: auto; margin: 0 auto; display: block;" />
+                    
                   </div>
 
                   <div style="padding: 40px 30px;">
