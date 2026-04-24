@@ -105,7 +105,7 @@ export default function PrivacyPolicy() {
               <strong>Account & Data Deletion Request:</strong> If you wish to permanently delete your transaction history and associated utility data from the AbaPay servers, you may submit a formal Data Deletion Request. 
             </p>
             <p className="text-red-800 font-bold">
-              To request deletion, please email <a href="mailto:privacy@abapays.com" className="underline hover:text-red-600">privacy@abapay.com</a> with your connected Wallet Address. We will process your deletion request within 30 days, subject to mandatory global AML retention laws.
+              To request deletion, please email <a href="mailto:privacy@abapays.com" className="underline hover:text-red-600">privacy@abapays.com</a> with your connected Wallet Address. We will process your deletion request within 30 days, subject to mandatory global AML retention laws.
             </p>
           </section>
 
