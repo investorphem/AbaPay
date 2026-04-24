@@ -305,9 +305,10 @@ export async function POST(req: Request) {
         }
 
         if (email) {
-          const emailPromise = resend.emails.send({
+                    const emailPromise = resend.emails.send({
             from: 'AbaPay Receipts <receipts@abapays.com>',
             to: email,
+            reply_to: 'support@abapays.com', // <--- ADD THIS LINE
             subject: `AbaPay Receipt - ${network} ${serviceCategory}`,
             html: `
               <div style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; background-color: #f4f4f5; padding: 40px 0; margin: 0;">
