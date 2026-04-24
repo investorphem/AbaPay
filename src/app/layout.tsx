@@ -14,8 +14,7 @@ const geistMono = Geist_Mono({
 
 export const metadata: Metadata = {
   title: "AbaPay | Seamless Payments",
-  description: "AbaPay: Decentralized Utility & Fiat Settlement Layer
-AbaPay is a Web3-native infrastructure platform designed to eliminate the friction of off-ramping digital assets in emerging markets. Built as a direct-to-utility settlement gateway, AbaPay allows users of non-custodial wallets (such as Celo MiniPay) to seamlessly execute stablecoin transactions that instantly settle as real-world fiat value—covering electricity, telecommunications, and education infrastructure. Engineered with a Next.js/Supabase architecture, the platform features automated concurrent routing, enterprise-grade fiat API integrations, and smart-fallback notification systems, effectively bridging the gap between decentralized finance and everyday utility.",
+  description: "AbaPay is a Web3-native infrastructure platform eliminating off-ramp friction. Instantly settle stablecoin transactions into real-world fiat utility value.",
   manifest: "/site.webmanifest",
   icons: {
     icon: [
