@@ -57,8 +57,7 @@ function getStrictRequestId() {
 export async function POST(req: Request) {
   try {
     const body = await req.json();
-    
-    // ⚡ Removed isForeign from destructuring, we will calculate it dynamically
+
     const { 
       serviceID, serviceCategory, network, billersCode, amount, 
       token: tokenSymbol, txHash, variation_code, phone, 
@@ -67,7 +66,6 @@ export async function POST(req: Request) {
       meter_account_type
     } = body;
 
-    // ⚡ DYNAMICALLY CHECK IF INTERNATIONAL
     const isForeign = serviceID === 'foreign-airtime';
 
     const appMode = process.env.NEXT_PUBLIC_APP_MODE || "sandbox";
@@ -214,7 +212,6 @@ export async function POST(req: Request) {
       });
       payData = await payRes.json();
     } catch (e: any) {
-      // ⚡ TRACK FETCH TIMEOUT / CRASH
       await supabase.from('transactions').update({ 
           status: 'FAILED_VTPASS_CRASH',
           error_code: '502_TIMEOUT',
@@ -224,7 +221,6 @@ export async function POST(req: Request) {
       return NextResponse.json({ success: false, code: "VTPASS_CRASH", message: "Network timeout while contacting provider. Please try again." }, { status: 200 }); 
     }
 
-    // ⚡ TRACK VTPASS REJECTIONS (e.g. 027, 011)
     if (!payData.content || !payData.content.transactions) {
         const friendlyMessage = error_messages[payData.code as string] || "Service is temporarily undergoing maintenance. Please try again later.";
         const rawTechnicalError = payData.response_description || payData.content?.errors || "Unknown VTpass Rejection";
@@ -310,27 +306,74 @@ export async function POST(req: Request) {
 
         if (email) {
           const emailPromise = resend.emails.send({
-            from: 'AbaPay <receipts@abapays.com>',
+            from: 'AbaPay Receipts <receipts@abapays.com>',
             to: email,
             subject: `AbaPay Receipt - ${network} ${serviceCategory}`,
             html: `
-                <div style="font-family: sans-serif; max-width: 600px; margin: 0 auto; padding: 20px; border: 1px solid #eaeaea; border-radius: 10px;">
-                    <h2 style="color: #333;">Transaction Successful ⚡</h2>
-                    <p>Thank you for using AbaPay! Here is your receipt for <strong>${network} ${serviceCategory}</strong>:</p>
-                    <div style="background-color: #f9f9f9; padding: 15px; border-radius: 8px; margin: 20px 0;">
-                        <p style="margin: 5px 0;"><strong>Amount Paid:</strong> ₦${vendAmount}</p>
-                        <p style="margin: 5px 0;"><strong>Crypto Charged:</strong> ${amount} ${tokenSymbol}</p>
-                        <p style="margin: 5px 0;"><strong>Account/Phone:</strong> ${billersCode || phone}</p>
+              <div style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; background-color: #f4f4f5; padding: 40px 0; margin: 0;">
+                <div style="max-width: 600px; margin: 0 auto; background-color: #ffffff; border-radius: 12px; overflow: hidden; box-shadow: 0 4px 6px rgba(0, 0, 0, 0.05);">
+                  
+                  <div style="background-color: #000000; padding: 30px; text-align: center;">
+                    <h1 style="color: #ffffff; margin: 0; font-size: 24px; letter-spacing: 1px;">AbaPay</h1>
+                  </div>
+
+                  <div style="padding: 40px 30px;">
+                    <p style="margin: 0 0 10px; color: #52525b; font-size: 14px; text-transform: uppercase; font-weight: 600;">Transaction Successful</p>
+                    <h2 style="margin: 0 0 30px; color: #18181b; font-size: 32px;">₦${vendAmount.toLocaleString()}</h2>
+                    
+                    <table style="width: 100%; border-collapse: collapse; margin-bottom: 30px;">
+                      <tr>
+                        <td style="padding: 15px 0; border-bottom: 1px solid #e4e4e7; color: #71717a; font-size: 15px;">Service</td>
+                        <td style="padding: 15px 0; border-bottom: 1px solid #e4e4e7; color: #18181b; font-size: 15px; text-align: right; font-weight: 500;">${network} ${serviceCategory}</td>
+                      </tr>
+                      <tr>
+                        <td style="padding: 15px 0; border-bottom: 1px solid #e4e4e7; color: #71717a; font-size: 15px;">Account / Phone</td>
+                        <td style="padding: 15px 0; border-bottom: 1px solid #e4e4e7; color: #18181b; font-size: 15px; text-align: right; font-weight: 500;">${billersCode || phone}</td>
+                      </tr>
+                      <tr>
+                        <td style="padding: 15px 0; border-bottom: 1px solid #e4e4e7; color: #71717a; font-size: 15px;">Crypto Charged</td>
+                        <td style="padding: 15px 0; border-bottom: 1px solid #e4e4e7; color: #18181b; font-size: 15px; text-align: right; font-weight: 500;">${amount} ${tokenSymbol}</td>
+                      </tr>
+                      <tr>
+                        <td style="padding: 15px 0; border-bottom: 1px solid #e4e4e7; color: #71717a; font-size: 15px;">Transaction Hash</td>
+                        <td style="padding: 15px 0; border-bottom: 1px solid #e4e4e7; color: #18181b; font-size: 15px; text-align: right; font-weight: 500; word-break: break-all;">${txHash}</td>
+                      </tr>
+                      ${dbPurchasedCode ? `
+                      <tr>
+                        <td style="padding: 15px 0; border-bottom: 1px solid #e4e4e7; color: #71717a; font-size: 15px;">Token / PIN</td>
+                        <td style="padding: 15px 0; border-bottom: 1px solid #e4e4e7; color: #10b981; font-size: 18px; text-align: right; font-weight: bold; letter-spacing: 2px;">
+                          ${dbPurchasedCode}
+                        </td>
+                      </tr>
+                      ` : `
+                      <tr>
+                        <td style="padding: 15px 0; border-bottom: 1px solid #e4e4e7; color: #71717a; font-size: 15px;">Reference ID</td>
+                        <td style="padding: 15px 0; border-bottom: 1px solid #e4e4e7; color: #18181b; font-size: 15px; text-align: right; font-weight: 500;">${alertTokenRef}</td>
+                      </tr>
+                      `}
+                    </table>
+
+                    <p style="color: #71717a; font-size: 14px; line-height: 1.5; margin: 0;">
+                      If you have any issues with this transaction, please reply directly to this email to reach our support desk.
+                    </p>
+                  </div>
+
+                  <div style="background-color: #f4f4f5; padding: 30px; text-align: center; border-top: 1px solid #e4e4e7;">
+                    <p style="color: #71717a; font-size: 14px; margin: 0 0 15px;">Join the AbaPay Community</p>
+                    
+                    <div>
+                      <a href="https://twitter.com/abapays" style="display: inline-block; margin: 0 10px; color: #000000; text-decoration: none; font-weight: 600; font-size: 14px;">X (Twitter)</a>
+                      <a href="https://t.me/abapays" style="display: inline-block; margin: 0 10px; color: #000000; text-decoration: none; font-weight: 600; font-size: 14px;">Telegram</a>
+                      <a href="https://wa.me/YourWhatsAppNumber" style="display: inline-block; margin: 0 10px; color: #000000; text-decoration: none; font-weight: 600; font-size: 14px;">WhatsApp</a>
                     </div>
-                    ${dbPurchasedCode ? `
-                    <p style="margin-top: 20px; font-weight: bold;">Your PIN / Token is:</p>
-                    <div style="background-color: #e0f2fe; color: #0284c7; padding: 15px; text-align: center; font-size: 24px; letter-spacing: 2px; font-weight: bold; border-radius: 8px; margin: 10px 0;">
-                        ${dbPurchasedCode}
-                    </div>
-                    ` : `
-                    <p style="margin-top: 20px;"><strong>Reference ID:</strong> ${alertTokenRef}</p>
-                    `}
+                    
+                    <p style="color: #a1a1aa; font-size: 12px; margin: 20px 0 0;">
+                      &copy; 2026 Masonode Technologies Limited. All rights reserved.
+                    </p>
+                  </div>
+
                 </div>
+              </div>
             `
           });
           notifications.push(emailPromise);
