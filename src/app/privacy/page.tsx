@@ -105,7 +105,7 @@ export default function PrivacyPolicy() {
               <strong>Account & Data Deletion Request:</strong> If you wish to permanently delete your transaction history and associated utility data from the AbaPay servers, you may submit a formal Data Deletion Request. 
             </p>
             <p className="text-red-800 font-bold">
-              To request deletion, please email <a href="mailto:privacy@abapay.com" className="underline hover:text-red-600">privacy@abapay.com</a> with your connected Wallet Address. We will process your deletion request within 30 days, subject to mandatory global AML retention laws.
+              To request deletion, please email <a href="mailto:privacy@abapays.com" className="underline hover:text-red-600">privacy@abapay.com</a> with your connected Wallet Address. We will process your deletion request within 30 days, subject to mandatory global AML retention laws.
             </p>
           </section>
 
@@ -117,7 +117,7 @@ export default function PrivacyPolicy() {
               If you have any questions, complaints, or require clarification regarding how MASONODE TECHNOLOGIES LIMITED handles your international data, please contact our support team and Data Protection Officer at:
             </p>
             <div className="mt-3 bg-slate-100 p-4 rounded-xl inline-block">
-              <p className="font-bold text-slate-800">Email: <a href="mailto:support@abapay.com" className="text-emerald-600 hover:underline">support@abapay.com</a></p>
+              <p className="font-bold text-slate-800">Email: <a href="mailto:support@abapay.com" className="text-emerald-600 hover:underline">support@abapays.com</a></p>
             </div>
           </section>
 
