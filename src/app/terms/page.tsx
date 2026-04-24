@@ -120,7 +120,7 @@ export default function TermsOfService() {
         {/* FOOTER */}
         <div className="mt-12 pt-8 border-t border-slate-100 text-center">
           <p className="text-xs font-bold text-slate-400 mb-4">
-            If you have any questions regarding these Terms, please contact us at support@abapay.com
+            If you have any questions regarding these Terms, please contact us at support@abapays.com
           </p>
           <Link href="/">
             <button className="bg-slate-900 hover:bg-black text-white px-6 py-3 rounded-xl font-black text-sm transition-all shadow-md hover:shadow-xl active:scale-95 flex items-center gap-2 mx-auto">
