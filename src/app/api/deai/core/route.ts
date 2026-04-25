@@ -50,24 +50,41 @@ export async function POST(req: Request) {
       return NextResponse.json({ action: 'REPLY', message: "❌ Incorrect PIN. Please try again." });
     }
 
-    // 3. AI Intent Routing (The Brain Upgrade)
-    const model = genAI.getGenerativeModel({ model: "gemini-1.5-flash", generationConfig: { responseMimeType: "application/json" } });
-    const prompt = `
-      You are the AbaPay DeAI Agent. Extract user intent into JSON.
-      Categories: VEND_AIRTIME, VEND_DATA, ELECTRICITY, EDUCATION, TV, BANK_TRANSFER.
-      
-      Rules:
-      - For 9mobile, use "etisalat".
-      - If amount is missing, leave as null.
-      - If they mention a "meter", intent is ELECTRICITY.
-      - If they mention "WAEC" or "JAMB", intent is EDUCATION.
+    // 3. AI Intent Routing (Updated for April 2026 Models)
+    const fallbackModels = ["gemini-3-flash-preview", "gemini-3.1-flash-lite-preview", "gemini-2.5-flash"];
+    let intentData = null;
 
-      Return: { "intent": string, "provider": string, "amount_ngn": number, "destination_account": string, "quantity": number }
-      Message: "${text}"
-    `;
+    for (const modelName of fallbackModels) {
+      try {
+        const model = genAI.getGenerativeModel({ 
+          model: modelName, 
+          generationConfig: { responseMimeType: "application/json" } 
+        });
 
-    const result = await model.generateContent(prompt);
-    const intentData = JSON.parse(result.response.text());
+        const prompt = `
+          You are the AbaPay DeAI Agent. Extract user intent into JSON.
+          Categories: VEND_AIRTIME, VEND_DATA, ELECTRICITY, EDUCATION, TV, BANK_TRANSFER.
+          
+          Rules:
+          - For 9mobile, use "etisalat".
+          - If amount is missing, leave as null.
+          - If they mention a "meter", intent is ELECTRICITY.
+          - If they mention "WAEC" or "JAMB", intent is EDUCATION.
+
+          Return: { "intent": string, "provider": string, "amount_ngn": number, "destination_account": string, "quantity": number }
+          Message: "${text}"
+        `;
+
+        const result = await model.generateContent(prompt);
+        intentData = JSON.parse(result.response.text());
+        if (intentData) break;
+      } catch (e) {
+        console.warn(`Model ${modelName} failed, trying next...`);
+        continue;
+      }
+    }
+
+    if (!intentData) throw new Error("All AI models failed to parse intent.");
 
     // 4. Apply AbaPay Logic Guardrails
     if (intentData.intent === 'VEND_AIRTIME') {
@@ -81,7 +98,11 @@ export async function POST(req: Request) {
 
     // Save session and ask for PIN
     await supabase.from('deai_sessions').upsert({
-      chat_id: platform_id, platform, intent_data: intentData, status: 'AWAITING_PIN', expires_at: new Date(Date.now() + 300000).toISOString()
+      chat_id: platform_id, 
+      platform, 
+      intent_data: intentData, 
+      status: 'AWAITING_PIN', 
+      expires_at: new Date(Date.now() + 300000).toISOString()
     }, { onConflict: 'chat_id' });
 
     const total = (intentData.amount_ngn || 0) + (intentData.fee || 0);
