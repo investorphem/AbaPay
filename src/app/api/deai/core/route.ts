@@ -19,8 +19,8 @@ export async function POST(req: Request) {
     if (platform === 'WHATSAPP') columnToSearch = 'whatsapp_number';
     if (platform === 'X') columnToSearch = 'x_twitter_id';
 
-    // 🚀 UPDATED: Now queries the hybrid master table (abapay_global_users)
-    const { data: identity } = await supabase
+    // 🚀 UPDATED: Now queries the hybrid master table and catches errors
+    const { data: identity, error } = await supabase
       .from('deai_identities')
       .select(`
         deai_pin, 
@@ -34,6 +34,11 @@ export async function POST(req: Request) {
       `)
       .eq(columnToSearch, platform_id)
       .single();
+
+    // 🚨 DEBUG LOGS: Check Vercel after sending a message!
+    console.log("🔍 INCOMING REQUEST:", { platform, platform_id, text });
+    console.log("🚨 SUPABASE ERROR:", error);
+    console.log("✅ SUPABASE IDENTITY DATA:", identity);
 
     if (!identity || !identity.is_active) {
       return NextResponse.json({ 
