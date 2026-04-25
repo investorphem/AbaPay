@@ -2,10 +2,14 @@
 import { NextResponse } from 'next/server';
 
 const TELEGRAM_BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN as string;
-const CORE_ENGINE_URL = `${process.env.NEXT_PUBLIC_SITE_URL}/api/deai/core`; 
 
 export async function POST(req: Request) {
   try {
+    // Dynamically grab your live domain (works on localhost AND Vercel automatically)
+    const host = req.headers.get('host');
+    const protocol = host?.includes('localhost') ? 'http' : 'https';
+    const CORE_ENGINE_URL = `${protocol}://${host}/api/deai/core`;
+
     const body = await req.json();
     const text = body.message?.text || "";
     const chatId = body.message?.chat?.id?.toString();
