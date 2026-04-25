@@ -16,11 +16,12 @@ export async function POST(req: Request) {
       return NextResponse.json({ success: true }); // Always return 200 to Telegram so they don't retry
     }
 
-    // 2. Pass the text to Gemini for Intent Parsing
+        // 2. Pass the text to Gemini for Intent Parsing
     const model = genAI.getGenerativeModel({
-      model: "gemini-1.5-flash",
+      model: "gemini-2.5-flash", // 🔥 JUST CHANGE THIS ONE LINE
       generationConfig: { responseMimeType: "application/json" }
     });
+
 
     const prompt = `
       You are the core intent routing engine for AbaPay.
