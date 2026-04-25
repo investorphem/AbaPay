@@ -2,6 +2,7 @@
 import { NextResponse } from 'next/server';
 import { GoogleGenerativeAI } from '@google/generative-ai';
 import { createClient } from '@supabase/supabase-js';
+import { categorizeDataPlan } from '@/lib/dataCategories';
 
 const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY as string);
 const supabase = createClient(
@@ -9,112 +10,88 @@ const supabase = createClient(
   (process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY) as string
 );
 
+// Helper for Auto-Network Detection from your constants logic
+const detectNetwork = (phone: string) => {
+  const prefix = phone.substring(0, 4);
+  if (["0803","0806","0810","0813","0814","0816","0903","0906","0913","0916","0703","0706"].includes(prefix)) return "mtn";
+  if (["0802","0808","0812","0902","0907","0912","0701","0708"].includes(prefix)) return "airtel";
+  if (["0805","0807","0811","0905","0705","0915"].includes(prefix)) return "glo";
+  if (["0809","0817","0818","0908","0909"].includes(prefix)) return "etisalat";
+  return null;
+};
+
 export async function POST(req: Request) {
   try {
     const { platform, platform_id, text } = await req.json();
 
-    // 1. Identify the User across any platform
-    let columnToSearch = '';
-    if (platform === 'TELEGRAM') columnToSearch = 'telegram_chat_id';
-    if (platform === 'WHATSAPP') columnToSearch = 'whatsapp_number';
-    if (platform === 'X') columnToSearch = 'x_twitter_id';
-
-    // 🚀 UPDATED: Now queries the hybrid master table and catches errors
-    const { data: identity, error } = await supabase
+    // 1. Identify User
+    let columnToSearch = platform === 'TELEGRAM' ? 'telegram_chat_id' : platform === 'WHATSAPP' ? 'whatsapp_number' : 'x_twitter_id';
+    const { data: identity } = await supabase
       .from('deai_identities')
-      .select(`
-        deai_pin, 
-        is_active, 
-        user_id,
-        abapay_global_users (
-          wallet_address,
-          email,
-          fiat_balance_ngn
-        )
-      `)
-      .eq(columnToSearch, platform_id)
-      .single();
-
-    // 🚨 DEBUG LOGS: Check Vercel after sending a message!
-    console.log("🔍 INCOMING REQUEST:", { platform, platform_id, text });
-    console.log("🚨 SUPABASE ERROR:", error);
-    console.log("✅ SUPABASE IDENTITY DATA:", identity);
+      .select(`deai_pin, is_active, user_id, abapay_global_users(wallet_address, fiat_balance_ngn)`)
+      .eq(columnToSearch, platform_id).single();
 
     if (!identity || !identity.is_active) {
-      return NextResponse.json({ 
-        action: 'REPLY', 
-        message: "🔒 **Unauthorized**\nPlease link your AbaPay account on the web dashboard to use this agent." 
-      });
+      return NextResponse.json({ action: 'REPLY', message: "🔒 **Unauthorized**\nPlease link your wallet on the AbaPay dashboard to use this agent." });
     }
 
-    // 2. PIN CHECKOUT PHASE
-    const { data: session } = await supabase
-      .from('deai_sessions')
-      .select('*')
-      .eq('chat_id', platform_id)
-      .eq('status', 'AWAITING_PIN')
-      .single();
+    // 2. State Machine Logic
+    const { data: session } = await supabase.from('deai_sessions').select('*').eq('chat_id', platform_id).single();
 
-    if (session) {
-      if (new Date(session.expires_at) < new Date()) {
-        await supabase.from('deai_sessions').delete().eq('chat_id', platform_id);
-        return NextResponse.json({ action: 'REPLY', message: "⏳ Session expired. Please start over." });
-      }
-
+    // PHASE: PIN CONFIRMATION
+    if (session?.status === 'AWAITING_PIN') {
       if (text.trim() === identity.deai_pin) {
-        // --- RELAYER EXECUTION HAPPENS HERE IN THE FUTURE ---
-        // 1. Call Smart Contract V2 to pull funds from identity.abapay_global_users.wallet_address
-        // 2. Hit VTPass API
-
         await supabase.from('deai_sessions').delete().eq('chat_id', platform_id);
-
         return NextResponse.json({ 
           action: 'SUCCESS_RECEIPT', 
-          message: `🎉 **Success!**\n\nSent ₦${session.intent_data.amount_ngn} ${session.intent_data.provider} to ${session.intent_data.destination_account}.\n\n*Relayer executed via ${platform}.*` 
+          message: `🎉 **Transaction Successful!**\n\nService: ${session.intent_data.intent}\nAmount: ₦${session.intent_data.amount_ngn}\nRecipient: ${session.intent_data.destination_account}\n\n*Receipt sent to your AbaPay history.*` 
         });
-      } else {
-        return NextResponse.json({ action: 'REPLY', message: "❌ Incorrect PIN." });
       }
+      return NextResponse.json({ action: 'REPLY', message: "❌ Incorrect PIN. Please try again." });
     }
 
-    // 3. AI INTENT ROUTING (If not in a checkout state)
-    const fallbackModels = ["gemini-2.5-flash", "gemini-1.5-pro", "gemini-2.0-flash"];
-    let intentData = null;
+    // 3. AI Intent Routing (The Brain Upgrade)
+    const model = genAI.getGenerativeModel({ model: "gemini-1.5-flash", generationConfig: { responseMimeType: "application/json" } });
+    const prompt = `
+      You are the AbaPay DeAI Agent. Extract user intent into JSON.
+      Categories: VEND_AIRTIME, VEND_DATA, ELECTRICITY, EDUCATION, TV, BANK_TRANSFER.
+      
+      Rules:
+      - For 9mobile, use "etisalat".
+      - If amount is missing, leave as null.
+      - If they mention a "meter", intent is ELECTRICITY.
+      - If they mention "WAEC" or "JAMB", intent is EDUCATION.
 
-    for (const modelName of fallbackModels) {
-      try {
-        const model = genAI.getGenerativeModel({ model: modelName, generationConfig: { responseMimeType: "application/json" } });
-        const prompt = `
-          Extract transaction details into strict JSON:
-          { "intent": "VEND_AIRTIME" | "VEND_DATA" | "UNKNOWN", "provider": "MTN" | "AIRTEL" | "GLO" | "9MOBILE" | null, "amount_ngn": number | null, "destination_account": string | null }
-          User Message: "${text}"
-        `;
-        const result = await model.generateContent(prompt);
-        intentData = JSON.parse(result.response.text());
-        break; 
-      } catch (e) { continue; }
+      Return: { "intent": string, "provider": string, "amount_ngn": number, "destination_account": string, "quantity": number }
+      Message: "${text}"
+    `;
+
+    const result = await model.generateContent(prompt);
+    const intentData = JSON.parse(result.response.text());
+
+    // 4. Apply AbaPay Logic Guardrails
+    if (intentData.intent === 'VEND_AIRTIME') {
+      if (!intentData.provider) intentData.provider = detectNetwork(intentData.destination_account);
+      if (intentData.amount_ngn < 100) return NextResponse.json({ action: 'REPLY', message: "❌ Minimum airtime is ₦100." });
     }
 
-    if (!intentData || intentData.intent === "UNKNOWN") {
-      return NextResponse.json({ action: 'REPLY', message: "I didn't catch that. Try: 'Buy 2k MTN for 08123456789'" });
+    if (intentData.intent === 'ELECTRICITY' || intentData.intent === 'BANK_TRANSFER' || intentData.intent === 'EDUCATION') {
+        intentData.fee = 100; // Your app's standard fee
     }
 
-    // Save state
-    const expiresAt = new Date();
-    expiresAt.setMinutes(expiresAt.getMinutes() + 5);
+    // Save session and ask for PIN
     await supabase.from('deai_sessions').upsert({
-      chat_id: platform_id, platform: platform, intent_data: intentData, status: 'AWAITING_PIN', expires_at: expiresAt.toISOString()
+      chat_id: platform_id, platform, intent_data: intentData, status: 'AWAITING_PIN', expires_at: new Date(Date.now() + 300000).toISOString()
     }, { onConflict: 'chat_id' });
 
-    // Return the payload so the specific platform can render its own buttons
+    const total = (intentData.amount_ngn || 0) + (intentData.fee || 0);
     return NextResponse.json({ 
-      action: 'REQUIRE_TOKEN_SELECTION', 
-      intentData: intentData,
-      message: `🤖 **AbaPay Checkout**\n\n₦${intentData.amount_ngn} ${intentData.provider} to ${intentData.destination_account}.\n\nReply with your 4-digit PIN to confirm.`
+      action: 'REPLY', 
+      message: `🤖 **AbaPay Checkout**\n\nService: ${intentData.intent}\nAccount: ${intentData.destination_account}\nAmount: ₦${intentData.amount_ngn}\nFee: ₦${intentData.fee || 0}\n**Total: ₦${total}**\n\nReply with your 4-digit PIN to confirm.`
     });
 
   } catch (error) {
-    console.error("Core Engine Error:", error);
-    return NextResponse.json({ action: 'ERROR' });
+    console.error("Brain Error:", error);
+    return NextResponse.json({ action: 'ERROR', message: "System rebooting. Try again in a moment." });
   }
 }
