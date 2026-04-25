@@ -6,7 +6,7 @@ import { createClient } from '@supabase/supabase-js';
 const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY as string);
 const TELEGRAM_BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN as string;
 
-// Initialize Supabase (Uses Service Role Key to bypass RLS securely on the backend)
+// Initialize Supabase (Uses Service Role Key to safely bypass RLS on the server)
 const supabase = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL as string,
   (process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY) as string
@@ -50,7 +50,7 @@ export async function POST(req: Request) {
         });
       }
 
-      // 3. Stop the loading spinner on the button
+      // 3. Answer the callback to stop the loading spinner
       await fetch(`https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/answerCallbackQuery`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -63,13 +63,67 @@ export async function POST(req: Request) {
     // ==========================================
     // SCENARIO 2: THE USER SENT A TEXT MESSAGE
     // ==========================================
-    const text = body.message?.text;
+    const text = body.message?.text || "";
     const chatId = body.message?.chat?.id?.toString();
     const messageId = body.message?.message_id;
 
     if (!text || !chatId) return NextResponse.json({ success: true }); 
 
-    // --- CHECK 1: IS THE USER IN THE MIDDLE OF A CHECKOUT? ---
+    // --- GATEWAY 1: ACCOUNT LINKING VIA DEEP LINK ---
+    // If the user clicks a link like t.me/AbaPayBot?start=auth_12345
+    if (text.startsWith('/start auth_')) {
+      const authToken = text.split(' ')[1]; // Extracts the token
+
+      // Find the user with this token and save their chat ID
+      const { data: updatedUser, error } = await supabase
+        .from('users') // **CHANGE THIS if your table is named differently**
+        .update({ telegram_chat_id: chatId })
+        .eq('telegram_auth_token', authToken)
+        .select()
+        .single();
+
+      if (updatedUser) {
+        await fetch(`https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ 
+            chat_id: chatId, 
+            text: "✅ **Account Linked Successfully!**\n\nI am connected to your AbaPay wallet. What bill can I sort out for you today?",
+            parse_mode: 'Markdown'
+          })
+        });
+      } else {
+        await fetch(`https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ chat_id: chatId, text: "❌ Invalid or expired linking token. Please try again from the web dashboard." })
+        });
+      }
+      return NextResponse.json({ success: true });
+    }
+
+    // --- GATEWAY 2: THE BOUNCER (Is this an existing user?) ---
+    const { data: registeredUser } = await supabase
+      .from('users') // **CHANGE THIS if your table is named differently**
+      .select('id, pin') // Fetch their ID and PIN
+      .eq('telegram_chat_id', chatId)
+      .single();
+
+    if (!registeredUser) {
+      // Reject unauthorized users immediately
+      await fetch(`https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ 
+            chat_id: chatId, 
+            text: "🔒 **Unauthorized**\n\nPlease link your AbaPay account first by logging into the web dashboard and clicking 'Connect Telegram'." 
+          })
+      });
+      return NextResponse.json({ success: true });
+    }
+
+
+    // --- GATEWAY 3: PIN CHECKOUT PHASE ---
     const { data: session } = await supabase
       .from('deai_sessions')
       .select('*')
@@ -77,12 +131,10 @@ export async function POST(req: Request) {
       .eq('status', 'AWAITING_PIN')
       .single();
 
-    // If they have an active session waiting for a PIN, process this text as a PIN attempt
     if (session) {
       const isExpired = new Date(session.expires_at) < new Date();
       
       if (isExpired) {
-        // Delete expired session
         await supabase.from('deai_sessions').delete().eq('chat_id', chatId);
         await fetch(`https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage`, {
             method: 'POST',
@@ -92,17 +144,19 @@ export async function POST(req: Request) {
         return NextResponse.json({ success: true });
       }
 
-      // Check if it's a 4-digit PIN
-      if (/^\d{4}$/.test(text.trim())) {
-        
-        // 🎯 MAGIC UX: Delete their PIN message from the chat history immediately for security!
-        await fetch(`https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/deleteMessage`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ chat_id: chatId, message_id: messageId })
-        });
+      // 🎯 MAGIC UX: Delete their PIN message instantly for security!
+      await fetch(`https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/deleteMessage`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ chat_id: chatId, message_id: messageId })
+      });
 
-        // TODO: In the future, verify the PIN against the user's real account here.
+      // Verify the PIN against the user's actual saved PIN in the database
+      if (text.trim() === registeredUser.pin) {
+        
+        // --- 🚀 BLOCKCHAIN & VTPASS LOGIC GOES HERE ---
+        // 1. Trigger smart contract using registeredUser.id
+        // 2. Call VTPass API using session.intent_data
         
         // Send success receipt
         const receiptMessage = `🎉 **Transaction Successful!**\n\n✅ Sent ₦${session.intent_data.amount_ngn} ${session.intent_data.provider} to ${session.intent_data.destination_account}\n🪙 Paid with: ${session.selected_token}\n\n*Transaction Hash: 0x...*`;
@@ -113,22 +167,23 @@ export async function POST(req: Request) {
             body: JSON.stringify({ chat_id: chatId, text: receiptMessage, parse_mode: 'Markdown' })
         });
 
-        // Clear the session so they can start a new one
+        // Clear the session
         await supabase.from('deai_sessions').delete().eq('chat_id', chatId);
         return NextResponse.json({ success: true });
 
       } else {
-        // Not a 4 digit PIN
+        // Wrong PIN
         await fetch(`https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ chat_id: chatId, text: "❌ Invalid format. Please enter your 4-digit PIN." })
+            body: JSON.stringify({ chat_id: chatId, text: "❌ Incorrect PIN. Please try again." })
         });
         return NextResponse.json({ success: true });
       }
     }
 
-    // --- CHECK 2: NO ACTIVE SESSION? ROUTE TO AI INTENT PARSER ---
+
+    // --- GATEWAY 4: AI INTENT PARSER (Standard text requests) ---
     const fallbackModels = ["gemini-2.5-flash", "gemini-1.5-pro", "gemini-2.0-flash"];
     let intentData = null;
 
