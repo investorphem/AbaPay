@@ -19,9 +19,19 @@ export async function POST(req: Request) {
     if (platform === 'WHATSAPP') columnToSearch = 'whatsapp_number';
     if (platform === 'X') columnToSearch = 'x_twitter_id';
 
+    // 🚀 UPDATED: Now queries the hybrid master table (abapay_global_users)
     const { data: identity } = await supabase
       .from('deai_identities')
-      .select('user_id, deai_pin, is_active, abapay_users(verified_phone)')
+      .select(`
+        deai_pin, 
+        is_active, 
+        user_id,
+        abapay_global_users (
+          wallet_address,
+          email,
+          fiat_balance_ngn
+        )
+      `)
       .eq(columnToSearch, platform_id)
       .single();
 
@@ -48,11 +58,11 @@ export async function POST(req: Request) {
 
       if (text.trim() === identity.deai_pin) {
         // --- RELAYER EXECUTION HAPPENS HERE IN THE FUTURE ---
-        // 1. Call Smart Contract V2 to pull funds from identity.user_id
+        // 1. Call Smart Contract V2 to pull funds from identity.abapay_global_users.wallet_address
         // 2. Hit VTPass API
 
         await supabase.from('deai_sessions').delete().eq('chat_id', platform_id);
-        
+
         return NextResponse.json({ 
           action: 'SUCCESS_RECEIPT', 
           message: `🎉 **Success!**\n\nSent ₦${session.intent_data.amount_ngn} ${session.intent_data.provider} to ${session.intent_data.destination_account}.\n\n*Relayer executed via ${platform}.*` 
