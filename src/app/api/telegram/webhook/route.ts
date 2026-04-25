@@ -9,7 +9,7 @@ export async function POST(req: Request) {
     const body = await req.json();
 
     // ==========================================
-    // SCENARIO 1: THE USER CLICKED A BUTTON
+    // SCENARIO 1: THE USER CLICKED A PAYMENT BUTTON
     // ==========================================
     if (body.callback_query) {
       const chatId = body.callback_query.message.chat.id;
@@ -18,6 +18,7 @@ export async function POST(req: Request) {
       // Clean up the token name for the message
       const tokenName = selectedToken.replace("TOKEN_", "");
 
+      // Send the PIN request message
       await fetch(`https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -28,7 +29,7 @@ export async function POST(req: Request) {
         })
       });
 
-      // We must tell Telegram we received the click, or the button will show a loading spinner forever
+      // Answer the callback to stop the loading spinner on the button
       await fetch(`https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/answerCallbackQuery`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -44,33 +45,56 @@ export async function POST(req: Request) {
     const text = body.message?.text;
     const chatId = body.message?.chat?.id;
 
+    // If there's no text (like a sticker or photo), just ignore it gracefully
     if (!text || !chatId) {
       return NextResponse.json({ success: true }); 
     }
 
-    // 1. Pass the text to Gemini for Intent Parsing
-    const model = genAI.getGenerativeModel({
-      model: "gemini-2.5-flash",
-      generationConfig: { responseMimeType: "application/json" }
-    });
+    // 1. Pass the text to Gemini for Intent Parsing with a Fallback Array
+    const fallbackModels = ["gemini-2.5-flash", "gemini-1.5-pro", "gemini-2.0-flash"];
+    let intentData = null;
 
-    const prompt = `
-      You are the core intent routing engine for AbaPay.
-      Extract the transaction details and return ONLY a valid JSON object.
-      
-      {
-        "intent": "VEND_AIRTIME" | "VEND_DATA" | "PAY_ELECTRICITY" | "UNKNOWN",
-        "provider": "MTN" | "AIRTEL" | "GLO" | "9MOBILE" | "IKEJA_ELECTRIC" | null,
-        "amount_ngn": number | null,
-        "destination_account": string | null,
-        "confidence_score": number
+    for (const modelName of fallbackModels) {
+      try {
+        const model = genAI.getGenerativeModel({
+          model: modelName,
+          generationConfig: { responseMimeType: "application/json" }
+        });
+
+        const prompt = `
+          You are the core intent routing engine for AbaPay.
+          Extract the transaction details and return ONLY a valid JSON object.
+          
+          {
+            "intent": "VEND_AIRTIME" | "VEND_DATA" | "PAY_ELECTRICITY" | "UNKNOWN",
+            "provider": "MTN" | "AIRTEL" | "GLO" | "9MOBILE" | "IKEJA_ELECTRIC" | null,
+            "amount_ngn": number | null,
+            "destination_account": string | null,
+            "confidence_score": number
+          }
+
+          User Message: "${text}"
+        `;
+
+        const result = await model.generateContent(prompt);
+        intentData = JSON.parse(result.response.text());
+        
+        // If successful, break out of the loop so we don't try the other models
+        break; 
+
+      } catch (aiError: any) {
+        console.warn(`⚠️ Model ${modelName} failed:`, aiError.message);
+        // If it's the last model in the array and it STILL fails, we throw the error
+        if (modelName === fallbackModels[fallbackModels.length - 1]) {
+          throw new Error("All AI fallback models are currently unavailable.");
+        }
       }
+    }
 
-      User Message: "${text}"
-    `;
-
-    const result = await model.generateContent(prompt);
-    const intentData = JSON.parse(result.response.text());
+    // Safety check just in case the parsing completely failed
+    if (!intentData) {
+       return NextResponse.json({ success: false, message: "AI Parsing failed" });
+    }
 
     // 2. Build the visual Telegram buttons (Inline Keyboard)
     const paymentKeyboard = {
@@ -95,7 +119,7 @@ export async function POST(req: Request) {
         chat_id: chatId,
         text: replyMessage,
         parse_mode: 'Markdown',
-        reply_markup: paymentKeyboard // This injects the buttons into the chat
+        reply_markup: paymentKeyboard 
       })
     });
 
@@ -103,10 +127,16 @@ export async function POST(req: Request) {
 
   } catch (error) {
     console.error("Webhook Error:", error);
+    // Alert the user if everything fails
+    if (req.body) {
+         // Silently fail for Telegram, but log it
+         return NextResponse.json({ success: false });
+    }
     return NextResponse.json({ success: false });
   }
 }
 
+// Simple pulse check to verify the endpoint is alive in your browser
 export async function GET() {
   return NextResponse.json({ status: "AbaPay DeAI Webhook is ALIVE!" });
 }
