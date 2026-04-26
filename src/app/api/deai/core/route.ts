@@ -10,8 +10,9 @@ const supabase = createClient(
   (process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY) as string
 );
 
-// Helper for Auto-Network Detection from your constants logic
+// Helper for Auto-Network Detection
 const detectNetwork = (phone: string) => {
+  if (!phone) return null;
   const prefix = phone.substring(0, 4);
   if (["0803","0806","0810","0813","0814","0816","0903","0906","0913","0916","0703","0706"].includes(prefix)) return "mtn";
   if (["0802","0808","0812","0902","0907","0912","0701","0708"].includes(prefix)) return "airtel";
@@ -37,38 +38,54 @@ export async function POST(req: Request) {
 
     // 2. State Machine Logic
     const { data: session } = await supabase.from('deai_sessions').select('*').eq('chat_id', platform_id).single();
+    const userInput = text.trim().toLowerCase();
+
+    // ESCAPE HATCH: Let the user cancel
+    if (userInput === 'cancel' || userInput === 'start') {
+      await supabase.from('deai_sessions').delete().eq('chat_id', platform_id);
+      return NextResponse.json({ action: 'REPLY', message: "🚫 Previous transaction cancelled. What would you like to do next?" });
+    }
 
     // PHASE: PIN CONFIRMATION
     if (session?.status === 'AWAITING_PIN') {
+      if (session.expires_at && new Date(session.expires_at) < new Date()) {
+        await supabase.from('deai_sessions').delete().eq('chat_id', platform_id);
+        return NextResponse.json({ action: 'REPLY', message: "⏳ Checkout session expired. Please start your request over." });
+      }
+
       if (text.trim() === identity.deai_pin) {
+        // ⚡ THIS DELETES THE STATE AND ALLOWS NEW TRANSACTIONS INSTANTLY ⚡
         await supabase.from('deai_sessions').delete().eq('chat_id', platform_id);
         return NextResponse.json({ 
           action: 'SUCCESS_RECEIPT', 
           message: `🎉 **Transaction Successful!**\n\nService: ${session.intent_data.intent}\nAmount: ₦${session.intent_data.amount_ngn}\nRecipient: ${session.intent_data.destination_account}\n\n*Receipt sent to your AbaPay history.*` 
         });
       }
-      return NextResponse.json({ action: 'REPLY', message: "❌ Incorrect PIN. Please try again." });
+      
+      return NextResponse.json({ action: 'REPLY', message: "❌ Incorrect PIN.\n\nReply with your 4-digit PIN, or type **Cancel** to start over." });
     }
 
-    // 3. AI Intent Routing (The Brain Upgrade with Fallback Loop)
-    // 🚀 We loop through valid models so your bot never goes offline due to a 404
+    // 3. AI Intent Routing (Now with Context Merging)
     const fallbackModels = ["gemini-2.5-flash", "gemini-2.0-flash", "gemini-1.5-pro"];
     let intentData = null;
 
+    // ⚡ CONTEXT INJECTION: Feed missing info back to the AI
+    const previousContext = session?.status === 'AWAITING_DETAILS' ? JSON.stringify(session.intent_data) : "None";
+
     for (const modelName of fallbackModels) {
       try {
-        const model = genAI.getGenerativeModel({ 
-          model: modelName, 
-          generationConfig: { responseMimeType: "application/json" } 
-        });
-
+        const model = genAI.getGenerativeModel({ model: modelName, generationConfig: { responseMimeType: "application/json" } });
         const prompt = `
           You are the AbaPay DeAI Agent. Extract user intent into JSON.
           Categories: VEND_AIRTIME, VEND_DATA, ELECTRICITY, EDUCATION, TV, BANK_TRANSFER.
           
+          Previous Context: ${previousContext}
+          If Previous Context is not "None", merge the new Message details into the Previous Context.
+          
           Rules:
           - For 9mobile, use "etisalat".
           - If amount is missing, leave as null.
+          - If destination account/phone is missing, leave as null.
           - If they mention a "meter", intent is ELECTRICITY.
           - If they mention "WAEC" or "JAMB", intent is EDUCATION.
 
@@ -78,31 +95,41 @@ export async function POST(req: Request) {
 
         const result = await model.generateContent(prompt);
         intentData = JSON.parse(result.response.text());
-        
-        // If successful, break out of the loop
         if (intentData) break; 
-      } catch (e) {
-        console.warn(`Model ${modelName} failed, trying next fallback...`);
-        continue;
+      } catch (e) { continue; }
+    }
+
+    if (!intentData) throw new Error("All AI models failed.");
+
+    // 4. Missing Information Guardrails
+    if (intentData.intent === 'VEND_AIRTIME') {
+      if (!intentData.provider) intentData.provider = detectNetwork(intentData.destination_account);
+      
+      // Check if crucial info is missing
+      if (!intentData.amount_ngn || !intentData.destination_account) {
+         // Save the partial intent and set status to AWAITING_DETAILS
+         await supabase.from('deai_sessions').upsert({
+            chat_id: platform_id, platform, intent_data: intentData, status: 'AWAITING_DETAILS', expires_at: new Date(Date.now() + 300000).toISOString()
+         }, { onConflict: 'chat_id' });
+
+         let missing = [];
+         if (!intentData.amount_ngn) missing.push("the amount");
+         if (!intentData.destination_account) missing.push("the phone number");
+         
+         return NextResponse.json({ action: 'REPLY', message: `Got it. Please tell me ${missing.join(" and ")}.` });
+      }
+
+      if (intentData.amount_ngn < 100) {
+         await supabase.from('deai_sessions').delete().eq('chat_id', platform_id); // Wipe so they aren't stuck
+         return NextResponse.json({ action: 'REPLY', message: "❌ Minimum airtime is ₦100. Please start over with a valid amount." });
       }
     }
 
-    // If every single model failed, throw an error to catch block
-    if (!intentData) {
-        throw new Error("All AI models failed to parse intent or returned null.");
-    }
-
-    // 4. Apply AbaPay Logic Guardrails
-    if (intentData.intent === 'VEND_AIRTIME') {
-      if (!intentData.provider) intentData.provider = detectNetwork(intentData.destination_account);
-      if (intentData.amount_ngn < 100) return NextResponse.json({ action: 'REPLY', message: "❌ Minimum airtime is ₦100." });
-    }
-
     if (intentData.intent === 'ELECTRICITY' || intentData.intent === 'BANK_TRANSFER' || intentData.intent === 'EDUCATION') {
-        intentData.fee = 100; // Your app's standard fee
+        intentData.fee = 100;
     }
 
-    // Save session and ask for PIN
+    // 5. Ready for Checkout! Save session and ask for PIN
     await supabase.from('deai_sessions').upsert({
       chat_id: platform_id, platform, intent_data: intentData, status: 'AWAITING_PIN', expires_at: new Date(Date.now() + 300000).toISOString()
     }, { onConflict: 'chat_id' });
