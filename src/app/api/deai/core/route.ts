@@ -30,7 +30,6 @@ const detectNetwork = (phone: any) => {
   return null;
 };
 
-// ⚡ 2. THE LOCAL ROUTER (Prevents AI Timeouts) ⚡
 const fallbackIntentMatcher = (text: string) => {
     const t = text.toLowerCase();
     if (t.includes('airtime') || t.includes('recharge')) return 'VEND_AIRTIME';
@@ -47,16 +46,20 @@ async function verifyAccount(intent: string, account: string, type?: string) {
     return { success: true, customer_name: "Verified User", min_amount: 100, max_amount: 100000 };
 }
 
+async function fetchCryptoBalances(walletAddress: string) {
+    if (!walletAddress) return { usdt: "0.00", usdc: "0.00", cusd: "0.00" };
+    return { usdt: "0.00", usdc: "0.00", cusd: "0.00" }; // Placeholder for Web3 logic
+}
+
 export async function POST(req: Request) {
   try {
     const { platform, platform_id, text } = await req.json();
 
     let columnToSearch = platform === 'TELEGRAM' ? 'telegram_chat_id' : platform === 'WHATSAPP' ? 'whatsapp_number' : 'x_twitter_id';
     
-    // ⚡ FIX: Fetching ALL columns (*) so we get crypto balances without crashing
     const { data: identity } = await supabase
       .from('deai_identities')
-      .select(`deai_pin, is_active, user_id, abapay_global_users(*)`)
+      .select(`deai_pin, is_active, user_id, abapay_global_users(wallet_address, fiat_balance_ngn, country_code)`)
       .eq(columnToSearch, platform_id).single();
 
     if (!identity || !identity.is_active) {
@@ -66,22 +69,28 @@ export async function POST(req: Request) {
     const globalUser: any = Array.isArray(identity.abapay_global_users) ? identity.abapay_global_users[0] : identity.abapay_global_users;
     const currentCountry = globalUser?.country_code || 'NG';
     const currencySymbol = currentCountry === 'NG' ? '₦' : (currentCountry === 'GH' ? 'GH₵' : '$');
-    
     const fiatBalance = globalUser?.fiat_balance_ngn || 0;
-    const usdtBalance = globalUser?.usdt_balance || 0;
-    const usdcBalance = globalUser?.usdc_balance || 0;
-    const cusdBalance = globalUser?.cusd_balance || 0;
+    const walletAddress = globalUser?.wallet_address || "";
 
+    const crypto = await fetchCryptoBalances(walletAddress);
     const { data: session } = await supabase.from('deai_sessions').select('*').eq('chat_id', platform_id).single();
     const userInput = text.trim().toLowerCase();
 
-    // ESCAPE HATCH & GREETING WITH CRYPTO BALANCES
+    // 1. ESCAPE HATCH
     if (userInput === 'cancel' || userInput === 'start' || userInput === 'help') {
       await supabase.from('deai_sessions').delete().eq('chat_id', platform_id);
       return NextResponse.json({ 
         action: 'REPLY', 
-        message: `🌍 **Region:** ${currentCountry}\n💵 **Fiat:** ${currencySymbol}${fiatBalance}\n🪙 **Crypto:** ${usdtBalance} USDT | ${usdcBalance} USDC | ${cusdBalance} cUSD\n\n👋 **Welcome to AbaPay AI!**\n\nI can help you pay bills and send crypto instantly.\n\n*Try saying:*\n💬 _Buy 500 MTN airtime for 08012345678_\n💬 _Pay 5000 electricity for meter 1122334455_\n📜 _Check my history_` 
+        message: `🌍 **Region:** ${currentCountry}\n💵 **Fiat:** ${currencySymbol}${fiatBalance}\n🪙 **Crypto:** ${crypto.usdt} USDT | ${crypto.usdc} USDC | ${crypto.cusd} cUSD\n\n👋 **Welcome to AbaPay AI!**\n\nI can help you pay bills and send crypto instantly.\n\n*Try saying:*\n💬 _Buy 500 MTN airtime for 08012345678_\n💬 _Pay 5000 electricity for meter 1122334455_\n📜 _Check my history_` 
       });
+    }
+
+    // ⚡ NEW FIX: CONTEXT PIVOT ⚡
+    // If the user issues a BRAND NEW command while stuck in a previous loop, wipe the old memory instantly.
+    const freshIntentCheck = fallbackIntentMatcher(text);
+    if (session && session.status === 'AWAITING_DETAILS' && freshIntentCheck !== 'UNKNOWN' && freshIntentCheck !== session.intent_data.intent) {
+        await supabase.from('deai_sessions').delete().eq('chat_id', platform_id);
+        session.status = null; // Proceed as a brand new request
     }
 
     let isContinuingToAI = false;
@@ -143,25 +152,27 @@ export async function POST(req: Request) {
        isContinuingToAI = true;
     }
 
-    // --- 3. THE HYBRID AI / LOCAL EXTRACTOR ---
+    // --- 3. ⚡ THE INDESTRUCTIBLE REGEX + AI HYBRID ⚡ ---
     if (!isContinuingToAI) return NextResponse.json({ success: true });
 
     let intentData: any = {};
     const previousContext = session?.status === 'AWAITING_DETAILS' ? JSON.stringify(session.intent_data) : "None";
 
+    // Regex extractors (Never fail, never time out)
+    const extractedEmail = text.match(/[a-zA-Z0-9._-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,6}/)?.[0] || null;
+    const digitsMatch = text.match(/\b\d+\b/g) || [];
+    const possibleAccountsOrPhones = digitsMatch.filter(d => d.length >= 10);
+    const possibleAmounts = digitsMatch.filter(d => d.length < 10);
+
     try {
         const model = genAI.getGenerativeModel({ model: "gemini-1.5-flash", generationConfig: { responseMimeType: "application/json" } });
         const prompt = `
-          Extract entities from the user message.
-          Message: "${text}"
+          Extract entities from: "${text}"
+          Previous Context: ${previousContext}
           
-          Rules:
-          - Categories: VEND_AIRTIME, VEND_DATA, ELECTRICITY, EDUCATION, TV, BANK_TRANSFER, TRANSACTION_HISTORY, UNKNOWN.
-          - "status", "history", "recent" map to "TRANSACTION_HISTORY".
-          - 10 or 11 digit numbers map to "destination_account".
-          - Standalone numbers map to "amount_ngn".
+          Categories: VEND_AIRTIME, VEND_DATA, ELECTRICITY, EDUCATION, TV, BANK_TRANSFER, TRANSACTION_HISTORY, UNKNOWN.
           
-          Output exactly this JSON format (use null if missing): 
+          Output exactly this JSON format: 
           { "intent": "UNKNOWN", "provider": null, "amount_ngn": null, "destination_account": null, "phone": null, "email": null }
         `;
         
@@ -170,31 +181,44 @@ export async function POST(req: Request) {
         const newAiData = JSON.parse(cleanedText);
 
         if (session?.status === 'AWAITING_DETAILS' && session.intent_data) {
-            intentData = {
-                intent: session.intent_data.intent, 
-                amount_ngn: newAiData.amount_ngn ? Number(newAiData.amount_ngn) : session.intent_data.amount_ngn,
-                destination_account: newAiData.destination_account ? String(newAiData.destination_account) : session.intent_data.destination_account,
-                provider: newAiData.provider || session.intent_data.provider,
-                phone: newAiData.phone ? String(newAiData.phone) : session.intent_data.phone,
-                email: newAiData.email || session.intent_data.email
-            };
+            intentData = session.intent_data; // Copy previous
+            // Smart Merge overriding AI mistakes
+            if (!intentData.amount_ngn) intentData.amount_ngn = newAiData.amount_ngn || (possibleAmounts[0] ? Number(possibleAmounts[0]) : null);
+            if (!intentData.email) intentData.email = extractedEmail || newAiData.email;
+            
+            // Smart mapping of 11-digit numbers based on what is missing
+            if (!intentData.destination_account && possibleAccountsOrPhones.length > 0) {
+                intentData.destination_account = String(possibleAccountsOrPhones[0]);
+            } else if (!intentData.phone && possibleAccountsOrPhones.length > 0) {
+                // If destination is already full, the number must be the contact phone!
+                intentData.phone = String(possibleAccountsOrPhones[0]);
+            } else if (!intentData.phone) {
+                intentData.phone = newAiData.phone;
+            }
+            if (!intentData.provider) intentData.provider = newAiData.provider;
         } else {
             intentData = newAiData;
             if (intentData.amount_ngn) intentData.amount_ngn = Number(intentData.amount_ngn);
             if (intentData.destination_account) intentData.destination_account = String(intentData.destination_account);
         }
     } catch (e) { 
-        console.warn("AI extraction failed, utilizing high-speed local router fallback.");
-        // ⚡ THE FAILSAFE: If AI drops, the bot routes it locally instantly ⚡
+        // ⚡ REGEX FAILSAFE (Bypasses AI completely if it crashes)
+        console.warn("AI extraction failed, utilizing high-speed local regex fallback.");
         let localIntent = fallbackIntentMatcher(text);
         if (session?.status === 'AWAITING_DETAILS' && session.intent_data) {
-            intentData = session.intent_data; // Keep existing memory
-            // Quick local checks for missing data
-            if (!intentData.amount_ngn && !isNaN(Number(text))) intentData.amount_ngn = Number(text);
-            if (!intentData.destination_account && text.length >= 10 && !isNaN(Number(text))) intentData.destination_account = String(text);
+            intentData = session.intent_data;
+            if (!intentData.amount_ngn && possibleAmounts.length > 0) intentData.amount_ngn = Number(possibleAmounts[0]);
+            if (!intentData.email && extractedEmail) intentData.email = extractedEmail;
+            
+            if (!intentData.destination_account && possibleAccountsOrPhones.length > 0) {
+                intentData.destination_account = String(possibleAccountsOrPhones[0]);
+            } else if (!intentData.phone && possibleAccountsOrPhones.length > 0) {
+                intentData.phone = String(possibleAccountsOrPhones[0]);
+            }
         } else {
             intentData = { intent: localIntent, amount_ngn: null, destination_account: null, provider: null, phone: null, email: null };
-            if (!isNaN(Number(text))) intentData.amount_ngn = Number(text); // Catch raw numbers
+            if (possibleAmounts.length > 0) intentData.amount_ngn = Number(possibleAmounts[0]); 
+            if (possibleAccountsOrPhones.length > 0) intentData.destination_account = String(possibleAccountsOrPhones[0]);
         }
     }
 
@@ -268,7 +292,7 @@ export async function POST(req: Request) {
 
         return NextResponse.json({
             action: 'REPLY',
-            message: `${prefixMsg}🪙 **Select Payment Method**\n\n1️⃣ Fiat Balance (${currencySymbol}${fiatBalance})\n2️⃣ USDT (${usdtBalance})\n3️⃣ USDC (${usdcBalance})\n4️⃣ cUSD (${cusdBalance})\n\n*Reply with the number (e.g., 2).*`
+            message: `${prefixMsg}🪙 **Select Payment Method**\n\n1️⃣ Fiat Balance (${currencySymbol}${fiatBalance})\n2️⃣ USDT (${crypto.usdt})\n3️⃣ USDC (${crypto.usdc})\n4️⃣ cUSD (${crypto.cusd})\n\n*Reply with the number (e.g., 2).*`
         });
     }
 
