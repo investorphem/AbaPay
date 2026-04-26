@@ -19,9 +19,11 @@ const SERVICE_RULES: Record<string, any> = {
     EDUCATION: { min: 1000, max: 50000, required: ['amount_ngn', 'destination_account', 'phone', 'email'] }
 };
 
-const detectNetwork = (phone: string) => {
+// ⚡ BUG FIX: Safely handles numbers and strings without crashing
+const detectNetwork = (phone: any) => {
   if (!phone) return null;
-  const prefix = phone.substring(0, 4);
+  const phoneStr = String(phone).padStart(11, '0'); // Restores the leading zero if missing
+  const prefix = phoneStr.substring(0, 4);
   if (["0803","0806","0810","0813","0814","0816","0903","0906","0913","0916","0703","0706"].includes(prefix)) return "mtn";
   if (["0802","0808","0812","0902","0907","0912","0701","0708"].includes(prefix)) return "airtel";
   if (["0805","0807","0811","0905","0705","0915"].includes(prefix)) return "glo";
@@ -56,7 +58,7 @@ export async function POST(req: Request) {
     const { data: session } = await supabase.from('deai_sessions').select('*').eq('chat_id', platform_id).single();
     const userInput = text.trim().toLowerCase();
 
-    // ESCAPE HATCH & GREETING
+    // 1. ESCAPE HATCH & GREETING
     if (userInput === 'cancel' || userInput === 'start' || userInput === 'help') {
       await supabase.from('deai_sessions').delete().eq('chat_id', platform_id);
       return NextResponse.json({ 
@@ -90,7 +92,7 @@ export async function POST(req: Request) {
       session.intent_data.selected_token = selected;
       await supabase.from('deai_sessions').upsert({ chat_id: platform_id, platform, intent_data: session.intent_data, status: 'AWAITING_PIN', expires_at: new Date(Date.now() + 300000).toISOString() }, { onConflict: 'chat_id' });
 
-      const total = (session.intent_data.amount_ngn || 0) + (session.intent_data.fee || 0);
+      const total = Number(session.intent_data.amount_ngn || 0) + Number(session.intent_data.fee || 0);
       return NextResponse.json({
           action: 'REPLY',
           message: `🤖 **Final Checkout**\n\nService: ${session.intent_data.intent.replace('_', ' ')}\nAccount: ${session.intent_data.destination_account}\nName: ${session.intent_data.verified_name || 'N/A'}\nAmount: ${currencySymbol}${session.intent_data.amount_ngn}\nPayment: **${selected}**\n**Total: ${currencySymbol}${total}**\n\n🔒 Reply with your **4-digit PIN** to confirm.`
@@ -124,49 +126,64 @@ export async function POST(req: Request) {
        isContinuingToAI = true;
     }
 
-    // --- 3. THE SMART AI EXTRACTOR ---
+    // --- 2. THE SMART AI EXTRACTOR (WITH FALLBACK LOOP) ---
     if (!isContinuingToAI) return NextResponse.json({ success: true });
 
     let intentData: any = {};
+    let aiSuccess = false;
 
-    try {
-        const model = genAI.getGenerativeModel({ model: "gemini-2.5-flash", generationConfig: { responseMimeType: "application/json" } });
-        const prompt = `
-          Extract entities from the user message.
-          Message: "${text}"
-          
-          Rules:
-          - Categories: VEND_AIRTIME, VEND_DATA, ELECTRICITY, EDUCATION, TV, BANK_TRANSFER, TRANSACTION_HISTORY, UNKNOWN.
-          - "status", "history", "recent" map to "TRANSACTION_HISTORY".
-          - 10 or 11 digit numbers map to "destination_account".
-          - Standalone numbers map to "amount_ngn".
-          
-          Output exactly: { "intent": "...", "provider": null, "amount_ngn": null, "destination_account": null, "phone": null, "email": null }
-        `;
-        
-        const result = await model.generateContent(prompt);
-        // ⚡ FIX: STRIP MARKDOWN TO PREVENT JSON CRASHES ⚡
-        const rawText = result.response.text();
-        const cleanedText = rawText.replace(/```json/gi, '').replace(/```/gi, '').trim();
-        const newAiData = JSON.parse(cleanedText);
+    // ⚡ BUG FIX: Bulletproof Fallback Loop so it NEVER goes offline
+    const fallbackModels = ["gemini-1.5-flash", "gemini-1.5-pro"]; 
+    const previousContext = session?.status === 'AWAITING_DETAILS' ? JSON.stringify(session.intent_data) : "None";
 
-        // ⚡ FIX: BULLETPROOF TYPESCRIPT MEMORY MERGING ⚡
-        if (session?.status === 'AWAITING_DETAILS' && session.intent_data) {
-            intentData = {
-                intent: session.intent_data.intent, // Lock the intent so it doesn't change
-                amount_ngn: newAiData.amount_ngn || session.intent_data.amount_ngn,
-                destination_account: newAiData.destination_account || newAiData.phone || session.intent_data.destination_account,
-                provider: newAiData.provider || session.intent_data.provider,
-                phone: newAiData.phone || session.intent_data.phone,
-                email: newAiData.email || session.intent_data.email
-            };
-        } else {
-            intentData = newAiData;
+    for (const modelName of fallbackModels) {
+        try {
+            const model = genAI.getGenerativeModel({ model: modelName, generationConfig: { responseMimeType: "application/json" } });
+            const prompt = `
+              Extract entities from the user message.
+              Message: "${text}"
+              
+              Rules:
+              - Categories: VEND_AIRTIME, VEND_DATA, ELECTRICITY, EDUCATION, TV, BANK_TRANSFER, TRANSACTION_HISTORY, UNKNOWN.
+              - "status", "history", "recent" map to "TRANSACTION_HISTORY".
+              - 10 or 11 digit numbers map to "destination_account".
+              - Standalone numbers map to "amount_ngn".
+              
+              Output exactly this JSON format (use null if missing): 
+              { "intent": "UNKNOWN", "provider": null, "amount_ngn": null, "destination_account": null, "phone": null, "email": null }
+            `;
+            
+            const result = await model.generateContent(prompt);
+            const cleanedText = result.response.text().replace(/```json/gi, '').replace(/```/gi, '').trim();
+            const newAiData = JSON.parse(cleanedText);
+
+            // Safely merge and enforce types
+            if (session?.status === 'AWAITING_DETAILS' && session.intent_data) {
+                intentData = {
+                    intent: session.intent_data.intent, 
+                    amount_ngn: newAiData.amount_ngn ? Number(newAiData.amount_ngn) : session.intent_data.amount_ngn,
+                    destination_account: newAiData.destination_account ? String(newAiData.destination_account) : session.intent_data.destination_account,
+                    provider: newAiData.provider || session.intent_data.provider,
+                    phone: newAiData.phone ? String(newAiData.phone) : session.intent_data.phone,
+                    email: newAiData.email || session.intent_data.email
+                };
+            } else {
+                intentData = newAiData;
+                if (intentData.amount_ngn) intentData.amount_ngn = Number(intentData.amount_ngn);
+                if (intentData.destination_account) intentData.destination_account = String(intentData.destination_account);
+                if (intentData.phone) intentData.phone = String(intentData.phone);
+            }
+            
+            aiSuccess = true;
+            break; // Success! Break out of the loop.
+        } catch (e) { 
+            console.warn(`Model ${modelName} failed, trying backup...`);
+            continue; 
         }
+    }
 
-    } catch (e) { 
-        console.error("Parse Error:", e);
-        return NextResponse.json({ action: 'REPLY', message: "🚨 Formatting error. Please try sending your message again." });
+    if (!aiSuccess) {
+        return NextResponse.json({ action: 'REPLY', message: "🚨 Secure AI Connection Timeout. Please type **Cancel** and try your request again." });
     }
 
     if (intentData?.intent === 'TRANSACTION_STATUS' || intentData?.intent === 'STATUS') intentData.intent = 'TRANSACTION_HISTORY';
@@ -190,7 +207,8 @@ export async function POST(req: Request) {
         return NextResponse.json({ action: 'REPLY', message: msg });
     }
 
-    // --- 4. THE MISSING FIELD ENGINE ---
+    // --- 3. THE MISSING FIELD ENGINE ---
+    
     if (['VEND_AIRTIME', 'VEND_DATA'].includes(intentData.intent) && intentData.destination_account && !intentData.provider) {
         intentData.provider = detectNetwork(intentData.destination_account);
     }
