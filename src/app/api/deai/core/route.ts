@@ -12,7 +12,7 @@ const supabase = createClient(
 // ⚡ 1. THE ENTERPRISE VALIDATION ENGINE ⚡
 const SERVICE_RULES: Record<string, any> = {
     VEND_AIRTIME: { min: 100, max: 50000, required: ['amount_ngn', 'destination_account', 'provider'] },
-    VEND_DATA: { min: 50, max: 50000, required: ['destination_account', 'provider'] }, // Data doesn't strictly need amount immediately
+    VEND_DATA: { min: 50, max: 50000, required: ['destination_account', 'provider'] }, 
     ELECTRICITY: { min: 1000, max: 100000, required: ['amount_ngn', 'destination_account', 'phone', 'email'] },
     TV: { min: 1500, max: 100000, required: ['amount_ngn', 'destination_account', 'phone', 'email'] },
     BANK_TRANSFER: { min: 500, max: 500000, required: ['amount_ngn', 'destination_account', 'provider'] },
@@ -75,8 +75,13 @@ export async function POST(req: Request) {
     let { data: session } = await supabase.from('deai_sessions').select('*').eq('chat_id', platform_id).single();
     const userInput = text.trim().toLowerCase();
 
-    // ESCAPE HATCH
-    if (userInput === 'cancel' || userInput === 'start' || userInput === 'help') {
+    // ⚡ 2. THE ESCAPE HATCH (STRICT ROUTING) ⚡
+    if (userInput === 'cancel') {
+      await supabase.from('deai_sessions').delete().eq('chat_id', platform_id);
+      return NextResponse.json({ action: 'REPLY', message: "🚫 **Transaction Cancelled.**\n\nType **Start** whenever you are ready to make a new request." });
+    }
+
+    if (userInput === 'start' || userInput === 'help') {
       await supabase.from('deai_sessions').delete().eq('chat_id', platform_id);
       return NextResponse.json({ 
         action: 'REPLY', 
@@ -84,30 +89,35 @@ export async function POST(req: Request) {
       });
     }
 
-    // CONTEXT PIVOT
-    const freshIntentCheck = fallbackIntentMatcher(text);
-    if (session && session.status === 'AWAITING_DETAILS' && freshIntentCheck !== 'UNKNOWN' && freshIntentCheck !== session.intent_data.intent) {
-        await supabase.from('deai_sessions').delete().eq('chat_id', platform_id);
-        session = null; 
+    // CONTEXT PIVOT (Only happens if they aren't trapped in the PIN state)
+    if (session && session.status !== 'AWAITING_PIN') {
+        const freshIntentCheck = fallbackIntentMatcher(text);
+        if (session.status === 'AWAITING_DETAILS' && freshIntentCheck !== 'UNKNOWN' && freshIntentCheck !== session.intent_data.intent) {
+            await supabase.from('deai_sessions').delete().eq('chat_id', platform_id);
+            session = null; 
+        }
     }
 
     let isContinuingToAI = false;
     let prependSystemMsg = "";
 
-    // STATE: PIN CONFIRMATION
+    // ⚡ 3. STATE: STRICT PIN CONFIRMATION TRAP ⚡
     if (session?.status === 'AWAITING_PIN') {
       if (text.trim() === identity.deai_pin) {
         await supabase.from('deai_sessions').delete().eq('chat_id', platform_id);
         return NextResponse.json({ action: 'REPLY', message: `✅ **PIN Verified!**\n\n⏳ *Processing your ${session.intent_data.selected_token} transaction...*\n\nYour transaction has been submitted. Type **Status** to check your history shortly.` });
-      }
-      
-      // ⚡ FIX: Allow 4 to 6 digit typos to just return "Incorrect PIN" instead of crashing
-      if (/^[\d\s]{4,6}$/.test(text.trim())) {
-        return NextResponse.json({ action: 'REPLY', message: "❌ Incorrect PIN. Reply with your correct 4-digit PIN, or type **Cancel**." });
       } else {
-        await supabase.from('deai_sessions').delete().eq('chat_id', platform_id);
-        session = null;
-        isContinuingToAI = true; 
+        // ANY input that is not the exact PIN triggers a failure strike. 
+        const attempts = (session.intent_data.pin_attempts || 0) + 1;
+        
+        if (attempts >= 4) {
+             await supabase.from('deai_sessions').delete().eq('chat_id', platform_id);
+             return NextResponse.json({ action: 'REPLY', message: "🚫 **Transaction Aborted**\n\nYou entered an incorrect PIN 4 times. For your security, this session has been securely wiped.\n\nType **Start** to begin a new request." });
+        } else {
+             session.intent_data.pin_attempts = attempts;
+             await supabase.from('deai_sessions').update({ intent_data: session.intent_data }).eq('chat_id', platform_id);
+             return NextResponse.json({ action: 'REPLY', message: `❌ **Incorrect PIN** (${4 - attempts} attempts left)\n\nPlease reply with your correct 4-digit PIN, or type **Cancel** to abort.` });
+        }
       }
     } 
     // STATE: TOKEN SELECTION
@@ -118,12 +128,23 @@ export async function POST(req: Request) {
       if (!selected) return NextResponse.json({ action: 'REPLY', message: "❌ Invalid selection. Reply with **1**, **2**, **3**, or **4**." });
 
       session.intent_data.selected_token = selected;
+      session.intent_data.pin_attempts = 0; // Initialize attempts
       await supabase.from('deai_sessions').upsert({ chat_id: platform_id, platform, intent_data: session.intent_data, status: 'AWAITING_PIN', expires_at: new Date(Date.now() + 300000).toISOString() }, { onConflict: 'chat_id' });
+
+      // ⚡ FIX: DYNAMIC CHECKOUT DISPLAY ⚡
+      let detailsRow = "";
+      if (['VEND_AIRTIME', 'VEND_DATA'].includes(session.intent_data.intent)) {
+          detailsRow = `Network: ${session.intent_data.provider?.toUpperCase()}`;
+      } else if (session.intent_data.intent === 'BANK_TRANSFER') {
+          detailsRow = `Bank: ${session.intent_data.provider?.toUpperCase()}`;
+      } else {
+          detailsRow = `Name: ${session.intent_data.verified_name || 'N/A'}`;
+      }
 
       const total = Number(session.intent_data.amount_ngn || 0) + Number(session.intent_data.fee || 0);
       return NextResponse.json({
           action: 'REPLY',
-          message: `🤖 **Final Checkout**\n\nService: ${session.intent_data.intent.replace('_', ' ')}\nAccount: ${session.intent_data.destination_account}\nName: ${session.intent_data.verified_name || 'N/A'}\nAmount: ${currencySymbol}${session.intent_data.amount_ngn || 0}\nPayment: **${selected}**\n**Total: ${currencySymbol}${total}**\n\n🔒 Reply with your **4-digit PIN** to confirm.`
+          message: `🤖 **Final Checkout**\n\nService: ${session.intent_data.intent.replace('_', ' ')}\nAccount: ${session.intent_data.destination_account}\n${detailsRow}\nAmount: ${currencySymbol}${session.intent_data.amount_ngn || 0}\nPayment: **${selected}**\n**Total: ${currencySymbol}${total}**\n\n🔒 Reply with your **4-digit PIN** to confirm.`
       });
     }
     // STATE: METER TYPE
@@ -145,7 +166,7 @@ export async function POST(req: Request) {
         session.status = 'AWAITING_DETAILS'; 
         
         prependSystemMsg = `✅ **Meter Verified!**\nName: ${verification.customer_name}\n\n`;
-        text = ""; // Wipe text to prevent accidental extraction
+        text = ""; 
         isContinuingToAI = true;
     }
     else if (session?.status === 'AWAITING_DETAILS') {
@@ -159,7 +180,7 @@ export async function POST(req: Request) {
     let intentData: any = {};
     let skipAI = false;
 
-    // ⚡ 3. THE "FAST-PASS" ENGINE (Eliminates AI Timeouts & Hallucinations for simple replies) ⚡
+    // THE "FAST-PASS" ENGINE 
     if (session?.status === 'AWAITING_DETAILS' && text !== "") {
         const cleanText = text.trim();
         const isOnlyDigits = /^\d+$/.test(cleanText.replace(/\s+/g, ''));
@@ -181,11 +202,11 @@ export async function POST(req: Request) {
                     intentData.amount_ngn = Number(cleanNum);
                 }
             }
-            skipAI = true; // We got what we needed perfectly. Do NOT call the AI.
+            skipAI = true; 
         }
     }
 
-    // --- 4. THE AI EXTRACTOR (Only runs for complex sentences) ---
+    // THE AI EXTRACTOR
     if (!skipAI) {
         const previousContext = session?.status === 'AWAITING_DETAILS' ? JSON.stringify(session.intent_data) : "None";
         const digitsMatch: string[] = text.match(/\b\d+\b/g) || [];
@@ -268,7 +289,7 @@ export async function POST(req: Request) {
         return NextResponse.json({ action: 'REPLY', message: msg });
     }
 
-    // --- 5. THE MISSING FIELD ENGINE ---
+    // --- 4. THE MISSING FIELD ENGINE ---
     if (['VEND_AIRTIME', 'VEND_DATA'].includes(intentData.intent) && intentData.destination_account && !intentData.provider) {
         intentData.provider = detectNetwork(intentData.destination_account);
     }
