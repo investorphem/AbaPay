@@ -9,7 +9,7 @@ const supabase = createClient(
   (process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY) as string
 );
 
-// ⚡ THE ENTERPRISE VALIDATION ENGINE ⚡
+// ⚡ 1. THE ENTERPRISE VALIDATION ENGINE ⚡
 const SERVICE_RULES: Record<string, any> = {
     VEND_AIRTIME: { min: 100, max: 50000, required: ['amount_ngn', 'destination_account', 'provider'] },
     VEND_DATA: { min: null, max: null, required: ['destination_account', 'provider'] },
@@ -19,16 +19,27 @@ const SERVICE_RULES: Record<string, any> = {
     EDUCATION: { min: 1000, max: 50000, required: ['amount_ngn', 'destination_account', 'phone', 'email'] }
 };
 
-// ⚡ BUG FIX: Safely handles numbers and strings without crashing
 const detectNetwork = (phone: any) => {
   if (!phone) return null;
-  const phoneStr = String(phone).padStart(11, '0'); // Restores the leading zero if missing
+  const phoneStr = String(phone).padStart(11, '0');
   const prefix = phoneStr.substring(0, 4);
   if (["0803","0806","0810","0813","0814","0816","0903","0906","0913","0916","0703","0706"].includes(prefix)) return "mtn";
   if (["0802","0808","0812","0902","0907","0912","0701","0708"].includes(prefix)) return "airtel";
   if (["0805","0807","0811","0905","0705","0915"].includes(prefix)) return "glo";
   if (["0809","0817","0818","0908","0909"].includes(prefix)) return "etisalat";
   return null;
+};
+
+// ⚡ 2. THE LOCAL ROUTER (Prevents AI Timeouts) ⚡
+const fallbackIntentMatcher = (text: string) => {
+    const t = text.toLowerCase();
+    if (t.includes('airtime') || t.includes('recharge')) return 'VEND_AIRTIME';
+    if (t.includes('data') || t.includes('mb') || t.includes('gb')) return 'VEND_DATA';
+    if (t.includes('electric') || t.includes('meter') || t.includes('nepa')) return 'ELECTRICITY';
+    if (t.includes('tv') || t.includes('dstv') || t.includes('gotv')) return 'TV';
+    if (t.includes('transfer') || t.includes('send money') || t.includes('bank')) return 'BANK_TRANSFER';
+    if (t.includes('history') || t.includes('status') || t.includes('recent')) return 'TRANSACTION_HISTORY';
+    return 'UNKNOWN';
 };
 
 async function verifyAccount(intent: string, account: string, type?: string) {
@@ -41,9 +52,11 @@ export async function POST(req: Request) {
     const { platform, platform_id, text } = await req.json();
 
     let columnToSearch = platform === 'TELEGRAM' ? 'telegram_chat_id' : platform === 'WHATSAPP' ? 'whatsapp_number' : 'x_twitter_id';
+    
+    // ⚡ FIX: Fetching ALL columns (*) so we get crypto balances without crashing
     const { data: identity } = await supabase
       .from('deai_identities')
-      .select(`deai_pin, is_active, user_id, abapay_global_users(wallet_address, fiat_balance_ngn, country_code)`)
+      .select(`deai_pin, is_active, user_id, abapay_global_users(*)`)
       .eq(columnToSearch, platform_id).single();
 
     if (!identity || !identity.is_active) {
@@ -53,17 +66,21 @@ export async function POST(req: Request) {
     const globalUser: any = Array.isArray(identity.abapay_global_users) ? identity.abapay_global_users[0] : identity.abapay_global_users;
     const currentCountry = globalUser?.country_code || 'NG';
     const currencySymbol = currentCountry === 'NG' ? '₦' : (currentCountry === 'GH' ? 'GH₵' : '$');
+    
     const fiatBalance = globalUser?.fiat_balance_ngn || 0;
+    const usdtBalance = globalUser?.usdt_balance || 0;
+    const usdcBalance = globalUser?.usdc_balance || 0;
+    const cusdBalance = globalUser?.cusd_balance || 0;
 
     const { data: session } = await supabase.from('deai_sessions').select('*').eq('chat_id', platform_id).single();
     const userInput = text.trim().toLowerCase();
 
-    // 1. ESCAPE HATCH & GREETING
+    // ESCAPE HATCH & GREETING WITH CRYPTO BALANCES
     if (userInput === 'cancel' || userInput === 'start' || userInput === 'help') {
       await supabase.from('deai_sessions').delete().eq('chat_id', platform_id);
       return NextResponse.json({ 
         action: 'REPLY', 
-        message: `🌍 **Region:** ${currentCountry}\n💰 **Fiat Balance:** ${currencySymbol}${fiatBalance}\n\n👋 **Welcome to AbaPay AI!**\n\nI can help you pay bills and send crypto instantly.\n\n*Try saying:*\n💬 _Buy 500 MTN airtime for 08012345678_\n💬 _Pay 5000 electricity for meter 1122334455_\n📜 _Check my history_` 
+        message: `🌍 **Region:** ${currentCountry}\n💵 **Fiat:** ${currencySymbol}${fiatBalance}\n🪙 **Crypto:** ${usdtBalance} USDT | ${usdcBalance} USDC | ${cusdBalance} cUSD\n\n👋 **Welcome to AbaPay AI!**\n\nI can help you pay bills and send crypto instantly.\n\n*Try saying:*\n💬 _Buy 500 MTN airtime for 08012345678_\n💬 _Pay 5000 electricity for meter 1122334455_\n📜 _Check my history_` 
       });
     }
 
@@ -126,64 +143,59 @@ export async function POST(req: Request) {
        isContinuingToAI = true;
     }
 
-    // --- 2. THE SMART AI EXTRACTOR (WITH FALLBACK LOOP) ---
+    // --- 3. THE HYBRID AI / LOCAL EXTRACTOR ---
     if (!isContinuingToAI) return NextResponse.json({ success: true });
 
     let intentData: any = {};
-    let aiSuccess = false;
-
-    // ⚡ BUG FIX: Bulletproof Fallback Loop so it NEVER goes offline
-    const fallbackModels = ["gemini-1.5-flash", "gemini-1.5-pro"]; 
     const previousContext = session?.status === 'AWAITING_DETAILS' ? JSON.stringify(session.intent_data) : "None";
 
-    for (const modelName of fallbackModels) {
-        try {
-            const model = genAI.getGenerativeModel({ model: modelName, generationConfig: { responseMimeType: "application/json" } });
-            const prompt = `
-              Extract entities from the user message.
-              Message: "${text}"
-              
-              Rules:
-              - Categories: VEND_AIRTIME, VEND_DATA, ELECTRICITY, EDUCATION, TV, BANK_TRANSFER, TRANSACTION_HISTORY, UNKNOWN.
-              - "status", "history", "recent" map to "TRANSACTION_HISTORY".
-              - 10 or 11 digit numbers map to "destination_account".
-              - Standalone numbers map to "amount_ngn".
-              
-              Output exactly this JSON format (use null if missing): 
-              { "intent": "UNKNOWN", "provider": null, "amount_ngn": null, "destination_account": null, "phone": null, "email": null }
-            `;
-            
-            const result = await model.generateContent(prompt);
-            const cleanedText = result.response.text().replace(/```json/gi, '').replace(/```/gi, '').trim();
-            const newAiData = JSON.parse(cleanedText);
+    try {
+        const model = genAI.getGenerativeModel({ model: "gemini-1.5-flash", generationConfig: { responseMimeType: "application/json" } });
+        const prompt = `
+          Extract entities from the user message.
+          Message: "${text}"
+          
+          Rules:
+          - Categories: VEND_AIRTIME, VEND_DATA, ELECTRICITY, EDUCATION, TV, BANK_TRANSFER, TRANSACTION_HISTORY, UNKNOWN.
+          - "status", "history", "recent" map to "TRANSACTION_HISTORY".
+          - 10 or 11 digit numbers map to "destination_account".
+          - Standalone numbers map to "amount_ngn".
+          
+          Output exactly this JSON format (use null if missing): 
+          { "intent": "UNKNOWN", "provider": null, "amount_ngn": null, "destination_account": null, "phone": null, "email": null }
+        `;
+        
+        const result = await model.generateContent(prompt);
+        const cleanedText = result.response.text().replace(/```json/gi, '').replace(/```/gi, '').trim();
+        const newAiData = JSON.parse(cleanedText);
 
-            // Safely merge and enforce types
-            if (session?.status === 'AWAITING_DETAILS' && session.intent_data) {
-                intentData = {
-                    intent: session.intent_data.intent, 
-                    amount_ngn: newAiData.amount_ngn ? Number(newAiData.amount_ngn) : session.intent_data.amount_ngn,
-                    destination_account: newAiData.destination_account ? String(newAiData.destination_account) : session.intent_data.destination_account,
-                    provider: newAiData.provider || session.intent_data.provider,
-                    phone: newAiData.phone ? String(newAiData.phone) : session.intent_data.phone,
-                    email: newAiData.email || session.intent_data.email
-                };
-            } else {
-                intentData = newAiData;
-                if (intentData.amount_ngn) intentData.amount_ngn = Number(intentData.amount_ngn);
-                if (intentData.destination_account) intentData.destination_account = String(intentData.destination_account);
-                if (intentData.phone) intentData.phone = String(intentData.phone);
-            }
-            
-            aiSuccess = true;
-            break; // Success! Break out of the loop.
-        } catch (e) { 
-            console.warn(`Model ${modelName} failed, trying backup...`);
-            continue; 
+        if (session?.status === 'AWAITING_DETAILS' && session.intent_data) {
+            intentData = {
+                intent: session.intent_data.intent, 
+                amount_ngn: newAiData.amount_ngn ? Number(newAiData.amount_ngn) : session.intent_data.amount_ngn,
+                destination_account: newAiData.destination_account ? String(newAiData.destination_account) : session.intent_data.destination_account,
+                provider: newAiData.provider || session.intent_data.provider,
+                phone: newAiData.phone ? String(newAiData.phone) : session.intent_data.phone,
+                email: newAiData.email || session.intent_data.email
+            };
+        } else {
+            intentData = newAiData;
+            if (intentData.amount_ngn) intentData.amount_ngn = Number(intentData.amount_ngn);
+            if (intentData.destination_account) intentData.destination_account = String(intentData.destination_account);
         }
-    }
-
-    if (!aiSuccess) {
-        return NextResponse.json({ action: 'REPLY', message: "🚨 Secure AI Connection Timeout. Please type **Cancel** and try your request again." });
+    } catch (e) { 
+        console.warn("AI extraction failed, utilizing high-speed local router fallback.");
+        // ⚡ THE FAILSAFE: If AI drops, the bot routes it locally instantly ⚡
+        let localIntent = fallbackIntentMatcher(text);
+        if (session?.status === 'AWAITING_DETAILS' && session.intent_data) {
+            intentData = session.intent_data; // Keep existing memory
+            // Quick local checks for missing data
+            if (!intentData.amount_ngn && !isNaN(Number(text))) intentData.amount_ngn = Number(text);
+            if (!intentData.destination_account && text.length >= 10 && !isNaN(Number(text))) intentData.destination_account = String(text);
+        } else {
+            intentData = { intent: localIntent, amount_ngn: null, destination_account: null, provider: null, phone: null, email: null };
+            if (!isNaN(Number(text))) intentData.amount_ngn = Number(text); // Catch raw numbers
+        }
     }
 
     if (intentData?.intent === 'TRANSACTION_STATUS' || intentData?.intent === 'STATUS') intentData.intent = 'TRANSACTION_HISTORY';
@@ -207,7 +219,7 @@ export async function POST(req: Request) {
         return NextResponse.json({ action: 'REPLY', message: msg });
     }
 
-    // --- 3. THE MISSING FIELD ENGINE ---
+    // --- 4. THE MISSING FIELD ENGINE ---
     
     if (['VEND_AIRTIME', 'VEND_DATA'].includes(intentData.intent) && intentData.destination_account && !intentData.provider) {
         intentData.provider = detectNetwork(intentData.destination_account);
@@ -256,7 +268,7 @@ export async function POST(req: Request) {
 
         return NextResponse.json({
             action: 'REPLY',
-            message: `${prefixMsg}🪙 **Select Payment Method**\n\n1️⃣ Fiat Balance (${currencySymbol}${fiatBalance})\n2️⃣ USDT\n3️⃣ USDC\n4️⃣ cUSD\n\n*Reply with the number (e.g., 2).*`
+            message: `${prefixMsg}🪙 **Select Payment Method**\n\n1️⃣ Fiat Balance (${currencySymbol}${fiatBalance})\n2️⃣ USDT (${usdtBalance})\n3️⃣ USDC (${usdcBalance})\n4️⃣ cUSD (${cusdBalance})\n\n*Reply with the number (e.g., 2).*`
         });
     }
 
