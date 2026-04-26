@@ -2,7 +2,6 @@
 import { NextResponse } from 'next/server';
 import { GoogleGenerativeAI } from '@google/generative-ai';
 import { createClient } from '@supabase/supabase-js';
-import { categorizeDataPlan } from '@/lib/dataCategories';
 
 const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY as string);
 const supabase = createClient(
@@ -29,23 +28,26 @@ export async function POST(req: Request) {
     let columnToSearch = platform === 'TELEGRAM' ? 'telegram_chat_id' : platform === 'WHATSAPP' ? 'whatsapp_number' : 'x_twitter_id';
     const { data: identity } = await supabase
       .from('deai_identities')
-      .select(`deai_pin, is_active, user_id, abapay_global_users(wallet_address, fiat_balance_ngn)`)
+      .select(`deai_pin, is_active, user_id, abapay_global_users(wallet_address, fiat_balance_ngn, country_code)`)
       .eq(columnToSearch, platform_id).single();
 
     if (!identity || !identity.is_active) {
       return NextResponse.json({ action: 'REPLY', message: "🔒 **Unauthorized**\nPlease link your wallet on the AbaPay dashboard to use this agent." });
     }
 
+    const currentCountry = identity.abapay_global_users?.country_code || 'NG';
+    const currencySymbol = currentCountry === 'NG' ? '₦' : (currentCountry === 'GH' ? 'GH₵' : '$');
+
     // 2. State Machine Logic
     const { data: session } = await supabase.from('deai_sessions').select('*').eq('chat_id', platform_id).single();
     const userInput = text.trim().toLowerCase();
 
-    // ESCAPE HATCH: Let the user cancel manually
+    // ESCAPE HATCH: Cancel or Start
     if (userInput === 'cancel' || userInput === 'start' || userInput === 'help') {
       await supabase.from('deai_sessions').delete().eq('chat_id', platform_id);
       return NextResponse.json({ 
         action: 'REPLY', 
-        message: "👋 **Welcome to AbaPay AI!**\n\nI can help you pay bills and send crypto instantly. Tell me what you'd like to do!\n\n*Try saying:*\n💬 _Buy 500 MTN airtime for 08012345678_\n💬 _Pay 5000 electricity for meter 1122334455_\n💬 _Buy 1.5GB data for 08012345678_" 
+        message: `👋 **Welcome to AbaPay AI!** (Region: ${currentCountry})\n\nI can help you pay bills and send crypto instantly.\n\n*Try saying:*\n💬 _Buy 500 MTN airtime for 08012345678_\n💬 _Pay 5000 electricity for meter 1122334455_\n💬 _Buy 1.5GB data for 08012345678_\n🌍 _Change my country to Ghana_` 
       });
     }
 
@@ -59,15 +61,13 @@ export async function POST(req: Request) {
       }
 
       if (text.trim() === identity.deai_pin) {
-        // SUCCESS: Wipe session and execute
         await supabase.from('deai_sessions').delete().eq('chat_id', platform_id);
         return NextResponse.json({ 
           action: 'SUCCESS_RECEIPT', 
-          message: `🎉 **Transaction Successful!**\n\nService: ${session.intent_data.intent}\nAmount: ₦${session.intent_data.amount_ngn}\nRecipient: ${session.intent_data.destination_account}\n\n*Receipt sent to your AbaPay history.*` 
+          message: `🎉 **Transaction Successful!**\n\nService: ${session.intent_data.intent}\nAmount: ${currencySymbol}${session.intent_data.amount_ngn}\nRecipient: ${session.intent_data.destination_account}\n\n*Receipt sent to your AbaPay history.*` 
         });
       }
       
-      // THE SMART RESET 
       if (/^\d{4}$/.test(text.trim())) {
         return NextResponse.json({ action: 'REPLY', message: "❌ Incorrect PIN.\n\nReply with your correct 4-digit PIN, or type **Cancel** to start over." });
       } else {
@@ -80,7 +80,7 @@ export async function POST(req: Request) {
     // 3. AI Intent Routing
     if (!isContinuingToAI) return NextResponse.json({ success: true });
 
-    const fallbackModels = ["gemini-2.5-flash", "gemini-2.0-flash", "gemini-1.5-pro"];
+    const fallbackModels = ["gemini-3-flash-preview", "gemini-2.5-flash", "gemini-1.5-pro"];
     let intentData = null;
 
     const previousContext = session?.status === 'AWAITING_DETAILS' ? JSON.stringify(session.intent_data) : "None";
@@ -90,13 +90,13 @@ export async function POST(req: Request) {
         const model = genAI.getGenerativeModel({ model: modelName, generationConfig: { responseMimeType: "application/json" } });
         const prompt = `
           You are the AbaPay DeAI Agent. Extract user intent into JSON.
-          Categories: VEND_AIRTIME, VEND_DATA, ELECTRICITY, EDUCATION, TV, BANK_TRANSFER, GREETING, UNKNOWN.
+          Categories: VEND_AIRTIME, VEND_DATA, ELECTRICITY, EDUCATION, TV, BANK_TRANSFER, CHANGE_COUNTRY, UNKNOWN.
           
           Previous Context: ${previousContext}
           If Previous Context is not "None", merge the new Message details into the Previous Context.
           
           Rules:
-          - If the user says hello, hi, start, or help, intent is GREETING.
+          - If the user asks to change country or region, intent is CHANGE_COUNTRY.
           - If the request is gibberish, intent is UNKNOWN.
           - For 9mobile, use "etisalat".
           - If amount is missing, leave as null.
@@ -104,7 +104,7 @@ export async function POST(req: Request) {
           - If they mention a "meter", intent is ELECTRICITY.
           - If they mention "WAEC" or "JAMB", intent is EDUCATION.
 
-          Return: { "intent": string, "provider": string, "amount_ngn": number, "destination_account": string, "quantity": number }
+          Return JSON: { "intent": string, "provider": string, "amount_ngn": number, "destination_account": string, "quantity": number, "country": string }
           Message: "${text}"
         `;
 
@@ -116,49 +116,58 @@ export async function POST(req: Request) {
 
     if (!intentData) throw new Error("All AI models failed.");
 
-    // Handle Greetings & Unknowns explicitly
-    if (intentData.intent === 'GREETING' || intentData.intent === 'UNKNOWN') {
-       await supabase.from('deai_sessions').delete().eq('chat_id', platform_id);
-       return NextResponse.json({ 
-         action: 'REPLY', 
-         message: "👋 **Welcome to AbaPay AI!**\n\nTell me what you'd like to do!\n\n*Examples:*\n💬 _Buy 500 MTN airtime for 08012345678_\n💬 _Pay 5000 electricity for meter 1122334455_\n💬 _Buy 1.5GB data for 08012345678_" 
-       });
+    if (intentData.intent === 'UNKNOWN') {
+       return NextResponse.json({ action: 'REPLY', message: "🤔 I didn't quite catch that. Type **Help** to see what I can do, or try rephrasing your request!" });
     }
 
-    // 4. Missing Information Guardrails & Dynamic Echo
-    if (intentData.intent === 'VEND_AIRTIME') {
-      if (!intentData.provider) intentData.provider = detectNetwork(intentData.destination_account);
-      
-      // If crucial info is missing, echo back what we know and ask for the rest
-      if (!intentData.amount_ngn || !intentData.destination_account) {
-         await supabase.from('deai_sessions').upsert({
+    if (intentData.intent === 'CHANGE_COUNTRY') {
+        return NextResponse.json({ action: 'REPLY', message: `🌍 Country Selection Menu:\n\nTo change your region, please log into your AbaPay Web Dashboard and update your profile settings. Your bot will automatically sync to your new local currency!` });
+    }
+
+    // 4. Missing Information Guardrails (For ALL Services)
+    if (intentData.intent === 'VEND_AIRTIME' && !intentData.provider) {
+      intentData.provider = detectNetwork(intentData.destination_account);
+    }
+
+    // Check what is missing based on service type
+    let missing = [];
+    const requiresAmount = ['VEND_AIRTIME', 'BANK_TRANSFER', 'ELECTRICITY'].includes(intentData.intent);
+    
+    if (requiresAmount && !intentData.amount_ngn) missing.push("the **amount**");
+    if (!intentData.destination_account) missing.push("the **target account/phone/meter number**");
+
+    if (missing.length > 0) {
+        // We save the state WITHOUT wiping it so they can answer
+        await supabase.from('deai_sessions').upsert({
             chat_id: platform_id, platform, intent_data: intentData, status: 'AWAITING_DETAILS', expires_at: new Date(Date.now() + 300000).toISOString()
-         }, { onConflict: 'chat_id' });
+        }, { onConflict: 'chat_id' });
 
-         // Construct the friendly echo
-         let understood = `I see you want to buy **Airtime**`;
-         if (intentData.provider) understood += ` for **${intentData.provider.toUpperCase()}**`;
-         if (intentData.destination_account) understood += ` to **${intentData.destination_account}**`;
-         if (intentData.amount_ngn) understood += ` for **₦${intentData.amount_ngn}**`;
+        let understood = `I see you want to process a **${intentData.intent.replace('_', ' ')}** transaction`;
+        if (intentData.provider) understood += ` for **${intentData.provider.toUpperCase()}**`;
+        if (intentData.destination_account) understood += ` to **${intentData.destination_account}**`;
+        if (intentData.amount_ngn) understood += ` for **${currencySymbol}${intentData.amount_ngn}**`;
          
-         let missing = [];
-         if (!intentData.amount_ngn) missing.push("the **amount**");
-         if (!intentData.destination_account) missing.push("the **phone number**");
-         
-         return NextResponse.json({ action: 'REPLY', message: `💡 ${understood}.\n\nTo proceed, please reply with ${missing.join(" and ")}.` });
-      }
-
-      if (intentData.amount_ngn < 100) {
-         await supabase.from('deai_sessions').delete().eq('chat_id', platform_id);
-         return NextResponse.json({ action: 'REPLY', message: "❌ Minimum airtime is ₦100. Please start over with a valid amount." });
-      }
+        return NextResponse.json({ action: 'REPLY', message: `💡 ${understood}.\n\nTo proceed, please reply with ${missing.join(" and ")}.` });
     }
 
-    if (intentData.intent === 'ELECTRICITY' || intentData.intent === 'BANK_TRANSFER' || intentData.intent === 'EDUCATION') {
+    // 5. Min/Max Validation (Without deleting memory!)
+    if (intentData.intent === 'VEND_AIRTIME' && intentData.amount_ngn < 100) {
+        // We reset the amount in memory, but KEEP the phone number and state!
+        intentData.amount_ngn = null; 
+        await supabase.from('deai_sessions').upsert({
+            chat_id: platform_id, platform, intent_data: intentData, status: 'AWAITING_DETAILS', expires_at: new Date(Date.now() + 300000).toISOString()
+        }, { onConflict: 'chat_id' });
+        return NextResponse.json({ action: 'REPLY', message: `❌ Minimum airtime is ${currencySymbol}100. Please reply with a valid amount.` });
+    }
+
+    // Fee Assignment
+    if (['ELECTRICITY', 'BANK_TRANSFER', 'EDUCATION', 'TV', 'VEND_DATA'].includes(intentData.intent)) {
         intentData.fee = 100;
+    } else {
+        intentData.fee = 0;
     }
 
-    // 5. Ready for Checkout! Save session and ask for PIN
+    // 6. Ready for Checkout! Save session and ask for PIN
     await supabase.from('deai_sessions').upsert({
       chat_id: platform_id, platform, intent_data: intentData, status: 'AWAITING_PIN', expires_at: new Date(Date.now() + 300000).toISOString()
     }, { onConflict: 'chat_id' });
@@ -166,7 +175,7 @@ export async function POST(req: Request) {
     const total = (intentData.amount_ngn || 0) + (intentData.fee || 0);
     return NextResponse.json({ 
       action: 'REPLY', 
-      message: `🤖 **AbaPay Checkout**\n\nService: ${intentData.intent.replace('_', ' ')}\nAccount: ${intentData.destination_account}\nAmount: ₦${intentData.amount_ngn}\nFee: ₦${intentData.fee || 0}\n**Total: ₦${total}**\n\nReply with your 4-digit PIN to confirm.`
+      message: `🤖 **AbaPay Checkout**\n\nService: ${intentData.intent.replace('_', ' ')}\nAccount: ${intentData.destination_account}\nAmount: ${currencySymbol}${intentData.amount_ngn}\nFee: ${currencySymbol}${intentData.fee}\n**Total: ${currencySymbol}${total}**\n\nReply with your 4-digit PIN to confirm.`
     });
 
   } catch (error) {
