@@ -50,8 +50,9 @@ export async function POST(req: Request) {
       return NextResponse.json({ action: 'REPLY', message: "❌ Incorrect PIN. Please try again." });
     }
 
-    // 3. AI Intent Routing (Updated for April 2026 Models)
-    const fallbackModels = ["gemini-3-flash-preview", "gemini-3.1-flash-lite-preview", "gemini-2.5-flash"];
+    // 3. AI Intent Routing (The Brain Upgrade with Fallback Loop)
+    // 🚀 We loop through valid models so your bot never goes offline due to a 404
+    const fallbackModels = ["gemini-2.5-flash", "gemini-2.0-flash", "gemini-1.5-pro"];
     let intentData = null;
 
     for (const modelName of fallbackModels) {
@@ -77,14 +78,19 @@ export async function POST(req: Request) {
 
         const result = await model.generateContent(prompt);
         intentData = JSON.parse(result.response.text());
-        if (intentData) break;
+        
+        // If successful, break out of the loop
+        if (intentData) break; 
       } catch (e) {
-        console.warn(`Model ${modelName} failed, trying next...`);
+        console.warn(`Model ${modelName} failed, trying next fallback...`);
         continue;
       }
     }
 
-    if (!intentData) throw new Error("All AI models failed to parse intent.");
+    // If every single model failed, throw an error to catch block
+    if (!intentData) {
+        throw new Error("All AI models failed to parse intent or returned null.");
+    }
 
     // 4. Apply AbaPay Logic Guardrails
     if (intentData.intent === 'VEND_AIRTIME') {
@@ -98,11 +104,7 @@ export async function POST(req: Request) {
 
     // Save session and ask for PIN
     await supabase.from('deai_sessions').upsert({
-      chat_id: platform_id, 
-      platform, 
-      intent_data: intentData, 
-      status: 'AWAITING_PIN', 
-      expires_at: new Date(Date.now() + 300000).toISOString()
+      chat_id: platform_id, platform, intent_data: intentData, status: 'AWAITING_PIN', expires_at: new Date(Date.now() + 300000).toISOString()
     }, { onConflict: 'chat_id' });
 
     const total = (intentData.amount_ngn || 0) + (intentData.fee || 0);
