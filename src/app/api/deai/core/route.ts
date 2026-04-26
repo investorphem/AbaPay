@@ -86,11 +86,10 @@ export async function POST(req: Request) {
     }
 
     // ⚡ NEW FIX: CONTEXT PIVOT ⚡
-    // If the user issues a BRAND NEW command while stuck in a previous loop, wipe the old memory instantly.
     const freshIntentCheck = fallbackIntentMatcher(text);
     if (session && session.status === 'AWAITING_DETAILS' && freshIntentCheck !== 'UNKNOWN' && freshIntentCheck !== session.intent_data.intent) {
         await supabase.from('deai_sessions').delete().eq('chat_id', platform_id);
-        session.status = null; // Proceed as a brand new request
+        session.status = null; 
     }
 
     let isContinuingToAI = false;
@@ -158,11 +157,11 @@ export async function POST(req: Request) {
     let intentData: any = {};
     const previousContext = session?.status === 'AWAITING_DETAILS' ? JSON.stringify(session.intent_data) : "None";
 
-    // Regex extractors (Never fail, never time out)
+    // ⚡ TYPESCRIPT FIX: Explicitly typed as string[] and filtering with (d: string) ⚡
     const extractedEmail = text.match(/[a-zA-Z0-9._-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,6}/)?.[0] || null;
-    const digitsMatch = text.match(/\b\d+\b/g) || [];
-    const possibleAccountsOrPhones = digitsMatch.filter(d => d.length >= 10);
-    const possibleAmounts = digitsMatch.filter(d => d.length < 10);
+    const digitsMatch: string[] = text.match(/\b\d+\b/g) || [];
+    const possibleAccountsOrPhones = digitsMatch.filter((d: string) => d.length >= 10);
+    const possibleAmounts = digitsMatch.filter((d: string) => d.length < 10);
 
     try {
         const model = genAI.getGenerativeModel({ model: "gemini-1.5-flash", generationConfig: { responseMimeType: "application/json" } });
@@ -181,16 +180,13 @@ export async function POST(req: Request) {
         const newAiData = JSON.parse(cleanedText);
 
         if (session?.status === 'AWAITING_DETAILS' && session.intent_data) {
-            intentData = session.intent_data; // Copy previous
-            // Smart Merge overriding AI mistakes
+            intentData = session.intent_data; 
             if (!intentData.amount_ngn) intentData.amount_ngn = newAiData.amount_ngn || (possibleAmounts[0] ? Number(possibleAmounts[0]) : null);
             if (!intentData.email) intentData.email = extractedEmail || newAiData.email;
             
-            // Smart mapping of 11-digit numbers based on what is missing
             if (!intentData.destination_account && possibleAccountsOrPhones.length > 0) {
                 intentData.destination_account = String(possibleAccountsOrPhones[0]);
             } else if (!intentData.phone && possibleAccountsOrPhones.length > 0) {
-                // If destination is already full, the number must be the contact phone!
                 intentData.phone = String(possibleAccountsOrPhones[0]);
             } else if (!intentData.phone) {
                 intentData.phone = newAiData.phone;
@@ -202,7 +198,6 @@ export async function POST(req: Request) {
             if (intentData.destination_account) intentData.destination_account = String(intentData.destination_account);
         }
     } catch (e) { 
-        // ⚡ REGEX FAILSAFE (Bypasses AI completely if it crashes)
         console.warn("AI extraction failed, utilizing high-speed local regex fallback.");
         let localIntent = fallbackIntentMatcher(text);
         if (session?.status === 'AWAITING_DETAILS' && session.intent_data) {
