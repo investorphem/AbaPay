@@ -12,7 +12,7 @@ const supabase = createClient(
 // ⚡ 1. THE ENTERPRISE VALIDATION ENGINE ⚡
 const SERVICE_RULES: Record<string, any> = {
     VEND_AIRTIME: { min: 100, max: 50000, required: ['amount_ngn', 'destination_account', 'provider'] },
-    VEND_DATA: { min: 50, max: 50000, required: ['amount_ngn', 'destination_account', 'provider'] }, // FIX: Amount is now required for Data
+    VEND_DATA: { min: 50, max: 50000, required: ['destination_account', 'provider'] }, // Data doesn't strictly need amount immediately
     ELECTRICITY: { min: 1000, max: 100000, required: ['amount_ngn', 'destination_account', 'phone', 'email'] },
     TV: { min: 1500, max: 100000, required: ['amount_ngn', 'destination_account', 'phone', 'email'] },
     BANK_TRANSFER: { min: 500, max: 500000, required: ['amount_ngn', 'destination_account', 'provider'] },
@@ -54,7 +54,6 @@ async function fetchCryptoBalances(walletAddress: string) {
 export async function POST(req: Request) {
   try {
     let { platform, platform_id, text } = await req.json();
-
     let columnToSearch = platform === 'TELEGRAM' ? 'telegram_chat_id' : platform === 'WHATSAPP' ? 'whatsapp_number' : 'x_twitter_id';
     
     const { data: identity } = await supabase
@@ -85,15 +84,15 @@ export async function POST(req: Request) {
       });
     }
 
-    // ⚡ FIX: MEMORY LEAK PREVENTION (Absolute Context Pivot) ⚡
+    // CONTEXT PIVOT
     const freshIntentCheck = fallbackIntentMatcher(text);
     if (session && session.status === 'AWAITING_DETAILS' && freshIntentCheck !== 'UNKNOWN' && freshIntentCheck !== session.intent_data.intent) {
         await supabase.from('deai_sessions').delete().eq('chat_id', platform_id);
-        session = null; // Completely wipe memory for the new task
+        session = null; 
     }
 
     let isContinuingToAI = false;
-    let prependSystemMsg = ""; // Used to chain verification messages smoothly
+    let prependSystemMsg = "";
 
     // STATE: PIN CONFIRMATION
     if (session?.status === 'AWAITING_PIN') {
@@ -101,9 +100,10 @@ export async function POST(req: Request) {
         await supabase.from('deai_sessions').delete().eq('chat_id', platform_id);
         return NextResponse.json({ action: 'REPLY', message: `✅ **PIN Verified!**\n\n⏳ *Processing your ${session.intent_data.selected_token} transaction...*\n\nYour transaction has been submitted. Type **Status** to check your history shortly.` });
       }
-      // ⚡ FIX: Any numeric entry is treated as a bad PIN attempt
-      if (/^\d+$/.test(text.trim())) {
-        return NextResponse.json({ action: 'REPLY', message: "❌ Incorrect PIN. Reply with your correct PIN, or type **Cancel**." });
+      
+      // ⚡ FIX: Allow 4 to 6 digit typos to just return "Incorrect PIN" instead of crashing
+      if (/^[\d\s]{4,6}$/.test(text.trim())) {
+        return NextResponse.json({ action: 'REPLY', message: "❌ Incorrect PIN. Reply with your correct 4-digit PIN, or type **Cancel**." });
       } else {
         await supabase.from('deai_sessions').delete().eq('chat_id', platform_id);
         session = null;
@@ -123,7 +123,7 @@ export async function POST(req: Request) {
       const total = Number(session.intent_data.amount_ngn || 0) + Number(session.intent_data.fee || 0);
       return NextResponse.json({
           action: 'REPLY',
-          message: `🤖 **Final Checkout**\n\nService: ${session.intent_data.intent.replace('_', ' ')}\nAccount: ${session.intent_data.destination_account}\nName: ${session.intent_data.verified_name || 'N/A'}\nAmount: ${currencySymbol}${session.intent_data.amount_ngn}\nPayment: **${selected}**\n**Total: ${currencySymbol}${total}**\n\n🔒 Reply with your **4-digit PIN** to confirm.`
+          message: `🤖 **Final Checkout**\n\nService: ${session.intent_data.intent.replace('_', ' ')}\nAccount: ${session.intent_data.destination_account}\nName: ${session.intent_data.verified_name || 'N/A'}\nAmount: ${currencySymbol}${session.intent_data.amount_ngn || 0}\nPayment: **${selected}**\n**Total: ${currencySymbol}${total}**\n\n🔒 Reply with your **4-digit PIN** to confirm.`
       });
     }
     // STATE: METER TYPE
@@ -134,20 +134,18 @@ export async function POST(req: Request) {
         if (!selectedType) return NextResponse.json({ action: 'REPLY', message: "❌ Please reply with **1** for Prepaid or **2** for Postpaid." });
         
         const verification = await verifyAccount(session.intent_data.intent, session.intent_data.destination_account, selectedType);
-        
         if (!verification.success) {
             await supabase.from('deai_sessions').delete().eq('chat_id', platform_id);
             return NextResponse.json({ action: 'REPLY', message: `❌ Verification failed. Please check the meter number and try again.` });
         }
 
-        // ⚡ FIX: Smooth Chaining! We update the session and let it fall through to ask for missing items.
         session.intent_data.meter_type = selectedType;
         session.intent_data.verified_name = verification.customer_name;
         session.intent_data.verified_min = verification.min_amount;
         session.status = 'AWAITING_DETAILS'; 
         
         prependSystemMsg = `✅ **Meter Verified!**\nName: ${verification.customer_name}\n\n`;
-        text = ""; // Wipe text so the "1" doesn't get extracted as an amount by the AI
+        text = ""; // Wipe text to prevent accidental extraction
         isContinuingToAI = true;
     }
     else if (session?.status === 'AWAITING_DETAILS') {
@@ -156,65 +154,96 @@ export async function POST(req: Request) {
        isContinuingToAI = true;
     }
 
-    // --- 3. ⚡ THE INDESTRUCTIBLE REGEX + AI HYBRID ⚡ ---
     if (!isContinuingToAI) return NextResponse.json({ success: true });
 
     let intentData: any = {};
-    const previousContext = session?.status === 'AWAITING_DETAILS' ? JSON.stringify(session.intent_data) : "None";
+    let skipAI = false;
 
-    const extractedEmail = text.match(/[a-zA-Z0-9._-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,6}/)?.[0] || null;
-    const digitsMatch: string[] = text.match(/\b\d+\b/g) || [];
-    const possibleAccountsOrPhones = digitsMatch.filter((d: string) => d.length >= 10);
-    const possibleAmounts = digitsMatch.filter((d: string) => d.length < 10);
+    // ⚡ 3. THE "FAST-PASS" ENGINE (Eliminates AI Timeouts & Hallucinations for simple replies) ⚡
+    if (session?.status === 'AWAITING_DETAILS' && text !== "") {
+        const cleanText = text.trim();
+        const isOnlyDigits = /^\d+$/.test(cleanText.replace(/\s+/g, ''));
+        const isOnlyEmail = /^[a-zA-Z0-9._-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,6}$/.test(cleanText);
+        const isProvider = ["mtn", "glo", "airtel", "9mobile", "etisalat"].includes(cleanText.toLowerCase());
 
-    try {
-        let newAiData: any = {};
-        if (text !== "") { // Skip AI call if we are just chaining from Meter Verification
-            const model = genAI.getGenerativeModel({ model: "gemini-1.5-flash", generationConfig: { responseMimeType: "application/json" } });
-            const prompt = `
-              Extract entities from: "${text}"
-              Previous Context: ${previousContext}
-              
-              Categories: VEND_AIRTIME, VEND_DATA, ELECTRICITY, EDUCATION, TV, BANK_TRANSFER, TRANSACTION_HISTORY, UNKNOWN.
-              
-              Output exactly this JSON format: 
-              { "intent": "UNKNOWN", "provider": null, "amount_ngn": null, "destination_account": null, "phone": null, "email": null }
-            `;
-            const result = await model.generateContent(prompt);
-            const cleanedText = result.response.text().replace(/```json/gi, '').replace(/```/gi, '').trim();
-            newAiData = JSON.parse(cleanedText);
-        }
-
-        if (session?.status === 'AWAITING_DETAILS' && session.intent_data) {
-            intentData = session.intent_data; 
-            if (text !== "") {
-                if (!intentData.amount_ngn) intentData.amount_ngn = newAiData.amount_ngn || (possibleAmounts[0] ? Number(possibleAmounts[0]) : null);
-                if (!intentData.email) intentData.email = extractedEmail || newAiData.email;
-                if (!intentData.destination_account && possibleAccountsOrPhones.length > 0) intentData.destination_account = String(possibleAccountsOrPhones[0]);
-                else if (!intentData.phone && possibleAccountsOrPhones.length > 0) intentData.phone = String(possibleAccountsOrPhones[0]);
-                else if (!intentData.phone) intentData.phone = newAiData.phone;
-                if (!intentData.provider) intentData.provider = newAiData.provider;
-            }
-        } else {
-            intentData = newAiData;
-            if (intentData.amount_ngn) intentData.amount_ngn = Number(intentData.amount_ngn);
-            if (intentData.destination_account) intentData.destination_account = String(intentData.destination_account);
-        }
-    } catch (e) { 
-        console.warn("AI extraction failed, utilizing high-speed local regex fallback.");
-        let localIntent = fallbackIntentMatcher(text);
-        if (session?.status === 'AWAITING_DETAILS' && session.intent_data) {
+        if (isOnlyDigits || isOnlyEmail || isProvider) {
             intentData = session.intent_data;
-            if (text !== "") {
-                if (!intentData.amount_ngn && possibleAmounts.length > 0) intentData.amount_ngn = Number(possibleAmounts[0]);
-                if (!intentData.email && extractedEmail) intentData.email = extractedEmail;
-                if (!intentData.destination_account && possibleAccountsOrPhones.length > 0) intentData.destination_account = String(possibleAccountsOrPhones[0]);
-                else if (!intentData.phone && possibleAccountsOrPhones.length > 0) intentData.phone = String(possibleAccountsOrPhones[0]);
+            if (isOnlyEmail) {
+                intentData.email = cleanText;
+            } else if (isProvider) {
+                intentData.provider = cleanText.toLowerCase();
+            } else if (isOnlyDigits) {
+                const cleanNum = cleanText.replace(/\s+/g, '');
+                if (cleanNum.length >= 10) {
+                    if (!intentData.destination_account) intentData.destination_account = cleanNum;
+                    else if (!intentData.phone) intentData.phone = cleanNum;
+                } else {
+                    intentData.amount_ngn = Number(cleanNum);
+                }
             }
-        } else {
-            intentData = { intent: localIntent, amount_ngn: null, destination_account: null, provider: null, phone: null, email: null };
-            if (possibleAmounts.length > 0) intentData.amount_ngn = Number(possibleAmounts[0]); 
-            if (possibleAccountsOrPhones.length > 0) intentData.destination_account = String(possibleAccountsOrPhones[0]);
+            skipAI = true; // We got what we needed perfectly. Do NOT call the AI.
+        }
+    }
+
+    // --- 4. THE AI EXTRACTOR (Only runs for complex sentences) ---
+    if (!skipAI) {
+        const previousContext = session?.status === 'AWAITING_DETAILS' ? JSON.stringify(session.intent_data) : "None";
+        const digitsMatch: string[] = text.match(/\b\d+\b/g) || [];
+        const possibleAccountsOrPhones = digitsMatch.filter((d: string) => d.length >= 10);
+        const possibleAmounts = digitsMatch.filter((d: string) => d.length < 10);
+
+        try {
+            let newAiData: any = {};
+            if (text !== "") { 
+                const model = genAI.getGenerativeModel({ model: "gemini-1.5-flash", generationConfig: { responseMimeType: "application/json" } });
+                const prompt = `
+                  Extract entities from: "${text}"
+                  Previous Context: ${previousContext}
+                  
+                  Categories: VEND_AIRTIME, VEND_DATA, ELECTRICITY, EDUCATION, TV, BANK_TRANSFER, TRANSACTION_HISTORY, UNKNOWN.
+                  
+                  CRITICAL RULES:
+                  1. ONLY extract values explicitly mentioned in the New Message.
+                  2. DO NOT invent amounts. If no amount is typed, amount_ngn MUST be null.
+                  3. "status" or "history" maps to TRANSACTION_HISTORY.
+                  
+                  Output exactly this JSON format: 
+                  { "intent": "UNKNOWN", "provider": null, "amount_ngn": null, "destination_account": null, "phone": null, "email": null }
+                `;
+                const result = await model.generateContent(prompt);
+                const cleanedText = result.response.text().replace(/```json/gi, '').replace(/```/gi, '').trim();
+                newAiData = JSON.parse(cleanedText);
+            }
+
+            if (session?.status === 'AWAITING_DETAILS' && session.intent_data) {
+                intentData = session.intent_data; 
+                if (text !== "") {
+                    if (!intentData.amount_ngn) intentData.amount_ngn = newAiData.amount_ngn || (possibleAmounts[0] ? Number(possibleAmounts[0]) : null);
+                    if (!intentData.email) intentData.email = newAiData.email;
+                    if (!intentData.destination_account && possibleAccountsOrPhones.length > 0) intentData.destination_account = String(possibleAccountsOrPhones[0]);
+                    else if (!intentData.phone && possibleAccountsOrPhones.length > 0) intentData.phone = String(possibleAccountsOrPhones[0]);
+                    else if (!intentData.phone) intentData.phone = newAiData.phone;
+                    if (!intentData.provider) intentData.provider = newAiData.provider;
+                }
+            } else {
+                intentData = newAiData;
+                if (intentData.amount_ngn) intentData.amount_ngn = Number(intentData.amount_ngn);
+                if (intentData.destination_account) intentData.destination_account = String(intentData.destination_account);
+            }
+        } catch (e) { 
+            let localIntent = fallbackIntentMatcher(text);
+            if (session?.status === 'AWAITING_DETAILS' && session.intent_data) {
+                intentData = session.intent_data;
+                if (text !== "") {
+                    if (!intentData.amount_ngn && possibleAmounts.length > 0) intentData.amount_ngn = Number(possibleAmounts[0]);
+                    if (!intentData.destination_account && possibleAccountsOrPhones.length > 0) intentData.destination_account = String(possibleAccountsOrPhones[0]);
+                    else if (!intentData.phone && possibleAccountsOrPhones.length > 0) intentData.phone = String(possibleAccountsOrPhones[0]);
+                }
+            } else {
+                intentData = { intent: localIntent, amount_ngn: null, destination_account: null, provider: null, phone: null, email: null };
+                if (possibleAmounts.length > 0) intentData.amount_ngn = Number(possibleAmounts[0]); 
+                if (possibleAccountsOrPhones.length > 0) intentData.destination_account = String(possibleAccountsOrPhones[0]);
+            }
         }
     }
 
@@ -239,7 +268,7 @@ export async function POST(req: Request) {
         return NextResponse.json({ action: 'REPLY', message: msg });
     }
 
-    // --- 4. THE MISSING FIELD ENGINE ---
+    // --- 5. THE MISSING FIELD ENGINE ---
     if (['VEND_AIRTIME', 'VEND_DATA'].includes(intentData.intent) && intentData.destination_account && !intentData.provider) {
         intentData.provider = detectNetwork(intentData.destination_account);
     }
@@ -271,7 +300,7 @@ export async function POST(req: Request) {
         }
     }
 
-    // ELECTRICITY VERIFICATION GATE (Triggers only when all other fields are filled)
+    // ELECTRICITY VERIFICATION GATE 
     if (intentData.intent === 'ELECTRICITY' && !intentData.meter_type) {
         await supabase.from('deai_sessions').upsert({ chat_id: platform_id, platform, intent_data: intentData, status: 'AWAITING_METER_TYPE', expires_at: new Date(Date.now() + 300000).toISOString() }, { onConflict: 'chat_id' });
         return NextResponse.json({ action: 'REPLY', message: `💡 Electricity Payment for Meter: **${intentData.destination_account}**\n\nIs this Prepaid or Postpaid?\n\nReply with:\n**1** for Prepaid\n**2** for Postpaid` });
