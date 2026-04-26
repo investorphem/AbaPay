@@ -19,10 +19,9 @@ const detectNetwork = (phone: string) => {
   return null;
 };
 
-// ⚡ SIMULATED VERIFICATION API (Replace with your actual VTPass logic)
+// ⚡ SIMULATED VERIFICATION API
 async function verifyAccount(intent: string, account: string, type?: string) {
     if (intent === 'ELECTRICITY') {
-        // Simulate an API call
         return { success: true, customer_name: "Oluwafemi Olagoke", min_amount: 1000, max_amount: 50000 };
     }
     return { success: true, customer_name: "Verified User", min_amount: 100, max_amount: 100000 };
@@ -49,18 +48,23 @@ export async function POST(req: Request) {
     const { data: session } = await supabase.from('deai_sessions').select('*').eq('chat_id', platform_id).single();
     const userInput = text.trim().toLowerCase();
 
-    // ESCAPE HATCH
+    // ESCAPE HATCH & GREETING
     if (userInput === 'cancel' || userInput === 'start' || userInput === 'help') {
       await supabase.from('deai_sessions').delete().eq('chat_id', platform_id);
       return NextResponse.json({ 
         action: 'REPLY', 
-        message: `👋 **Welcome to AbaPay AI!**\n\nI can help you pay bills and send crypto instantly.\n\n*Try saying:*\n💬 _Buy 500 MTN airtime for 08012345678_\n💬 _Pay 5000 electricity for meter 1122334455_\n💬 _Buy 1.5GB data for 08012345678_` 
+        message: `👋 **Welcome to AbaPay AI!**\n\nI can help you pay bills and send crypto instantly.\n\n*Try saying:*\n💬 _Buy 500 MTN airtime for 08012345678_\n💬 _Pay 5000 electricity for meter 1122334455_\n📜 _Check my recent transactions_\n🌍 _Change my country to Ghana_` 
       });
     }
 
     // STATE: PROCESSING LOCK
     if (session?.status === 'PROCESSING') {
-        return NextResponse.json({ action: 'REPLY', message: "⏳ Your previous transaction is currently processing. Please wait for confirmation." });
+        // If they ask for history while processing, we can let them check it.
+        if (userInput.includes('history') || userInput.includes('status') || userInput.includes('recent')) {
+            // Let the logic fall through to the AI so it hits the TRANSACTION_HISTORY intent
+        } else {
+            return NextResponse.json({ action: 'REPLY', message: "⏳ Your previous transaction is currently processing. Type **Status** to check your history." });
+        }
     }
 
     let isContinuingToAI = false;
@@ -72,11 +76,10 @@ export async function POST(req: Request) {
         await supabase.from('deai_sessions').update({ status: 'PROCESSING' }).eq('chat_id', platform_id);
         
         // ⚡ HERE IS WHERE YOU CALL YOUR BLOCKCHAIN/PAYMENT API ⚡
-        // ... execute payment ...
 
         return NextResponse.json({ 
           action: 'REPLY', 
-          message: `✅ **PIN Verified!**\n\n⏳ *Processing your ${session.intent_data.selected_token} transaction...*\n\nYou will receive a receipt once it clears on the network.` 
+          message: `✅ **PIN Verified!**\n\n⏳ *Processing your ${session.intent_data.selected_token} transaction...*\n\nType **Status** or **History** in a few moments to check the result.` 
         });
       }
       
@@ -103,7 +106,7 @@ export async function POST(req: Request) {
           message: `🤖 **Final Checkout**\n\nService: ${session.intent_data.intent}\nAccount: ${session.intent_data.destination_account}\nName: ${session.intent_data.verified_name || 'N/A'}\nAmount: ${currencySymbol}${session.intent_data.amount_ngn}\nPayment: **${selected}**\n**Total: ${currencySymbol}${total}**\n\n🔒 Reply with your **4-digit PIN** to confirm.`
       });
     }
-    // STATE: METER TYPE (Prepaid/Postpaid)
+    // STATE: METER TYPE
     else if (session?.status === 'AWAITING_METER_TYPE') {
         const typeMap: Record<string, string> = { '1': 'prepaid', '2': 'postpaid' };
         const selectedType = typeMap[userInput];
@@ -112,7 +115,6 @@ export async function POST(req: Request) {
         
         session.intent_data.meter_type = selectedType;
 
-        // VERIFY ACCOUNT NOW THAT WE HAVE ID AND TYPE
         const verification = await verifyAccount(session.intent_data.intent, session.intent_data.destination_account, selectedType);
         
         if (!verification.success) {
@@ -136,7 +138,7 @@ export async function POST(req: Request) {
     }
 
     // --- AI ROUTING ---
-    if (!isContinuingToAI) return NextResponse.json({ success: true });
+    if (!isContinuingToAI && session?.status !== 'PROCESSING') return NextResponse.json({ success: true });
 
     const fallbackModels = ["gemini-3-flash-preview", "gemini-2.5-flash"];
     let intentData = null;
@@ -146,8 +148,16 @@ export async function POST(req: Request) {
       try {
         const model = genAI.getGenerativeModel({ model: modelName, generationConfig: { responseMimeType: "application/json" } });
         const prompt = `
-          Extract user intent into JSON. Categories: VEND_AIRTIME, ELECTRICITY, EDUCATION, TV.
+          Extract user intent into JSON. 
+          Categories: VEND_AIRTIME, ELECTRICITY, EDUCATION, TV, CHANGE_COUNTRY, TRANSACTION_HISTORY, UNKNOWN.
+          
           Previous Context: ${previousContext} (Merge new details into this if present).
+          
+          Rules:
+          - If the user asks for their recent transactions, history, or status of a payment, intent is TRANSACTION_HISTORY.
+          - If the user asks to change country or region, intent is CHANGE_COUNTRY.
+          - For 9mobile, use "etisalat".
+          
           Return JSON: { "intent": string, "provider": string, "amount_ngn": number, "destination_account": string, "phone": string, "email": string }
           Message: "${text}"
         `;
@@ -160,6 +170,43 @@ export async function POST(req: Request) {
     if (!intentData) throw new Error("AI parsing failed.");
 
     // --- LOGIC GATES ---
+
+    if (intentData.intent === 'UNKNOWN') {
+       return NextResponse.json({ action: 'REPLY', message: "🤔 I didn't quite catch that. Type **Help** to see what I can do!" });
+    }
+
+    if (intentData.intent === 'CHANGE_COUNTRY') {
+        return NextResponse.json({ action: 'REPLY', message: `🌍 **Country Selection**\n\nTo change your region, log into your AbaPay Web Dashboard. Your bot will automatically sync!` });
+    }
+
+    // ⚡ GATE: TRANSACTION HISTORY ⚡
+    if (intentData.intent === 'TRANSACTION_HISTORY') {
+        // Clear any stuck sessions if they are just checking history
+        if (session?.status !== 'PROCESSING') {
+            await supabase.from('deai_sessions').delete().eq('chat_id', platform_id);
+        }
+
+        // NOTE: Change 'transactions' to your actual AbaPay transactions table name
+        const { data: recentTxs, error } = await supabase
+            .from('transactions') 
+            .select('*')
+            .eq('user_id', identity.user_id)
+            .order('created_at', { ascending: false })
+            .limit(3);
+
+        if (!recentTxs || recentTxs.length === 0) {
+            return NextResponse.json({ action: 'REPLY', message: "📜 You don't have any recent transactions yet." });
+        }
+
+        let msg = "📜 **Your Recent Transactions:**\n\n";
+        recentTxs.forEach((tx, index) => {
+            // Adjust 'service_type', 'amount', 'status' to match your DB columns
+            msg += `${index + 1}. **${tx.service_type || 'Payment'}** - ${currencySymbol}${tx.amount}\n`;
+            msg += `Status: ${tx.status} | Date: ${new Date(tx.created_at).toLocaleDateString()}\n\n`;
+        });
+
+        return NextResponse.json({ action: 'REPLY', message: msg });
+    }
 
     // GATE 1: ELECTRICITY REQUIRES METER TYPE
     if (intentData.intent === 'ELECTRICITY' && !intentData.meter_type) {
@@ -182,7 +229,7 @@ export async function POST(req: Request) {
 
     // GATE 3: MIN/MAX VALIDATION
     if (intentData.min_amount && intentData.amount_ngn < intentData.min_amount) {
-        intentData.amount_ngn = null; // Reset amount in memory
+        intentData.amount_ngn = null; 
         await supabase.from('deai_sessions').upsert({ chat_id: platform_id, platform, intent_data: intentData, status: 'AWAITING_DETAILS', expires_at: new Date(Date.now() + 300000).toISOString() }, { onConflict: 'chat_id' });
         return NextResponse.json({ action: 'REPLY', message: `❌ The minimum amount for this meter is ${currencySymbol}${intentData.min_amount}. Please reply with a higher amount.` });
     }
