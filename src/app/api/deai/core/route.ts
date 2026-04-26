@@ -35,8 +35,14 @@ export async function POST(req: Request) {
       return NextResponse.json({ action: 'REPLY', message: "🔒 **Unauthorized**\nPlease link your wallet on the AbaPay dashboard to use this agent." });
     }
 
-    const currentCountry = identity.abapay_global_users?.country_code || 'NG';
+        // Safely extract the user data whether Supabase returns an array or an object
+    const globalUser: any = Array.isArray(identity.abapay_global_users) 
+      ? identity.abapay_global_users[0] 
+      : identity.abapay_global_users;
+
+    const currentCountry = globalUser?.country_code || 'NG';
     const currencySymbol = currentCountry === 'NG' ? '₦' : (currentCountry === 'GH' ? 'GH₵' : '$');
+
 
     // 2. State Machine Logic
     const { data: session } = await supabase.from('deai_sessions').select('*').eq('chat_id', platform_id).single();
