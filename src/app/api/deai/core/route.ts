@@ -19,7 +19,7 @@ const detectNetwork = (phone: string) => {
   return null;
 };
 
-// ⚡ SIMULATED VERIFICATION API
+// ⚡ SIMULATED VERIFICATION API (Replace this with your VTPass integration)
 async function verifyAccount(intent: string, account: string, type?: string) {
     if (intent === 'ELECTRICITY') {
         return { success: true, customer_name: "Oluwafemi Olagoke", min_amount: 1000, max_amount: 50000 };
@@ -59,9 +59,8 @@ export async function POST(req: Request) {
 
     // STATE: PROCESSING LOCK
     if (session?.status === 'PROCESSING') {
-        // If they ask for history while processing, we can let them check it.
         if (userInput.includes('history') || userInput.includes('status') || userInput.includes('recent')) {
-            // Let the logic fall through to the AI so it hits the TRANSACTION_HISTORY intent
+            // Let it fall through to the AI so the user can check their history while processing
         } else {
             return NextResponse.json({ action: 'REPLY', message: "⏳ Your previous transaction is currently processing. Type **Status** to check your history." });
         }
@@ -75,7 +74,7 @@ export async function POST(req: Request) {
         // Lock the state to processing
         await supabase.from('deai_sessions').update({ status: 'PROCESSING' }).eq('chat_id', platform_id);
         
-        // ⚡ HERE IS WHERE YOU CALL YOUR BLOCKCHAIN/PAYMENT API ⚡
+        // ⚡ BLOCKCHAIN / VTPASS PAYMENT LOGIC EXECUTION GOES HERE ⚡
 
         return NextResponse.json({ 
           action: 'REPLY', 
@@ -106,7 +105,7 @@ export async function POST(req: Request) {
           message: `🤖 **Final Checkout**\n\nService: ${session.intent_data.intent}\nAccount: ${session.intent_data.destination_account}\nName: ${session.intent_data.verified_name || 'N/A'}\nAmount: ${currencySymbol}${session.intent_data.amount_ngn}\nPayment: **${selected}**\n**Total: ${currencySymbol}${total}**\n\n🔒 Reply with your **4-digit PIN** to confirm.`
       });
     }
-    // STATE: METER TYPE
+    // STATE: METER TYPE (Prepaid/Postpaid)
     else if (session?.status === 'AWAITING_METER_TYPE') {
         const typeMap: Record<string, string> = { '1': 'prepaid', '2': 'postpaid' };
         const selectedType = typeMap[userInput];
@@ -181,18 +180,21 @@ export async function POST(req: Request) {
 
     // ⚡ GATE: TRANSACTION HISTORY ⚡
     if (intentData.intent === 'TRANSACTION_HISTORY') {
-        // Clear any stuck sessions if they are just checking history
         if (session?.status !== 'PROCESSING') {
             await supabase.from('deai_sessions').delete().eq('chat_id', platform_id);
         }
 
-        // NOTE: Change 'transactions' to your actual AbaPay transactions table name
         const { data: recentTxs, error } = await supabase
             .from('transactions') 
-            .select('*')
-            .eq('user_id', identity.user_id)
+            .select('service_category, network, amount_naira, status, created_at, token_used')
+            .eq('wallet_address', globalUser.wallet_address)
             .order('created_at', { ascending: false })
             .limit(3);
+
+        if (error) {
+            console.error("History fetch error:", error);
+            return NextResponse.json({ action: 'REPLY', message: "🚨 Sorry, I couldn't fetch your history right now. Please try again." });
+        }
 
         if (!recentTxs || recentTxs.length === 0) {
             return NextResponse.json({ action: 'REPLY', message: "📜 You don't have any recent transactions yet." });
@@ -200,9 +202,10 @@ export async function POST(req: Request) {
 
         let msg = "📜 **Your Recent Transactions:**\n\n";
         recentTxs.forEach((tx, index) => {
-            // Adjust 'service_type', 'amount', 'status' to match your DB columns
-            msg += `${index + 1}. **${tx.service_type || 'Payment'}** - ${currencySymbol}${tx.amount}\n`;
-            msg += `Status: ${tx.status} | Date: ${new Date(tx.created_at).toLocaleDateString()}\n\n`;
+            const dateStr = new Date(tx.created_at).toLocaleDateString('en-NG', { day: 'numeric', month: 'short' });
+            msg += `${index + 1}. **${(tx.service_category || 'Payment').replace('_', ' ')}** (${(tx.network || 'N/A').toUpperCase()})\n`;
+            msg += `Amount: ${currencySymbol}${tx.amount_naira} (Paid in ${tx.token_used || 'Fiat'})\n`;
+            msg += `Status: ${tx.status} | Date: ${dateStr}\n\n`;
         });
 
         return NextResponse.json({ action: 'REPLY', message: msg });
