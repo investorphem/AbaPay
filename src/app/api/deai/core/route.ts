@@ -10,13 +10,13 @@ const supabase = createClient(
 );
 
 // ⚡ 1. THE ENTERPRISE VALIDATION ENGINE ⚡
-// This hardcodes the rules so the AI doesn't have to guess.
 const SERVICE_RULES: Record<string, any> = {
     VEND_AIRTIME: { min: 100, max: 50000, required: ['amount_ngn', 'destination_account', 'provider'] },
     VEND_DATA: { min: null, max: null, required: ['destination_account', 'provider'] },
     ELECTRICITY: { min: 1000, max: 100000, required: ['amount_ngn', 'destination_account', 'phone', 'email'] },
     TV: { min: 1500, max: 100000, required: ['amount_ngn', 'destination_account', 'phone', 'email'] },
-    BANK_TRANSFER: { min: 500, max: 500000, required: ['amount_ngn', 'destination_account', 'provider'] }
+    BANK_TRANSFER: { min: 500, max: 500000, required: ['amount_ngn', 'destination_account', 'provider'] },
+    EDUCATION: { min: 1000, max: 50000, required: ['amount_ngn', 'destination_account', 'phone', 'email'] }
 };
 
 const detectNetwork = (phone: string) => {
@@ -30,7 +30,7 @@ const detectNetwork = (phone: string) => {
 };
 
 async function verifyAccount(intent: string, account: string, type?: string) {
-    if (intent === 'ELECTRICITY') return { success: true, customer_name: "Oluwafemi Olagoke", min_amount: 1000, max_amount: 50000 };
+    if (intent === 'ELECTRICITY') return { success: true, customer_name: "Verified User", min_amount: 1000, max_amount: 50000 };
     return { success: true, customer_name: "Verified User", min_amount: 100, max_amount: 100000 };
 }
 
@@ -65,19 +65,17 @@ export async function POST(req: Request) {
       });
     }
 
-    if (session?.status === 'PROCESSING') {
-        if (!['history', 'status', 'recent'].some(w => userInput.includes(w))) {
-            return NextResponse.json({ action: 'REPLY', message: "⏳ Your previous transaction is currently processing. Type **Status** to check your history." });
-        }
-    }
-
     let isContinuingToAI = false;
 
     // STATE: PIN CONFIRMATION
     if (session?.status === 'AWAITING_PIN') {
       if (text.trim() === identity.deai_pin) {
-        await supabase.from('deai_sessions').update({ status: 'PROCESSING' }).eq('chat_id', platform_id);
-        return NextResponse.json({ action: 'REPLY', message: `✅ **PIN Verified!**\n\n⏳ *Processing your ${session.intent_data.selected_token} transaction...*\n\nType **Status** in a few moments to check the result.` });
+        // ⚡ FIX: We instantly delete the session here so they are NEVER locked out!
+        await supabase.from('deai_sessions').delete().eq('chat_id', platform_id);
+        
+        // Blockchain/API call happens here...
+
+        return NextResponse.json({ action: 'REPLY', message: `✅ **PIN Verified!**\n\n⏳ *Processing your ${session.intent_data.selected_token} transaction...*\n\nYour transaction has been submitted. Type **Status** to check your history shortly.` });
       }
       if (/^\d{4}$/.test(text.trim())) {
         return NextResponse.json({ action: 'REPLY', message: "❌ Incorrect PIN. Reply with your correct PIN, or type **Cancel**." });
@@ -118,7 +116,6 @@ export async function POST(req: Request) {
         }
 
         session.intent_data.verified_name = verification.customer_name;
-        // Override global rules with verified API limits
         session.intent_data.verified_min = verification.min_amount;
         
         await supabase.from('deai_sessions').upsert({ chat_id: platform_id, platform, intent_data: session.intent_data, status: 'AWAITING_DETAILS', expires_at: new Date(Date.now() + 300000).toISOString() }, { onConflict: 'chat_id' });
@@ -132,28 +129,25 @@ export async function POST(req: Request) {
     }
 
     // --- 3. THE SMART AI EXTRACTOR ---
-    if (!isContinuingToAI && session?.status !== 'PROCESSING') return NextResponse.json({ success: true });
+    if (!isContinuingToAI) return NextResponse.json({ success: true });
 
     let intentData = null;
     const previousContext = session?.status === 'AWAITING_DETAILS' ? JSON.stringify(session.intent_data) : "None";
 
     try {
         const model = genAI.getGenerativeModel({ model: "gemini-2.5-flash", generationConfig: { responseMimeType: "application/json" } });
-        // The prompt is now strictly tuned to merge specific entity formats.
         const prompt = `
-          You are a strict data extractor for a payment gateway. Merge the user's new message into the Previous Context.
+          Extract user intent into JSON. 
+          MUST USE ONE OF THESE EXACT CATEGORIES: VEND_AIRTIME, VEND_DATA, ELECTRICITY, EDUCATION, TV, BANK_TRANSFER, TRANSACTION_HISTORY, UNKNOWN.
           
           Previous Context: ${previousContext}
           New Message: "${text}"
           
-          EXTRACTION RULES:
-          1. If the message is a pure number (e.g., "200", "5000") and amount_ngn is null/missing, assign it to "amount_ngn".
-          2. If the message contains an 10 or 11-digit number (e.g., "08168811821"), assign it to "destination_account" AND "phone".
-          3. If the message contains a network name (MTN, Airtel, Glo, 9mobile), assign it to "provider".
-          4. If the message contains an email address, assign it to "email".
-          5. If intent is missing, infer it (e.g., "airtime" = VEND_AIRTIME, "history" = TRANSACTION_HISTORY).
+          Rules:
+          - "status", "history", "recent" MUST map to "TRANSACTION_HISTORY".
+          - Merge new details into the Previous Context.
           
-          Output ONLY valid JSON matching: { "intent": "...", "provider": "...", "amount_ngn": number|null, "destination_account": "...", "phone": "...", "email": "..." }
+          Output exactly: { "intent": "...", "provider": "...", "amount_ngn": number|null, "destination_account": "...", "phone": "...", "email": "..." }
         `;
         const result = await model.generateContent(prompt);
         intentData = JSON.parse(result.response.text());
@@ -161,11 +155,19 @@ export async function POST(req: Request) {
         return NextResponse.json({ action: 'REPLY', message: "🚨 AI timeout. Please try sending your message again." });
     }
 
-    if (!intentData || !intentData.intent) return NextResponse.json({ action: 'REPLY', message: "🤔 I didn't quite catch that. Type **Help** to see what I can do!" });
+    // ⚡ FIX: THE INTENT FIREWALL ⚡
+    // If the AI hallucinates a fake intent, force it to UNKNOWN
+    if (intentData?.intent === 'TRANSACTION_STATUS' || intentData?.intent === 'STATUS') intentData.intent = 'TRANSACTION_HISTORY';
+    if (!SERVICE_RULES[intentData.intent] && intentData.intent !== 'TRANSACTION_HISTORY') {
+        intentData.intent = 'UNKNOWN';
+    }
+
+    if (intentData.intent === 'UNKNOWN') {
+       return NextResponse.json({ action: 'REPLY', message: "🤔 I didn't quite catch that. Type **Help** to see what I can do!" });
+    }
 
     if (intentData.intent === 'TRANSACTION_HISTORY') {
-        if (session?.status !== 'PROCESSING') await supabase.from('deai_sessions').delete().eq('chat_id', platform_id);
-
+        await supabase.from('deai_sessions').delete().eq('chat_id', platform_id); // Wipe any stuck sessions
         const { data: recentTxs } = await supabase
             .from('transactions').select('service_category, network, amount_naira, status, created_at, token_used')
             .eq('wallet_address', globalUser.wallet_address).order('created_at', { ascending: false }).limit(3);
@@ -183,7 +185,6 @@ export async function POST(req: Request) {
 
     // --- 4. THE MISSING FIELD ENGINE ---
     
-    // Auto-fill provider using your prefix logic if missing
     if (['VEND_AIRTIME', 'VEND_DATA'].includes(intentData.intent) && intentData.destination_account && !intentData.provider) {
         intentData.provider = detectNetwork(intentData.destination_account);
     }
@@ -192,7 +193,6 @@ export async function POST(req: Request) {
     if (rules) {
         let missing = [];
         
-        // Loop through the mandatory fields configured at the top
         for (const field of rules.required) {
             if (!intentData[field]) {
                 if (field === 'amount_ngn') missing.push("the **Amount**");
@@ -208,8 +208,7 @@ export async function POST(req: Request) {
             return NextResponse.json({ action: 'REPLY', message: `To process your ${intentData.intent.replace('_', ' ')}, please reply with ${missing.join(", ")}.` });
         }
 
-        // --- 5. MIN/MAX VALUE VALIDATION ---
-        const activeMin = intentData.verified_min || rules.min; // Use API limit if verified, otherwise default rule
+        const activeMin = intentData.verified_min || rules.min;
         if (activeMin && intentData.amount_ngn < activeMin) {
             intentData.amount_ngn = null; 
             await supabase.from('deai_sessions').upsert({ chat_id: platform_id, platform, intent_data: intentData, status: 'AWAITING_DETAILS', expires_at: new Date(Date.now() + 300000).toISOString() }, { onConflict: 'chat_id' });
@@ -227,9 +226,14 @@ export async function POST(req: Request) {
     // TOKEN SELECTION
     if (!intentData.selected_token) {
         await supabase.from('deai_sessions').upsert({ chat_id: platform_id, platform, intent_data: intentData, status: 'AWAITING_TOKEN', expires_at: new Date(Date.now() + 300000).toISOString() }, { onConflict: 'chat_id' });
+        
+        // Let the user know if we auto-detected their network!
+        let prefixMsg = intentData.provider && ['VEND_AIRTIME', 'VEND_DATA'].includes(intentData.intent) 
+            ? `(Network Auto-Detected: **${intentData.provider.toUpperCase()}**)\n\n` : "";
+
         return NextResponse.json({
             action: 'REPLY',
-            message: `🪙 **Select Payment Method**\n\n1️⃣ Fiat Balance (${currencySymbol}${fiatBalance})\n2️⃣ USDT\n3️⃣ USDC\n4️⃣ cUSD\n\n*Reply with the number (e.g., 2).*`
+            message: `${prefixMsg}🪙 **Select Payment Method**\n\n1️⃣ Fiat Balance (${currencySymbol}${fiatBalance})\n2️⃣ USDT\n3️⃣ USDC\n4️⃣ cUSD\n\n*Reply with the number (e.g., 2).*`
         });
     }
 
