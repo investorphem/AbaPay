@@ -12,7 +12,8 @@ const supabase = createClient(
 // ⚡ 1. THE ENTERPRISE VALIDATION ENGINE ⚡
 const SERVICE_RULES: Record<string, any> = {
     VEND_AIRTIME: { min: 100, max: 50000, required: ['amount_ngn', 'destination_account', 'provider'] },
-    VEND_DATA: { min: 50, max: 50000, required: ['destination_account', 'provider'] }, 
+    // ⚡ FIX: amount_ngn is NO LONGER required for VEND_DATA initially. We fetch it from the variations.
+    VEND_DATA: { min: null, max: null, required: ['destination_account', 'provider'] }, 
     ELECTRICITY: { min: 1000, max: 100000, required: ['amount_ngn', 'destination_account', 'phone', 'email'] },
     TV: { min: 1500, max: 100000, required: ['amount_ngn', 'destination_account', 'phone', 'email'] },
     BANK_TRANSFER: { min: 500, max: 500000, required: ['amount_ngn', 'destination_account', 'provider'] },
@@ -35,11 +36,38 @@ const fallbackIntentMatcher = (text: string) => {
     if (t.includes('airtime') || t.includes('recharge')) return 'VEND_AIRTIME';
     if (t.includes('data') || t.includes('mb') || t.includes('gb')) return 'VEND_DATA';
     if (t.includes('electric') || t.includes('meter') || t.includes('nepa')) return 'ELECTRICITY';
-    if (t.includes('tv') || t.includes('dstv') || t.includes('gotv')) return 'TV';
+    if (t.includes('tv') || t.includes('dstv') || t.includes('gotv') || t.includes('cable')) return 'TV';
     if (t.includes('transfer') || t.includes('send money') || t.includes('bank')) return 'BANK_TRANSFER';
+    if (t.includes('education') || t.includes('waec') || t.includes('jamb') || t.includes('school')) return 'EDUCATION';
     if (t.includes('history') || t.includes('status') || t.includes('recent')) return 'TRANSACTION_HISTORY';
     return 'UNKNOWN';
 };
+
+// The Lightning-Fast Local Extractor
+function extractEntities(text: string, currentData: any = {}) {
+    let data = { ...currentData };
+    const cleanText = text.trim().toLowerCase();
+    
+    const extractedEmail = cleanText.match(/[a-zA-Z0-9._-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,6}/)?.[0];
+    if (extractedEmail && !data.email) data.email = extractedEmail;
+    
+    const providers = ["mtn", "glo", "airtel", "9mobile", "etisalat", "dstv", "gotv", "startimes", "ikeja", "ibadan", "eko", "abuja"];
+    const foundProvider = providers.find(p => cleanText.includes(p));
+    if (foundProvider && !data.provider) data.provider = foundProvider;
+
+    const digitsMatch = cleanText.match(/\b\d+\b/g) || [];
+    const possibleAccountsOrPhones = digitsMatch.filter(d => d.length >= 10);
+    const possibleAmounts = digitsMatch.filter(d => d.length >= 2 && d.length < 10); 
+
+    if (possibleAmounts.length > 0 && !data.amount_ngn) data.amount_ngn = Number(possibleAmounts[0]);
+    if (possibleAccountsOrPhones.length > 0) {
+        possibleAccountsOrPhones.forEach(num => {
+            if (!data.destination_account) data.destination_account = num;
+            else if (!data.phone && num !== data.destination_account) data.phone = num;
+        });
+    }
+    return data;
+}
 
 async function verifyAccount(intent: string, account: string, type?: string) {
     if (intent === 'ELECTRICITY') return { success: true, customer_name: "Verified User", min_amount: 1000, max_amount: 50000 };
@@ -49,6 +77,17 @@ async function verifyAccount(intent: string, account: string, type?: string) {
 async function fetchCryptoBalances(walletAddress: string) {
     if (!walletAddress) return { usdt: "0.00", usdc: "0.00", cusd: "0.00" };
     return { usdt: "0.00", usdc: "0.00", cusd: "0.00" }; 
+}
+
+// ⚡ NEW: Simulated VTPass Data Variations API
+async function fetchDataVariations(provider: string) {
+    // Replace this with your actual VTPass API call
+    return [
+        { id: '1', name: '1GB 30 Days', price: 300, code: `${provider}-1gb` },
+        { id: '2', name: '2GB 30 Days', price: 600, code: `${provider}-2gb` },
+        { id: '3', name: '5GB 30 Days', price: 1500, code: `${provider}-5gb` },
+        { id: '4', name: '10GB 30 Days', price: 3000, code: `${provider}-10gb` }
+    ];
 }
 
 export async function POST(req: Request) {
@@ -69,13 +108,12 @@ export async function POST(req: Request) {
     const currentCountry = globalUser?.country_code || 'NG';
     const currencySymbol = currentCountry === 'NG' ? '₦' : (currentCountry === 'GH' ? 'GH₵' : '$');
     const fiatBalance = globalUser?.fiat_balance_ngn || 0;
-    const walletAddress = globalUser?.wallet_address || "";
+    const crypto = await fetchCryptoBalances(globalUser?.wallet_address || "");
 
-    const crypto = await fetchCryptoBalances(walletAddress);
     let { data: session } = await supabase.from('deai_sessions').select('*').eq('chat_id', platform_id).single();
     const userInput = text.trim().toLowerCase();
 
-    // ⚡ 2. THE ESCAPE HATCH (STRICT ROUTING) ⚡
+    // ⚡ ESCAPE HATCHES ⚡
     if (userInput === 'cancel') {
       await supabase.from('deai_sessions').delete().eq('chat_id', platform_id);
       return NextResponse.json({ action: 'REPLY', message: "🚫 **Transaction Cancelled.**\n\nType **Start** whenever you are ready to make a new request." });
@@ -89,34 +127,32 @@ export async function POST(req: Request) {
       });
     }
 
-    // CONTEXT PIVOT (Only happens if they aren't trapped in the PIN state)
-    if (session && session.status !== 'AWAITING_PIN') {
-        const freshIntentCheck = fallbackIntentMatcher(text);
-        if (session.status === 'AWAITING_DETAILS' && freshIntentCheck !== 'UNKNOWN' && freshIntentCheck !== session.intent_data.intent) {
-            await supabase.from('deai_sessions').delete().eq('chat_id', platform_id);
-            session = null; 
-        }
+    // CONTEXT PIVOT
+    const freshIntentCheck = fallbackIntentMatcher(text);
+    if (session && session.status === 'AWAITING_DETAILS' && freshIntentCheck !== 'UNKNOWN' && freshIntentCheck !== session.intent_data.intent) {
+        await supabase.from('deai_sessions').delete().eq('chat_id', platform_id);
+        session = null; 
     }
 
     let isContinuingToAI = false;
     let prependSystemMsg = "";
 
-    // ⚡ 3. STATE: STRICT PIN CONFIRMATION TRAP ⚡
+    // ⚡ 3. STATE TRAFFIC CONTROL ⚡
+
+    // STATE: STRICT PIN CONFIRMATION TRAP
     if (session?.status === 'AWAITING_PIN') {
       if (text.trim() === identity.deai_pin) {
         await supabase.from('deai_sessions').delete().eq('chat_id', platform_id);
         return NextResponse.json({ action: 'REPLY', message: `✅ **PIN Verified!**\n\n⏳ *Processing your ${session.intent_data.selected_token} transaction...*\n\nYour transaction has been submitted. Type **Status** to check your history shortly.` });
       } else {
-        // ANY input that is not the exact PIN triggers a failure strike. 
         const attempts = (session.intent_data.pin_attempts || 0) + 1;
-        
         if (attempts >= 4) {
              await supabase.from('deai_sessions').delete().eq('chat_id', platform_id);
              return NextResponse.json({ action: 'REPLY', message: "🚫 **Transaction Aborted**\n\nYou entered an incorrect PIN 4 times. For your security, this session has been securely wiped.\n\nType **Start** to begin a new request." });
         } else {
              session.intent_data.pin_attempts = attempts;
              await supabase.from('deai_sessions').update({ intent_data: session.intent_data }).eq('chat_id', platform_id);
-             return NextResponse.json({ action: 'REPLY', message: `❌ **Incorrect PIN** (${4 - attempts} attempts left)\n\nPlease reply with your correct 4-digit PIN, or type **Cancel** to abort.` });
+             return NextResponse.json({ action: 'REPLY', message: `❌ **Incorrect PIN** (${4 - attempts} attempts left)\n\nPlease reply with your correct 4-digit PIN to confirm this transaction, or type **Cancel** to abort it and start a new one.` });
         }
       }
     } 
@@ -128,24 +164,37 @@ export async function POST(req: Request) {
       if (!selected) return NextResponse.json({ action: 'REPLY', message: "❌ Invalid selection. Reply with **1**, **2**, **3**, or **4**." });
 
       session.intent_data.selected_token = selected;
-      session.intent_data.pin_attempts = 0; // Initialize attempts
+      session.intent_data.pin_attempts = 0; 
       await supabase.from('deai_sessions').upsert({ chat_id: platform_id, platform, intent_data: session.intent_data, status: 'AWAITING_PIN', expires_at: new Date(Date.now() + 300000).toISOString() }, { onConflict: 'chat_id' });
 
-      // ⚡ FIX: DYNAMIC CHECKOUT DISPLAY ⚡
       let detailsRow = "";
-      if (['VEND_AIRTIME', 'VEND_DATA'].includes(session.intent_data.intent)) {
-          detailsRow = `Network: ${session.intent_data.provider?.toUpperCase()}`;
-      } else if (session.intent_data.intent === 'BANK_TRANSFER') {
-          detailsRow = `Bank: ${session.intent_data.provider?.toUpperCase()}`;
-      } else {
-          detailsRow = `Name: ${session.intent_data.verified_name || 'N/A'}`;
-      }
+      if (session.intent_data.intent === 'VEND_DATA') detailsRow = `Plan: ${session.intent_data.variation_name}\nNetwork: ${session.intent_data.provider?.toUpperCase()}`;
+      else if (session.intent_data.intent === 'VEND_AIRTIME') detailsRow = `Network: ${session.intent_data.provider?.toUpperCase()}`;
+      else if (session.intent_data.intent === 'BANK_TRANSFER') detailsRow = `Bank: ${session.intent_data.provider?.toUpperCase()}`;
+      else detailsRow = `Name: ${session.intent_data.verified_name || 'N/A'}`;
 
       const total = Number(session.intent_data.amount_ngn || 0) + Number(session.intent_data.fee || 0);
       return NextResponse.json({
           action: 'REPLY',
           message: `🤖 **Final Checkout**\n\nService: ${session.intent_data.intent.replace('_', ' ')}\nAccount: ${session.intent_data.destination_account}\n${detailsRow}\nAmount: ${currencySymbol}${session.intent_data.amount_ngn || 0}\nPayment: **${selected}**\n**Total: ${currencySymbol}${total}**\n\n🔒 Reply with your **4-digit PIN** to confirm.`
       });
+    }
+    // ⚡ NEW STATE: DATA PLAN SELECTION ⚡
+    else if (session?.status === 'AWAITING_DATA_PLAN') {
+        const selection = text.trim();
+        const variation = session.intent_data.available_variations.find((v: any) => v.id === selection);
+        
+        if (!variation) {
+            return NextResponse.json({ action: 'REPLY', message: "❌ Invalid selection. Please reply with a valid number from the list." });
+        }
+        
+        // Save the chosen plan and move directly to Token Selection
+        session.intent_data.variation_code = variation.code;
+        session.intent_data.variation_name = variation.name;
+        session.intent_data.amount_ngn = variation.price; 
+        session.status = 'AWAITING_DETAILS'; 
+        text = ""; // clear text to prevent double matching
+        isContinuingToAI = true;
     }
     // STATE: METER TYPE
     else if (session?.status === 'AWAITING_METER_TYPE') {
@@ -180,39 +229,18 @@ export async function POST(req: Request) {
     let intentData: any = {};
     let skipAI = false;
 
-    // THE "FAST-PASS" ENGINE 
+    // FAST-PASS EXTRACTION
     if (session?.status === 'AWAITING_DETAILS' && text !== "") {
-        const cleanText = text.trim();
-        const isOnlyDigits = /^\d+$/.test(cleanText.replace(/\s+/g, ''));
-        const isOnlyEmail = /^[a-zA-Z0-9._-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,6}$/.test(cleanText);
-        const isProvider = ["mtn", "glo", "airtel", "9mobile", "etisalat"].includes(cleanText.toLowerCase());
-
-        if (isOnlyDigits || isOnlyEmail || isProvider) {
-            intentData = session.intent_data;
-            if (isOnlyEmail) {
-                intentData.email = cleanText;
-            } else if (isProvider) {
-                intentData.provider = cleanText.toLowerCase();
-            } else if (isOnlyDigits) {
-                const cleanNum = cleanText.replace(/\s+/g, '');
-                if (cleanNum.length >= 10) {
-                    if (!intentData.destination_account) intentData.destination_account = cleanNum;
-                    else if (!intentData.phone) intentData.phone = cleanNum;
-                } else {
-                    intentData.amount_ngn = Number(cleanNum);
-                }
-            }
-            skipAI = true; 
-        }
+        intentData = extractEntities(text, session.intent_data);
+        skipAI = true; 
+    } else if (!session && freshIntentCheck !== 'UNKNOWN') {
+        intentData = extractEntities(text, { intent: freshIntentCheck });
+        skipAI = true;
     }
 
-    // THE AI EXTRACTOR
+    // AI EXTRACTOR (Only runs for complex unstructured sentences)
     if (!skipAI) {
         const previousContext = session?.status === 'AWAITING_DETAILS' ? JSON.stringify(session.intent_data) : "None";
-        const digitsMatch: string[] = text.match(/\b\d+\b/g) || [];
-        const possibleAccountsOrPhones = digitsMatch.filter((d: string) => d.length >= 10);
-        const possibleAmounts = digitsMatch.filter((d: string) => d.length < 10);
-
         try {
             let newAiData: any = {};
             if (text !== "") { 
@@ -220,31 +248,21 @@ export async function POST(req: Request) {
                 const prompt = `
                   Extract entities from: "${text}"
                   Previous Context: ${previousContext}
-                  
                   Categories: VEND_AIRTIME, VEND_DATA, ELECTRICITY, EDUCATION, TV, BANK_TRANSFER, TRANSACTION_HISTORY, UNKNOWN.
-                  
-                  CRITICAL RULES:
-                  1. ONLY extract values explicitly mentioned in the New Message.
-                  2. DO NOT invent amounts. If no amount is typed, amount_ngn MUST be null.
-                  3. "status" or "history" maps to TRANSACTION_HISTORY.
-                  
-                  Output exactly this JSON format: 
-                  { "intent": "UNKNOWN", "provider": null, "amount_ngn": null, "destination_account": null, "phone": null, "email": null }
+                  Output exactly this JSON format: { "intent": "UNKNOWN", "provider": null, "amount_ngn": null, "destination_account": null, "phone": null, "email": null }
                 `;
                 const result = await model.generateContent(prompt);
-                const cleanedText = result.response.text().replace(/```json/gi, '').replace(/```/gi, '').trim();
-                newAiData = JSON.parse(cleanedText);
+                newAiData = JSON.parse(result.response.text().replace(/```json/gi, '').replace(/```/gi, '').trim());
             }
 
             if (session?.status === 'AWAITING_DETAILS' && session.intent_data) {
                 intentData = session.intent_data; 
                 if (text !== "") {
-                    if (!intentData.amount_ngn) intentData.amount_ngn = newAiData.amount_ngn || (possibleAmounts[0] ? Number(possibleAmounts[0]) : null);
-                    if (!intentData.email) intentData.email = newAiData.email;
-                    if (!intentData.destination_account && possibleAccountsOrPhones.length > 0) intentData.destination_account = String(possibleAccountsOrPhones[0]);
-                    else if (!intentData.phone && possibleAccountsOrPhones.length > 0) intentData.phone = String(possibleAccountsOrPhones[0]);
-                    else if (!intentData.phone) intentData.phone = newAiData.phone;
-                    if (!intentData.provider) intentData.provider = newAiData.provider;
+                    if (!intentData.amount_ngn && newAiData.amount_ngn) intentData.amount_ngn = Number(newAiData.amount_ngn);
+                    if (!intentData.email && newAiData.email) intentData.email = newAiData.email;
+                    if (!intentData.destination_account && newAiData.destination_account) intentData.destination_account = String(newAiData.destination_account);
+                    if (!intentData.phone && newAiData.phone) intentData.phone = String(newAiData.phone);
+                    if (!intentData.provider && newAiData.provider) intentData.provider = newAiData.provider;
                 }
             } else {
                 intentData = newAiData;
@@ -254,16 +272,9 @@ export async function POST(req: Request) {
         } catch (e) { 
             let localIntent = fallbackIntentMatcher(text);
             if (session?.status === 'AWAITING_DETAILS' && session.intent_data) {
-                intentData = session.intent_data;
-                if (text !== "") {
-                    if (!intentData.amount_ngn && possibleAmounts.length > 0) intentData.amount_ngn = Number(possibleAmounts[0]);
-                    if (!intentData.destination_account && possibleAccountsOrPhones.length > 0) intentData.destination_account = String(possibleAccountsOrPhones[0]);
-                    else if (!intentData.phone && possibleAccountsOrPhones.length > 0) intentData.phone = String(possibleAccountsOrPhones[0]);
-                }
+                intentData = extractEntities(text, session.intent_data);
             } else {
-                intentData = { intent: localIntent, amount_ngn: null, destination_account: null, provider: null, phone: null, email: null };
-                if (possibleAmounts.length > 0) intentData.amount_ngn = Number(possibleAmounts[0]); 
-                if (possibleAccountsOrPhones.length > 0) intentData.destination_account = String(possibleAccountsOrPhones[0]);
+                intentData = extractEntities(text, { intent: localIntent });
             }
         }
     }
@@ -314,11 +325,24 @@ export async function POST(req: Request) {
         }
 
         const activeMin = intentData.verified_min || rules.min;
-        if (activeMin && intentData.amount_ngn < activeMin) {
+        if (activeMin && intentData.amount_ngn && intentData.amount_ngn < activeMin) {
             intentData.amount_ngn = null; 
             await supabase.from('deai_sessions').upsert({ chat_id: platform_id, platform, intent_data: intentData, status: 'AWAITING_DETAILS', expires_at: new Date(Date.now() + 300000).toISOString() }, { onConflict: 'chat_id' });
             return NextResponse.json({ action: 'REPLY', message: `❌ Minimum amount for this service is ${currencySymbol}${activeMin}. Please reply with a valid amount.` });
         }
+    }
+
+    // ⚡ VEND_DATA VARIATIONS GATE ⚡
+    if (intentData.intent === 'VEND_DATA' && !intentData.variation_code) {
+        const variations = await fetchDataVariations(intentData.provider);
+        intentData.available_variations = variations;
+        await supabase.from('deai_sessions').upsert({ chat_id: platform_id, platform, intent_data: intentData, status: 'AWAITING_DATA_PLAN', expires_at: new Date(Date.now() + 300000).toISOString() }, { onConflict: 'chat_id' });
+        
+        let msg = `📊 **Select Data Plan for ${intentData.provider.toUpperCase()}**\n\n`;
+        variations.forEach((v: any) => msg += `${v.id}️⃣ ${v.name} - ${currencySymbol}${v.price}\n`);
+        msg += `\n*Reply with the number (e.g., 1).*`;
+        
+        return NextResponse.json({ action: 'REPLY', message: msg });
     }
 
     // ELECTRICITY VERIFICATION GATE 
@@ -333,7 +357,7 @@ export async function POST(req: Request) {
     if (!intentData.selected_token) {
         await supabase.from('deai_sessions').upsert({ chat_id: platform_id, platform, intent_data: intentData, status: 'AWAITING_TOKEN', expires_at: new Date(Date.now() + 300000).toISOString() }, { onConflict: 'chat_id' });
         
-        let prefixMsg = intentData.provider && ['VEND_AIRTIME', 'VEND_DATA'].includes(intentData.intent) 
+        let prefixMsg = intentData.provider && ['VEND_AIRTIME'].includes(intentData.intent) 
             ? `(Network Auto-Detected: **${intentData.provider.toUpperCase()}**)\n\n` : "";
 
         return NextResponse.json({
