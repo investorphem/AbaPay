@@ -9,7 +9,7 @@ const supabase = createClient(
   (process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY) as string
 );
 
-// ⚡ 1. THE ENTERPRISE VALIDATION ENGINE ⚡
+// ⚡ THE ENTERPRISE VALIDATION ENGINE ⚡
 const SERVICE_RULES: Record<string, any> = {
     VEND_AIRTIME: { min: 100, max: 50000, required: ['amount_ngn', 'destination_account', 'provider'] },
     VEND_DATA: { min: null, max: null, required: ['destination_account', 'provider'] },
@@ -56,7 +56,7 @@ export async function POST(req: Request) {
     const { data: session } = await supabase.from('deai_sessions').select('*').eq('chat_id', platform_id).single();
     const userInput = text.trim().toLowerCase();
 
-    // 2. ESCAPE HATCH & DYNAMIC GREETING
+    // ESCAPE HATCH & GREETING
     if (userInput === 'cancel' || userInput === 'start' || userInput === 'help') {
       await supabase.from('deai_sessions').delete().eq('chat_id', platform_id);
       return NextResponse.json({ 
@@ -70,11 +70,7 @@ export async function POST(req: Request) {
     // STATE: PIN CONFIRMATION
     if (session?.status === 'AWAITING_PIN') {
       if (text.trim() === identity.deai_pin) {
-        // ⚡ FIX: We instantly delete the session here so they are NEVER locked out!
         await supabase.from('deai_sessions').delete().eq('chat_id', platform_id);
-        
-        // Blockchain/API call happens here...
-
         return NextResponse.json({ action: 'REPLY', message: `✅ **PIN Verified!**\n\n⏳ *Processing your ${session.intent_data.selected_token} transaction...*\n\nYour transaction has been submitted. Type **Status** to check your history shortly.` });
       }
       if (/^\d{4}$/.test(text.trim())) {
@@ -131,45 +127,56 @@ export async function POST(req: Request) {
     // --- 3. THE SMART AI EXTRACTOR ---
     if (!isContinuingToAI) return NextResponse.json({ success: true });
 
-    let intentData = null;
-    const previousContext = session?.status === 'AWAITING_DETAILS' ? JSON.stringify(session.intent_data) : "None";
+    let intentData: any = {};
 
     try {
         const model = genAI.getGenerativeModel({ model: "gemini-2.5-flash", generationConfig: { responseMimeType: "application/json" } });
         const prompt = `
-          Extract user intent into JSON. 
-          MUST USE ONE OF THESE EXACT CATEGORIES: VEND_AIRTIME, VEND_DATA, ELECTRICITY, EDUCATION, TV, BANK_TRANSFER, TRANSACTION_HISTORY, UNKNOWN.
-          
-          Previous Context: ${previousContext}
-          New Message: "${text}"
+          Extract entities from the user message.
+          Message: "${text}"
           
           Rules:
-          - "status", "history", "recent" MUST map to "TRANSACTION_HISTORY".
-          - Merge new details into the Previous Context.
+          - Categories: VEND_AIRTIME, VEND_DATA, ELECTRICITY, EDUCATION, TV, BANK_TRANSFER, TRANSACTION_HISTORY, UNKNOWN.
+          - "status", "history", "recent" map to "TRANSACTION_HISTORY".
+          - 10 or 11 digit numbers map to "destination_account".
+          - Standalone numbers map to "amount_ngn".
           
-          Output exactly: { "intent": "...", "provider": "...", "amount_ngn": number|null, "destination_account": "...", "phone": "...", "email": "..." }
+          Output exactly: { "intent": "...", "provider": null, "amount_ngn": null, "destination_account": null, "phone": null, "email": null }
         `;
+        
         const result = await model.generateContent(prompt);
-        intentData = JSON.parse(result.response.text());
+        // ⚡ FIX: STRIP MARKDOWN TO PREVENT JSON CRASHES ⚡
+        const rawText = result.response.text();
+        const cleanedText = rawText.replace(/```json/gi, '').replace(/```/gi, '').trim();
+        const newAiData = JSON.parse(cleanedText);
+
+        // ⚡ FIX: BULLETPROOF TYPESCRIPT MEMORY MERGING ⚡
+        if (session?.status === 'AWAITING_DETAILS' && session.intent_data) {
+            intentData = {
+                intent: session.intent_data.intent, // Lock the intent so it doesn't change
+                amount_ngn: newAiData.amount_ngn || session.intent_data.amount_ngn,
+                destination_account: newAiData.destination_account || newAiData.phone || session.intent_data.destination_account,
+                provider: newAiData.provider || session.intent_data.provider,
+                phone: newAiData.phone || session.intent_data.phone,
+                email: newAiData.email || session.intent_data.email
+            };
+        } else {
+            intentData = newAiData;
+        }
+
     } catch (e) { 
-        return NextResponse.json({ action: 'REPLY', message: "🚨 AI timeout. Please try sending your message again." });
+        console.error("Parse Error:", e);
+        return NextResponse.json({ action: 'REPLY', message: "🚨 Formatting error. Please try sending your message again." });
     }
 
-    // ⚡ FIX: THE INTENT FIREWALL ⚡
-    // If the AI hallucinates a fake intent, force it to UNKNOWN
     if (intentData?.intent === 'TRANSACTION_STATUS' || intentData?.intent === 'STATUS') intentData.intent = 'TRANSACTION_HISTORY';
-    if (!SERVICE_RULES[intentData.intent] && intentData.intent !== 'TRANSACTION_HISTORY') {
-        intentData.intent = 'UNKNOWN';
-    }
+    if (!SERVICE_RULES[intentData.intent] && intentData.intent !== 'TRANSACTION_HISTORY') intentData.intent = 'UNKNOWN';
 
-    if (intentData.intent === 'UNKNOWN') {
-       return NextResponse.json({ action: 'REPLY', message: "🤔 I didn't quite catch that. Type **Help** to see what I can do!" });
-    }
+    if (intentData.intent === 'UNKNOWN') return NextResponse.json({ action: 'REPLY', message: "🤔 I didn't quite catch that. Type **Help** to see what I can do!" });
 
     if (intentData.intent === 'TRANSACTION_HISTORY') {
-        await supabase.from('deai_sessions').delete().eq('chat_id', platform_id); // Wipe any stuck sessions
-        const { data: recentTxs } = await supabase
-            .from('transactions').select('service_category, network, amount_naira, status, created_at, token_used')
+        await supabase.from('deai_sessions').delete().eq('chat_id', platform_id);
+        const { data: recentTxs } = await supabase.from('transactions').select('service_category, network, amount_naira, status, created_at, token_used')
             .eq('wallet_address', globalUser.wallet_address).order('created_at', { ascending: false }).limit(3);
 
         if (!recentTxs || recentTxs.length === 0) return NextResponse.json({ action: 'REPLY', message: "📜 You don't have any recent transactions yet." });
@@ -184,7 +191,6 @@ export async function POST(req: Request) {
     }
 
     // --- 4. THE MISSING FIELD ENGINE ---
-    
     if (['VEND_AIRTIME', 'VEND_DATA'].includes(intentData.intent) && intentData.destination_account && !intentData.provider) {
         intentData.provider = detectNetwork(intentData.destination_account);
     }
@@ -227,7 +233,6 @@ export async function POST(req: Request) {
     if (!intentData.selected_token) {
         await supabase.from('deai_sessions').upsert({ chat_id: platform_id, platform, intent_data: intentData, status: 'AWAITING_TOKEN', expires_at: new Date(Date.now() + 300000).toISOString() }, { onConflict: 'chat_id' });
         
-        // Let the user know if we auto-detected their network!
         let prefixMsg = intentData.provider && ['VEND_AIRTIME', 'VEND_DATA'].includes(intentData.intent) 
             ? `(Network Auto-Detected: **${intentData.provider.toUpperCase()}**)\n\n` : "";
 
