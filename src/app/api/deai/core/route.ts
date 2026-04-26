@@ -35,14 +35,13 @@ export async function POST(req: Request) {
       return NextResponse.json({ action: 'REPLY', message: "🔒 **Unauthorized**\nPlease link your wallet on the AbaPay dashboard to use this agent." });
     }
 
-        // Safely extract the user data whether Supabase returns an array or an object
+    // Safely extract the user data
     const globalUser: any = Array.isArray(identity.abapay_global_users) 
       ? identity.abapay_global_users[0] 
       : identity.abapay_global_users;
 
     const currentCountry = globalUser?.country_code || 'NG';
     const currencySymbol = currentCountry === 'NG' ? '₦' : (currentCountry === 'GH' ? 'GH₵' : '$');
-
 
     // 2. State Machine Logic
     const { data: session } = await supabase.from('deai_sessions').select('*').eq('chat_id', platform_id).single();
@@ -57,9 +56,9 @@ export async function POST(req: Request) {
       });
     }
 
-    // PHASE: PIN CONFIRMATION
-    let isContinuingToAI = true;
+    let isContinuingToAI = false;
 
+    // PHASE 3: PIN CONFIRMATION
     if (session?.status === 'AWAITING_PIN') {
       if (session.expires_at && new Date(session.expires_at) < new Date()) {
         await supabase.from('deai_sessions').delete().eq('chat_id', platform_id);
@@ -68,9 +67,10 @@ export async function POST(req: Request) {
 
       if (text.trim() === identity.deai_pin) {
         await supabase.from('deai_sessions').delete().eq('chat_id', platform_id);
+        // ⚡ CHANGED TO 'REPLY' TO FIX THE SILENT BOT ISSUE ⚡
         return NextResponse.json({ 
-          action: 'SUCCESS_RECEIPT', 
-          message: `🎉 **Transaction Successful!**\n\nService: ${session.intent_data.intent}\nAmount: ${currencySymbol}${session.intent_data.amount_ngn}\nRecipient: ${session.intent_data.destination_account}\n\n*Receipt sent to your AbaPay history.*` 
+          action: 'REPLY', 
+          message: `✅ **PIN Verified!**\n\n⏳ *Processing your ${session.intent_data.selected_token} transaction on the blockchain...*\n\nPlease wait a moment. Your final receipt will drop here shortly.` 
         });
       }
       
@@ -78,15 +78,44 @@ export async function POST(req: Request) {
         return NextResponse.json({ action: 'REPLY', message: "❌ Incorrect PIN.\n\nReply with your correct 4-digit PIN, or type **Cancel** to start over." });
       } else {
         await supabase.from('deai_sessions').delete().eq('chat_id', platform_id);
+        isContinuingToAI = true; // They typed a new command, let AI handle it
       }
-    } else if (session?.status === 'AWAITING_DETAILS') {
+    } 
+    // PHASE 2: TOKEN SELECTION (NEW!)
+    else if (session?.status === 'AWAITING_TOKEN') {
+      const tokenMap: Record<string, string> = { '1': 'Fiat Balance', '2': 'USDT', '3': 'USDC', '4': 'cUSD' };
+      const selected = tokenMap[userInput];
+
+      if (!selected) {
+          return NextResponse.json({ action: 'REPLY', message: "❌ Invalid selection. Please reply with **1**, **2**, **3**, or **4** to choose your payment method." });
+      }
+
+      session.intent_data.selected_token = selected;
+      
+      await supabase.from('deai_sessions').upsert({
+          chat_id: platform_id, platform, intent_data: session.intent_data, status: 'AWAITING_PIN', expires_at: new Date(Date.now() + 300000).toISOString()
+      }, { onConflict: 'chat_id' });
+
+      const total = (session.intent_data.amount_ngn || 0) + (session.intent_data.fee || 0);
+      return NextResponse.json({
+          action: 'REPLY',
+          message: `🤖 **AbaPay Checkout**\n\nService: ${session.intent_data.intent.replace('_', ' ')}\nAccount: ${session.intent_data.destination_account}\nAmount: ${currencySymbol}${session.intent_data.amount_ngn}\nFee: ${currencySymbol}${session.intent_data.fee}\nPayment: **${selected}**\n**Total: ${currencySymbol}${total}**\n\n🔒 Reply with your **4-digit PIN** to confirm.`
+      });
+
+    }
+    // PHASE 1: MISSING DETAILS
+    else if (session?.status === 'AWAITING_DETAILS') {
+       isContinuingToAI = true;
+    } 
+    else {
        isContinuingToAI = true;
     }
 
     // 3. AI Intent Routing
     if (!isContinuingToAI) return NextResponse.json({ success: true });
 
-    const fallbackModels = ["gemini-3-flash-preview", "gemini-2.5-flash", "gemini-1.5-pro"];
+    // Removed the slow 1.5-pro model to speed up response times!
+    const fallbackModels = ["gemini-3-flash-preview", "gemini-2.5-flash"];
     let intentData = null;
 
     const previousContext = session?.status === 'AWAITING_DETAILS' ? JSON.stringify(session.intent_data) : "None";
@@ -127,7 +156,7 @@ export async function POST(req: Request) {
     }
 
     if (intentData.intent === 'CHANGE_COUNTRY') {
-        return NextResponse.json({ action: 'REPLY', message: `🌍 Country Selection Menu:\n\nTo change your region, please log into your AbaPay Web Dashboard and update your profile settings. Your bot will automatically sync to your new local currency!` });
+        return NextResponse.json({ action: 'REPLY', message: `🌍 **Country Selection**\n\nTo change your region, please log into your AbaPay Web Dashboard and update your profile settings. Your bot will automatically sync to your new local currency!` });
     }
 
     // 4. Missing Information Guardrails (For ALL Services)
@@ -135,7 +164,6 @@ export async function POST(req: Request) {
       intentData.provider = detectNetwork(intentData.destination_account);
     }
 
-    // Check what is missing based on service type
     let missing = [];
     const requiresAmount = ['VEND_AIRTIME', 'BANK_TRANSFER', 'ELECTRICITY'].includes(intentData.intent);
     
@@ -143,7 +171,6 @@ export async function POST(req: Request) {
     if (!intentData.destination_account) missing.push("the **target account/phone/meter number**");
 
     if (missing.length > 0) {
-        // We save the state WITHOUT wiping it so they can answer
         await supabase.from('deai_sessions').upsert({
             chat_id: platform_id, platform, intent_data: intentData, status: 'AWAITING_DETAILS', expires_at: new Date(Date.now() + 300000).toISOString()
         }, { onConflict: 'chat_id' });
@@ -156,9 +183,7 @@ export async function POST(req: Request) {
         return NextResponse.json({ action: 'REPLY', message: `💡 ${understood}.\n\nTo proceed, please reply with ${missing.join(" and ")}.` });
     }
 
-    // 5. Min/Max Validation (Without deleting memory!)
     if (intentData.intent === 'VEND_AIRTIME' && intentData.amount_ngn < 100) {
-        // We reset the amount in memory, but KEEP the phone number and state!
         intentData.amount_ngn = null; 
         await supabase.from('deai_sessions').upsert({
             chat_id: platform_id, platform, intent_data: intentData, status: 'AWAITING_DETAILS', expires_at: new Date(Date.now() + 300000).toISOString()
@@ -173,16 +198,17 @@ export async function POST(req: Request) {
         intentData.fee = 0;
     }
 
-    // 6. Ready for Checkout! Save session and ask for PIN
-    await supabase.from('deai_sessions').upsert({
-      chat_id: platform_id, platform, intent_data: intentData, status: 'AWAITING_PIN', expires_at: new Date(Date.now() + 300000).toISOString()
-    }, { onConflict: 'chat_id' });
+    // 5. Trigger Token Selection! (If all details are present, but no token is selected)
+    if (!intentData.selected_token) {
+        await supabase.from('deai_sessions').upsert({
+            chat_id: platform_id, platform, intent_data: intentData, status: 'AWAITING_TOKEN', expires_at: new Date(Date.now() + 300000).toISOString()
+        }, { onConflict: 'chat_id' });
 
-    const total = (intentData.amount_ngn || 0) + (intentData.fee || 0);
-    return NextResponse.json({ 
-      action: 'REPLY', 
-      message: `🤖 **AbaPay Checkout**\n\nService: ${intentData.intent.replace('_', ' ')}\nAccount: ${intentData.destination_account}\nAmount: ${currencySymbol}${intentData.amount_ngn}\nFee: ${currencySymbol}${intentData.fee}\n**Total: ${currencySymbol}${total}**\n\nReply with your 4-digit PIN to confirm.`
-    });
+        return NextResponse.json({
+            action: 'REPLY',
+            message: `🪙 **Select Payment Method**\nYour Fiat Balance: ${currencySymbol}${globalUser.fiat_balance_ngn || 0}\n\nHow would you like to pay?\n1️⃣ Fiat Balance\n2️⃣ USDT\n3️⃣ USDC\n4️⃣ cUSD\n\n*Reply with the number (e.g., 2).*`
+        });
+    }
 
   } catch (error) {
     console.error("🚨 Brain Error Catch Block:", error);
