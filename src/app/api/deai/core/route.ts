@@ -3,12 +3,14 @@ import { NextResponse } from 'next/server';
 import { GoogleGenerativeAI } from '@google/generative-ai';
 import { createClient } from '@supabase/supabase-js';
 
+// Using the fastest, most stable model to prevent Vercel Timeouts
 const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY as string);
 const supabase = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL as string,
   (process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY) as string
 );
 
+// Auto-Detect Network
 const detectNetwork = (phone: string) => {
   if (!phone) return null;
   const prefix = phone.substring(0, 4);
@@ -19,11 +21,10 @@ const detectNetwork = (phone: string) => {
   return null;
 };
 
-// ⚡ SIMULATED VERIFICATION API (Replace this with your VTPass integration)
+// Simulated VTPass API
 async function verifyAccount(intent: string, account: string, type?: string) {
-    if (intent === 'ELECTRICITY') {
-        return { success: true, customer_name: "Oluwafemi Olagoke", min_amount: 1000, max_amount: 50000 };
-    }
+    if (intent === 'ELECTRICITY') return { success: true, customer_name: "Oluwafemi Olagoke", min_amount: 1000, max_amount: 50000 };
+    if (intent === 'TV') return { success: true, customer_name: "AbaPay User", min_amount: 1500, max_amount: 100000 };
     return { success: true, customer_name: "Verified User", min_amount: 100, max_amount: 100000 };
 }
 
@@ -48,19 +49,19 @@ export async function POST(req: Request) {
     const { data: session } = await supabase.from('deai_sessions').select('*').eq('chat_id', platform_id).single();
     const userInput = text.trim().toLowerCase();
 
-    // ESCAPE HATCH & GREETING
+    // 1. ESCAPE HATCH & GREETING
     if (userInput === 'cancel' || userInput === 'start' || userInput === 'help') {
       await supabase.from('deai_sessions').delete().eq('chat_id', platform_id);
       return NextResponse.json({ 
         action: 'REPLY', 
-        message: `👋 **Welcome to AbaPay AI!**\n\nI can help you pay bills and send crypto instantly.\n\n*Try saying:*\n💬 _Buy 500 MTN airtime for 08012345678_\n💬 _Pay 5000 electricity for meter 1122334455_\n📜 _Check my recent transactions_\n🌍 _Change my country to Ghana_` 
+        message: `👋 **Welcome to AbaPay AI!**\n\nI can help you pay bills and send crypto instantly.\n\n*Try saying:*\n💬 _Buy 500 MTN airtime for 08012345678_\n💬 _Pay 5000 electricity for meter 1122334455_\n📜 _Check my recent transactions_` 
       });
     }
 
-    // STATE: PROCESSING LOCK
+    // 2. PROCESSING LOCK
     if (session?.status === 'PROCESSING') {
         if (userInput.includes('history') || userInput.includes('status') || userInput.includes('recent')) {
-            // Let it fall through to the AI so the user can check their history while processing
+            // Let it fall through to fetch history
         } else {
             return NextResponse.json({ action: 'REPLY', message: "⏳ Your previous transaction is currently processing. Type **Status** to check your history." });
         }
@@ -68,18 +69,12 @@ export async function POST(req: Request) {
 
     let isContinuingToAI = false;
 
-    // STATE: PIN CONFIRMATION
+    // 3. STATE: PIN CONFIRMATION
     if (session?.status === 'AWAITING_PIN') {
       if (text.trim() === identity.deai_pin) {
-        // Lock the state to processing
         await supabase.from('deai_sessions').update({ status: 'PROCESSING' }).eq('chat_id', platform_id);
-        
-        // ⚡ BLOCKCHAIN / VTPASS PAYMENT LOGIC EXECUTION GOES HERE ⚡
-
-        return NextResponse.json({ 
-          action: 'REPLY', 
-          message: `✅ **PIN Verified!**\n\n⏳ *Processing your ${session.intent_data.selected_token} transaction...*\n\nType **Status** or **History** in a few moments to check the result.` 
-        });
+        // ⚡ BLOCKCHAIN / VTPASS PAYMENT LOGIC GOES HERE ⚡
+        return NextResponse.json({ action: 'REPLY', message: `✅ **PIN Verified!**\n\n⏳ *Processing your ${session.intent_data.selected_token} transaction...*\n\nType **Status** in a few moments to check the result.` });
       }
       
       if (/^\d{4}$/.test(text.trim())) {
@@ -89,7 +84,7 @@ export async function POST(req: Request) {
         isContinuingToAI = true; 
       }
     } 
-    // STATE: TOKEN SELECTION
+    // 4. STATE: TOKEN SELECTION
     else if (session?.status === 'AWAITING_TOKEN') {
       const tokenMap: Record<string, string> = { '1': 'Fiat', '2': 'USDT', '3': 'USDC', '4': 'cUSD' };
       const selected = tokenMap[userInput];
@@ -102,10 +97,10 @@ export async function POST(req: Request) {
       const total = (session.intent_data.amount_ngn || 0) + (session.intent_data.fee || 0);
       return NextResponse.json({
           action: 'REPLY',
-          message: `🤖 **Final Checkout**\n\nService: ${session.intent_data.intent}\nAccount: ${session.intent_data.destination_account}\nName: ${session.intent_data.verified_name || 'N/A'}\nAmount: ${currencySymbol}${session.intent_data.amount_ngn}\nPayment: **${selected}**\n**Total: ${currencySymbol}${total}**\n\n🔒 Reply with your **4-digit PIN** to confirm.`
+          message: `🤖 **Final Checkout**\n\nService: ${session.intent_data.intent.replace('_', ' ')}\nAccount: ${session.intent_data.destination_account}\nName: ${session.intent_data.verified_name || 'N/A'}\nAmount: ${currencySymbol}${session.intent_data.amount_ngn}\nPayment: **${selected}**\n**Total: ${currencySymbol}${total}**\n\n🔒 Reply with your **4-digit PIN** to confirm.`
       });
     }
-    // STATE: METER TYPE (Prepaid/Postpaid)
+    // 5. STATE: METER/SMARTCARD TYPE
     else if (session?.status === 'AWAITING_METER_TYPE') {
         const typeMap: Record<string, string> = { '1': 'prepaid', '2': 'postpaid' };
         const selectedType = typeMap[userInput];
@@ -113,7 +108,6 @@ export async function POST(req: Request) {
         if (!selectedType) return NextResponse.json({ action: 'REPLY', message: "❌ Please reply with **1** for Prepaid or **2** for Postpaid." });
         
         session.intent_data.meter_type = selectedType;
-
         const verification = await verifyAccount(session.intent_data.intent, session.intent_data.destination_account, selectedType);
         
         if (!verification.success) {
@@ -123,50 +117,48 @@ export async function POST(req: Request) {
 
         session.intent_data.verified_name = verification.customer_name;
         session.intent_data.min_amount = verification.min_amount;
-        session.intent_data.max_amount = verification.max_amount;
-
+        
         await supabase.from('deai_sessions').upsert({ chat_id: platform_id, platform, intent_data: session.intent_data, status: 'AWAITING_DETAILS', expires_at: new Date(Date.now() + 300000).toISOString() }, { onConflict: 'chat_id' });
 
-        return NextResponse.json({ action: 'REPLY', message: `✅ **Verified!**\nName: ${verification.customer_name}\nMin Amount: ${currencySymbol}${verification.min_amount}\n\nPlease reply with the **Amount** you wish to pay, your **Phone Number**, and **Email Address** (e.g., "5000 08012345678 test@email.com").` });
+        return NextResponse.json({ action: 'REPLY', message: `✅ **Verified!**\nName: ${verification.customer_name}\n\nPlease reply with the **Amount** you wish to pay, your **Phone Number**, and **Email Address** (e.g., "5000 08012345678 test@email.com").` });
     }
-    // STATE: DETAILS
+    // 6. STATE: AWAITING DETAILS
     else if (session?.status === 'AWAITING_DETAILS') {
        isContinuingToAI = true;
     } else {
        isContinuingToAI = true;
     }
 
-    // --- AI ROUTING ---
+    // --- AI ROUTING (Fast Generation) ---
     if (!isContinuingToAI && session?.status !== 'PROCESSING') return NextResponse.json({ success: true });
 
-    const fallbackModels = ["gemini-3-flash-preview", "gemini-2.5-flash"];
     let intentData = null;
     const previousContext = session?.status === 'AWAITING_DETAILS' ? JSON.stringify(session.intent_data) : "None";
 
-    for (const modelName of fallbackModels) {
-      try {
-        const model = genAI.getGenerativeModel({ model: modelName, generationConfig: { responseMimeType: "application/json" } });
+    try {
+        // Locked to 2.5-flash for maximum speed and zero timeouts
+        const model = genAI.getGenerativeModel({ model: "gemini-2.5-flash", generationConfig: { responseMimeType: "application/json" } });
         const prompt = `
           Extract user intent into JSON. 
-          Categories: VEND_AIRTIME, ELECTRICITY, EDUCATION, TV, CHANGE_COUNTRY, TRANSACTION_HISTORY, UNKNOWN.
+          Categories: VEND_AIRTIME, VEND_DATA, ELECTRICITY, EDUCATION, TV, BANK_TRANSFER, TRANSACTION_HISTORY, UNKNOWN.
           
           Previous Context: ${previousContext} (Merge new details into this if present).
           
           Rules:
-          - If the user asks for their recent transactions, history, or status of a payment, intent is TRANSACTION_HISTORY.
-          - If the user asks to change country or region, intent is CHANGE_COUNTRY.
-          - For 9mobile, use "etisalat".
+          - If the user asks for history, intent is TRANSACTION_HISTORY.
+          - If the request is gibberish, intent is UNKNOWN.
           
           Return JSON: { "intent": string, "provider": string, "amount_ngn": number, "destination_account": string, "phone": string, "email": string }
           Message: "${text}"
         `;
         const result = await model.generateContent(prompt);
         intentData = JSON.parse(result.response.text());
-        if (intentData) break; 
-      } catch (e) { continue; }
+    } catch (e) { 
+        console.error("AI Error:", e);
+        return NextResponse.json({ action: 'REPLY', message: "🚨 AI timeout. Please try sending your message again." });
     }
 
-    if (!intentData) throw new Error("AI parsing failed.");
+    if (!intentData) return NextResponse.json({ action: 'REPLY', message: "🚨 Parsing failed." });
 
     // --- LOGIC GATES ---
 
@@ -174,73 +166,71 @@ export async function POST(req: Request) {
        return NextResponse.json({ action: 'REPLY', message: "🤔 I didn't quite catch that. Type **Help** to see what I can do!" });
     }
 
-    if (intentData.intent === 'CHANGE_COUNTRY') {
-        return NextResponse.json({ action: 'REPLY', message: `🌍 **Country Selection**\n\nTo change your region, log into your AbaPay Web Dashboard. Your bot will automatically sync!` });
-    }
-
-    // ⚡ GATE: TRANSACTION HISTORY ⚡
     if (intentData.intent === 'TRANSACTION_HISTORY') {
-        if (session?.status !== 'PROCESSING') {
-            await supabase.from('deai_sessions').delete().eq('chat_id', platform_id);
-        }
+        if (session?.status !== 'PROCESSING') await supabase.from('deai_sessions').delete().eq('chat_id', platform_id);
 
         const { data: recentTxs, error } = await supabase
-            .from('transactions') 
-            .select('service_category, network, amount_naira, status, created_at, token_used')
-            .eq('wallet_address', globalUser.wallet_address)
-            .order('created_at', { ascending: false })
-            .limit(3);
+            .from('transactions').select('service_category, network, amount_naira, status, created_at, token_used')
+            .eq('wallet_address', globalUser.wallet_address).order('created_at', { ascending: false }).limit(3);
 
-        if (error) {
-            console.error("History fetch error:", error);
-            return NextResponse.json({ action: 'REPLY', message: "🚨 Sorry, I couldn't fetch your history right now. Please try again." });
-        }
-
-        if (!recentTxs || recentTxs.length === 0) {
-            return NextResponse.json({ action: 'REPLY', message: "📜 You don't have any recent transactions yet." });
-        }
+        if (!recentTxs || recentTxs.length === 0) return NextResponse.json({ action: 'REPLY', message: "📜 You don't have any recent transactions yet." });
 
         let msg = "📜 **Your Recent Transactions:**\n\n";
         recentTxs.forEach((tx, index) => {
             const dateStr = new Date(tx.created_at).toLocaleDateString('en-NG', { day: 'numeric', month: 'short' });
-            msg += `${index + 1}. **${(tx.service_category || 'Payment').replace('_', ' ')}** (${(tx.network || 'N/A').toUpperCase()})\n`;
-            msg += `Amount: ${currencySymbol}${tx.amount_naira} (Paid in ${tx.token_used || 'Fiat'})\n`;
-            msg += `Status: ${tx.status} | Date: ${dateStr}\n\n`;
+            msg += `${index + 1}. **${(tx.service_category || 'Payment').replace('_', ' ')}**\n`;
+            msg += `Amount: ${currencySymbol}${tx.amount_naira} (${tx.token_used || 'Fiat'})\nStatus: ${tx.status} | Date: ${dateStr}\n\n`;
         });
-
         return NextResponse.json({ action: 'REPLY', message: msg });
     }
 
-    // GATE 1: ELECTRICITY REQUIRES METER TYPE
+    // ⚡ THE FIX: STRICT MISSING INFO GATES FOR ALL SERVICES ⚡
+    let missing = [];
+    
+    // Everyone needs an amount
+    if (!intentData.amount_ngn) missing.push("the **Amount**");
+
+    if (['VEND_AIRTIME', 'VEND_DATA'].includes(intentData.intent)) {
+        // Auto-detect network if they provided a phone number but no provider
+        if (intentData.destination_account && !intentData.provider) {
+             intentData.provider = detectNetwork(intentData.destination_account);
+        }
+        if (!intentData.destination_account) missing.push("the **Phone Number** to recharge");
+        if (!intentData.provider) missing.push("the **Network Provider** (e.g. MTN, Airtel)");
+    } 
+    else if (['ELECTRICITY', 'TV'].includes(intentData.intent)) {
+        if (!intentData.destination_account) missing.push("the **Meter/Smartcard Number**");
+        if (!intentData.phone) missing.push("your **Phone Number**");
+        if (!intentData.email) missing.push("your **Email Address**");
+    }
+    else if (['BANK_TRANSFER'].includes(intentData.intent)) {
+        if (!intentData.destination_account) missing.push("the **Account Number**");
+        if (!intentData.provider) missing.push("the **Bank Name**");
+    }
+
+    // If anything is missing, pause and ask!
+    if (missing.length > 0) {
+        await supabase.from('deai_sessions').upsert({ chat_id: platform_id, platform, intent_data: intentData, status: 'AWAITING_DETAILS', expires_at: new Date(Date.now() + 300000).toISOString() }, { onConflict: 'chat_id' });
+        return NextResponse.json({ action: 'REPLY', message: `I need a bit more info to process this. Please reply with ${missing.join(", ")}.` });
+    }
+
+    // ⚡ GATE: ELECTRICITY REQUIRES METER TYPE (Only triggers IF amount, meter, phone, and email are provided)
     if (intentData.intent === 'ELECTRICITY' && !intentData.meter_type) {
         await supabase.from('deai_sessions').upsert({ chat_id: platform_id, platform, intent_data: intentData, status: 'AWAITING_METER_TYPE', expires_at: new Date(Date.now() + 300000).toISOString() }, { onConflict: 'chat_id' });
         return NextResponse.json({ action: 'REPLY', message: `💡 Electricity Payment for Meter: **${intentData.destination_account}**\n\nIs this Prepaid or Postpaid?\n\nReply with:\n**1** for Prepaid\n**2** for Postpaid` });
     }
 
-    // GATE 2: MISSING INFO FOR VERIFIED SERVICES
-    let missing = [];
-    if (!intentData.amount_ngn) missing.push("the **Amount**");
-    if (['ELECTRICITY', 'TV', 'EDUCATION'].includes(intentData.intent)) {
-        if (!intentData.phone) missing.push("your **Phone Number**");
-        if (!intentData.email) missing.push("your **Email Address**");
-    }
-
-    if (missing.length > 0) {
-        await supabase.from('deai_sessions').upsert({ chat_id: platform_id, platform, intent_data: intentData, status: 'AWAITING_DETAILS', expires_at: new Date(Date.now() + 300000).toISOString() }, { onConflict: 'chat_id' });
-        return NextResponse.json({ action: 'REPLY', message: `I need a bit more info. Please reply with ${missing.join(", ")}.` });
-    }
-
-    // GATE 3: MIN/MAX VALIDATION
+    // MIN/MAX VALIDATION
     if (intentData.min_amount && intentData.amount_ngn < intentData.min_amount) {
         intentData.amount_ngn = null; 
         await supabase.from('deai_sessions').upsert({ chat_id: platform_id, platform, intent_data: intentData, status: 'AWAITING_DETAILS', expires_at: new Date(Date.now() + 300000).toISOString() }, { onConflict: 'chat_id' });
-        return NextResponse.json({ action: 'REPLY', message: `❌ The minimum amount for this meter is ${currencySymbol}${intentData.min_amount}. Please reply with a higher amount.` });
+        return NextResponse.json({ action: 'REPLY', message: `❌ Minimum amount is ${currencySymbol}${intentData.min_amount}. Please reply with a valid amount.` });
     }
 
     // FEE ASSIGNMENT
     intentData.fee = ['ELECTRICITY', 'TV', 'EDUCATION'].includes(intentData.intent) ? 100 : 0;
 
-    // GATE 4: TOKEN SELECTION
+    // ⚡ GATE: TOKEN SELECTION (Final step before PIN)
     if (!intentData.selected_token) {
         await supabase.from('deai_sessions').upsert({ chat_id: platform_id, platform, intent_data: intentData, status: 'AWAITING_TOKEN', expires_at: new Date(Date.now() + 300000).toISOString() }, { onConflict: 'chat_id' });
         return NextResponse.json({
@@ -250,6 +240,7 @@ export async function POST(req: Request) {
     }
 
   } catch (error) {
+    console.error("System Error:", error);
     return NextResponse.json({ action: 'REPLY', message: "🚨 System processing error. Please try again." });
   }
 }
