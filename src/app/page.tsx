@@ -1,8 +1,9 @@
 "use client";
 
 import React, { useState, useEffect, useMemo, useRef } from "react";
-import { createWalletClient, createPublicClient, custom, http, parseUnits, formatUnits } from "viem";
-import { celo, celoSepolia } from "viem/chains";
+import sdk from "@farcaster/frame-sdk";
+import { createWalletClient, createPublicClient, custom, http, parseUnits, formatUnits, type WalletClient } from "viem";
+import { celo, celoSepolia, base, baseSepolia } from "viem/chains";
 import Link from "next/link";
 import { 
   ShieldCheck, Zap, AlertTriangle, CheckCircle2, ChevronDown, 
@@ -26,11 +27,14 @@ import {
 import { HistoryTab } from "@/components/HistoryTab";
 
 export default function Home() {
+  const [environment, setEnvironment] = useState<'MINIPAY' | 'FARCASTER' | 'WEB' | 'LOADING'>('LOADING');
   const [killSwitches, setKillSwitches] = useState<Record<string, boolean>>({});
-  const [isInitiallyLoading, setIsInitiallyLoading] = useState(true);
   const [address, setAddress] = useState<string | null>(null);
-  const [client, setClient] = useState<any>(null);
-  
+  const [client, setClient] = useState<WalletClient | null>(null);
+
+  const isMainnet = process.env.NEXT_PUBLIC_NETWORK === "celo" || process.env.NEXT_PUBLIC_NETWORK === "mainnet";
+  const [activeChain, setActiveChain] = useState<any>(isMainnet ? celo : celoSepolia);
+
   const [nairaAmount, setNairaAmount] = useState(""); 
   const [accountNumber, setAccountNumber] = useState("");
   const [customerPhone, setCustomerPhone] = useState("");
@@ -79,7 +83,7 @@ export default function Home() {
   const [intlOperators, setIntlOperators] = useState<any[]>([]);
   const [intlVariations, setIntlVariations] = useState<any[]>([]);
   const [intlCurrency, setIntlCurrency] = useState<string>(""); 
-  
+
   const [selectedIntlProduct, setSelectedIntlProduct] = useState<any>(null);
   const [selectedIntlOperator, setSelectedIntlOperator] = useState<any>(null);
   const [selectedIntlVariation, setSelectedIntlVariation] = useState<any>(null);
@@ -107,8 +111,6 @@ export default function Home() {
   const [transactions, setTransactions] = useState<any[]>([]);
   const [globalFiatRates, setGlobalFiatRates] = useState<Record<string, number>>({});
 
-  const isMainnet = process.env.NEXT_PUBLIC_NETWORK === "celo";
-  const activeChain = isMainnet ? celo : celoSepolia;
   const ABAPAY_CONTRACT = process.env.NEXT_PUBLIC_ABAPAY_ADDRESS as `0x${string}`;
   const GAS_CURRENCY = isMainnet ? "0x765DE816845861e75A25fCA122bb6898B8B1282a" : "0xdE9e4C3ce781b4bA68120d6261cbad65ce0aB00b";
 
@@ -152,7 +154,7 @@ export default function Home() {
   const isFixedPlan = isInternational 
     ? (selectedIntlVariation && selectedIntlVariation.fixedPrice === "Yes")
     : (activeTab === "education" || (activeTab === "pay" && (activeService.id === "INTERNET" || activeService.id === "CABLE")));
-  
+
   const currentMinDisplay = (activeTab === "pay" && activeService.id === "ELECTRICITY") ? dynamicElecMin : dynamicMinAmount;
 
   const displayForeignAmount = useMemo(() => {
@@ -165,7 +167,7 @@ export default function Home() {
   const calculatedNairaAmount = useMemo(() => {
     if (!isInternational) return nairaAmount;
     if (!selectedIntlVariation) return "0";
-    
+
     const rate = parseFloat(selectedIntlVariation.variation_rate || "1");
     if (selectedIntlVariation.fixedPrice === "Yes") {
         const charged = parseFloat(selectedIntlVariation.charged_amount || "0");
@@ -190,13 +192,13 @@ export default function Home() {
 
     if (isInternational) {
         const currencyCode = intlCurrency || (activeCountry as any).currency || activeCountry.code;
-        
+
         if (selectedIntlVariation && selectedIntlVariation.variation_rate) {
             const rate = parseFloat(selectedIntlVariation.variation_rate);
             const foreignBal = (bal * exchangeRate) / rate;
             return `${currencyCode} ${foreignBal.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
         }
-        
+
         const liveRate = globalFiatRates[currencyCode];
         if (liveRate) {
             const foreignBal = bal * liveRate;
@@ -204,7 +206,7 @@ export default function Home() {
         }
         return `${currencyCode} ...`;
     }
-    
+
     return `₦${(bal * exchangeRate).toLocaleString('en-NG', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
   }, [walletBalance, exchangeRate, isInternational, activeCountry, intlCurrency, selectedIntlVariation, globalFiatRates]);
 
@@ -357,7 +359,7 @@ export default function Home() {
   };
 
   const handleShareReceipt = async () => {
-    const receiptText = `🧾 AbaPay Receipt\n\nDate: ${selectedReceipt?.date}\nStatus: ${selectedReceipt?.status}\nProduct: ${selectedReceipt?.network} ${selectedReceipt?.service}\nRecipient: ${selectedReceipt?.account}\nAmount Paid: ₦${selectedReceipt?.amountNaira}\nCrypto Used: ${selectedReceipt?.amountCrypto} ${selectedReceipt?.tokenUsed}\nTx Hash: ${selectedReceipt?.txHash}\n\nSecured by Celo Network`;
+    const receiptText = `🧾 AbaPay Receipt\n\nDate: ${selectedReceipt?.date}\nStatus: ${selectedReceipt?.status}\nProduct: ${selectedReceipt?.network} ${selectedReceipt?.service}\nRecipient: ${selectedReceipt?.account}\nAmount Paid: ₦${selectedReceipt?.amountNaira}\nCrypto Used: ${selectedReceipt?.amountCrypto} ${selectedReceipt?.tokenUsed}\nTx Hash: ${selectedReceipt?.txHash}\n\nSecured by ${activeChain.name} Network`;
     if (navigator.share) { try { await navigator.share({ title: 'Receipt', text: receiptText }); } catch (err) {} } 
     else { try { await navigator.clipboard.writeText(receiptText); showToast("Copied!", "Receipt details copied to clipboard.", "success"); } catch (err) {} }
   };
@@ -457,15 +459,25 @@ export default function Home() {
       try {
         const currentChainId = await client.getChainId();
         if (currentChainId !== activeChain.id) await client.switchChain({ id: activeChain.id });
-      } catch (switchError) { await client.addChain({ chain: activeChain }); }
+      } catch (switchError) { 
+        // Viem doesn't have addChain natively on client without standard EIP-1193 request, 
+        // but typically Farcaster/MiniPay auto-add them.
+      }
 
       const valueInWei = parseUnits(cryptoToCharge, selectedToken.decimals);
+      
+      // ⚡ Handle Token Address Selection safely across chains
       const tokenAddress = isMainnet ? selectedToken.mainnet : selectedToken.sepolia;
+      
       const publicClient = createPublicClient({ chain: activeChain, transport: http(undefined, { fetchOptions: { cache: 'no-store' } }), pollingInterval: 4000 });
-      const isMiniPay = typeof window !== "undefined" && !!(window as any).ethereum?.isMiniPay;
-
+      
       const txConfig: any = { account: address as `0x${string}` };
-      if (!isMiniPay) txConfig.feeCurrency = GAS_CURRENCY as `0x${string}`; 
+      
+      // ⚡ Only append feeCurrency if on Celo and not MiniPay
+      const isCelo = activeChain.id === celo.id || activeChain.id === celoSepolia.id;
+      if (isCelo && environment !== 'MINIPAY') {
+         txConfig.feeCurrency = GAS_CURRENCY as `0x${string}`; 
+      }
 
       setStatus("Verifying permissions...");
       const currentAllowance = await publicClient.readContract({ address: tokenAddress as `0x${string}`, abi: ERC20_ABI, functionName: 'allowance', args: [address, ABAPAY_CONTRACT], blockTag: 'latest' }) as bigint;
@@ -554,34 +566,104 @@ export default function Home() {
     } finally { setIsProcessing(false); }
   };
 
-  useEffect(() => { const timer = setTimeout(() => setIsInitiallyLoading(false), 2000); return () => clearTimeout(timer); }, []);
   useEffect(() => { if (status && !isProcessing) { const timer = setTimeout(() => setStatus(""), 5000); return () => clearTimeout(timer); } }, [status, isProcessing]);
 
+  // ⚡ 1. THE SETTINGS INTERVAL ⚡
   useEffect(() => {
     let intervalId: NodeJS.Timeout;
-    async function initSystem() {
-      const fetchSettings = async () => {
-          try { 
-              const { data: settingsData } = await supabase.from('platform_settings').select('exchange_rate, kill_switches').eq('id', 1).single(); 
-              if (settingsData) {
-                  if (settingsData.exchange_rate) setExchangeRate(Number(settingsData.exchange_rate)); 
-                  if (settingsData.kill_switches) setKillSwitches(settingsData.kill_switches);
-              }
-          } catch (e) {}
-      };
-      await fetchSettings(); intervalId = setInterval(fetchSettings, 15000); 
+    async function fetchSettings() {
+        try { 
+            const { data: settingsData } = await supabase.from('platform_settings').select('exchange_rate, kill_switches').eq('id', 1).single(); 
+            if (settingsData) {
+                if (settingsData.exchange_rate) setExchangeRate(Number(settingsData.exchange_rate)); 
+                if (settingsData.kill_switches) setKillSwitches(settingsData.kill_switches);
+            }
+        } catch (e) {}
+    }
+    fetchSettings(); 
+    intervalId = setInterval(fetchSettings, 15000); 
+    return () => { if (intervalId) clearInterval(intervalId); };
+  }, []);
 
+  // ⚡ 2. THE CHAMELEON ENVIRONMENT DETECTOR ⚡
+  useEffect(() => {
+    let timeoutId: NodeJS.Timeout;
+
+    const detectAndConnect = async () => {
       try {
+        // Option 1: Farcaster SDK (Warpcast App)
+        const context = await sdk.context;
+        if (context && context.client) {
+          setEnvironment('FARCASTER');
+          sdk.actions.ready(); 
+          
+          const targetChain = isMainnet ? base : baseSepolia;
+          setActiveChain(targetChain);
+
+          const farcasterClient = createWalletClient({
+            chain: targetChain,
+            transport: custom(sdk.wallet.ethProvider),
+          });
+
+          const [acc] = await farcasterClient.requestAddresses();
+          const currentChainId = await farcasterClient.getChainId();
+          if (currentChainId !== targetChain.id) {
+             await farcasterClient.switchChain({ id: targetChain.id });
+          }
+
+          setAddress(acc);
+          setClient(farcasterClient);
+          return; // Exit
+        }
+
+        // Option 2: Opera MiniPay
+        if (typeof window !== "undefined" && (window as any).ethereum && (window as any).ethereum.isMiniPay) {
+          setEnvironment('MINIPAY');
+          
+          const targetChain = isMainnet ? celo : celoSepolia;
+          setActiveChain(targetChain);
+
+          const miniPayClient = createWalletClient({
+            chain: targetChain,
+            transport: custom((window as any).ethereum),
+          });
+
+          const [acc] = await miniPayClient.requestAddresses();
+          const currentChainId = await miniPayClient.getChainId();
+          if (currentChainId !== targetChain.id) {
+             await miniPayClient.switchChain({ id: targetChain.id });
+          }
+
+          setAddress(acc);
+          setClient(miniPayClient);
+          return; // Exit
+        }
+
+        // Option 3: Standard Web Browser Fallback
+        setEnvironment('WEB');
+        const targetChain = isMainnet ? celo : celoSepolia; // Default to Celo on Web
+        setActiveChain(targetChain);
+
         if (typeof window !== "undefined" && (window as any).ethereum) {
           const eth = (window as any).ethereum;
-          const walletClient = createWalletClient({ chain: activeChain, transport: custom(eth) });
-          walletClient.requestAddresses().then(([acc]) => { setAddress(acc); setClient(walletClient); }).catch(() => {});
+          const webClient = createWalletClient({ chain: targetChain, transport: custom(eth) });
+          webClient.requestAddresses().then(([acc]) => { setAddress(acc); setClient(webClient); }).catch(() => {});
         }
-      } catch (e) {}
-    }
-    initSystem();
-    return () => { if (intervalId) clearInterval(intervalId); };
-  }, [activeChain]);
+      } catch (error) {
+        console.error("Viem connection failed:", error);
+        setEnvironment('WEB');
+      }
+    };
+
+    // Give the Farcaster SDK a maximum of 2 seconds to respond, otherwise force Web Fallback
+    timeoutId = setTimeout(() => {
+        if (environment === 'LOADING') setEnvironment('WEB');
+    }, 2000);
+
+    detectAndConnect();
+
+    return () => clearTimeout(timeoutId);
+  }, [isMainnet, environment]);
 
   useEffect(() => {
     fetch('https://open.er-api.com/v6/latest/USD')
@@ -690,7 +772,7 @@ export default function Home() {
         const operatorId = selectedIntlOperator.operator_id || selectedIntlOperator.id;
         const typeId = selectedIntlProduct.product_type_id || selectedIntlProduct.id;
         setIsIntlLoading(true); setIntlVariations([]); setSelectedIntlVariation(null); setIntlCurrency("");
-        
+
         fetch(`/api/intl?action=variations&operator_id=${operatorId}&type_id=${typeId}`)
           .then(res => res.json())
           .then(data => {
@@ -805,7 +887,7 @@ export default function Home() {
     <main className="min-h-screen bg-slate-50 text-slate-900 font-sans p-4 flex flex-col items-center pb-20 relative">
       <style>{`@keyframes logoScale { 0%, 100% { transform: scale(1); opacity: 0.9; } 50% { transform: scale(1.1); opacity: 1; } } .animate-logo-scale { animation: logoScale 1.5s ease-in-out infinite; } .no-scrollbar::-webkit-scrollbar { display: none; } .no-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }`}</style>
 
-      {isInitiallyLoading && (
+      {environment === 'LOADING' && (
         <div className="fixed inset-0 z-[100] bg-white flex flex-col items-center justify-center animate-in fade-out duration-500 fill-mode-forwards" style={{ animationDelay: '1.5s' }}>
           <img src="/logo.png" alt="AbaPay" className="h-28 w-auto object-contain animate-logo-scale mb-10" />
           <div className="flex flex-col items-center gap-2">
@@ -827,7 +909,7 @@ export default function Home() {
 
               <div className="text-center mb-8">
                  <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-2">Total Payable</p>
-                 
+
                  <h2 className="text-4xl font-black text-slate-900 mb-2">
                     {isInternational ? `${intlCurrency || activeCountry.currency || activeCountry.code} ${displayForeignAmount}` : `₦${(parseFloat(calculatedNairaAmount || "0") + currentFee).toLocaleString()}`}
                  </h2>
@@ -936,6 +1018,38 @@ export default function Home() {
       )}
 
       <div className="w-full max-w-md">
+
+        {/* ⚡ DYNAMIC HEADER BASED ON ENVIRONMENT ⚡ */}
+        {environment === 'FARCASTER' && (
+          <div className="bg-purple-900 text-white p-4 rounded-3xl mb-6 shadow-lg border border-purple-700 flex justify-between items-center">
+            <div>
+               <h1 className="font-bold text-xl flex items-center gap-2">
+                 🟣 AbaPay <span className="text-xs bg-purple-600 px-2 py-1 rounded-full text-white">Farcaster</span>
+               </h1>
+               <p className="text-sm text-purple-200 mt-1">Base Network Active</p>
+            </div>
+          </div>
+        )}
+
+        {environment === 'MINIPAY' && (
+          <div className="bg-yellow-400 text-black p-4 rounded-3xl mb-6 shadow-lg border border-yellow-500 flex justify-between items-center">
+             <div>
+                <h1 className="font-bold text-xl flex items-center gap-2">
+                  🟡 AbaPay <span className="text-xs bg-yellow-300 px-2 py-1 rounded-full text-black">MiniPay</span>
+                </h1>
+                <p className="text-sm font-medium mt-1 text-black/80">Celo Network Active</p>
+             </div>
+          </div>
+        )}
+
+        {environment === 'WEB' && (
+          <div className="bg-blue-600 text-white p-4 rounded-3xl mb-6 shadow-lg flex justify-between items-center">
+            <div>
+               <h1 className="font-bold text-xl">🌐 AbaPay Web</h1>
+               <p className="text-sm opacity-90 mt-1">Please open in Farcaster or MiniPay</p>
+            </div>
+          </div>
+        )}
 
         {/* ⚡ HEADER ⚡ */}
         <div className="flex justify-between items-center bg-white p-4 rounded-3xl shadow-sm border border-slate-100 mb-6">
@@ -1374,7 +1488,7 @@ export default function Home() {
         {/* ======================================= */}
         {activeTab === 'pay' && (
           <div className="bg-white border border-slate-100 rounded-[2.5rem] p-8 shadow-2xl shadow-emerald-900/10 animate-in fade-in zoom-in-95">
-            
+
             {!isInternational && (
                 <div className="grid grid-cols-4 gap-2 pb-2 mb-4">
                     {SERVICES.filter(s => s.id !== 'BANK').map(s => (
@@ -1425,7 +1539,7 @@ export default function Home() {
                             <button 
                                 onClick={() => {
                                     if (intlProductTypes.length === 0) return;
-                                    
+
                                     const getIcon = (name: string) => name.toLowerCase().includes('data') 
                                         ? "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='24' height='24' viewBox='0 0 24 24' fill='none' stroke='%230ea5e9' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M5 12.55a11 11 0 0 1 14.08 0'/%3E%3Cpath d='M1.42 9a16 16 0 0 1 21.16 0'/%3E%3Cpath d='M8.53 16.11a6 6 0 0 1 6.95 0'/%3E%3Cline x1='12' y1='20' x2='12.01' y2='20'/%3E%3C/svg%3E" 
                                         : "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='24' height='24' viewBox='0 0 24 24' fill='none' stroke='%2310b981' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpolygon points='13 2 3 14 12 14 11 22 21 10 12 10 13 2'/%3E%3C/svg%3E";
@@ -1706,13 +1820,13 @@ export default function Home() {
                                       const rate = parseFloat(plan.variation_rate || "1");
                                       const foreignAmt = parseFloat(plan.variation_amount || "0");
                                       const isFixed = plan.fixedPrice === "Yes";
-                                      
+
                                       let nairaEquivalent = 0;
                                       if (isFixed) {
                                           nairaEquivalent = parseFloat(plan.charged_amount || "0");
                                           if (nairaEquivalent <= 0) nairaEquivalent = foreignAmt * rate;
                                       }
-                                      
+
                                       const cryptoCostEstimate = (nairaEquivalent / exchangeRate).toFixed(4);
                                       const cryptoRateEstimate = (rate / exchangeRate).toFixed(4);
 
