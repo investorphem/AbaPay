@@ -12,7 +12,7 @@ const geistMono = Geist_Mono({
   subsets: ["latin"],
 });
 
-// ⚡ FARCASTER MINI-APP METADATA ⚡
+// ⚡ FARCASTER MINI-APP METADATA CONFIG ⚡
 const farcasterFrameConfig = {
   version: "next",
   imageUrl: "https://abapays.com/og-image.png", 
@@ -28,6 +28,7 @@ const farcasterFrameConfig = {
   }
 };
 
+// Standard Next.js Metadata for Google, Twitter, etc.
 export const metadata: Metadata = {
   title: "AbaPay | Seamless Payments",
   description: "AbaPay is a Web3-native infrastructure platform eliminating off-ramp friction. Instantly settle stablecoin transactions into real-world fiat utility value.",
@@ -47,12 +48,7 @@ export const metadata: Metadata = {
     images: ["https://abapays.com/og-image.png"],
   },
   other: {
-    // Your existing TalentApp verification
     "talentapp:project_verification": "16d69b905a69b32dac428a7080e67a7c4b61c0b6fde7a037be4639ba1031686e2f495a23013e42f1b9ebcd017c92d5f5d32fe10e95bc72cfa1b173658d925cc8",
-    // ⚡ Tells Farcaster to render the Mini-App ⚡
-    "fc:frame": JSON.stringify(farcasterFrameConfig),
-    // ⚡ Base App Verification ⚡
-    "base:app_id": "69ef3dd6e6b83cf73ad1dbb4",
   },
 };
 
@@ -66,6 +62,14 @@ export default function RootLayout({
       lang="en"
       className={`${geistSans.variable} ${geistMono.variable} h-full antialiased`}
     >
+      <head>
+        {/* ⚡ HARDCODED WEB3 TAGS TO BYPASS NEXT.JS STREAMING ⚡ */}
+        {/* Farcaster Frame Data */}
+        <meta name="fc:frame" content={JSON.stringify(farcasterFrameConfig)} />
+        
+        {/* Base App Verification */}
+        <meta name="base:app_id" content="69ef3dd6e6b83cf73ad1dbb4" />
+      </head>
       <body className="min-h-full flex flex-col">{children}</body>
     </html>
   );
