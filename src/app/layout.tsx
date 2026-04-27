@@ -12,7 +12,7 @@ const geistMono = Geist_Mono({
   subsets: ["latin"],
 });
 
-// ⚡ THE MASTER METADATA ⚡
+// ⚡ STANDARD SEO METADATA (Safe for Next.js) ⚡
 export const metadata: Metadata = {
   metadataBase: new URL("https://abapays.com"),
   title: "AbaPay | Seamless Payments",
@@ -41,20 +41,6 @@ export const metadata: Metadata = {
       }
     ],
   },
-  other: {
-    // ⚡ 1. YOUR BASE APP ID (Passes the first check)
-    "base:app_id": "69ef61fe7bbc513a443f26e4",
-    
-    // ⚡ 2. FARCASTER V1 FRAME TAGS (Fixes the "must have metadata" error)
-    "fc:frame": "vNext",
-    "fc:frame:image": "https://abapays.com/og-image.png",
-    "fc:frame:button:1": "Launch AbaPay",
-    "fc:frame:button:1:action": "link",
-    "fc:frame:button:1:target": "https://abapays.com/",
-    
-    // ⚡ 3. TalentApp Verification
-    "talentapp:project_verification": "16d69b905a69b32dac428a7080e67a7c4b61c0b6fde7a037be4639ba1031686e2f495a23013e42f1b9ebcd017c92d5f5d32fe10e95bc72cfa1b173658d925cc8",
-  },
 };
 
 export default function RootLayout({
@@ -67,6 +53,22 @@ export default function RootLayout({
       lang="en"
       className={`${geistSans.variable} ${geistMono.variable} h-full antialiased`}
     >
+      <head>
+        {/* ⚡ HARDCODED WEB3 TAGS TO BYPASS NEXT.JS BUGS ⚡ */}
+        {/* 1. Base App Verification */}
+        <meta name="base:app_id" content="69ef61fe7bbc513a443f26e4" />
+        
+        {/* 2. Strict Farcaster / Base Crawler Properties */}
+        <meta property="fc:frame" content="vNext" />
+        <meta property="fc:frame:image" content="https://abapays.com/og-image.png" />
+        <meta property="fc:frame:button:1" content="Launch AbaPay" />
+        <meta property="fc:frame:button:1:action" content="link" />
+        <meta property="fc:frame:button:1:target" content="https://abapays.com/" />
+
+        {/* 3. TalentApp Verification */}
+        <meta name="talentapp:project_verification" content="16d69b905a69b32dac428a7080e67a7c4b61c0b6fde7a037be4639ba1031686e2f495a23013e42f1b9ebcd017c92d5f5d32fe10e95bc72cfa1b173658d925cc8" />
+      </head>
+      
       <body className="min-h-full flex flex-col">{children}</body>
     </html>
   );
