@@ -1,4 +1,4 @@
-import type { Metadata } from "next";
+import { Metadata } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
 import "./globals.css";
 
@@ -28,7 +28,7 @@ const farcasterFrameConfig = {
   }
 };
 
-// ⚡ THE MASTER METADATA INJECTION ⚡
+// ⚡ NATIVE METADATA (Perfectly clean for the Base Crawler) ⚡
 export const metadata: Metadata = {
   title: "AbaPay | Seamless Payments",
   description: "AbaPay is a Web3-native infrastructure platform eliminating off-ramp friction. Instantly settle stablecoin transactions into real-world fiat utility value.",
@@ -48,12 +48,9 @@ export const metadata: Metadata = {
     images: ["https://abapays.com/og-image.png"],
   },
   other: {
-    // 1. TalentApp
-    "talentapp:project_verification": "16d69b905a69b32dac428a7080e67a7c4b61c0b6fde7a037be4639ba1031686e2f495a23013e42f1b9ebcd017c92d5f5d32fe10e95bc72cfa1b173658d925cc8",
-    // 2. Farcaster Frame
-    "fc:frame": JSON.stringify(farcasterFrameConfig),
-    // 3. Base App Verification
+    // ⚡ Base App Verification is cleanly isolated here
     "base:app_id": "69ef3dd6e6b83cf73ad1dbb4",
+    "talentapp:project_verification": "16d69b905a69b32dac428a7080e67a7c4b61c0b6fde7a037be4639ba1031686e2f495a23013e42f1b9ebcd017c92d5f5d32fe10e95bc72cfa1b173658d925cc8",
   },
 };
 
@@ -67,6 +64,10 @@ export default function RootLayout({
       lang="en"
       className={`${geistSans.variable} ${geistMono.variable} h-full antialiased`}
     >
+      <head>
+        {/* ⚡ Hardcoded Farcaster tag so it doesn't break the Base Crawler's regex ⚡ */}
+        <meta name="fc:frame" content={JSON.stringify(farcasterFrameConfig)} />
+      </head>
       <body className="min-h-full flex flex-col">{children}</body>
     </html>
   );
