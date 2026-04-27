@@ -21,7 +21,7 @@ const farcasterFrameConfig = {
     action: {
       type: "launch_frame",
       name: "AbaPay",
-      url: "https://abapays.com/", 
+      url: "https://abapay-git-de-ai-investorphems-projects.vercel.app/", 
       splashImageUrl: "https://abapays.com/logo.png", 
       splashBackgroundColor: "#f8fafc" 
     }
