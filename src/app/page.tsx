@@ -590,38 +590,40 @@ export default function Home() {
     let timeoutId: NodeJS.Timeout;
 
     const detectAndConnect = async () => {
-      try {
-        // ⚡ NEW FIX: Tell Warpcast to drop the loading screen IMMEDIATELY
-        // Do this before awaiting anything else!
-        sdk.actions.ready();
+  try {
+    // 1. Wait for the context FIRST to establish the iframe bridge
+    const context = await sdk.context;
 
-        // Option 1: Farcaster SDK (Warpcast App)
-        const context = await sdk.context;
-        if (context && context.client) {
-          setEnvironment('FARCASTER');
+    // Option 1: Farcaster SDK (Warpcast App)
+    if (context && context.client) {
+      // 2. NOW signal Warpcast to drop the splash screen
+      sdk.actions.ready();
 
-          const targetChain = isMainnet ? base : baseSepolia;
-          setActiveChain(targetChain);
+      setEnvironment('FARCASTER');
 
-          const farcasterClient = createWalletClient({
-            chain: targetChain,
-            transport: custom(sdk.wallet.ethProvider),
-          });
+      const targetChain = isMainnet ? base : baseSepolia;
+      setActiveChain(targetChain);
 
-          const [acc] = await farcasterClient.requestAddresses();
-          const currentChainId = await farcasterClient.getChainId();
-          if (currentChainId !== targetChain.id) {
-             await farcasterClient.switchChain({ id: targetChain.id });
-          }
+      const farcasterClient = createWalletClient({
+        chain: targetChain,
+        transport: custom(sdk.wallet.ethProvider),
+      });
 
-          setAddress(acc);
-          setClient(farcasterClient);
-          return; // Exit
-        }
+      const [acc] = await farcasterClient.requestAddresses();
+      const currentChainId = await farcasterClient.getChainId();
+      if (currentChainId !== targetChain.id) {
+         await farcasterClient.switchChain({ id: targetChain.id });
+      }
 
+      setAddress(acc);
+      setClient(farcasterClient);
+      return; // Exit
+    }
 
-        // Option 2: Opera MiniPay
-        if (typeof window !== "undefined" && (window as any).ethereum && (window as any).ethereum.isMiniPay) {
+    // Option 2: Opera MiniPay
+    if (typeof window !== "undefined" && (window as any).ethereum && (window as any).ethereum.isMiniPay) {
+       // ... existing MiniPay logic
+
           setEnvironment('MINIPAY');
           
           const targetChain = isMainnet ? celo : celoSepolia;
