@@ -66,7 +66,7 @@ export const metadata: Metadata = {
   },
   other: {
     // ⚡ 1. Base App Verification 
-    "base:app_id": "69ef3dd6e6b83cf73ad1dbb4",
+    "base:app_id": "69ef61fe7bbc513a443f26e4",
     // ⚡ 2. New Farcaster Standard
     "fc:miniapp": JSON.stringify(miniAppConfig),
     // ⚡ 3. Legacy Farcaster Fallback
