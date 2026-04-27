@@ -12,6 +12,22 @@ const geistMono = Geist_Mono({
   subsets: ["latin"],
 });
 
+// ⚡ FARCASTER MINI-APP METADATA ⚡
+const farcasterFrameConfig = {
+  version: "next",
+  imageUrl: "https://abapays.com/og-image.png", 
+  button: {
+    title: "Launch AbaPay", 
+    action: {
+      type: "launch_frame",
+      name: "AbaPay",
+      url: "https://abapays.com/", 
+      splashImageUrl: "https://abapays.com/logo.png", 
+      splashBackgroundColor: "#f8fafc" 
+    }
+  }
+};
+
 export const metadata: Metadata = {
   title: "AbaPay | Seamless Payments",
   description: "AbaPay is a Web3-native infrastructure platform eliminating off-ramp friction. Instantly settle stablecoin transactions into real-world fiat utility value.",
@@ -25,8 +41,16 @@ export const metadata: Metadata = {
       { url: "/apple-touch-icon.png", sizes: "180x180", type: "image/png" },
     ],
   },
+  openGraph: {
+    title: "AbaPay | Seamless Payments",
+    description: "Instantly settle stablecoin transactions into real-world fiat utility value.",
+    images: ["https://abapays.com/og-image.png"],
+  },
   other: {
+    // Your existing TalentApp verification
     "talentapp:project_verification": "16d69b905a69b32dac428a7080e67a7c4b61c0b6fde7a037be4639ba1031686e2f495a23013e42f1b9ebcd017c92d5f5d32fe10e95bc72cfa1b173658d925cc8",
+    // ⚡ This tells Farcaster to render the Mini-App! ⚡
+    "fc:frame": JSON.stringify(farcasterFrameConfig),
   },
 };
 
