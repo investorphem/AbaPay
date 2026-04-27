@@ -1,0 +1,18 @@
+{
+  "accountAssociation": {
+    "header": "eyJmaWQiOjIxOTA1OSwidHlwZSI6ImN1c3RvZHkiLCJrZXkiOiIweEQ2OEYyMjZCQjY5ZTk4MmI3N0I0QTYxYUEwMmZhMzdhMjJCQUU2MDgifQ",
+    "payload": "eyJkb21haW4iOiJhYmFwYXlzLmNvbSJ9",
+    "signature": "Wq1Ftd4ub6Gl2RVMfzMJbDHRBtVEgvTmnVBVusy6qZ8hLyCdIu/crfpw5BOTtvkraJU93hU07QJLpkRtXQhq9Rw="
+  },
+  "frame": {
+    "version": "1",
+    "name": "AbaPay",
+    "iconUrl": "https://abapays.com/logo.png",
+    "homeUrl": "https://abapays.com",
+    "imageUrl": "https://abapays.com/og-image.png",
+    "buttonTitle": "Launch AbaPay",
+    "splashImageUrl": "https://abapays.com/logo.png",
+    "splashBackgroundColor": "#f8fafc",
+    "webhookUrl": "https://abapays.com/api/webhook"
+  }
+}
