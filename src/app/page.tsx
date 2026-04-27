@@ -585,18 +585,21 @@ export default function Home() {
     return () => { if (intervalId) clearInterval(intervalId); };
   }, []);
 
-  // ⚡ 2. THE CHAMELEON ENVIRONMENT DETECTOR ⚡
+    // ⚡ 2. THE CHAMELEON ENVIRONMENT DETECTOR ⚡
   useEffect(() => {
     let timeoutId: NodeJS.Timeout;
 
     const detectAndConnect = async () => {
       try {
+        // ⚡ NEW FIX: Tell Warpcast to drop the loading screen IMMEDIATELY
+        // Do this before awaiting anything else!
+        sdk.actions.ready();
+
         // Option 1: Farcaster SDK (Warpcast App)
         const context = await sdk.context;
         if (context && context.client) {
           setEnvironment('FARCASTER');
-          sdk.actions.ready(); 
-          
+
           const targetChain = isMainnet ? base : baseSepolia;
           setActiveChain(targetChain);
 
@@ -615,6 +618,7 @@ export default function Home() {
           setClient(farcasterClient);
           return; // Exit
         }
+
 
         // Option 2: Opera MiniPay
         if (typeof window !== "undefined" && (window as any).ethereum && (window as any).ethereum.isMiniPay) {
