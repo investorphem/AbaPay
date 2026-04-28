@@ -58,12 +58,13 @@ export async function POST(req: Request) {
   try {
     const body = await req.json();
 
+    // ⚡ ADDED 'blockchain' DESTRUCTURING ⚡
     const { 
       serviceID, serviceCategory, network, billersCode, amount, 
       token: tokenSymbol, txHash, variation_code, phone, 
       nairaAmount, wallet_address, subscription_type = 'change',
       operator_id, country_code, product_type_id, email,
-      meter_account_type
+      meter_account_type, blockchain 
     } = body;
 
     const isForeign = serviceID === 'foreign-airtime';
@@ -87,6 +88,8 @@ export async function POST(req: Request) {
       request_id: vtRequestId,
       service_category: serviceCategory, 
       network: network, 
+      // ⚡ SAVING THE BLOCKCHAIN TO DB (Defaults to CELO as a failsafe) ⚡
+      blockchain: blockchain || "CELO",
       account_number: billersCode || phone || "N/A",
       amount_usdt: parseFloat(amount), 
       amount_naira: vendAmount,
@@ -130,7 +133,7 @@ export async function POST(req: Request) {
             error_code: 'FUNDS_MISMATCH',
             api_response: `Paid ${amount}, Expected ${expectedCryptoStr}`
         }).eq('tx_hash', txHash);
-        try { await sendTelegramAlert(`🚨 *RATE MISMATCH / UNDERPAYMENT*\nUser: ${wallet_address}\nHash: \`${txHash}\`\nThey paid: ${amount} ${tokenSymbol}. We expected: ${expectedCryptoStr} based on rate ₦${baseRate}.`); } catch (e) {}
+        try { await sendTelegramAlert(`🚨 *RATE MISMATCH / UNDERPAYMENT*\n⛓️ *Chain:* ${blockchain || 'CELO'}\nUser: ${wallet_address}\nHash: \`${txHash}\`\nThey paid: ${amount} ${tokenSymbol}. We expected: ${expectedCryptoStr} based on rate ₦${baseRate}.`); } catch (e) {}
         return NextResponse.json({ success: false, code: "FUNDS", message: "Insufficient crypto paid. Admin has been notified." }, { status: 400 });
     }
 
@@ -217,7 +220,7 @@ export async function POST(req: Request) {
           error_code: '502_TIMEOUT',
           api_response: e.message || 'Fetch failed entirely'
       }).eq('tx_hash', txHash);
-      try { await sendTelegramAlert(`❌ *NETWORK CRASH (LIVE)*\n🛒 *Product:* ${network} ${serviceCategory}\n👤 *User:* ${billersCode || phone}\n⚠️ Connection to VTpass timed out completely.`); } catch (err) {}
+      try { await sendTelegramAlert(`❌ *NETWORK CRASH (LIVE)*\n⛓️ *Chain:* ${blockchain || 'CELO'}\n🛒 *Product:* ${network} ${serviceCategory}\n👤 *User:* ${billersCode || phone}\n⚠️ Connection to VTpass timed out completely.`); } catch (err) {}
       return NextResponse.json({ success: false, code: "VTPASS_CRASH", message: "Network timeout while contacting provider. Please try again." }, { status: 200 }); 
     }
 
@@ -231,7 +234,7 @@ export async function POST(req: Request) {
             api_response: rawTechnicalError
         }).eq('tx_hash', txHash);
 
-        try { await sendTelegramAlert(`❌ *VTPASS REJECTION*\n🛒 *Product:* ${network} ${serviceCategory}\n👤 *User:* ${billersCode || phone}\n🚨 *Admin Error:* Code ${payData.code} - ${rawTechnicalError}\n🗣 *User Saw:* ${friendlyMessage}`); } catch (err) {}
+        try { await sendTelegramAlert(`❌ *VTPASS REJECTION*\n⛓️ *Chain:* ${blockchain || 'CELO'}\n🛒 *Product:* ${network} ${serviceCategory}\n👤 *User:* ${billersCode || phone}\n🚨 *Admin Error:* Code ${payData.code} - ${rawTechnicalError}\n🗣 *User Saw:* ${friendlyMessage}`); } catch (err) {}
 
         return NextResponse.json({ success: false, message: friendlyMessage, code: payData.code }, { status: 200 }); 
     }
@@ -274,7 +277,7 @@ export async function POST(req: Request) {
         if (requiresCode && !dbPurchasedCode) {
             await supabase.from('transactions').update({ status: 'PENDING' }).eq('tx_hash', txHash);
 
-            try { await sendTelegramAlert(`⏳ *TOKEN DELAYED (PENDING)*\n🛒 *Product:* ${network} ${serviceCategory}\n👤 *User:* ${billersCode || phone}\n⚠️ Provider reported success but no PIN/Token was generated yet. Moved to PENDING for requery.`); } catch (e) {}
+            try { await sendTelegramAlert(`⏳ *TOKEN DELAYED (PENDING)*\n⛓️ *Chain:* ${blockchain || 'CELO'}\n🛒 *Product:* ${network} ${serviceCategory}\n👤 *User:* ${billersCode || phone}\n⚠️ Provider reported success but no PIN/Token was generated yet. Moved to PENDING for requery.`); } catch (e) {}
 
             return NextResponse.json({
               success: true,
@@ -292,7 +295,7 @@ export async function POST(req: Request) {
         const notifications = [];
 
         notifications.push(
-          sendTelegramAlert(`✅ *SALE SUCCESSFUL*\n🛒 *Product:* ${network} ${serviceCategory}\n💰 *Naira:* ₦${vendAmount}\n🪙 *Asset:* ${amount} ${tokenSymbol || 'USD₮'}\n👤 *User:* ${billersCode || phone}\n⛽ *Fee:* ₦${serviceFee}\n🧾 *Ref:* ${alertTokenRef}`)
+          sendTelegramAlert(`✅ *SALE SUCCESSFUL*\n⛓️ *Chain:* ${blockchain || 'CELO'}\n🛒 *Product:* ${network} ${serviceCategory}\n💰 *Naira:* ₦${vendAmount}\n🪙 *Asset:* ${amount} ${tokenSymbol || 'USD₮'}\n👤 *User:* ${billersCode || phone}\n⛽ *Fee:* ₦${serviceFee}\n🧾 *Ref:* ${alertTokenRef}`)
         );
 
         if (serviceCategory === 'ELECTRICITY' || serviceCategory === 'EDUCATION') {
@@ -305,19 +308,17 @@ export async function POST(req: Request) {
         }
 
         if (email) {
-                              const emailPromise = resend.emails.send({
+          const emailPromise = resend.emails.send({
             from: 'AbaPay Receipts <receipts@abapays.com>',
             to: email,
-            replyTo: 'support@abapays.com', // <--- Change to capital T
+            replyTo: 'support@abapays.com', 
             subject: `AbaPay Receipt - ${network} ${serviceCategory}`,
             html: `
               <div style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; background-color: #f4f4f5; padding: 40px 0; margin: 0;">
                 <div style="max-width: 600px; margin: 0 auto; background-color: #ffffff; border-radius: 12px; overflow: hidden; box-shadow: 0 4px 6px rgba(0, 0, 0, 0.05);">
                   
-                                    <div style="background: linear-gradient(135deg, #18181b 0%, #000000 100%); padding: 40px 30px; text-align: center; border-bottom: 3px solid #10b981;">
-                    
+                  <div style="background: linear-gradient(135deg, #18181b 0%, #000000 100%); padding: 40px 30px; text-align: center; border-bottom: 3px solid #10b981;">
                     <img src="https://abapays.com/logo.png" alt="AbaPay" style="max-height: 45px; width: auto; margin: 0 auto; display: block;" />
-                    
                   </div>
 
                   <div style="padding: 40px 30px;">
@@ -325,6 +326,10 @@ export async function POST(req: Request) {
                     <h2 style="margin: 0 0 30px; color: #18181b; font-size: 32px;">₦${vendAmount.toLocaleString()}</h2>
                     
                     <table style="width: 100%; border-collapse: collapse; margin-bottom: 30px;">
+                      <tr>
+                        <td style="padding: 15px 0; border-bottom: 1px solid #e4e4e7; color: #71717a; font-size: 15px;">Network</td>
+                        <td style="padding: 15px 0; border-bottom: 1px solid #e4e4e7; color: #18181b; font-size: 15px; text-align: right; font-weight: 500; text-transform: uppercase;">${blockchain || 'CELO'}</td>
+                      </tr>
                       <tr>
                         <td style="padding: 15px 0; border-bottom: 1px solid #e4e4e7; color: #71717a; font-size: 15px;">Service</td>
                         <td style="padding: 15px 0; border-bottom: 1px solid #e4e4e7; color: #18181b; font-size: 15px; text-align: right; font-weight: 500;">${network} ${serviceCategory}</td>
@@ -419,7 +424,7 @@ export async function POST(req: Request) {
             api_response: `Inner Status: ${actualStatus}`
         }).eq('tx_hash', txHash);
 
-        try { await sendTelegramAlert(`❌ *TX FAILED AT PROVIDER*\n🛒 *Product:* ${network} ${serviceCategory}\n👤 *User:* ${billersCode || phone}\n⚠️ VTpass returned an explicit failed status (${actualStatus}).`); } catch (err) {}
+        try { await sendTelegramAlert(`❌ *TX FAILED AT PROVIDER*\n⛓️ *Chain:* ${blockchain || 'CELO'}\n🛒 *Product:* ${network} ${serviceCategory}\n👤 *User:* ${billersCode || phone}\n⚠️ VTpass returned an explicit failed status (${actualStatus}).`); } catch (err) {}
         return NextResponse.json({ success: false, message: "The provider network is currently unstable. Please try again.", code: "INNER_FAIL" }, { status: 200 }); 
       }
 
@@ -433,7 +438,7 @@ export async function POST(req: Request) {
           api_response: rawTechnicalError
       }).eq('tx_hash', txHash);
 
-      try { await sendTelegramAlert(`❌ *VENDING REJECTED*\n🛒 *Product:* ${network} ${serviceCategory}\n👤 *User:* ${billersCode || phone}\n🚨 *Admin Error:* Code ${payData.code} - ${rawTechnicalError}\n🗣 *User Saw:* ${friendlyMessage}`); } catch (err) {}
+      try { await sendTelegramAlert(`❌ *VENDING REJECTED*\n⛓️ *Chain:* ${blockchain || 'CELO'}\n🛒 *Product:* ${network} ${serviceCategory}\n👤 *User:* ${billersCode || phone}\n🚨 *Admin Error:* Code ${payData.code} - ${rawTechnicalError}\n🗣 *User Saw:* ${friendlyMessage}`); } catch (err) {}
 
       return NextResponse.json({ success: false, message: friendlyMessage, code: payData.code }, { status: 200 }); 
     }
