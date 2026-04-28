@@ -589,7 +589,21 @@ const [environment, setEnvironment] = useState<'MINIPAY' | 'FARCASTER' | 'WEB' |
     return () => { if (intervalId) clearInterval(intervalId); };
   }, []);
 
-            // ⚡ WAGMI TO ABAPAY BRIDGE ⚡
+              // ⚡ FARCASTER SPLASH SCREEN DROPPER ⚡
+  useEffect(() => {
+    const notifyFarcaster = async () => {
+      try {
+        if (typeof window !== "undefined") {
+          sdk.actions.ready();
+        }
+      } catch (error) {
+        // Silently ignore if opened in a normal web browser
+      }
+    };
+    notifyFarcaster();
+  }, []);
+
+  // ⚡ WAGMI TO ABAPAY BRIDGE ⚡
   useEffect(() => {
     if (environment === 'WEB' && isWagmiConnected && wagmiAddress) {
       setAddress(wagmiAddress);
