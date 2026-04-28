@@ -27,7 +27,8 @@ import {
 import { HistoryTab } from "@/components/HistoryTab";
 
 export default function Home() {
-  const [environment, setEnvironment] = useState<'MINIPAY' | 'FARCASTER' | 'WEB' | 'LOADING'>('LOADING');
+  // To this:
+const [environment, setEnvironment] = useState<'MINIPAY' | 'FARCASTER' | 'WEB' | 'LOADING' | 'BASE'>('LOADING');
   const [killSwitches, setKillSwitches] = useState<Record<string, boolean>>({});
   const [address, setAddress] = useState<string | null>(null);
   const [client, setClient] = useState<WalletClient | null>(null);
@@ -589,69 +590,63 @@ export default function Home() {
   useEffect(() => {
     let timeoutId: NodeJS.Timeout;
 
-    const detectAndConnect = async () => {
+        const detectAndConnect = async () => {
       try {
         // Option 1: Farcaster SDK (Warpcast App)
         const context = await sdk.context;
         if (context && context.client) {
           setEnvironment('FARCASTER');
-          sdk.actions.ready(); 
-          
           const targetChain = isMainnet ? base : baseSepolia;
           setActiveChain(targetChain);
-
-          const farcasterClient = createWalletClient({
-            chain: targetChain,
-            transport: custom(sdk.wallet.ethProvider),
-          });
-
+          const farcasterClient = createWalletClient({ chain: targetChain, transport: custom(sdk.wallet.ethProvider) });
           const [acc] = await farcasterClient.requestAddresses();
           const currentChainId = await farcasterClient.getChainId();
-          if (currentChainId !== targetChain.id) {
-             await farcasterClient.switchChain({ id: targetChain.id });
-          }
-
-          setAddress(acc);
-          setClient(farcasterClient);
-          return; // Exit
+          if (currentChainId !== targetChain.id) await farcasterClient.switchChain({ id: targetChain.id }).catch(()=>{});
+          setAddress(acc); setClient(farcasterClient);
+          return;
         }
 
         // Option 2: Opera MiniPay
         if (typeof window !== "undefined" && (window as any).ethereum && (window as any).ethereum.isMiniPay) {
           setEnvironment('MINIPAY');
-          
           const targetChain = isMainnet ? celo : celoSepolia;
           setActiveChain(targetChain);
-
-          const miniPayClient = createWalletClient({
-            chain: targetChain,
-            transport: custom((window as any).ethereum),
-          });
-
+          const miniPayClient = createWalletClient({ chain: targetChain, transport: custom((window as any).ethereum) });
           const [acc] = await miniPayClient.requestAddresses();
           const currentChainId = await miniPayClient.getChainId();
-          if (currentChainId !== targetChain.id) {
-             await miniPayClient.switchChain({ id: targetChain.id });
+          if (currentChainId !== targetChain.id) await miniPayClient.switchChain({ id: targetChain.id }).catch(()=>{});
+          setAddress(acc); setClient(miniPayClient);
+          return;
+        }
+
+        // ⚡ NEW: Option 3: Base Mini App / Coinbase Wallet
+        const eth = typeof window !== "undefined" ? (window as any).ethereum : null;
+        const isCoinbase = eth && (eth.isCoinbaseWallet || (Array.isArray(eth.providers) && eth.providers.some((p: any) => p.isCoinbaseWallet)));
+        
+        if (isCoinbase) {
+          setEnvironment('BASE');
+          const targetChain = isMainnet ? base : baseSepolia;
+          setActiveChain(targetChain);
+          
+          // Ensure we grab the specific Coinbase provider if multiple wallets exist
+          let providerToUse = eth;
+          if (Array.isArray(eth.providers)) {
+             providerToUse = eth.providers.find((p: any) => p.isCoinbaseWallet) || eth;
           }
 
-          setAddress(acc);
-          setClient(miniPayClient);
-          return; // Exit
+          const baseAppClient = createWalletClient({ chain: targetChain, transport: custom(providerToUse) });
+          const [acc] = await baseAppClient.requestAddresses();
+          const currentChainId = await baseAppClient.getChainId();
+          if (currentChainId !== targetChain.id) await baseAppClient.switchChain({ id: targetChain.id }).catch(()=>{});
+          
+          setAddress(acc); setClient(baseAppClient);
+          return;
         }
 
-        // Option 3: Standard Web Browser Fallback
+        // Option 4: Standard Web Browser Fallback
         setEnvironment('WEB');
-        const targetChain = isMainnet ? celo : celoSepolia; // Default to Celo on Web
-        setActiveChain(targetChain);
+        // ... (Keep your existing fallback code here)
 
-        if (typeof window !== "undefined" && (window as any).ethereum) {
-          const eth = (window as any).ethereum;
-          const webClient = createWalletClient({ chain: targetChain, transport: custom(eth) });
-          webClient.requestAddresses().then(([acc]) => { setAddress(acc); setClient(webClient); }).catch(() => {});
-        }
-      } catch (error) {
-        console.error("Viem connection failed:", error);
-        setEnvironment('WEB');
       }
     };
 
