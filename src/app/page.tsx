@@ -28,15 +28,14 @@ import {
 import { HistoryTab } from "@/components/HistoryTab";
 
 export default function Home() {
-  // Add these lines near your other states
   const { address: wagmiAddress, isConnected: isWagmiConnected, chain: wagmiChain } = useAccount();
   const { connectors, connect } = useConnect();
-const [environment, setEnvironment] = useState<'MINIPAY' | 'FARCASTER' | 'WEB' | 'LOADING' | 'BASE'>('LOADING');
+  const [environment, setEnvironment] = useState<'MINIPAY' | 'FARCASTER' | 'WEB' | 'LOADING' | 'BASE'>('LOADING');
   const [killSwitches, setKillSwitches] = useState<Record<string, boolean>>({});
   const [address, setAddress] = useState<string | null>(null);
   const [client, setClient] = useState<WalletClient | null>(null);
 
-    // ⚡ SMART MAINNET DETECTOR ⚡
+  // ⚡ SMART MAINNET DETECTOR ⚡
   const isMainnet = 
     process.env.NEXT_PUBLIC_NETWORK === "mainnet" || 
     process.env.NEXT_PUBLIC_NETWORK === "celo" || 
@@ -121,15 +120,14 @@ const [environment, setEnvironment] = useState<'MINIPAY' | 'FARCASTER' | 'WEB' |
   const [transactions, setTransactions] = useState<any[]>([]);
   const [globalFiatRates, setGlobalFiatRates] = useState<Record<string, number>>({});
 
-    // ⚡ DYNAMIC ABAPAY CONTRACT ROUTING ⚡
+  // ⚡ DYNAMIC ABAPAY CONTRACT ROUTING ⚡
   const ABAPAY_CONTRACT = useMemo(() => {
-    // If connected to Base or Base Sepolia, use the Base Contract
     if (activeChain?.id === base.id || activeChain?.id === baseSepolia.id) {
       return (process.env.NEXT_PUBLIC_ABAPAY_BASE_ADDRESS || process.env.NEXT_PUBLIC_ABAPAY_ADDRESS) as `0x${string}`;
     }
-    // Otherwise, default to the Celo Contract
     return (process.env.NEXT_PUBLIC_ABAPAY_CELO_ADDRESS || process.env.NEXT_PUBLIC_ABAPAY_ADDRESS) as `0x${string}`;
   }, [activeChain]);
+  
   const GAS_CURRENCY = isMainnet ? "0x765DE816845861e75A25fCA122bb6898B8B1282a" : "0xdE9e4C3ce781b4bA68120d6261cbad65ce0aB00b";
 
   const indexOfLastItem = currentPage * ITEMS_PER_PAGE;
@@ -137,7 +135,7 @@ const [environment, setEnvironment] = useState<'MINIPAY' | 'FARCASTER' | 'WEB' |
   const currentTransactions = transactions.slice(indexOfFirstItem, indexOfLastItem);
   const totalPages = Math.ceil(transactions.length / ITEMS_PER_PAGE);
 
-    const currentDisco = useMemo(() => ELECTRICITY_DISCOS.find(d => d.serviceID === elecProvider), [elecProvider]);
+  const currentDisco = useMemo(() => ELECTRICITY_DISCOS.find(d => d.serviceID === elecProvider), [elecProvider]);
   const currentCable = useMemo(() => CABLE_PROVIDERS_LIST.find(c => c.serviceID === cableProvider), [cableProvider]);
   const currentInternet = useMemo(() => INTERNET_PROVIDERS.find(c => c.serviceID === internetProvider), [internetProvider]);
 
@@ -145,7 +143,7 @@ const [environment, setEnvironment] = useState<'MINIPAY' | 'FARCASTER' | 'WEB' |
 
   // ⚡ DYNAMIC NETWORK TEXT ⚡
   const activeNetworkDisplay = useMemo(() => {
-    if (!address) return "Base & Celo"; // Not connected
+    if (!address) return "Base & Celo";
     if (activeChain?.name?.toLowerCase().includes("base")) return "Base";
     if (activeChain?.name?.toLowerCase().includes("celo")) return "Celo";
     return activeChain?.name || "Base & Celo";
@@ -159,8 +157,6 @@ const [environment, setEnvironment] = useState<'MINIPAY' | 'FARCASTER' | 'WEB' |
      );
   }, [activeChain]);
 
-  // If the user switches networks (e.g. from Celo to Base), 
-  // and their current token (USDm) isn't supported on Base, auto-switch them to USDC!
   useEffect(() => {
      if (availableTokens.length > 0 && !availableTokens.find(t => t.symbol === selectedToken.symbol)) {
          setSelectedToken(availableTokens[0]);
@@ -501,14 +497,11 @@ const [environment, setEnvironment] = useState<'MINIPAY' | 'FARCASTER' | 'WEB' |
       try {
         const currentChainId = await client.getChainId();
         if (currentChainId !== activeChain.id) await client.switchChain({ id: activeChain.id });
-      } catch (switchError) { 
-        // Viem doesn't have addChain natively on client without standard EIP-1193 request, 
-        // but typically Farcaster/MiniPay auto-add them.
-      }
+      } catch (switchError) { }
 
       const valueInWei = parseUnits(cryptoToCharge, selectedToken.decimals);
-      
-            // ⚡ Handle Token Address Selection safely across chains
+
+      // ⚡ Handle Token Address Selection safely across chains
       let tokenAddress;
       if (activeChain.id === base.id) {
           tokenAddress = (selectedToken as any).baseMainnet || selectedToken.mainnet;
@@ -520,11 +513,11 @@ const [environment, setEnvironment] = useState<'MINIPAY' | 'FARCASTER' | 'WEB' |
           // Defaults to Celo Alfajores if nothing else matches
           tokenAddress = (selectedToken as any).celoSepolia || selectedToken.sepolia;
       }
-      
+
       const publicClient = createPublicClient({ chain: activeChain, transport: http(undefined, { fetchOptions: { cache: 'no-store' } }), pollingInterval: 4000 });
-      
+
       const txConfig: any = { account: address as `0x${string}` };
-      
+
       // ⚡ Only append feeCurrency if on Celo and not MiniPay
       const isCelo = activeChain.id === celo.id || activeChain.id === celoSepolia.id;
       if (isCelo && environment !== 'MINIPAY') {
@@ -637,30 +630,26 @@ const [environment, setEnvironment] = useState<'MINIPAY' | 'FARCASTER' | 'WEB' |
     return () => { if (intervalId) clearInterval(intervalId); };
   }, []);
 
-              // ⚡ FARCASTER SPLASH SCREEN DROPPER ⚡
+  // ⚡ FARCASTER SPLASH SCREEN DROPPER ⚡
   useEffect(() => {
     const notifyFarcaster = async () => {
       try {
         if (typeof window !== "undefined") {
           sdk.actions.ready();
         }
-      } catch (error) {
-        // Silently ignore if opened in a normal web browser
-      }
+      } catch (error) { }
     };
     notifyFarcaster();
   }, []);
 
-    // ⚡ WAGMI TO ABAPAY BRIDGE ⚡
+  // ⚡ WAGMI TO ABAPAY BRIDGE ⚡
   useEffect(() => {
     if (environment === 'WEB' && isWagmiConnected && wagmiAddress) {
       setAddress(wagmiAddress);
-      
-      // Tell AbaPay to sync its network with whatever network Wagmi is currently using
+
       if (wagmiChain) {
          setActiveChain(wagmiChain);
       } else {
-         // Failsafe: Default to Base if the Wagmi chain hasn't loaded yet
          setActiveChain(isMainnet ? base : baseSepolia);
       }
     }
@@ -672,7 +661,7 @@ const [environment, setEnvironment] = useState<'MINIPAY' | 'FARCASTER' | 'WEB' |
 
     const detectAndConnect = async () => {
       try {
-        // Option 1: Farcaster SDK (Warpcast App)
+        // Option 1: Farcaster SDK
         const context = await sdk.context;
         if (context && context.client) {
           setEnvironment('FARCASTER');
@@ -699,17 +688,14 @@ const [environment, setEnvironment] = useState<'MINIPAY' | 'FARCASTER' | 'WEB' |
           return;
         }
 
-        // Option 3: Standard Web (Base App / Mobile Wallets)
-        // Wagmi handles all the auto-reconnects natively in the background!
+        // Option 3: Wagmi Web Bridge
         setEnvironment('WEB');
 
       } catch (error) {
-        console.error("Connection failed:", error);
         setEnvironment('WEB');
       }
     };
 
-    // Give the Farcaster SDK a maximum of 2 seconds to respond, otherwise force Web Fallback
     timeoutId = setTimeout(() => {
         if (environment === 'LOADING') setEnvironment('WEB');
     }, 2000);
@@ -725,6 +711,7 @@ const [environment, setEnvironment] = useState<'MINIPAY' | 'FARCASTER' | 'WEB' |
       .then(data => { if(data && data.rates) setGlobalFiatRates(data.rates); })
       .catch(() => {});
   }, []);
+
   const connectWebWallet = async () => {
     if (typeof window !== "undefined" && (window as any).ethereum) {
       try {
@@ -732,13 +719,10 @@ const [environment, setEnvironment] = useState<'MINIPAY' | 'FARCASTER' | 'WEB' |
         const ethWeb = (window as any).ethereum;
         let webTargetChain: any = isMainnet ? base : baseSepolia; 
         const webClient = createWalletClient({ chain: webTargetChain, transport: custom(ethWeb) });
-        
-                // ⚡ TRIGGER POPUP: This is allowed because the user clicked a button!
+
         const [acc] = await webClient.requestAddresses();
-        
-        // ⚡ ADD THIS LINE: Save the memory flag!
         localStorage.setItem('abapay_connected', 'true'); 
-        
+
         const currentChainId = await webClient.getChainId();
         if (currentChainId === celo.id || currentChainId === celoSepolia.id) {
            webTargetChain = currentChainId === celo.id ? celo : celoSepolia;
@@ -1105,7 +1089,6 @@ const [environment, setEnvironment] = useState<'MINIPAY' | 'FARCASTER' | 'WEB' |
 
       <div className="w-full max-w-md">
 
-
         {/* ⚡ HEADER ⚡ */}
         <div className="flex justify-between items-center bg-white p-4 rounded-3xl shadow-sm border border-slate-100 mb-6">
           <div className="flex items-center gap-3">
@@ -1116,6 +1099,15 @@ const [environment, setEnvironment] = useState<'MINIPAY' | 'FARCASTER' | 'WEB' |
             </div>
           </div>
           <div className="flex items-center gap-2">
+            
+            {/* ⚡ NEW: DYNAMIC NETWORK BADGE ⚡ */}
+            {address && (
+                <div className={`hidden sm:flex px-2.5 py-1.5 rounded-xl border items-center gap-1.5 shadow-sm ${activeChain?.name?.toLowerCase().includes('base') ? 'bg-blue-50 border-blue-200 text-blue-700' : 'bg-emerald-50 border-emerald-200 text-emerald-700'}`}>
+                    <div className={`w-1.5 h-1.5 rounded-full animate-pulse ${activeChain?.name?.toLowerCase().includes('base') ? 'bg-blue-500' : 'bg-emerald-500'}`}></div>
+                    <span className="text-[9px] font-black uppercase tracking-widest">{activeNetworkDisplay}</span>
+                </div>
+            )}
+
             <PointsBadge walletAddress={address || undefined} />
             <button 
               onClick={() => openSelectionModal('country', "Select Region", intlCountries.length ? intlCountries : SUPPORTED_COUNTRIES, handleCountryChange)}
@@ -1133,7 +1125,7 @@ const [environment, setEnvironment] = useState<'MINIPAY' | 'FARCASTER' | 'WEB' |
           </div>
         </div>
 
-                        {/* ⚡ PREMIUM CONNECT WALLET BANNER ⚡ */}
+        {/* ⚡ PREMIUM CONNECT WALLET BANNER ⚡ */}
         {!address && environment === 'WEB' && (
           <div className="bg-slate-900 p-1 rounded-[1.25rem] mb-6 shadow-xl shadow-slate-900/10 animate-in fade-in slide-in-from-top-4">
             <div className="bg-slate-800/50 backdrop-blur-md rounded-xl p-3.5 flex justify-between items-center border border-slate-700/50">
@@ -1146,7 +1138,7 @@ const [environment, setEnvironment] = useState<'MINIPAY' | 'FARCASTER' | 'WEB' |
                      <p className="text-slate-400 text-[10px] font-bold mt-1 uppercase tracking-wider">Access AbaPay</p>
                   </div>
                </div>
-               
+
                {/* ⚡ NEW WAGMI BUTTON PASTED HERE ⚡ */}
                <button 
                   onClick={() => connect({ connector: connectors[0] })}
