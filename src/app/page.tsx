@@ -586,7 +586,7 @@ const [environment, setEnvironment] = useState<'MINIPAY' | 'FARCASTER' | 'WEB' |
     return () => { if (intervalId) clearInterval(intervalId); };
   }, []);
 
-        // ⚡ 2. THE CHAMELEON ENVIRONMENT DETECTOR ⚡
+          // ⚡ 2. THE CHAMELEON ENVIRONMENT DETECTOR ⚡
   useEffect(() => {
     let timeoutId: NodeJS.Timeout;
 
@@ -621,17 +621,21 @@ const [environment, setEnvironment] = useState<'MINIPAY' | 'FARCASTER' | 'WEB' |
 
         // Option 3: Standard Web (Passive Check & Auto-Reconnect)
         setEnvironment('WEB');
-        if (typeof window !== "undefined" && (window as any).ethereum) {
-          const ethWeb = (window as any).ethereum;
+        
+        // Wait for the mobile browser to inject the wallet BEFORE checking
+        let ethWeb = typeof window !== "undefined" ? (window as any).ethereum : undefined;
+        
+        if (!ethWeb && typeof window !== "undefined") {
+          // If the wallet isn't there instantly, wait 500ms for Base App to inject it
+          await new Promise(resolve => setTimeout(resolve, 500));
+          ethWeb = (window as any).ethereum;
+        }
+
+        if (ethWeb) {
           let webTargetChain: any = isMainnet ? base : baseSepolia; 
           const webClient = createWalletClient({ chain: webTargetChain, transport: custom(ethWeb) });
           
           const previouslyConnected = localStorage.getItem('abapay_connected') === 'true';
-          
-          // ⚡ THE FIX: Give the mobile wallet half a second to "wake up" 
-          if (previouslyConnected) {
-             await new Promise(resolve => setTimeout(resolve, 500));
-          }
           
           // Step 1: Try the polite, silent check
           let addresses = await webClient.getAddresses().catch(() => []);
