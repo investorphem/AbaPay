@@ -590,7 +590,7 @@ const [environment, setEnvironment] = useState<'MINIPAY' | 'FARCASTER' | 'WEB' |
   useEffect(() => {
     let timeoutId: NodeJS.Timeout;
 
-        const detectAndConnect = async () => {
+            const detectAndConnect = async () => {
       try {
         // Option 1: Farcaster SDK (Warpcast App)
         const context = await sdk.context;
@@ -624,8 +624,8 @@ const [environment, setEnvironment] = useState<'MINIPAY' | 'FARCASTER' | 'WEB' |
         if (typeof window !== "undefined" && (window as any).ethereum) {
           const ethWeb = (window as any).ethereum;
           
-          // Let the wallet tell US what chain it prefers
-          let webTargetChain = isMainnet ? base : baseSepolia; // Default to base for normal browsers
+          // ⚡ THE FIX: Added ": any" so TypeScript allows swapping between Base and Celo
+          let webTargetChain: any = isMainnet ? base : baseSepolia; 
           
           const webClient = createWalletClient({ chain: webTargetChain, transport: custom(ethWeb) });
           const [acc] = await webClient.requestAddresses();
@@ -651,7 +651,6 @@ const [environment, setEnvironment] = useState<'MINIPAY' | 'FARCASTER' | 'WEB' |
         setEnvironment('WEB');
       }
     };
-
 
     // Give the Farcaster SDK a maximum of 2 seconds to respond, otherwise force Web Fallback
     timeoutId = setTimeout(() => {
