@@ -2,7 +2,11 @@ import React from 'react';
 import Link from 'next/link';
 import { ShieldCheck, Send } from 'lucide-react';
 
-export default function AppFooter() {
+interface AppFooterProps {
+  network?: string;
+}
+
+export default function AppFooter({ network = "Base & Celo" }: AppFooterProps) {
   return (
     <footer className="mt-12 w-full border-t border-slate-200 pt-8 pb-4 flex flex-col items-center gap-5 animate-in fade-in">
       <div className="flex items-center gap-4">
@@ -15,10 +19,13 @@ export default function AppFooter() {
           <Send size={20} className="ml-[-2px] mt-[2px] group-hover:scale-110 transition-transform" /> 
         </a>
       </div>
+      
+      {/* ⚡ DYNAMIC NETWORK BADGE ⚡ */}
       <div className="flex items-center gap-2.5 bg-white px-4 py-1.5 rounded-full shadow-sm border border-slate-100">
          <ShieldCheck size={16} className="text-emerald-600" />
-         <span className="text-[11px] font-bold text-slate-500 uppercase tracking-widest">Secured by Celo Network</span>
+         <span className="text-[11px] font-bold text-slate-500 uppercase tracking-widest">Secured by {network} Network</span>
       </div>
+
       <div className="flex gap-6">
         <Link href="/docs" className="text-[10px] font-black text-slate-400 hover:text-emerald-600 uppercase transition-colors">Docs & FAQ</Link>
         <Link href="/terms" className="text-[10px] font-black text-slate-400 hover:text-emerald-600 uppercase transition-colors">Terms</Link>
