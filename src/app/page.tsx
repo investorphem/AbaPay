@@ -590,9 +590,8 @@ const [environment, setEnvironment] = useState<'MINIPAY' | 'FARCASTER' | 'WEB' |
   useEffect(() => {
     let timeoutId: NodeJS.Timeout;
 
-    const detectAndConnect = async () => {
-      try { // <--- THE TRY BLOCK STARTS HERE
-
+        const detectAndConnect = async () => {
+      try {
         // Option 1: Farcaster SDK (Warpcast App)
         const context = await sdk.context;
         if (context && context.client) {
@@ -620,45 +619,39 @@ const [environment, setEnvironment] = useState<'MINIPAY' | 'FARCASTER' | 'WEB' |
           return;
         }
 
-        // ⚡ Option 3: Base Mini App / Coinbase Wallet
-        const eth = typeof window !== "undefined" ? (window as any).ethereum : null;
-        const isCoinbase = eth && (eth.isCoinbaseWallet || (Array.isArray(eth.providers) && eth.providers.some((p: any) => p.isCoinbaseWallet)));
-        
-        if (isCoinbase) {
-          setEnvironment('BASE');
-          const targetChain = isMainnet ? base : baseSepolia;
-          setActiveChain(targetChain);
-          
-          let providerToUse = eth;
-          if (Array.isArray(eth.providers)) {
-             providerToUse = eth.providers.find((p: any) => p.isCoinbaseWallet) || eth;
-          }
-
-          const baseAppClient = createWalletClient({ chain: targetChain, transport: custom(providerToUse) });
-          const [acc] = await baseAppClient.requestAddresses();
-          const currentChainId = await baseAppClient.getChainId();
-          if (currentChainId !== targetChain.id) await baseAppClient.switchChain({ id: targetChain.id }).catch(()=>{});
-          
-          setAddress(acc); setClient(baseAppClient);
-          return;
-        }
-
-        // Option 4: Standard Web Browser Fallback
+        // Option 3: Standard Web (This handles Base App, MetaMask, Trust Wallet, etc. natively!)
         setEnvironment('WEB');
-        const targetChainWeb = isMainnet ? celo : celoSepolia;
-        setActiveChain(targetChainWeb);
-
         if (typeof window !== "undefined" && (window as any).ethereum) {
           const ethWeb = (window as any).ethereum;
-          const webClient = createWalletClient({ chain: targetChainWeb, transport: custom(ethWeb) });
-          webClient.requestAddresses().then(([acc]) => { setAddress(acc); setClient(webClient); }).catch(() => {});
+          
+          // Let the wallet tell US what chain it prefers
+          let webTargetChain = isMainnet ? base : baseSepolia; // Default to base for normal browsers
+          
+          const webClient = createWalletClient({ chain: webTargetChain, transport: custom(ethWeb) });
+          const [acc] = await webClient.requestAddresses();
+          
+          // Check what chain the wallet is currently connected to
+          const currentChainId = await webClient.getChainId();
+          
+          // If they are on Celo, update the active chain so your UI works perfectly
+          if (currentChainId === celo.id || currentChainId === celoSepolia.id) {
+             webTargetChain = currentChainId === celo.id ? celo : celoSepolia;
+          } else if (currentChainId !== webTargetChain.id) {
+             // Otherwise, try to force them to Base
+             await webClient.switchChain({ id: webTargetChain.id }).catch(() => {});
+          }
+
+          setActiveChain(webTargetChain);
+          setAddress(acc); 
+          setClient(webClient);
         }
 
-      } catch (error) { // <--- THIS WAS THE MISSING PIECE!
-        console.error("Viem connection failed:", error);
+      } catch (error) {
+        console.error("Connection failed:", error);
         setEnvironment('WEB');
       }
     };
+
 
     // Give the Farcaster SDK a maximum of 2 seconds to respond, otherwise force Web Fallback
     timeoutId = setTimeout(() => {
