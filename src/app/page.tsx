@@ -29,7 +29,7 @@ import { HistoryTab } from "@/components/HistoryTab";
 
 export default function Home() {
   // Add these lines near your other states
-  const { address: wagmiAddress, isConnected: isWagmiConnected } = useAccount();
+  const { address: wagmiAddress, isConnected: isWagmiConnected, chain: wagmiChain } = useAccount();
   const { connectors, connect } = useConnect();
 const [environment, setEnvironment] = useState<'MINIPAY' | 'FARCASTER' | 'WEB' | 'LOADING' | 'BASE'>('LOADING');
   const [killSwitches, setKillSwitches] = useState<Record<string, boolean>>({});
@@ -611,12 +611,20 @@ const [environment, setEnvironment] = useState<'MINIPAY' | 'FARCASTER' | 'WEB' |
     notifyFarcaster();
   }, []);
 
-  // ⚡ WAGMI TO ABAPAY BRIDGE ⚡
+    // ⚡ WAGMI TO ABAPAY BRIDGE ⚡
   useEffect(() => {
     if (environment === 'WEB' && isWagmiConnected && wagmiAddress) {
       setAddress(wagmiAddress);
+      
+      // Tell AbaPay to sync its network with whatever network Wagmi is currently using
+      if (wagmiChain) {
+         setActiveChain(wagmiChain);
+      } else {
+         // Failsafe: Default to Base if the Wagmi chain hasn't loaded yet
+         setActiveChain(isMainnet ? base : baseSepolia);
+      }
     }
-  }, [environment, isWagmiConnected, wagmiAddress]);
+  }, [environment, isWagmiConnected, wagmiAddress, wagmiChain, isMainnet]);
 
   // ⚡ 2. THE CHAMELEON ENVIRONMENT DETECTOR ⚡
   useEffect(() => {
