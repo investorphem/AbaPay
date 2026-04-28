@@ -396,8 +396,8 @@ export default function Home() {
     });
   };
 
-  const handleShareReceipt = async () => {
-    const receiptText = `🧾 AbaPay Receipt\n\nDate: ${selectedReceipt?.date}\nStatus: ${selectedReceipt?.status}\nProduct: ${selectedReceipt?.network} ${selectedReceipt?.service}\nRecipient: ${selectedReceipt?.account}\nAmount Paid: ₦${selectedReceipt?.amountNaira}\nCrypto Used: ${selectedReceipt?.amountCrypto} ${selectedReceipt?.tokenUsed}\nTx Hash: ${selectedReceipt?.txHash}\n\nSecured by ${activeChain.name} Network`;
+    const handleShareReceipt = async () => {
+    const receiptText = `🧾 AbaPay Receipt\n\nDate: ${selectedReceipt?.date}\nStatus: ${selectedReceipt?.status}\nProduct: ${selectedReceipt?.network} ${selectedReceipt?.service}\nRecipient: ${selectedReceipt?.account}\nAmount Paid: ${selectedReceipt?.amountNaira}\nCrypto Used: ${selectedReceipt?.amountCrypto} ${selectedReceipt?.tokenUsed}\nTx Hash: ${selectedReceipt?.txHash}\n\nSecured by ${selectedReceipt?.blockchain || activeChain.name} Network`;
     if (navigator.share) { try { await navigator.share({ title: 'Receipt', text: receiptText }); } catch (err) {} } 
     else { try { await navigator.clipboard.writeText(receiptText); showToast("Copied!", "Receipt details copied to clipboard.", "success"); } catch (err) {} }
   };
@@ -559,10 +559,9 @@ export default function Home() {
       const hash = await client.writeContract({ address: ABAPAY_CONTRACT, abi: ABAPAY_ABI, functionName: 'payBill', args: [tokenAddress, vtpassServiceID, payloadBillersCode, valueInWei], nonce: realNonce, ...txConfig });
       setStatus(`Secured. Processing...`);
 
-            const backendPayload = {
+                  const backendPayload = {
         serviceID: vtpassServiceID, serviceCategory: uiCategory, network: displayNetwork.toUpperCase(), 
-        // ⚡ ADDED BLOCKCHAIN FIELD ⚡
-        blockchain: activeChain.name.toUpperCase(), 
+        blockchain: activeChain.name.toUpperCase(), // ⚡ INJECTING BLOCKCHAIN FOR THE API ⚡
         billersCode: payloadBillersCode, amount: cryptoToCharge, 
         nairaAmount: calculatedNairaAmount, token: selectedToken.symbol, txHash: hash, variation_code: finalVariationCode, 
         phone: customerPhone || accountNumber, email: customerEmail, wallet_address: address, 
@@ -573,10 +572,8 @@ export default function Home() {
       const newTx: any = { 
           id: hash.slice(0,8), date: new Date().toLocaleString(), status: "PENDING", 
           amountNaira: isInternational ? `${intlCurrency || activeCountry.code} ${displayForeignAmount}` : calculatedNairaAmount, 
-          amountCrypto: cryptoToCharge, tokenUsed: selectedToken.symbol, service: uiCategory, 
-          network: displayNetwork.toUpperCase(), 
-          // ⚡ ADDED BLOCKCHAIN FIELD ⚡
-          blockchain: activeChain.name.toUpperCase(), 
+          amountCrypto: cryptoToCharge, tokenUsed: selectedToken.symbol, service: uiCategory, network: displayNetwork.toUpperCase(), 
+          blockchain: activeChain.name.toUpperCase(), // ⚡ INJECTING BLOCKCHAIN FOR THE UI ⚡
           txHash: hash, account: payloadBillersCode 
       };
 
@@ -758,12 +755,12 @@ export default function Home() {
         const sixMonthsAgo = new Date(); sixMonthsAgo.setMonth(sixMonthsAgo.getMonth() - 6);
         const { data } = await supabase.from('transactions').select('*').eq('wallet_address', address).gte('created_at', sixMonthsAgo.toISOString()).order('created_at', { ascending: false });
         // Find this block inside fetchCloudHistory:
-        if (data && data.length > 0) {
+                if (data && data.length > 0) {
           const cloudHistory = data.map((tx: any) => ({ 
              id: tx.tx_hash.slice(0, 8), date: new Date(tx.created_at).toLocaleString(), status: tx.status, 
              amountNaira: tx.amount_naira.toString(), amountCrypto: tx.amount_usdt.toString(), 
              tokenUsed: tx.token_used || "USD₮", service: tx.service_category, network: tx.network, 
-             // ⚡ JUST ADD THIS ONE LINE ⚡
+             // ⚡ FETCHING THE BLOCKCHAIN FROM DB ⚡
              blockchain: tx.blockchain || 'CELO',
              txHash: tx.tx_hash, account: tx.account_number, refund_hash: tx.refund_hash, 
              purchased_code: tx.purchased_code, request_id: tx.request_id, units: tx.units 
