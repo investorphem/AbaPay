@@ -586,12 +586,13 @@ const [environment, setEnvironment] = useState<'MINIPAY' | 'FARCASTER' | 'WEB' |
     return () => { if (intervalId) clearInterval(intervalId); };
   }, []);
 
-  // ⚡ 2. THE CHAMELEON ENVIRONMENT DETECTOR ⚡
+    // ⚡ 2. THE CHAMELEON ENVIRONMENT DETECTOR ⚡
   useEffect(() => {
     let timeoutId: NodeJS.Timeout;
 
-        const detectAndConnect = async () => {
-      try {
+    const detectAndConnect = async () => {
+      try { // <--- THE TRY BLOCK STARTS HERE
+
         // Option 1: Farcaster SDK (Warpcast App)
         const context = await sdk.context;
         if (context && context.client) {
@@ -619,7 +620,7 @@ const [environment, setEnvironment] = useState<'MINIPAY' | 'FARCASTER' | 'WEB' |
           return;
         }
 
-        // ⚡ NEW: Option 3: Base Mini App / Coinbase Wallet
+        // ⚡ Option 3: Base Mini App / Coinbase Wallet
         const eth = typeof window !== "undefined" ? (window as any).ethereum : null;
         const isCoinbase = eth && (eth.isCoinbaseWallet || (Array.isArray(eth.providers) && eth.providers.some((p: any) => p.isCoinbaseWallet)));
         
@@ -628,7 +629,6 @@ const [environment, setEnvironment] = useState<'MINIPAY' | 'FARCASTER' | 'WEB' |
           const targetChain = isMainnet ? base : baseSepolia;
           setActiveChain(targetChain);
           
-          // Ensure we grab the specific Coinbase provider if multiple wallets exist
           let providerToUse = eth;
           if (Array.isArray(eth.providers)) {
              providerToUse = eth.providers.find((p: any) => p.isCoinbaseWallet) || eth;
@@ -645,8 +645,18 @@ const [environment, setEnvironment] = useState<'MINIPAY' | 'FARCASTER' | 'WEB' |
 
         // Option 4: Standard Web Browser Fallback
         setEnvironment('WEB');
-        // ... (Keep your existing fallback code here)
+        const targetChainWeb = isMainnet ? celo : celoSepolia;
+        setActiveChain(targetChainWeb);
 
+        if (typeof window !== "undefined" && (window as any).ethereum) {
+          const ethWeb = (window as any).ethereum;
+          const webClient = createWalletClient({ chain: targetChainWeb, transport: custom(ethWeb) });
+          webClient.requestAddresses().then(([acc]) => { setAddress(acc); setClient(webClient); }).catch(() => {});
+        }
+
+      } catch (error) { // <--- THIS WAS THE MISSING PIECE!
+        console.error("Viem connection failed:", error);
+        setEnvironment('WEB');
       }
     };
 
@@ -659,6 +669,7 @@ const [environment, setEnvironment] = useState<'MINIPAY' | 'FARCASTER' | 'WEB' |
 
     return () => clearTimeout(timeoutId);
   }, [isMainnet, environment]);
+
 
   useEffect(() => {
     fetch('https://open.er-api.com/v6/latest/USD')
@@ -1014,37 +1025,6 @@ const [environment, setEnvironment] = useState<'MINIPAY' | 'FARCASTER' | 'WEB' |
 
       <div className="w-full max-w-md">
 
-        {/* ⚡ DYNAMIC HEADER BASED ON ENVIRONMENT ⚡ */}
-        {environment === 'FARCASTER' && (
-          <div className="bg-purple-900 text-white p-4 rounded-3xl mb-6 shadow-lg border border-purple-700 flex justify-between items-center">
-            <div>
-               <h1 className="font-bold text-xl flex items-center gap-2">
-                 🟣 AbaPay <span className="text-xs bg-purple-600 px-2 py-1 rounded-full text-white">Farcaster</span>
-               </h1>
-               <p className="text-sm text-purple-200 mt-1">Base Network Active</p>
-            </div>
-          </div>
-        )}
-
-        {environment === 'MINIPAY' && (
-          <div className="bg-yellow-400 text-black p-4 rounded-3xl mb-6 shadow-lg border border-yellow-500 flex justify-between items-center">
-             <div>
-                <h1 className="font-bold text-xl flex items-center gap-2">
-                  🟡 AbaPay <span className="text-xs bg-yellow-300 px-2 py-1 rounded-full text-black">MiniPay</span>
-                </h1>
-                <p className="text-sm font-medium mt-1 text-black/80">Celo Network Active</p>
-             </div>
-          </div>
-        )}
-
-        {environment === 'WEB' && (
-          <div className="bg-blue-600 text-white p-4 rounded-3xl mb-6 shadow-lg flex justify-between items-center">
-            <div>
-               <h1 className="font-bold text-xl">🌐 AbaPay Web</h1>
-               <p className="text-sm opacity-90 mt-1">Please open in Farcaster or MiniPay</p>
-            </div>
-          </div>
-        )}
 
         {/* ⚡ HEADER ⚡ */}
         <div className="flex justify-between items-center bg-white p-4 rounded-3xl shadow-sm border border-slate-100 mb-6">
