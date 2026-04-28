@@ -1,7 +1,7 @@
 "use client";
 
 import React, { useState, useEffect, useMemo, useRef } from "react";
-import sdk from "@farcaster/frame-sdk";
+import sdk from "@farcaster/miniapp-sdk";
 import { createWalletClient, createPublicClient, custom, http, parseUnits, formatUnits, type WalletClient } from "viem";
 import { celo, celoSepolia, base, baseSepolia } from "viem/chains";
 import Link from "next/link";
