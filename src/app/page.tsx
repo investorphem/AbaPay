@@ -115,7 +115,15 @@ const [environment, setEnvironment] = useState<'MINIPAY' | 'FARCASTER' | 'WEB' |
   const [transactions, setTransactions] = useState<any[]>([]);
   const [globalFiatRates, setGlobalFiatRates] = useState<Record<string, number>>({});
 
-  const ABAPAY_CONTRACT = process.env.NEXT_PUBLIC_ABAPAY_ADDRESS as `0x${string}`;
+    // ⚡ DYNAMIC ABAPAY CONTRACT ROUTING ⚡
+  const ABAPAY_CONTRACT = useMemo(() => {
+    // If connected to Base or Base Sepolia, use the Base Contract
+    if (activeChain?.id === base.id || activeChain?.id === baseSepolia.id) {
+      return (process.env.NEXT_PUBLIC_ABAPAY_BASE_ADDRESS || process.env.NEXT_PUBLIC_ABAPAY_ADDRESS) as `0x${string}`;
+    }
+    // Otherwise, default to the Celo Contract
+    return (process.env.NEXT_PUBLIC_ABAPAY_CELO_ADDRESS || process.env.NEXT_PUBLIC_ABAPAY_ADDRESS) as `0x${string}`;
+  }, [activeChain]);
   const GAS_CURRENCY = isMainnet ? "0x765DE816845861e75A25fCA122bb6898B8B1282a" : "0xdE9e4C3ce781b4bA68120d6261cbad65ce0aB00b";
 
   const indexOfLastItem = currentPage * ITEMS_PER_PAGE;
