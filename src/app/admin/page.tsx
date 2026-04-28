@@ -252,8 +252,8 @@ export default function AdminDashboard() {
       const currentChainId = await client.getChainId();
       if (currentChainId !== targetChain.id) await client.switchChain({ id: targetChain.id });
 
-      const tokenAddr = network === 'BASE' 
-         ? (isMainnet ? TOKENS[tokenSymbol].baseMainnet : TOKENS[tokenSymbol].baseSepolia)
+            const tokenAddr = network === 'BASE' 
+         ? (isMainnet ? (TOKENS[tokenSymbol] as any).baseMainnet : (TOKENS[tokenSymbol] as any).baseSepolia)
          : (isMainnet ? TOKENS[tokenSymbol].celoMainnet : TOKENS[tokenSymbol].celoSepolia);
 
       const hash = await client.writeContract({ address: targetContract, abi: ABAPAY_ADMIN_ABI, functionName: 'withdrawFunds', args: [tokenAddr], account: address });
@@ -281,7 +281,7 @@ export default function AdminDashboard() {
       const isBaseTx = (tx.network || "").toUpperCase().includes("BASE");
       const targetChain = isBaseTx ? (isMainnet ? base : baseSepolia) : (isMainnet ? celo : celoSepolia);
       const targetContract = isBaseTx ? BASE_CONTRACT : CELO_CONTRACT;
-      const tokenAddr = isBaseTx ? (isMainnet ? tokenData.baseMainnet : tokenData.baseSepolia) : (isMainnet ? tokenData.celoMainnet : tokenData.celoSepolia);
+            const tokenAddr = isBaseTx ? (isMainnet ? (tokenData as any).baseMainnet : (tokenData as any).baseSepolia) : (isMainnet ? tokenData.celoMainnet : tokenData.celoSepolia);
 
       // Force admin wallet onto correct network
       const currentChainId = await client.getChainId();
