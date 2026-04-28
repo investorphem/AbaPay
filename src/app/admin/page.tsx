@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useMemo } from "react";
 import { createWalletClient, createPublicClient, custom, http, formatUnits, parseUnits } from "viem";
-import { celo, celoSepolia } from "viem/chains"; 
+import { celo, celoSepolia, base, baseSepolia } from "viem/chains"; 
 import { 
   Lock, ArrowDownToLine, Wallet, ShieldAlert, Activity, 
   Database, RefreshCcw, Globe, Zap, ExternalLink, 
@@ -11,10 +11,8 @@ import {
 } from "lucide-react";
 import { supabase } from "@/utils/supabase";
 
-// ⚡ IMPORTED PROVIDERS FOR GRANULAR KILL SWITCHES
 import { TELECOM_PROVIDERS, INTERNET_PROVIDERS, CABLE_PROVIDERS_LIST, EDUCATION_PROVIDERS } from "@/constants";
 import { ELECTRICITY_DISCOS } from "../discos"; 
-
 
 const ABAPAY_ADMIN_ABI = [
   {"inputs":[],"name":"owner","outputs":[{"internalType":"address","name":"","type":"address"}],"stateMutability":"view","type":"function"},
@@ -27,10 +25,11 @@ const ERC20_ABI = [
   {"inputs":[{"internalType":"address","name":"recipient","type":"address"},{"internalType":"uint256","name":"amount","type":"uint256"}],"name":"transfer","outputs":[{"internalType":"bool","name":"","type":"bool"}],"stateMutability":"nonpayable","type":"function"}
 ];
 
+// ⚡ MULTI-CHAIN TOKENS CONFIG ⚡
 const TOKENS = {
-  "USD₮": { decimals: 6, mainnet: "0x48065fbbe25f71c9282ddf5e1cd6d6a887483d5e", sepolia: "0xd077A400968890Eacc75cdc901F0356c943e4fDb" },
-  "USDC": { decimals: 6, mainnet: "0xcebA9300f2b948710d2653dD7B07f33A8B32118C", sepolia: "0x01C5C0122039549AD1493B8220cABEdD739BC44E" },
-  "cUSD": { decimals: 18, mainnet: "0x765DE816845861e75A25fCA122bb6898B8B1282a", sepolia: "0xdE9e4C3ce781b4bA68120d6261cbad65ce0aB00b" }
+  "USD₮": { decimals: 6, celoMainnet: "0x48065fbbe25f71c9282ddf5e1cd6d6a887483d5e", celoSepolia: "0xd077A400968890Eacc75cdc901F0356c943e4fDb", baseMainnet: "0xfde4C3ce781b4bA68120d6261cbad65ce0aB00b", baseSepolia: "0x1d5728a887e1fa1a191467094ac7761d019b4c2c" },
+  "USDC": { decimals: 6, celoMainnet: "0xcebA9300f2b948710d2653dD7B07f33A8B32118C", celoSepolia: "0x2F25deB3848C207fc8E0c34035B3Ba7fC157602B", baseMainnet: "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913", baseSepolia: "0x036CbD53842c5426634e7929541eC2318f3dCF7e" },
+  "USDm": { decimals: 18, celoMainnet: "0x765DE816845861e75A25fCA122bb6898B8B1282a", celoSepolia: "0xdE9e4C3ce781b4bA68120d6261cbad65ce0aB00b" } // Exclusive to Celo
 };
 
 const ITEMS_PER_PAGE = 10;
@@ -44,9 +43,9 @@ export default function AdminDashboard() {
   const [isAuthenticating, setIsAuthenticating] = useState(true); 
   const [authError, setAuthError] = useState(""); 
 
-  const [usdtVaultBalance, setUsdtVaultBalance] = useState("0.00");
-  const [usdcVaultBalance, setUsdcVaultBalance] = useState("0.00");
-  const [cusdVaultBalance, setCusdVaultBalance] = useState("0.00");
+  // ⚡ SPLIT VAULT BALANCES ⚡
+  const [celoVaults, setCeloVaults] = useState({ usdt: "0.00", usdc: "0.00", usdm: "0.00" });
+  const [baseVaults, setBaseVaults] = useState({ usdt: "0.00", usdc: "0.00" });
 
   const [vtBalance, setVtBalance] = useState("0.00"); 
   const [smsBalance, setSmsBalance] = useState("0");    
@@ -75,10 +74,12 @@ export default function AdminDashboard() {
   const [killSwitches, setKillSwitches] = useState<Record<string, boolean>>({});
   const [isUpdatingSwitches, setIsUpdatingSwitches] = useState(false);
 
-  const isMainnet = process.env.NEXT_PUBLIC_NETWORK === "celo";
+  // ⚡ SMART MAINNET & DUAL CONTRACT ROUTING ⚡
+  const isMainnet = process.env.NEXT_PUBLIC_NETWORK === "mainnet" || process.env.NEXT_PUBLIC_NETWORK === "celo" || process.env.NEXT_PUBLIC_NETWORK === "base";
   const isLive = process.env.NEXT_PUBLIC_APP_MODE === "live";
-  const activeChain = isMainnet ? celo : celoSepolia; 
-  const ABAPAY_CONTRACT = process.env.NEXT_PUBLIC_ABAPAY_ADDRESS as `0x${string}`;
+  
+  const CELO_CONTRACT = (process.env.NEXT_PUBLIC_ABAPAY_CELO_ADDRESS || process.env.NEXT_PUBLIC_ABAPAY_ADDRESS) as `0x${string}`;
+  const BASE_CONTRACT = (process.env.NEXT_PUBLIC_ABAPAY_BASE_ADDRESS || process.env.NEXT_PUBLIC_ABAPAY_ADDRESS) as `0x${string}`;
 
   useEffect(() => {
     async function initAdmin() {
@@ -86,21 +87,16 @@ export default function AdminDashboard() {
         setIsAuthenticating(true);
         setAuthError("");
         try {
-          const walletClient = createWalletClient({ chain: activeChain, transport: custom((window as any).ethereum) });
+          // Temporarily connect to Celo just to verify ownership (assuming same owner wallet for both chains)
+          const tempChain = isMainnet ? celo : celoSepolia;
+          const walletClient = createWalletClient({ chain: tempChain, transport: custom((window as any).ethereum) });
           const [account] = await walletClient.requestAddresses();
           setAddress(account);
           setClient(walletClient);
 
-          try {
-            const currentChainId = await walletClient.getChainId();
-            if (currentChainId !== activeChain.id) await walletClient.switchChain({ id: activeChain.id });
-          } catch (switchError) {
-             try { await walletClient.addChain({ chain: activeChain }); } catch(e) {}
-          }
-
-          const publicClient = createPublicClient({ chain: activeChain, transport: http() });
+          const publicClient = createPublicClient({ chain: tempChain, transport: http() });
           const contractOwner = await publicClient.readContract({
-            address: ABAPAY_CONTRACT,
+            address: CELO_CONTRACT,
             abi: ABAPAY_ADMIN_ABI,
             functionName: 'owner',
           }) as string;
@@ -114,7 +110,7 @@ export default function AdminDashboard() {
           }
         } catch (error) { 
           setIsOwner(false);
-          setAuthError("Failed to read Smart Contract.");
+          setAuthError("Failed to read Smart Contract. Are you on the right network?");
         } finally {
           setIsAuthenticating(false);
         }
@@ -125,7 +121,7 @@ export default function AdminDashboard() {
       }
     }
     initAdmin();
-  }, [activeChain, ABAPAY_CONTRACT]);
+  }, [CELO_CONTRACT, isMainnet]);
 
   const refreshAllData = async () => {
     setIsFetching(true);
@@ -201,18 +197,32 @@ export default function AdminDashboard() {
       finally { setIsUpdatingSwitches(false); }
   };
 
+  // ⚡ MULTI-CHAIN SILENT BALANCE FETCHER ⚡
   const fetchOnChainBalances = async () => {
-    const publicClient = createPublicClient({ chain: activeChain, transport: http() });
+    const celoPublic = createPublicClient({ chain: isMainnet ? celo : celoSepolia, transport: http() });
+    const basePublic = createPublicClient({ chain: isMainnet ? base : baseSepolia, transport: http() });
+    
     try {
-      const usdtBal = await publicClient.readContract({ address: (isMainnet ? TOKENS["USD₮"].mainnet : TOKENS["USD₮"].sepolia) as `0x${string}`, abi: ERC20_ABI, functionName: 'balanceOf', args: [ABAPAY_CONTRACT] }) as bigint;
-      setUsdtVaultBalance(formatUnits(usdtBal, TOKENS["USD₮"].decimals));
+      // Fetch Celo Vaults
+      const cUsdtBal = await celoPublic.readContract({ address: (isMainnet ? TOKENS["USD₮"].celoMainnet : TOKENS["USD₮"].celoSepolia) as `0x${string}`, abi: ERC20_ABI, functionName: 'balanceOf', args: [CELO_CONTRACT] }) as bigint;
+      const cUsdcBal = await celoPublic.readContract({ address: (isMainnet ? TOKENS["USDC"].celoMainnet : TOKENS["USDC"].celoSepolia) as `0x${string}`, abi: ERC20_ABI, functionName: 'balanceOf', args: [CELO_CONTRACT] }) as bigint;
+      const cUsdmBal = await celoPublic.readContract({ address: (isMainnet ? TOKENS["USDm"].celoMainnet : TOKENS["USDm"].celoSepolia) as `0x${string}`, abi: ERC20_ABI, functionName: 'balanceOf', args: [CELO_CONTRACT] }) as bigint;
+      
+      setCeloVaults({
+          usdt: formatUnits(cUsdtBal, TOKENS["USD₮"].decimals),
+          usdc: formatUnits(cUsdcBal, TOKENS["USDC"].decimals),
+          usdm: formatUnits(cUsdmBal, TOKENS["USDm"].decimals),
+      });
 
-      const usdcBal = await publicClient.readContract({ address: (isMainnet ? TOKENS["USDC"].mainnet : TOKENS["USDC"].sepolia) as `0x${string}`, abi: ERC20_ABI, functionName: 'balanceOf', args: [ABAPAY_CONTRACT] }) as bigint;
-      setUsdcVaultBalance(formatUnits(usdcBal, TOKENS["USDC"].decimals));
+      // Fetch Base Vaults
+      const bUsdtBal = await basePublic.readContract({ address: (isMainnet ? TOKENS["USD₮"].baseMainnet : TOKENS["USD₮"].baseSepolia) as `0x${string}`, abi: ERC20_ABI, functionName: 'balanceOf', args: [BASE_CONTRACT] }) as bigint;
+      const bUsdcBal = await basePublic.readContract({ address: (isMainnet ? TOKENS["USDC"].baseMainnet : TOKENS["USDC"].baseSepolia) as `0x${string}`, abi: ERC20_ABI, functionName: 'balanceOf', args: [BASE_CONTRACT] }) as bigint;
 
-      const cusdBal = await publicClient.readContract({ address: (isMainnet ? TOKENS["cUSD"].mainnet : TOKENS["cUSD"].sepolia) as `0x${string}`, abi: ERC20_ABI, functionName: 'balanceOf', args: [ABAPAY_CONTRACT] }) as bigint;
-      setCusdVaultBalance(formatUnits(cusdBal, TOKENS["cUSD"].decimals));
-    } catch (error) { console.error("Failed to fetch vault balances"); }
+      setBaseVaults({
+          usdt: formatUnits(bUsdtBal, TOKENS["USD₮"].decimals),
+          usdc: formatUnits(bUsdcBal, TOKENS["USDC"].decimals)
+      });
+    } catch (error) { console.error("Failed to fetch multi-chain vault balances"); }
   };
 
   const fetchVtPassHealth = async () => {
@@ -224,40 +234,69 @@ export default function AdminDashboard() {
     } catch (e) { console.error("Failed to fetch VTpass health"); }
   };
 
-  const handleWithdrawal = async (tokenSymbol: 'USD₮' | 'USDC' | 'cUSD') => {
+  // ⚡ SMART WITHDRAWAL ROUTING ⚡
+  const handleWithdrawal = async (tokenSymbol: 'USD₮' | 'USDC' | 'USDm', network: 'CELO' | 'BASE') => {
     if (!client || !address) return;
-    const balanceToCheck = tokenSymbol === 'USD₮' ? usdtVaultBalance : tokenSymbol === 'USDC' ? usdcVaultBalance : cusdVaultBalance;
-    if (parseFloat(balanceToCheck) <= 0) return setStatus(`The ${tokenSymbol} Vault is already empty.`);
-    setStatus(`Withdrawing ${tokenSymbol}...`);
+    
+    const balanceToCheck = network === 'CELO' 
+        ? celoVaults[tokenSymbol.toLowerCase() as keyof typeof celoVaults] 
+        : baseVaults[tokenSymbol.toLowerCase() as keyof typeof baseVaults];
+
+    if (parseFloat(balanceToCheck) <= 0) return setStatus(`The ${network} ${tokenSymbol} Vault is already empty.`);
+    setStatus(`Withdrawing ${tokenSymbol} from ${network}...`);
 
     try {
-      const tokenAddr = isMainnet ? TOKENS[tokenSymbol].mainnet : TOKENS[tokenSymbol].sepolia;
-      const hash = await client.writeContract({ address: ABAPAY_CONTRACT, abi: ABAPAY_ADMIN_ABI, functionName: 'withdrawFunds', args: [tokenAddr], account: address });
+      const targetChain = network === 'BASE' ? (isMainnet ? base : baseSepolia) : (isMainnet ? celo : celoSepolia);
+      const targetContract = network === 'BASE' ? BASE_CONTRACT : CELO_CONTRACT;
+      
+      const currentChainId = await client.getChainId();
+      if (currentChainId !== targetChain.id) await client.switchChain({ id: targetChain.id });
+
+      const tokenAddr = network === 'BASE' 
+         ? (isMainnet ? TOKENS[tokenSymbol].baseMainnet : TOKENS[tokenSymbol].baseSepolia)
+         : (isMainnet ? TOKENS[tokenSymbol].celoMainnet : TOKENS[tokenSymbol].celoSepolia);
+
+      const hash = await client.writeContract({ address: targetContract, abi: ABAPAY_ADMIN_ABI, functionName: 'withdrawFunds', args: [tokenAddr], account: address });
       setStatus(`Success! Hash: ${hash.slice(0, 10)}`);
       setTimeout(() => refreshAllData(), 5000);
     } catch (error) { setStatus("Rejected or Insufficient Gas."); }
   };
 
+  // ⚡ SMART REFUND ROUTING ⚡
   const handleRefund = async (tx: any) => {
     try {
       if (!client || !address) return alert("Connect your Admin Wallet first.");
       setProcessingRefundId(tx.id);
 
-      const rawAmount = parseFloat(tx.amount_usdt);
+      const rawAmount = parseFloat(tx.amount_usdt || tx.amount_crypto);
       if (isNaN(rawAmount) || rawAmount <= 0) throw new Error("Invalid crypto amount found in database.");
 
-      const tokenSymbol = tx.tokenUsed || tx.token_used || "USD₮"; 
+      // Treat cUSD legacy tags as USDm
+      let tokenSymbol = tx.tokenUsed || tx.token_used || "USD₮"; 
+      if (tokenSymbol === 'cUSD') tokenSymbol = 'USDm';
+
       const tokenData = TOKENS[tokenSymbol as keyof typeof TOKENS];
       if (!tokenData) throw new Error(`Token ${tokenSymbol} is not supported.`);
 
-      const tokenAddr = isMainnet ? tokenData.mainnet : tokenData.sepolia;
+      const isBaseTx = (tx.network || "").toUpperCase().includes("BASE");
+      const targetChain = isBaseTx ? (isMainnet ? base : baseSepolia) : (isMainnet ? celo : celoSepolia);
+      const targetContract = isBaseTx ? BASE_CONTRACT : CELO_CONTRACT;
+      const tokenAddr = isBaseTx ? (isMainnet ? tokenData.baseMainnet : tokenData.baseSepolia) : (isMainnet ? tokenData.celoMainnet : tokenData.celoSepolia);
+
+      // Force admin wallet onto correct network
+      const currentChainId = await client.getChainId();
+      if (currentChainId !== targetChain.id) {
+          alert(`This is a ${isBaseTx ? 'Base' : 'Celo'} transaction. Please approve the network switch in your wallet.`);
+          await client.switchChain({ id: targetChain.id });
+      }
+
       const decimals = tokenData.decimals;
       const cleanAmountString = rawAmount.toFixed(decimals);
       const valueInWei = parseUnits(cleanAmountString, decimals);
 
-      const refundHash = await client.writeContract({ address: ABAPAY_CONTRACT as `0x${string}`, abi: ABAPAY_ADMIN_ABI, functionName: 'refundUser', args: [tokenAddr, tx.wallet_address, valueInWei], account: address });
+      const refundHash = await client.writeContract({ address: targetContract as `0x${string}`, abi: ABAPAY_ADMIN_ABI, functionName: 'refundUser', args: [tokenAddr, tx.wallet_address, valueInWei], account: address });
 
-      const publicClient = createPublicClient({ chain: activeChain, transport: http() });
+      const publicClient = createPublicClient({ chain: targetChain, transport: http() });
       const receipt = await publicClient.waitForTransactionReceipt({ hash: refundHash });
       if (receipt.status !== 'success') throw new Error("Transaction reverted. Vault does not have enough balance.");
 
@@ -284,7 +323,9 @@ export default function AdminDashboard() {
     finally { setIsRequeryingId(null); }
   };
 
-  const currentVaultTotal = parseFloat(usdtVaultBalance || "0") + parseFloat(usdcVaultBalance || "0") + parseFloat(cusdVaultBalance || "0");
+  const currentVaultTotal = 
+    parseFloat(celoVaults.usdt) + parseFloat(celoVaults.usdc) + parseFloat(celoVaults.usdm) +
+    parseFloat(baseVaults.usdt) + parseFloat(baseVaults.usdc);
 
   const timeFilteredTransactions = useMemo(() => {
     const now = new Date();
@@ -299,8 +340,8 @@ export default function AdminDashboard() {
 
   const analytics = useMemo(() => {
     const successTx = timeFilteredTransactions.filter(tx => tx.status === "SUCCESS");
-    const totalDeposited = timeFilteredTransactions.reduce((acc, tx) => acc + (parseFloat(tx.amount_usdt) || 0), 0);
-    const totalRefunded = timeFilteredTransactions.filter(tx => tx.status === "REFUNDED").reduce((acc, tx) => acc + (parseFloat(tx.amount_usdt) || 0), 0);
+    const totalDeposited = timeFilteredTransactions.reduce((acc, tx) => acc + (parseFloat(tx.amount_usdt || tx.amount_crypto) || 0), 0);
+    const totalRefunded = timeFilteredTransactions.filter(tx => tx.status === "REFUNDED").reduce((acc, tx) => acc + (parseFloat(tx.amount_usdt || tx.amount_crypto) || 0), 0);
 
     return {
       vol: successTx.reduce((acc, tx) => acc + Number(tx.amount_naira || 0), 0),
@@ -338,7 +379,7 @@ export default function AdminDashboard() {
 
   const exportCSV = () => {
     const headers = "Date,Status,Network,Service,Account,Naira,Crypto,Token Used,Transaction ID,Units,Token PIN,Hash\n";
-    const rows = filteredTx.map(tx => `${tx.created_at},${tx.status},${tx.network},${tx.service_category},${tx.account_number},${tx.amount_naira},${tx.amount_usdt},${tx.token_used || 'USD₮'},${tx.request_id || 'N/A'},${tx.units || 'N/A'},${tx.purchased_code || 'N/A'},${tx.tx_hash}`).join("\n");
+    const rows = filteredTx.map(tx => `${tx.created_at},${tx.status},${tx.network},${tx.service_category},${tx.account_number},${tx.amount_naira},${tx.amount_usdt || tx.amount_crypto},${tx.token_used || 'USD₮'},${tx.request_id || 'N/A'},${tx.units || 'N/A'},${tx.purchased_code || 'N/A'},${tx.tx_hash}`).join("\n");
     const blob = new Blob([headers + rows], { type: 'text/csv' });
     const url = window.URL.createObjectURL(blob);
     const a = document.createElement('a'); a.href = url; a.download = `AbaPay_Report_${timeFilter}.csv`; a.click();
@@ -365,7 +406,7 @@ export default function AdminDashboard() {
             </h1>
             <div className="flex gap-3 mt-2">
               <span className={`px-2 py-0.5 rounded text-[10px] font-bold border ${isLive ? 'bg-red-500/10 text-red-500 border-red-500/20' : 'bg-blue-500/10 text-blue-500 border-blue-500/20'}`}>{isLive ? 'LIVE' : 'SANDBOX'}</span>
-              <span className="px-2 py-0.5 rounded text-[10px] font-bold border bg-purple-500/10 text-purple-400 border-purple-500/20">{isMainnet ? 'MAINNET' : 'SEPOLIA'}</span>
+              <span className="px-2 py-0.5 rounded text-[10px] font-bold border bg-purple-500/10 text-purple-400 border-purple-500/20">{isMainnet ? 'MAINNET' : 'TESTNET'}</span>
             </div>
           </div>
 
@@ -403,7 +444,7 @@ export default function AdminDashboard() {
             {/* STATS */}
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
               <StatBox label="VTpass Wallet" value={`₦${vtBalance}`} sub="Live Naira Float" color="text-white" icon={<Banknote size={16}/>} />
-              <StatBox label={`Vaults (${timeFilter})`} value={`$${currentVaultTotal.toFixed(2)}`} sub="Total Locked Assets" color="text-emerald-500" icon={<Wallet size={16}/>} />
+              <StatBox label={`Global Vaults (${timeFilter})`} value={`$${currentVaultTotal.toFixed(2)}`} sub="Base & Celo Combined" color="text-emerald-500" icon={<Wallet size={16}/>} />
               <StatBox label={`Profit (${timeFilter})`} value={`₦${analytics.fees.toLocaleString()}`} sub="Service Fees Accrued" color="text-blue-400" icon={<BarChart3 size={16}/>} />
               <StatBox label="SMS Health" value={`${smsBalance} Units`} sub="Messaging Units" color="text-orange-400" icon={<Activity size={16}/>} />
             </div>
@@ -591,8 +632,7 @@ export default function AdminDashboard() {
                     <Search className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-600" size={16} />
                     <input type="text" placeholder="Search by ID, Account or Wallet..." className="w-full bg-slate-950 border border-slate-800 rounded-xl pl-12 pr-4 py-3 text-sm focus:border-emerald-500 outline-none" value={searchTerm} onChange={(e) => setSearchTerm(e.target.value)} />
                   </div>
-                  
-                  {/* ⚡ UPDATED FILTER DROPDOWN ⚡ */}
+
                   <select value={filterStatus} onChange={(e) => setFilterStatus(e.target.value)} className="bg-slate-950 border border-slate-800 rounded-xl px-4 py-3 text-sm text-slate-300">
                     <option value="ALL">All Status</option>
                     <option value="SUCCESS">Success</option>
@@ -603,7 +643,7 @@ export default function AdminDashboard() {
                     <option value="FAILED_FUNDS_MISMATCH">Failed (Rate Mismatch)</option>
                     <option value="REFUNDED">Refunded</option>
                   </select>
-                  
+
                   <button onClick={exportCSV} className="flex items-center gap-2 bg-slate-800 border border-slate-700 px-6 py-3 rounded-xl text-sm font-bold hover:bg-slate-700"><Download size={16} /> Export</button>
                 </div>
 
@@ -624,13 +664,14 @@ export default function AdminDashboard() {
 
                         const walletInfo = allWalletsMap.find(w => w.wallet_address?.toLowerCase() === tx.wallet_address?.toLowerCase());
                         const verifiedPhone = walletInfo?.abapay_users?.verified_phone || "N/A";
+                        const isBaseTx = (tx.network || "").toUpperCase().includes("BASE");
 
                         return (
                         <tr key={tx.id} className="hover:bg-slate-900/40">
 
                           <td className="py-4 px-2 min-w-[120px]">
                             <p className="text-white font-medium text-xs mb-1">{new Date(tx.created_at).toLocaleString()}</p>
-                            <a href={`https://${isMainnet ? '' : 'sepolia.'}celoscan.io/tx/${tx.tx_hash}`} target="_blank" className="text-[9px] text-emerald-400 hover:underline flex items-center gap-1 mt-1 font-mono tracking-wider">Hash: {tx.tx_hash.slice(0, 8)}... <ExternalLink size={8} /></a>
+                            <a href={`https://${isMainnet ? '' : 'sepolia.'}${isBaseTx ? 'basescan.org' : 'celoscan.io'}/tx/${tx.tx_hash}`} target="_blank" className={`text-[9px] ${isBaseTx ? 'text-blue-400' : 'text-emerald-400'} hover:underline flex items-center gap-1 mt-1 font-mono tracking-wider`}>Hash: {tx.tx_hash.slice(0, 8)}... <ExternalLink size={8} /></a>
                           </td>
 
                           <td className="py-4 px-2 min-w-[150px]">
@@ -639,7 +680,10 @@ export default function AdminDashboard() {
                           </td>
 
                           <td className="py-4 px-2 min-w-[180px]">
-                            <p className="text-slate-200 font-bold uppercase">{tx.network || 'N/A'}</p>
+                            <p className="text-slate-200 font-bold uppercase flex items-center gap-1">
+                                {isBaseTx ? <span className="w-1.5 h-1.5 rounded-full bg-blue-500"></span> : <span className="w-1.5 h-1.5 rounded-full bg-emerald-500"></span>}
+                                {tx.network || 'N/A'}
+                            </p>
                             <p className="text-[10px] text-slate-500 uppercase tracking-wider mt-0.5">{tx.service_category}</p>
                             <p className="text-[10px] text-blue-400 font-mono mt-1 font-bold">Acct/Ph: {tx.account_number}</p>
                           </td>
@@ -657,27 +701,24 @@ export default function AdminDashboard() {
                           </td>
                           <td className="py-4 px-2 min-w-[120px]">
                             <p className="text-white font-black">₦{tx.amount_naira.toLocaleString()}</p>
-                            <p className="text-[10px] text-emerald-500 font-mono">${(tx.amount_usdt || tx.amount_crypto || 0).toString()} {tx.token_used || 'USD₮'}</p>
+                            <p className="text-[10px] text-emerald-500 font-mono">${(tx.amount_usdt || tx.amount_crypto || 0).toString()} {tx.token_used === 'cUSD' ? 'USDm' : (tx.token_used || 'USD₮')}</p>
                           </td>
                           <td className="py-4 px-2">
-  <div className="flex flex-col items-start gap-2">
-    <span className={`text-[9px] font-black px-2 py-1 rounded tracking-widest uppercase ${
-      tx.status === 'SUCCESS' ? 'bg-emerald-500/10 text-emerald-500' : 
-      tx.status === 'REFUNDED' ? 'bg-blue-500/10 text-blue-400' :
-      tx.status === 'PENDING' ? 'bg-orange-500/10 text-orange-400' : 
-      'bg-red-500/10 text-red-500'
-    }`}>
-      {tx.status}
-    </span>
+                            <div className="flex flex-col items-start gap-2">
+                                <span className={`text-[9px] font-black px-2 py-1 rounded tracking-widest uppercase ${
+                                  tx.status === 'SUCCESS' ? 'bg-emerald-500/10 text-emerald-500' : 
+                                  tx.status === 'REFUNDED' ? 'bg-blue-500/10 text-blue-400' :
+                                  tx.status === 'PENDING' ? 'bg-orange-500/10 text-orange-400' : 
+                                  'bg-red-500/10 text-red-500'
+                                }`}>
+                                  {tx.status}
+                                </span>
 
-    {/* ⚡ NEW: SHOW RAW API ERROR CODE IN THE ADMIN DASHBOARD ⚡ */}
-    {tx.error_code && (
-        <span className="text-[8px] font-mono text-red-400 bg-red-500/5 border border-red-500/10 px-1.5 py-0.5 rounded">
-            API Code: {tx.error_code}
-        </span>
-    )}
-
-    {/* ... (Refund and Requery buttons stay the same below this) */}
+                                {tx.error_code && (
+                                    <span className="text-[8px] font-mono text-red-400 bg-red-500/5 border border-red-500/10 px-1.5 py-0.5 rounded">
+                                        API Code: {tx.error_code}
+                                    </span>
+                                )}
 
                               {tx.status === 'PENDING' && (
                                 <button 
@@ -690,7 +731,6 @@ export default function AdminDashboard() {
                                 </button>
                               )}
 
-                              {/* ⚡ UPDATED: ALL FAILED STATUSES GET THE REFUND BUTTON ⚡ */}
                               {tx.status?.startsWith('FAILED') && (
                                 <button 
                                   onClick={() => handleRefund(tx)}
@@ -733,29 +773,47 @@ export default function AdminDashboard() {
               </div>
             )}
 
-            {/* VAULT TAB */}
+            {/* VAULT TAB (NOW MULTI-CHAIN) */}
             {activeTab === 'vault' && (
               <div className="bg-[#111114] border border-slate-800 rounded-3xl p-8 animate-in fade-in slide-in-from-bottom-4">
                 <div className="flex flex-col items-center mb-8">
                     <div className="bg-emerald-500/10 rounded-full mb-4 p-4"><Lock className="text-emerald-500" size={32} /></div>
-                    <p className="text-slate-500 text-sm text-center max-w-md italic">Smart Contract Escrow Balances</p>
+                    <p className="text-slate-500 text-sm text-center max-w-md italic">Multi-Chain Smart Contract Escrow Balances</p>
                     {status && <div className="mt-4 text-xs font-mono text-emerald-400 bg-emerald-500/5 py-2 px-4 rounded border border-emerald-500/10">{status}</div>}
                 </div>
-                <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+                
+                {/* CELO VAULTS */}
+                <h3 className="text-sm font-black text-emerald-500 uppercase tracking-widest mb-4 border-b border-slate-800 pb-2 flex items-center gap-2"><span className="w-2 h-2 rounded-full bg-emerald-500"></span> Celo Network Reserves</h3>
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-10">
                     <div className="bg-slate-900 border border-slate-800 p-6 rounded-3xl text-center">
-                        <h2 className="text-4xl font-black mb-1">${usdtVaultBalance}</h2>
+                        <h2 className="text-4xl font-black mb-1">${celoVaults.usdt}</h2>
                         <span className="text-xs text-emerald-500 font-bold uppercase tracking-widest bg-emerald-500/10 px-3 py-1 rounded-full">USD₮ Vault</span>
-                        <button onClick={() => handleWithdrawal('USD₮')} className="mt-8 w-full bg-slate-800 hover:bg-emerald-500 hover:text-slate-950 text-slate-300 font-black py-3 rounded-xl flex items-center justify-center gap-2 transition-all"><ArrowDownToLine size={16} /> Withdraw USD₮</button>
+                        <button onClick={() => handleWithdrawal('USD₮', 'CELO')} className="mt-8 w-full bg-slate-800 hover:bg-emerald-500 hover:text-slate-950 text-slate-300 font-black py-3 rounded-xl flex items-center justify-center gap-2 transition-all"><ArrowDownToLine size={16} /> Withdraw USD₮</button>
                     </div>
                     <div className="bg-slate-900 border border-slate-800 p-6 rounded-3xl text-center">
-                        <h2 className="text-4xl font-black mb-1">${usdcVaultBalance}</h2>
+                        <h2 className="text-4xl font-black mb-1">${celoVaults.usdc}</h2>
                         <span className="text-xs text-blue-400 font-bold uppercase tracking-widest bg-blue-500/10 px-3 py-1 rounded-full">USDC Vault</span>
-                        <button onClick={() => handleWithdrawal('USDC')} className="mt-8 w-full bg-slate-800 hover:bg-blue-500 hover:text-slate-950 text-slate-300 font-black py-3 rounded-xl flex items-center justify-center gap-2 transition-all"><ArrowDownToLine size={16} /> Withdraw USDC</button>
+                        <button onClick={() => handleWithdrawal('USDC', 'CELO')} className="mt-8 w-full bg-slate-800 hover:bg-blue-500 hover:text-slate-950 text-slate-300 font-black py-3 rounded-xl flex items-center justify-center gap-2 transition-all"><ArrowDownToLine size={16} /> Withdraw USDC</button>
                     </div>
                     <div className="bg-slate-900 border border-slate-800 p-6 rounded-3xl text-center">
-                        <h2 className="text-4xl font-black mb-1">${cusdVaultBalance}</h2>
-                        <span className="text-xs text-yellow-500 font-bold uppercase tracking-widest bg-yellow-500/10 px-3 py-1 rounded-full">cUSD Vault</span>
-                        <button onClick={() => handleWithdrawal('cUSD')} className="mt-8 w-full bg-slate-800 hover:bg-yellow-500 hover:text-slate-950 text-slate-300 font-black py-3 rounded-xl flex items-center justify-center gap-2 transition-all"><ArrowDownToLine size={16} /> Withdraw cUSD</button>
+                        <h2 className="text-4xl font-black mb-1">${celoVaults.usdm}</h2>
+                        <span className="text-xs text-yellow-500 font-bold uppercase tracking-widest bg-yellow-500/10 px-3 py-1 rounded-full">USDm Vault</span>
+                        <button onClick={() => handleWithdrawal('USDm', 'CELO')} className="mt-8 w-full bg-slate-800 hover:bg-yellow-500 hover:text-slate-950 text-slate-300 font-black py-3 rounded-xl flex items-center justify-center gap-2 transition-all"><ArrowDownToLine size={16} /> Withdraw USDm</button>
+                    </div>
+                </div>
+
+                {/* BASE VAULTS */}
+                <h3 className="text-sm font-black text-blue-500 uppercase tracking-widest mb-4 border-b border-slate-800 pb-2 flex items-center gap-2"><span className="w-2 h-2 rounded-full bg-blue-500"></span> Base Network Reserves</h3>
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                    <div className="bg-slate-900 border border-slate-800 p-6 rounded-3xl text-center">
+                        <h2 className="text-4xl font-black mb-1">${baseVaults.usdt}</h2>
+                        <span className="text-xs text-emerald-500 font-bold uppercase tracking-widest bg-emerald-500/10 px-3 py-1 rounded-full">USD₮ Vault</span>
+                        <button onClick={() => handleWithdrawal('USD₮', 'BASE')} className="mt-8 w-full bg-slate-800 hover:bg-emerald-500 hover:text-slate-950 text-slate-300 font-black py-3 rounded-xl flex items-center justify-center gap-2 transition-all"><ArrowDownToLine size={16} /> Withdraw USD₮</button>
+                    </div>
+                    <div className="bg-slate-900 border border-slate-800 p-6 rounded-3xl text-center">
+                        <h2 className="text-4xl font-black mb-1">${baseVaults.usdc}</h2>
+                        <span className="text-xs text-blue-400 font-bold uppercase tracking-widest bg-blue-500/10 px-3 py-1 rounded-full">USDC Vault</span>
+                        <button onClick={() => handleWithdrawal('USDC', 'BASE')} className="mt-8 w-full bg-slate-800 hover:bg-blue-500 hover:text-slate-950 text-slate-300 font-black py-3 rounded-xl flex items-center justify-center gap-2 transition-all"><ArrowDownToLine size={16} /> Withdraw USDC</button>
                     </div>
                 </div>
               </div>
