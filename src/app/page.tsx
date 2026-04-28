@@ -137,6 +137,22 @@ const [environment, setEnvironment] = useState<'MINIPAY' | 'FARCASTER' | 'WEB' |
     return activeChain?.name || "Base & Celo";
   }, [address, activeChain]);
 
+  // ⚡ MULTI-CHAIN TOKEN FILTER & AUTO-SWITCHER ⚡
+  const availableTokens = useMemo(() => {
+     return SUPPORTED_TOKENS.filter((t: any) => 
+        !t.supportedNetworks || 
+        t.supportedNetworks.some((n: string) => activeChain?.name?.toLowerCase().includes(n))
+     );
+  }, [activeChain]);
+
+  // If the user switches networks (e.g. from Celo to Base), 
+  // and their current token (USDm) isn't supported on Base, auto-switch them to USDC!
+  useEffect(() => {
+     if (availableTokens.length > 0 && !availableTokens.find(t => t.symbol === selectedToken.symbol)) {
+         setSelectedToken(availableTokens[0]);
+     }
+  }, [availableTokens, selectedToken.symbol]);
+
   const isCurrentServiceDisabled = useMemo(() => {
       if (!killSwitches) return false;
       if (isInternational) return false; 
@@ -478,8 +494,18 @@ const [environment, setEnvironment] = useState<'MINIPAY' | 'FARCASTER' | 'WEB' |
 
       const valueInWei = parseUnits(cryptoToCharge, selectedToken.decimals);
       
-      // ⚡ Handle Token Address Selection safely across chains
-      const tokenAddress = isMainnet ? selectedToken.mainnet : selectedToken.sepolia;
+            // ⚡ Handle Token Address Selection safely across chains
+      let tokenAddress;
+      if (activeChain.id === base.id) {
+          tokenAddress = (selectedToken as any).baseMainnet || selectedToken.mainnet;
+      } else if (activeChain.id === baseSepolia.id) {
+          tokenAddress = (selectedToken as any).baseSepolia || selectedToken.sepolia;
+      } else if (activeChain.id === celo.id) {
+          tokenAddress = (selectedToken as any).celoMainnet || selectedToken.mainnet;
+      } else {
+          // Defaults to Celo Alfajores if nothing else matches
+          tokenAddress = (selectedToken as any).celoSepolia || selectedToken.sepolia;
+      }
       
       const publicClient = createPublicClient({ chain: activeChain, transport: http(undefined, { fetchOptions: { cache: 'no-store' } }), pollingInterval: 4000 });
       
@@ -1138,7 +1164,7 @@ const [environment, setEnvironment] = useState<'MINIPAY' | 'FARCASTER' | 'WEB' |
                 <div className="bg-slate-50 border border-slate-100 p-4 rounded-2xl flex justify-between items-center animate-in fade-in">
                   <div 
                     className="flex items-center gap-2 cursor-pointer hover:bg-slate-100 p-2 -ml-2 rounded-xl transition-colors" 
-                    onClick={() => openSelectionModal('token', "Select Token", SUPPORTED_TOKENS, (symbol) => setSelectedToken(SUPPORTED_TOKENS.find(t => t.symbol === symbol)!))}
+                    onClick={() => openSelectionModal('token', "Select Token", availableTokens, (symbol) => setSelectedToken(SUPPORTED_TOKENS.find(t => t.symbol === symbol)!))}
                   >
                      <img src={selectedToken.logo} alt={selectedToken.symbol} className="w-7 h-7 object-contain rounded-full shadow-sm bg-white" />
                      <span className="font-black text-slate-800 uppercase text-sm tracking-tight">{selectedToken.symbol}</span>
@@ -1342,7 +1368,7 @@ const [environment, setEnvironment] = useState<'MINIPAY' | 'FARCASTER' | 'WEB' |
                 <div className="bg-slate-50 border border-slate-100 p-4 rounded-2xl flex justify-between items-center animate-in fade-in">
                   <div 
                     className="flex items-center gap-2 cursor-pointer hover:bg-slate-100 p-2 -ml-2 rounded-xl transition-colors" 
-                    onClick={() => openSelectionModal('token', "Select Token", SUPPORTED_TOKENS, (symbol) => setSelectedToken(SUPPORTED_TOKENS.find(t => t.symbol === symbol)!))}
+                    onClick={() => openSelectionModal('token', "Select Token", availableTokens, (symbol) => setSelectedToken(SUPPORTED_TOKENS.find(t => t.symbol === symbol)!))}
                   >
                      <img src={selectedToken.logo} alt={selectedToken.symbol} className="w-7 h-7 object-contain rounded-full shadow-sm bg-white" />
                      <span className="font-black text-slate-800 uppercase text-sm tracking-tight">{selectedToken.symbol}</span>
@@ -1553,7 +1579,7 @@ const [environment, setEnvironment] = useState<'MINIPAY' | 'FARCASTER' | 'WEB' |
                 <div className="bg-slate-50 border border-slate-100 p-4 rounded-2xl flex justify-between items-center animate-in fade-in">
                   <div 
                     className="flex items-center gap-2 cursor-pointer hover:bg-slate-100 p-2 -ml-2 rounded-xl transition-colors" 
-                    onClick={() => openSelectionModal('token', "Select Token", SUPPORTED_TOKENS, (symbol) => setSelectedToken(SUPPORTED_TOKENS.find(t => t.symbol === symbol)!))}
+                    onClick={() => openSelectionModal('token', "Select Token", availableTokens, (symbol) => setSelectedToken(SUPPORTED_TOKENS.find(t => t.symbol === symbol)!))}
                   >
                      <img src={selectedToken.logo} alt={selectedToken.symbol} className="w-7 h-7 object-contain rounded-full shadow-sm bg-white" />
                      <span className="font-black text-slate-800 uppercase text-sm tracking-tight">{selectedToken.symbol}</span>
