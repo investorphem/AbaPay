@@ -619,21 +619,29 @@ const [environment, setEnvironment] = useState<'MINIPAY' | 'FARCASTER' | 'WEB' |
           return;
         }
 
-                // Option 3: Standard Web (Passive Check & Auto-Reconnect)
+                        // Option 3: Standard Web (Passive Check & Auto-Reconnect)
         setEnvironment('WEB');
         if (typeof window !== "undefined" && (window as any).ethereum) {
           const ethWeb = (window as any).ethereum;
           let webTargetChain: any = isMainnet ? base : baseSepolia; 
           const webClient = createWalletClient({ chain: webTargetChain, transport: custom(ethWeb) });
           
-          // ⚡ THE FIX: Check our memory flag
           const previouslyConnected = localStorage.getItem('abapay_connected') === 'true';
           
-          // If they connected before, use requestAddresses (wallet will silently auto-approve).
-          // If it's their first time, use getAddresses (passive check so it doesn't pop up).
-          const addresses = previouslyConnected 
-              ? await webClient.requestAddresses().catch(() => []) 
-              : await webClient.getAddresses();
+          // ⚡ THE FIX: Give the mobile wallet half a second to "wake up" 
+          // before we ask it for the addresses!
+          if (previouslyConnected) {
+             await new Promise(resolve => setTimeout(resolve, 500));
+          }
+          
+          // Step 1: Try the polite, silent check
+          let addresses = await webClient.getAddresses().catch(() => []);
+          
+          // Step 2: If the wallet was still sleepy but we KNOW they connected before, 
+          // forcefully request the addresses.
+          if (addresses.length === 0 && previouslyConnected) {
+             addresses = await webClient.requestAddresses().catch(() => []);
+          }
           
           if (addresses.length > 0) {
              const acc = addresses[0];
@@ -646,13 +654,11 @@ const [environment, setEnvironment] = useState<'MINIPAY' | 'FARCASTER' | 'WEB' |
              setActiveChain(webTargetChain);
              setAddress(acc); 
              setClient(webClient);
+          } else {
+             // If we STILL couldn't connect, clear the memory so the user can try again
+             localStorage.removeItem('abapay_connected');
           }
-        }
-      } catch (error) {
-        console.error("Connection failed:", error);
-        setEnvironment('WEB');
-      }
-    };
+        };
 
     // Give the Farcaster SDK a maximum of 2 seconds to respond, otherwise force Web Fallback
     timeoutId = setTimeout(() => {
