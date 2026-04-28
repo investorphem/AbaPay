@@ -559,8 +559,11 @@ export default function Home() {
       const hash = await client.writeContract({ address: ABAPAY_CONTRACT, abi: ABAPAY_ABI, functionName: 'payBill', args: [tokenAddress, vtpassServiceID, payloadBillersCode, valueInWei], nonce: realNonce, ...txConfig });
       setStatus(`Secured. Processing...`);
 
-      const backendPayload = {
-        serviceID: vtpassServiceID, serviceCategory: uiCategory, network: displayNetwork.toUpperCase(), billersCode: payloadBillersCode, amount: cryptoToCharge, 
+            const backendPayload = {
+        serviceID: vtpassServiceID, serviceCategory: uiCategory, network: displayNetwork.toUpperCase(), 
+        // ⚡ ADDED BLOCKCHAIN FIELD ⚡
+        blockchain: activeChain.name.toUpperCase(), 
+        billersCode: payloadBillersCode, amount: cryptoToCharge, 
         nairaAmount: calculatedNairaAmount, token: selectedToken.symbol, txHash: hash, variation_code: finalVariationCode, 
         phone: customerPhone || accountNumber, email: customerEmail, wallet_address: address, 
         subscription_type: activeTab === "pay" && activeService.id === "CABLE" && ['dstv', 'gotv'].includes(cableProvider) ? cableSubscriptionType : undefined,
@@ -570,7 +573,11 @@ export default function Home() {
       const newTx: any = { 
           id: hash.slice(0,8), date: new Date().toLocaleString(), status: "PENDING", 
           amountNaira: isInternational ? `${intlCurrency || activeCountry.code} ${displayForeignAmount}` : calculatedNairaAmount, 
-          amountCrypto: cryptoToCharge, tokenUsed: selectedToken.symbol, service: uiCategory, network: displayNetwork.toUpperCase(), txHash: hash, account: payloadBillersCode 
+          amountCrypto: cryptoToCharge, tokenUsed: selectedToken.symbol, service: uiCategory, 
+          network: displayNetwork.toUpperCase(), 
+          // ⚡ ADDED BLOCKCHAIN FIELD ⚡
+          blockchain: activeChain.name.toUpperCase(), 
+          txHash: hash, account: payloadBillersCode 
       };
 
       const res = await fetch('/api/pay', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(backendPayload) });
