@@ -619,34 +619,30 @@ const [environment, setEnvironment] = useState<'MINIPAY' | 'FARCASTER' | 'WEB' |
           return;
         }
 
-        // Option 3: Standard Web (This handles Base App, MetaMask, Trust Wallet, etc. natively!)
+                // Option 3: Standard Web
         setEnvironment('WEB');
         if (typeof window !== "undefined" && (window as any).ethereum) {
           const ethWeb = (window as any).ethereum;
-          
-          // ⚡ THE FIX: Added ": any" so TypeScript allows swapping between Base and Celo
           let webTargetChain: any = isMainnet ? base : baseSepolia; 
-          
           const webClient = createWalletClient({ chain: webTargetChain, transport: custom(ethWeb) });
-          const [acc] = await webClient.requestAddresses();
           
-          // Check what chain the wallet is currently connected to
-          const currentChainId = await webClient.getChainId();
+          // ⚡ THE FIX: Silently check if they are ALREADY connected (No popups)
+          const addresses = await webClient.getAddresses();
           
-          // If they are on Celo, update the active chain so your UI works perfectly
-          if (currentChainId === celo.id || currentChainId === celoSepolia.id) {
-             webTargetChain = currentChainId === celo.id ? celo : celoSepolia;
-          } else if (currentChainId !== webTargetChain.id) {
-             // Otherwise, try to force them to Base
-             await webClient.switchChain({ id: webTargetChain.id }).catch(() => {});
+          if (addresses.length > 0) {
+             const acc = addresses[0];
+             const currentChainId = await webClient.getChainId();
+             if (currentChainId === celo.id || currentChainId === celoSepolia.id) {
+                webTargetChain = currentChainId === celo.id ? celo : celoSepolia;
+             } else if (currentChainId !== webTargetChain.id) {
+                await webClient.switchChain({ id: webTargetChain.id }).catch(() => {});
+             }
+             setActiveChain(webTargetChain);
+             setAddress(acc); 
+             setClient(webClient);
           }
-
-          setActiveChain(webTargetChain);
-          setAddress(acc); 
-          setClient(webClient);
         }
-
-      } catch (error) {
+ catch (error) {
         console.error("Connection failed:", error);
         setEnvironment('WEB');
       }
@@ -669,6 +665,35 @@ const [environment, setEnvironment] = useState<'MINIPAY' | 'FARCASTER' | 'WEB' |
       .then(data => { if(data && data.rates) setGlobalFiatRates(data.rates); })
       .catch(() => {});
   }, []);
+  const connectWebWallet = async () => {
+    if (typeof window !== "undefined" && (window as any).ethereum) {
+      try {
+        setIsProcessing(true);
+        const ethWeb = (window as any).ethereum;
+        let webTargetChain: any = isMainnet ? base : baseSepolia; 
+        const webClient = createWalletClient({ chain: webTargetChain, transport: custom(ethWeb) });
+        
+        // ⚡ TRIGGER POPUP: This is allowed because the user clicked a button!
+        const [acc] = await webClient.requestAddresses();
+        
+        const currentChainId = await webClient.getChainId();
+        if (currentChainId === celo.id || currentChainId === celoSepolia.id) {
+           webTargetChain = currentChainId === celo.id ? celo : celoSepolia;
+        } else if (currentChainId !== webTargetChain.id) {
+           await webClient.switchChain({ id: webTargetChain.id }).catch(() => {});
+        }
+        setActiveChain(webTargetChain);
+        setAddress(acc); 
+        setClient(webClient);
+      } catch (error) {
+        setStatus("Wallet connection cancelled.");
+      } finally {
+        setIsProcessing(false);
+      }
+    } else {
+      setStatus("No Web3 wallet detected.");
+    }
+  };
 
   useEffect(() => {
     if (!address) { setTransactions([]); return; }
@@ -1044,6 +1069,18 @@ const [environment, setEnvironment] = useState<'MINIPAY' | 'FARCASTER' | 'WEB' |
             </button>
           </div>
         </div>
+
+        {/* ⚡ CONNECT WALLET BANNER (ONLY SHOWS IF DISCONNECTED) ⚡ */}
+        {!address && environment === 'WEB' && (
+          <button 
+             onClick={connectWebWallet}
+             disabled={isProcessing}
+             className="w-full bg-slate-900 hover:bg-black text-white font-black py-4 rounded-2xl mb-6 shadow-xl shadow-slate-900/20 flex justify-center items-center gap-2 transition-all active:scale-95 disabled:opacity-50"
+          >
+             {isProcessing ? <Loader2 size={20} className="animate-spin"/> : <Zap size={20} className="text-emerald-400"/>}
+             {isProcessing ? "CONNECTING..." : "CONNECT WALLET"}
+          </button>
+        )}
 
         {/* THE TABS */}
         <div className="flex gap-2 bg-slate-200/50 p-1.5 rounded-2xl mb-6 shadow-inner overflow-x-auto no-scrollbar">
