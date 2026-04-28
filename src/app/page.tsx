@@ -619,15 +619,21 @@ const [environment, setEnvironment] = useState<'MINIPAY' | 'FARCASTER' | 'WEB' |
           return;
         }
 
-        // Option 3: Standard Web (Passive Check)
+                // Option 3: Standard Web (Passive Check & Auto-Reconnect)
         setEnvironment('WEB');
         if (typeof window !== "undefined" && (window as any).ethereum) {
           const ethWeb = (window as any).ethereum;
           let webTargetChain: any = isMainnet ? base : baseSepolia; 
           const webClient = createWalletClient({ chain: webTargetChain, transport: custom(ethWeb) });
           
-          // ⚡ Silently check if they are ALREADY connected (No popups)
-          const addresses = await webClient.getAddresses();
+          // ⚡ THE FIX: Check our memory flag
+          const previouslyConnected = localStorage.getItem('abapay_connected') === 'true';
+          
+          // If they connected before, use requestAddresses (wallet will silently auto-approve).
+          // If it's their first time, use getAddresses (passive check so it doesn't pop up).
+          const addresses = previouslyConnected 
+              ? await webClient.requestAddresses().catch(() => []) 
+              : await webClient.getAddresses();
           
           if (addresses.length > 0) {
              const acc = addresses[0];
@@ -672,8 +678,11 @@ const [environment, setEnvironment] = useState<'MINIPAY' | 'FARCASTER' | 'WEB' |
         let webTargetChain: any = isMainnet ? base : baseSepolia; 
         const webClient = createWalletClient({ chain: webTargetChain, transport: custom(ethWeb) });
         
-        // ⚡ TRIGGER POPUP: This is allowed because the user clicked a button!
+                // ⚡ TRIGGER POPUP: This is allowed because the user clicked a button!
         const [acc] = await webClient.requestAddresses();
+        
+        // ⚡ ADD THIS LINE: Save the memory flag!
+        localStorage.setItem('abapay_connected', 'true'); 
         
         const currentChainId = await webClient.getChainId();
         if (currentChainId === celo.id || currentChainId === celoSepolia.id) {
@@ -1069,16 +1078,29 @@ const [environment, setEnvironment] = useState<'MINIPAY' | 'FARCASTER' | 'WEB' |
           </div>
         </div>
 
-        {/* ⚡ CONNECT WALLET BANNER (ONLY SHOWS IF DISCONNECTED) ⚡ */}
+                {/* ⚡ PREMIUM CONNECT WALLET BANNER ⚡ */}
         {!address && environment === 'WEB' && (
-          <button 
-             onClick={connectWebWallet}
-             disabled={isProcessing}
-             className="w-full bg-slate-900 hover:bg-black text-white font-black py-4 rounded-2xl mb-6 shadow-xl shadow-slate-900/20 flex justify-center items-center gap-2 transition-all active:scale-95 disabled:opacity-50"
-          >
-             {isProcessing ? <Loader2 size={20} className="animate-spin"/> : <Zap size={20} className="text-emerald-400"/>}
-             {isProcessing ? "CONNECTING..." : "CONNECT WALLET"}
-          </button>
+          <div className="bg-slate-900 p-1 rounded-[1.25rem] mb-6 shadow-xl shadow-slate-900/10 animate-in fade-in slide-in-from-top-4">
+            <div className="bg-slate-800/50 backdrop-blur-md rounded-xl p-3.5 flex justify-between items-center border border-slate-700/50">
+               <div className="flex items-center gap-3">
+                  <div className="bg-emerald-500/10 p-2 rounded-full border border-emerald-500/20">
+                     <Zap size={16} className="text-emerald-400"/>
+                  </div>
+                  <div className="text-left">
+                     <p className="text-white font-black text-sm tracking-tight leading-none">Secure Connection</p>
+                     <p className="text-slate-400 text-[10px] font-bold mt-1 uppercase tracking-wider">Access AbaPay</p>
+                  </div>
+               </div>
+               <button 
+                  onClick={connectWebWallet}
+                  disabled={isProcessing}
+                  className="bg-emerald-500 hover:bg-emerald-400 text-slate-900 font-black text-xs px-5 py-2.5 rounded-full transition-all active:scale-95 disabled:opacity-50 shadow-md flex items-center gap-1.5"
+               >
+                  {isProcessing ? <Loader2 size={14} className="animate-spin"/> : null}
+                  {isProcessing ? "WAIT" : "CONNECT"}
+               </button>
+            </div>
+          </div>
         )}
 
         {/* THE TABS */}
