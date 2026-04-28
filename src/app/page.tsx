@@ -586,11 +586,11 @@ const [environment, setEnvironment] = useState<'MINIPAY' | 'FARCASTER' | 'WEB' |
     return () => { if (intervalId) clearInterval(intervalId); };
   }, []);
 
-    // ⚡ 2. THE CHAMELEON ENVIRONMENT DETECTOR ⚡
+      // ⚡ 2. THE CHAMELEON ENVIRONMENT DETECTOR ⚡
   useEffect(() => {
     let timeoutId: NodeJS.Timeout;
 
-            const detectAndConnect = async () => {
+    const detectAndConnect = async () => {
       try {
         // Option 1: Farcaster SDK (Warpcast App)
         const context = await sdk.context;
@@ -619,14 +619,14 @@ const [environment, setEnvironment] = useState<'MINIPAY' | 'FARCASTER' | 'WEB' |
           return;
         }
 
-                // Option 3: Standard Web
+        // Option 3: Standard Web (Passive Check)
         setEnvironment('WEB');
         if (typeof window !== "undefined" && (window as any).ethereum) {
           const ethWeb = (window as any).ethereum;
           let webTargetChain: any = isMainnet ? base : baseSepolia; 
           const webClient = createWalletClient({ chain: webTargetChain, transport: custom(ethWeb) });
           
-          // ⚡ THE FIX: Silently check if they are ALREADY connected (No popups)
+          // ⚡ Silently check if they are ALREADY connected (No popups)
           const addresses = await webClient.getAddresses();
           
           if (addresses.length > 0) {
@@ -642,7 +642,7 @@ const [environment, setEnvironment] = useState<'MINIPAY' | 'FARCASTER' | 'WEB' |
              setClient(webClient);
           }
         }
- catch (error) {
+      } catch (error) {
         console.error("Connection failed:", error);
         setEnvironment('WEB');
       }
@@ -657,7 +657,6 @@ const [environment, setEnvironment] = useState<'MINIPAY' | 'FARCASTER' | 'WEB' |
 
     return () => clearTimeout(timeoutId);
   }, [isMainnet, environment]);
-
 
   useEffect(() => {
     fetch('https://open.er-api.com/v6/latest/USD')
