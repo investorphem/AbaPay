@@ -77,7 +77,7 @@ export default function AdminDashboard() {
   // ⚡ SMART MAINNET & DUAL CONTRACT ROUTING ⚡
   const isMainnet = process.env.NEXT_PUBLIC_NETWORK === "mainnet" || process.env.NEXT_PUBLIC_NETWORK === "celo" || process.env.NEXT_PUBLIC_NETWORK === "base";
   const isLive = process.env.NEXT_PUBLIC_APP_MODE === "live";
-  
+
   const CELO_CONTRACT = (process.env.NEXT_PUBLIC_ABAPAY_CELO_ADDRESS || process.env.NEXT_PUBLIC_ABAPAY_ADDRESS) as `0x${string}`;
   const BASE_CONTRACT = (process.env.NEXT_PUBLIC_ABAPAY_BASE_ADDRESS || process.env.NEXT_PUBLIC_ABAPAY_ADDRESS) as `0x${string}`;
 
@@ -201,13 +201,13 @@ export default function AdminDashboard() {
   const fetchOnChainBalances = async () => {
     const celoPublic = createPublicClient({ chain: isMainnet ? celo : celoSepolia, transport: http() });
     const basePublic = createPublicClient({ chain: isMainnet ? base : baseSepolia, transport: http() });
-    
+
     try {
       // Fetch Celo Vaults
       const cUsdtBal = await celoPublic.readContract({ address: (isMainnet ? TOKENS["USD₮"].celoMainnet : TOKENS["USD₮"].celoSepolia) as `0x${string}`, abi: ERC20_ABI, functionName: 'balanceOf', args: [CELO_CONTRACT] }) as bigint;
       const cUsdcBal = await celoPublic.readContract({ address: (isMainnet ? TOKENS["USDC"].celoMainnet : TOKENS["USDC"].celoSepolia) as `0x${string}`, abi: ERC20_ABI, functionName: 'balanceOf', args: [CELO_CONTRACT] }) as bigint;
       const cUsdmBal = await celoPublic.readContract({ address: (isMainnet ? TOKENS["USDm"].celoMainnet : TOKENS["USDm"].celoSepolia) as `0x${string}`, abi: ERC20_ABI, functionName: 'balanceOf', args: [CELO_CONTRACT] }) as bigint;
-      
+
       setCeloVaults({
           usdt: formatUnits(cUsdtBal, TOKENS["USD₮"].decimals),
           usdc: formatUnits(cUsdcBal, TOKENS["USDC"].decimals),
@@ -237,7 +237,7 @@ export default function AdminDashboard() {
   // ⚡ SMART WITHDRAWAL ROUTING ⚡
   const handleWithdrawal = async (tokenSymbol: 'USD₮' | 'USDC' | 'USDm', network: 'CELO' | 'BASE') => {
     if (!client || !address) return;
-    
+
     const balanceToCheck = network === 'CELO' 
         ? celoVaults[tokenSymbol.toLowerCase() as keyof typeof celoVaults] 
         : baseVaults[tokenSymbol.toLowerCase() as keyof typeof baseVaults];
@@ -248,11 +248,12 @@ export default function AdminDashboard() {
     try {
       const targetChain = network === 'BASE' ? (isMainnet ? base : baseSepolia) : (isMainnet ? celo : celoSepolia);
       const targetContract = network === 'BASE' ? BASE_CONTRACT : CELO_CONTRACT;
-      
+
       const currentChainId = await client.getChainId();
       if (currentChainId !== targetChain.id) await client.switchChain({ id: targetChain.id });
 
-            const tokenAddr = network === 'BASE' 
+      // ⚡ TYPE FIX APPLIED ⚡
+      const tokenAddr = network === 'BASE' 
          ? (isMainnet ? (TOKENS[tokenSymbol] as any).baseMainnet : (TOKENS[tokenSymbol] as any).baseSepolia)
          : (isMainnet ? TOKENS[tokenSymbol].celoMainnet : TOKENS[tokenSymbol].celoSepolia);
 
@@ -278,10 +279,13 @@ export default function AdminDashboard() {
       const tokenData = TOKENS[tokenSymbol as keyof typeof TOKENS];
       if (!tokenData) throw new Error(`Token ${tokenSymbol} is not supported.`);
 
-      const isBaseTx = (tx.network || "").toUpperCase().includes("BASE");
+      // ⚡ DB BLOCKCHAIN FIX APPLIED ⚡
+      const isBaseTx = (tx.blockchain || "").toUpperCase().includes("BASE");
       const targetChain = isBaseTx ? (isMainnet ? base : baseSepolia) : (isMainnet ? celo : celoSepolia);
       const targetContract = isBaseTx ? BASE_CONTRACT : CELO_CONTRACT;
-            const tokenAddr = isBaseTx ? (isMainnet ? (tokenData as any).baseMainnet : (tokenData as any).baseSepolia) : (isMainnet ? tokenData.celoMainnet : tokenData.celoSepolia);
+      
+      // ⚡ TYPE FIX APPLIED ⚡
+      const tokenAddr = isBaseTx ? (isMainnet ? (tokenData as any).baseMainnet : (tokenData as any).baseSepolia) : (isMainnet ? tokenData.celoMainnet : tokenData.celoSepolia);
 
       // Force admin wallet onto correct network
       const currentChainId = await client.getChainId();
@@ -358,6 +362,7 @@ export default function AdminDashboard() {
       const searchLower = searchTerm.toLowerCase();
       const matchesSearch = (tx.account_number || "").includes(searchTerm) || 
                             (tx.network || "").toLowerCase().includes(searchLower) ||
+                            (tx.blockchain || "").toLowerCase().includes(searchLower) ||
                             (tx.wallet_address || "").toLowerCase().includes(searchLower) ||
                             (tx.request_id || "").toLowerCase().includes(searchLower);
       const matchesStatus = filterStatus === "ALL" || tx.status === filterStatus;
@@ -377,9 +382,10 @@ export default function AdminDashboard() {
   const totalPages = Math.ceil(filteredTx.length / ITEMS_PER_PAGE);
   const currentTransactions = filteredTx.slice((currentPage - 1) * ITEMS_PER_PAGE, currentPage * ITEMS_PER_PAGE);
 
+  // ⚡ EXPORT CSV WITH BLOCKCHAIN ⚡
   const exportCSV = () => {
-    const headers = "Date,Status,Network,Service,Account,Naira,Crypto,Token Used,Transaction ID,Units,Token PIN,Hash\n";
-    const rows = filteredTx.map(tx => `${tx.created_at},${tx.status},${tx.network},${tx.service_category},${tx.account_number},${tx.amount_naira},${tx.amount_usdt || tx.amount_crypto},${tx.token_used || 'USD₮'},${tx.request_id || 'N/A'},${tx.units || 'N/A'},${tx.purchased_code || 'N/A'},${tx.tx_hash}`).join("\n");
+    const headers = "Date,Status,Blockchain,Network,Service,Account,Naira,Crypto,Token Used,Transaction ID,Units,Token PIN,Hash\n";
+    const rows = filteredTx.map(tx => `${tx.created_at},${tx.status},${tx.blockchain || 'CELO'},${tx.network},${tx.service_category},${tx.account_number},${tx.amount_naira},${tx.amount_usdt || tx.amount_crypto},${tx.token_used || 'USD₮'},${tx.request_id || 'N/A'},${tx.units || 'N/A'},${tx.purchased_code || 'N/A'},${tx.tx_hash}`).join("\n");
     const blob = new Blob([headers + rows], { type: 'text/csv' });
     const url = window.URL.createObjectURL(blob);
     const a = document.createElement('a'); a.href = url; a.download = `AbaPay_Report_${timeFilter}.csv`; a.click();
@@ -664,7 +670,9 @@ export default function AdminDashboard() {
 
                         const walletInfo = allWalletsMap.find(w => w.wallet_address?.toLowerCase() === tx.wallet_address?.toLowerCase());
                         const verifiedPhone = walletInfo?.abapay_users?.verified_phone || "N/A";
-                        const isBaseTx = (tx.network || "").toUpperCase().includes("BASE");
+                        
+                        // ⚡ DB BLOCKCHAIN UI FIX APPLIED ⚡
+                        const isBaseTx = (tx.blockchain || "").toUpperCase().includes("BASE");
 
                         return (
                         <tr key={tx.id} className="hover:bg-slate-900/40">
@@ -682,7 +690,7 @@ export default function AdminDashboard() {
                           <td className="py-4 px-2 min-w-[180px]">
                             <p className="text-slate-200 font-bold uppercase flex items-center gap-1">
                                 {isBaseTx ? <span className="w-1.5 h-1.5 rounded-full bg-blue-500"></span> : <span className="w-1.5 h-1.5 rounded-full bg-emerald-500"></span>}
-                                {tx.network || 'N/A'}
+                                {tx.blockchain || 'CELO'} • {tx.network || 'N/A'}
                             </p>
                             <p className="text-[10px] text-slate-500 uppercase tracking-wider mt-0.5">{tx.service_category}</p>
                             <p className="text-[10px] text-blue-400 font-mono mt-1 font-bold">Acct/Ph: {tx.account_number}</p>
@@ -781,7 +789,7 @@ export default function AdminDashboard() {
                     <p className="text-slate-500 text-sm text-center max-w-md italic">Multi-Chain Smart Contract Escrow Balances</p>
                     {status && <div className="mt-4 text-xs font-mono text-emerald-400 bg-emerald-500/5 py-2 px-4 rounded border border-emerald-500/10">{status}</div>}
                 </div>
-                
+
                 {/* CELO VAULTS */}
                 <h3 className="text-sm font-black text-emerald-500 uppercase tracking-widest mb-4 border-b border-slate-800 pb-2 flex items-center gap-2"><span className="w-2 h-2 rounded-full bg-emerald-500"></span> Celo Network Reserves</h3>
                 <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-10">
