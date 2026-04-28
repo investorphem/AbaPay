@@ -55,7 +55,7 @@ export function ReceiptModal({ receipt, isMainnet, onClose, onSupport }: any) {
     const receiptElement = document.getElementById('printable-receipt');
     if (!receiptElement) return;
 
-    const fallbackText = `🧾 AbaPay Receipt\n\nService: ${receipt.network} ${receipt.service}\nAmount: ₦${receipt.amountNaira}\nStatus: ${receipt.status}\nAccount: ${receipt.account}\nRef: ${receipt.id}\n${hasPin ? `\nPIN/TOKEN: ${receipt.purchased_code}` : ''}\n\nSecured by Celo ⚡`;
+    const fallbackText = `🧾 AbaPay Receipt\n\nService: ${receipt.network} ${receipt.service}\nAmount: ₦${receipt.amountNaira}\nStatus: ${receipt.status}\nAccount: ${receipt.account}\nRef: ${receipt.id}\n${hasPin ? `\nPIN/TOKEN: ${receipt.purchased_code}` : ''}\n\nSecured by ${receipt.blockchain || 'Celo'} ⚡`;
     const isMiniPay = typeof window !== "undefined" && !!(window as any).ethereum?.isMiniPay;
 
     if (isMiniPay) {
@@ -165,10 +165,22 @@ export function ReceiptModal({ receipt, isMainnet, onClose, onSupport }: any) {
                  </div>
                )}
 
+               {/* ⚡ MULTI-CHAIN REFUND HASH LINK ⚡ */}
                {receipt.status === 'REFUNDED' && receipt.refund_hash && (
                  <div className="flex justify-between border-b border-slate-100 pb-3">
                     <span className="text-slate-400 text-[10px] font-bold uppercase tracking-wider">Refund Hash</span>
-                    <a data-html2canvas-ignore="true" href={`https://${isMainnet?'':'sepolia.'}celoscan.io/tx/${receipt.refund_hash}`} target="_blank" className="text-blue-600 font-mono font-bold text-xs flex items-center justify-end gap-1 hover:underline">View Transfer <ExternalLink size={10}/></a>
+                    {(() => {
+                        const isBaseTx = receipt?.blockchain?.toUpperCase().includes('BASE');
+                        const refundUrl = isBaseTx 
+                            ? (isMainnet ? `https://basescan.org/tx/${receipt.refund_hash}` : `https://sepolia.basescan.org/tx/${receipt.refund_hash}`)
+                            : (isMainnet ? `https://celoscan.io/tx/${receipt.refund_hash}` : `https://alfajores.celoscan.io/tx/${receipt.refund_hash}`);
+                        
+                        return (
+                            <a data-html2canvas-ignore="true" href={refundUrl} target="_blank" rel="noopener noreferrer" className="text-blue-600 font-mono font-bold text-xs flex items-center justify-end gap-1 hover:underline">
+                                View Transfer <ExternalLink size={10}/>
+                            </a>
+                        );
+                    })()}
                  </div>
                )}
 
@@ -180,7 +192,24 @@ export function ReceiptModal({ receipt, isMainnet, onClose, onSupport }: any) {
           </div>
 
           <div className="px-8 pb-8 space-y-3">
-             <button onClick={() => window.open(`https://${isMainnet?'':'sepolia.'}celoscan.io/tx/${receipt.txHash}`)} className="w-full py-3 bg-slate-50 hover:bg-slate-100 rounded-xl text-[10px] font-black uppercase tracking-widest text-slate-500 flex items-center justify-center gap-2 transition-colors">Verify on Celoscan <ExternalLink size={12}/></button>
+             {/* ⚡ MULTI-CHAIN VERIFY BUTTON ⚡ */}
+             {(() => {
+                 const isBaseTx = receipt?.blockchain?.toUpperCase().includes('BASE');
+                 const explorerName = isBaseTx ? "Basescan" : "Celoscan";
+                 const explorerUrl = isBaseTx 
+                     ? (isMainnet ? `https://basescan.org/tx/${receipt?.txHash}` : `https://sepolia.basescan.org/tx/${receipt?.txHash}`)
+                     : (isMainnet ? `https://celoscan.io/tx/${receipt?.txHash}` : `https://alfajores.celoscan.io/tx/${receipt?.txHash}`);
+
+                 return (
+                     <button 
+                         onClick={() => window.open(explorerUrl)} 
+                         className="w-full py-3 bg-slate-50 hover:bg-slate-100 rounded-xl text-[10px] font-black uppercase tracking-widest text-slate-500 flex items-center justify-center gap-2 transition-colors"
+                     >
+                         Verify on {explorerName} <ExternalLink size={12}/>
+                     </button>
+                 );
+             })()}
+
              <div className="flex gap-2">
                 <button 
                   onClick={handleShareImage} 
