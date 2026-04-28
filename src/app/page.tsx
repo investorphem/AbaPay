@@ -757,11 +757,14 @@ export default function Home() {
       try {
         const sixMonthsAgo = new Date(); sixMonthsAgo.setMonth(sixMonthsAgo.getMonth() - 6);
         const { data } = await supabase.from('transactions').select('*').eq('wallet_address', address).gte('created_at', sixMonthsAgo.toISOString()).order('created_at', { ascending: false });
+        // Find this block inside fetchCloudHistory:
         if (data && data.length > 0) {
           const cloudHistory = data.map((tx: any) => ({ 
              id: tx.tx_hash.slice(0, 8), date: new Date(tx.created_at).toLocaleString(), status: tx.status, 
              amountNaira: tx.amount_naira.toString(), amountCrypto: tx.amount_usdt.toString(), 
              tokenUsed: tx.token_used || "USD₮", service: tx.service_category, network: tx.network, 
+             // ⚡ JUST ADD THIS ONE LINE ⚡
+             blockchain: tx.blockchain || 'CELO',
              txHash: tx.tx_hash, account: tx.account_number, refund_hash: tx.refund_hash, 
              purchased_code: tx.purchased_code, request_id: tx.request_id, units: tx.units 
           }));
