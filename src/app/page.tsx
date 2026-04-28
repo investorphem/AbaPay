@@ -31,17 +31,6 @@ export default function Home() {
   // Add these lines near your other states
   const { address: wagmiAddress, isConnected: isWagmiConnected } = useAccount();
   const { connectors, connect } = useConnect();
-
-  // ⚡ WAGMI TO ABAPAY BRIDGE ⚡
-  useEffect(() => {
-    if (environment === 'WEB' && isWagmiConnected && wagmiAddress) {
-      setAddress(wagmiAddress);
-      // We don't need to manually set the client here because 
-      // Wagmi handles contract writes natively under the hood!
-    }
-  }, [environment, isWagmiConnected, wagmiAddress]);
-
-  // To this:
 const [environment, setEnvironment] = useState<'MINIPAY' | 'FARCASTER' | 'WEB' | 'LOADING' | 'BASE'>('LOADING');
   const [killSwitches, setKillSwitches] = useState<Record<string, boolean>>({});
   const [address, setAddress] = useState<string | null>(null);
@@ -600,7 +589,14 @@ const [environment, setEnvironment] = useState<'MINIPAY' | 'FARCASTER' | 'WEB' |
     return () => { if (intervalId) clearInterval(intervalId); };
   }, []);
 
-          // ⚡ 2. THE CHAMELEON ENVIRONMENT DETECTOR ⚡
+            // ⚡ WAGMI TO ABAPAY BRIDGE ⚡
+  useEffect(() => {
+    if (environment === 'WEB' && isWagmiConnected && wagmiAddress) {
+      setAddress(wagmiAddress);
+    }
+  }, [environment, isWagmiConnected, wagmiAddress]);
+
+  // ⚡ 2. THE CHAMELEON ENVIRONMENT DETECTOR ⚡
   useEffect(() => {
     let timeoutId: NodeJS.Timeout;
 
@@ -633,10 +629,13 @@ const [environment, setEnvironment] = useState<'MINIPAY' | 'FARCASTER' | 'WEB' |
           return;
         }
 
-                // Option 3: Standard Web (Base App / Mobile Wallets)
-        // Wagmi handles the connection cache completely in the background.
+        // Option 3: Standard Web (Base App / Mobile Wallets)
+        // Wagmi handles all the auto-reconnects natively in the background!
         setEnvironment('WEB');
 
+      } catch (error) {
+        console.error("Connection failed:", error);
+        setEnvironment('WEB');
       }
     };
 
