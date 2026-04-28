@@ -36,7 +36,13 @@ const [environment, setEnvironment] = useState<'MINIPAY' | 'FARCASTER' | 'WEB' |
   const [address, setAddress] = useState<string | null>(null);
   const [client, setClient] = useState<WalletClient | null>(null);
 
-  const isMainnet = process.env.NEXT_PUBLIC_NETWORK === "celo" || process.env.NEXT_PUBLIC_NETWORK === "mainnet";
+    // ⚡ SMART MAINNET DETECTOR ⚡
+  const isMainnet = 
+    process.env.NEXT_PUBLIC_NETWORK === "mainnet" || 
+    process.env.NEXT_PUBLIC_NETWORK === "celo" || 
+    process.env.NEXT_PUBLIC_NETWORK === "base";
+
+  // ⚡ MUST BE A USESTATE (Defaults to Celo, but changes to Base when connected) ⚡
   const [activeChain, setActiveChain] = useState<any>(isMainnet ? celo : celoSepolia);
 
   const [nairaAmount, setNairaAmount] = useState(""); 
