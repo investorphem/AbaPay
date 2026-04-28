@@ -585,45 +585,39 @@ export default function Home() {
     return () => { if (intervalId) clearInterval(intervalId); };
   }, []);
 
-    // ⚡ 2. THE CHAMELEON ENVIRONMENT DETECTOR ⚡
+  // ⚡ 2. THE CHAMELEON ENVIRONMENT DETECTOR ⚡
   useEffect(() => {
     let timeoutId: NodeJS.Timeout;
 
     const detectAndConnect = async () => {
-  try {
-    // 1. Wait for the context FIRST to establish the iframe bridge
-    const context = await sdk.context;
+      try {
+        // Option 1: Farcaster SDK (Warpcast App)
+        const context = await sdk.context;
+        if (context && context.client) {
+          setEnvironment('FARCASTER');
+          sdk.actions.ready(); 
+          
+          const targetChain = isMainnet ? base : baseSepolia;
+          setActiveChain(targetChain);
 
-    // Option 1: Farcaster SDK (Warpcast App)
-    if (context && context.client) {
-      // 2. NOW signal Warpcast to drop the splash screen
-      sdk.actions.ready();
+          const farcasterClient = createWalletClient({
+            chain: targetChain,
+            transport: custom(sdk.wallet.ethProvider),
+          });
 
-      setEnvironment('FARCASTER');
+          const [acc] = await farcasterClient.requestAddresses();
+          const currentChainId = await farcasterClient.getChainId();
+          if (currentChainId !== targetChain.id) {
+             await farcasterClient.switchChain({ id: targetChain.id });
+          }
 
-      const targetChain = isMainnet ? base : baseSepolia;
-      setActiveChain(targetChain);
+          setAddress(acc);
+          setClient(farcasterClient);
+          return; // Exit
+        }
 
-      const farcasterClient = createWalletClient({
-        chain: targetChain,
-        transport: custom(sdk.wallet.ethProvider),
-      });
-
-      const [acc] = await farcasterClient.requestAddresses();
-      const currentChainId = await farcasterClient.getChainId();
-      if (currentChainId !== targetChain.id) {
-         await farcasterClient.switchChain({ id: targetChain.id });
-      }
-
-      setAddress(acc);
-      setClient(farcasterClient);
-      return; // Exit
-    }
-
-    // Option 2: Opera MiniPay
-    if (typeof window !== "undefined" && (window as any).ethereum && (window as any).ethereum.isMiniPay) {
-       // ... existing MiniPay logic
-
+        // Option 2: Opera MiniPay
+        if (typeof window !== "undefined" && (window as any).ethereum && (window as any).ethereum.isMiniPay) {
           setEnvironment('MINIPAY');
           
           const targetChain = isMainnet ? celo : celoSepolia;
