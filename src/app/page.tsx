@@ -123,11 +123,19 @@ const [environment, setEnvironment] = useState<'MINIPAY' | 'FARCASTER' | 'WEB' |
   const currentTransactions = transactions.slice(indexOfFirstItem, indexOfLastItem);
   const totalPages = Math.ceil(transactions.length / ITEMS_PER_PAGE);
 
-  const currentDisco = useMemo(() => ELECTRICITY_DISCOS.find(d => d.serviceID === elecProvider), [elecProvider]);
+    const currentDisco = useMemo(() => ELECTRICITY_DISCOS.find(d => d.serviceID === elecProvider), [elecProvider]);
   const currentCable = useMemo(() => CABLE_PROVIDERS_LIST.find(c => c.serviceID === cableProvider), [cableProvider]);
   const currentInternet = useMemo(() => INTERNET_PROVIDERS.find(c => c.serviceID === internetProvider), [internetProvider]);
 
   const isInternational = activeCountry.code !== "NG";
+
+  // ⚡ DYNAMIC NETWORK TEXT ⚡
+  const activeNetworkDisplay = useMemo(() => {
+    if (!address) return "Base & Celo"; // Not connected
+    if (activeChain?.name?.toLowerCase().includes("base")) return "Base";
+    if (activeChain?.name?.toLowerCase().includes("celo")) return "Celo";
+    return activeChain?.name || "Base & Celo";
+  }, [address, activeChain]);
 
   const isCurrentServiceDisabled = useMemo(() => {
       if (!killSwitches) return false;
@@ -2160,7 +2168,7 @@ const [environment, setEnvironment] = useState<'MINIPAY' | 'FARCASTER' | 'WEB' |
           />
         )}
 
-        <AppFooter />
+        <AppFooter network={activeNetworkDisplay} />
       </div>
     </main>
   );
