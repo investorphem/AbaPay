@@ -10,7 +10,7 @@
   },
   "dependencies": {
     "@base-org/account": "^1.0.0",
-    "@farcaster/frame-sdk": "latest",
+    "@farcaster/miniapp-sdk": "latest",
     "@google/generative-ai": "^0.24.1",
     "@supabase/supabase-js": "^2.101.1",
     "@tanstack/react-query": "^5.0.0",
