@@ -12,6 +12,7 @@ import {
 } from "lucide-react";
 import { supabase } from "@/utils/supabase";
 import { ELECTRICITY_DISCOS } from "./discos"; 
+import { useAccount, useConnect } from 'wagmi';
 
 import { ReceiptModal, SelectionModal } from "@/components/Modals";
 import { TermsModal, PrivacyModal } from "@/components/Modals";
@@ -27,6 +28,19 @@ import {
 import { HistoryTab } from "@/components/HistoryTab";
 
 export default function Home() {
+  // Add these lines near your other states
+  const { address: wagmiAddress, isConnected: isWagmiConnected } = useAccount();
+  const { connectors, connect } = useConnect();
+
+  // ⚡ WAGMI TO ABAPAY BRIDGE ⚡
+  useEffect(() => {
+    if (environment === 'WEB' && isWagmiConnected && wagmiAddress) {
+      setAddress(wagmiAddress);
+      // We don't need to manually set the client here because 
+      // Wagmi handles contract writes natively under the hood!
+    }
+  }, [environment, isWagmiConnected, wagmiAddress]);
+
   // To this:
 const [environment, setEnvironment] = useState<'MINIPAY' | 'FARCASTER' | 'WEB' | 'LOADING' | 'BASE'>('LOADING');
   const [killSwitches, setKillSwitches] = useState<Record<string, boolean>>({});
@@ -619,52 +633,10 @@ const [environment, setEnvironment] = useState<'MINIPAY' | 'FARCASTER' | 'WEB' |
           return;
         }
 
-        // Option 3: Standard Web (Passive Check & Auto-Reconnect)
+                // Option 3: Standard Web (Base App / Mobile Wallets)
+        // Wagmi handles the connection cache completely in the background.
         setEnvironment('WEB');
-        
-        // Wait for the mobile browser to inject the wallet BEFORE checking
-        let ethWeb = typeof window !== "undefined" ? (window as any).ethereum : undefined;
-        
-        if (!ethWeb && typeof window !== "undefined") {
-          // If the wallet isn't there instantly, wait 500ms for Base App to inject it
-          await new Promise(resolve => setTimeout(resolve, 500));
-          ethWeb = (window as any).ethereum;
-        }
 
-        if (ethWeb) {
-          let webTargetChain: any = isMainnet ? base : baseSepolia; 
-          const webClient = createWalletClient({ chain: webTargetChain, transport: custom(ethWeb) });
-          
-          const previouslyConnected = localStorage.getItem('abapay_connected') === 'true';
-          
-          // Step 1: Try the polite, silent check
-          let addresses = await webClient.getAddresses().catch(() => []);
-          
-          // Step 2: If the wallet was still sleepy but we KNOW they connected before, 
-          // forcefully request the addresses.
-          if (addresses.length === 0 && previouslyConnected) {
-             addresses = await webClient.requestAddresses().catch(() => []);
-          }
-          
-          if (addresses.length > 0) {
-             const acc = addresses[0];
-             const currentChainId = await webClient.getChainId();
-             if (currentChainId === celo.id || currentChainId === celoSepolia.id) {
-                webTargetChain = currentChainId === celo.id ? celo : celoSepolia;
-             } else if (currentChainId !== webTargetChain.id) {
-                await webClient.switchChain({ id: webTargetChain.id }).catch(() => {});
-             }
-             setActiveChain(webTargetChain);
-             setAddress(acc); 
-             setClient(webClient);
-          } else {
-             // If we STILL couldn't connect, clear the memory so the user can try again
-             localStorage.removeItem('abapay_connected');
-          }
-        }
-      } catch (error) {
-        console.error("Connection failed:", error);
-        setEnvironment('WEB');
       }
     };
 
@@ -1092,7 +1064,7 @@ const [environment, setEnvironment] = useState<'MINIPAY' | 'FARCASTER' | 'WEB' |
           </div>
         </div>
 
-                {/* ⚡ PREMIUM CONNECT WALLET BANNER ⚡ */}
+                        {/* ⚡ PREMIUM CONNECT WALLET BANNER ⚡ */}
         {!address && environment === 'WEB' && (
           <div className="bg-slate-900 p-1 rounded-[1.25rem] mb-6 shadow-xl shadow-slate-900/10 animate-in fade-in slide-in-from-top-4">
             <div className="bg-slate-800/50 backdrop-blur-md rounded-xl p-3.5 flex justify-between items-center border border-slate-700/50">
@@ -1105,14 +1077,17 @@ const [environment, setEnvironment] = useState<'MINIPAY' | 'FARCASTER' | 'WEB' |
                      <p className="text-slate-400 text-[10px] font-bold mt-1 uppercase tracking-wider">Access AbaPay</p>
                   </div>
                </div>
+               
+               {/* ⚡ NEW WAGMI BUTTON PASTED HERE ⚡ */}
                <button 
-                  onClick={connectWebWallet}
+                  onClick={() => connect({ connector: connectors[0] })}
                   disabled={isProcessing}
                   className="bg-emerald-500 hover:bg-emerald-400 text-slate-900 font-black text-xs px-5 py-2.5 rounded-full transition-all active:scale-95 disabled:opacity-50 shadow-md flex items-center gap-1.5"
                >
                   {isProcessing ? <Loader2 size={14} className="animate-spin"/> : null}
                   {isProcessing ? "WAIT" : "CONNECT"}
                </button>
+
             </div>
           </div>
         )}
