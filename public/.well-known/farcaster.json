@@ -14,7 +14,7 @@
     "splashImageUrl": "https://abapays.com/logo.png",
     "splashBackgroundColor": "#f8fafc",
     "webhookUrl": "https://abapays.com/api/webhook",
-    "subtitle": "Pay utility bills globally with crypto",
+    "subtitle": "Pay bills with crypto",
     "description": "AbaPay bridges Web3 liquidity to real-world utility. Instantly pay for electricity, airtime, data, and TV subscriptions globally.",
     "primaryCategory": "finance",
     "tags": [
@@ -23,9 +23,17 @@
       "utility",
       "defi"
     ],
+    "tagline": "Bridge crypto to real-world utility",
+    "ogTitle": "AbaPay - Global Crypto Utility Payments",
+    "ogDescription": "Pay your electricity, airtime, and TV bills instantly using crypto.",
+    "ogImageUrl": "https://abapays.com/og-image.png",
+    "castShareUrl": "https://abapays.com",
     "screenshotUrls": [
       "https://abapays.com/screenshot1.png",
-      "https://abapays.com/screenshot2.png"
+      "https://abapays.com/screenshot2.png",
+      "https://abapays.com/screenshot3.png",
+      "https://abapays.com/screenshot4.png",
+      "https://abapays.com/screenshot5.png"
     ],
     "heroImageUrl": "https://abapays.com/hero-banner.png"
   }
