@@ -15,7 +15,7 @@ const geistMono = Geist_Mono({
 // ⚡ 1. FARCASTER V2 MINI-APP CONFIG ⚡
 // This perfectly meets Farcaster's requirements for a "Launch" button app
 const farcasterConfig = {
-  version: "next",
+  version: "1",
   imageUrl: "https://abapays.com/og-image.png", 
   button: {
     title: "Launch AbaPay", 
