@@ -23,17 +23,16 @@
       "utility",
       "defi"
     ],
-    "tagline": "Bridge crypto to real-world utility",
-    "ogTitle": "AbaPay - Global Crypto Utility Payments",
+    "tagline": "Bridge crypto to utility",
+    "ogTitle": "AbaPay - Utility Payments",
     "ogDescription": "Pay your electricity, airtime, and TV bills instantly using crypto.",
     "ogImageUrl": "https://abapays.com/og-image.png",
     "castShareUrl": "https://abapays.com",
     "screenshotUrls": [
       "https://abapays.com/screenshot1.png",
       "https://abapays.com/screenshot2.png",
-      "https://abapays.com/screenshot3.png",
-      "https://abapays.com/screenshot4.png",
-      "https://abapays.com/screenshot5.png"
+      "https://abapays.com/screenshot3.png"
+      
     ],
     "heroImageUrl": "https://abapays.com/hero-banner.png"
   }
