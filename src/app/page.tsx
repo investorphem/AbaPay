@@ -2170,7 +2170,7 @@ export default function Home() {
                 <div className="animate-in fade-in mt-3">
                      <input 
                         type="email" 
-                        placeholder={isInternational ? "Email Address (Required by VTpass)" : "Email Address (Optional for Receipt)"}
+                        placeholder={isInternational ? "Email Address (Required)" : "Email Address (Optional for Receipt)"}
                         className={`w-full bg-slate-50 border p-5 rounded-2xl font-bold text-slate-700 outline-none transition-colors ${
                             isInternational && customerEmail && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(customerEmail) ? 'border-red-300 focus:border-red-500' : 'border-slate-100 focus:border-emerald-500'
                         }`}
