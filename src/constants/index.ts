@@ -72,7 +72,7 @@ export const SUPPORTED_TOKENS = [
     decimals: 6,
     mainnet: "0x48065fbBE25f71C9282ddf5e1cD6D6A8824272d2", // Celo Mainnet (Default to Celo)
     sepolia: "0x1E05bc8B6DEE14B44B3654fD4eb59fF0E9a6D2c7", // Celo Alfajores
-    baseMainnet: "0xfde4C3ce781b4bA68120d6261cbad65ce0aB00b", // Base Mainnet (Bridged USDT)
+    baseMainnet: "0xfde4C96c8593536E31F229EA8f37b2ADa2699bb2", // Base Mainnet (Bridged USDT - Checksummed)
     baseSepolia: "0x1d5728a887e1fa1a191467094ac7761d019b4c2c", // Base Sepolia
     supportedNetworks: ["celo", "base"] // ⚡ On both chains
   }
