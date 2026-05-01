@@ -777,13 +777,26 @@ export default function Home() {
     try { const saved = localStorage.getItem(`abapay_beneficiaries_${address}`); if (saved) setBeneficiaries(JSON.parse(saved)); else setBeneficiaries({}); } catch (e) {}
   }, [address]);
 
-  useEffect(() => {
+    useEffect(() => {
     async function fetchBalance() {
       if (!address) return;
       setIsFetchingBalance(true);
       try {
         const publicClient = createPublicClient({ chain: activeChain, transport: http() });
-        const tokenAddress = isMainnet ? selectedToken.mainnet : selectedToken.sepolia;
+        
+        // ⚡ THE FIX: Dynamically select the token address based on the active chain
+        let tokenAddress;
+        if (activeChain.id === base.id) {
+            tokenAddress = (selectedToken as any).baseMainnet || selectedToken.mainnet;
+        } else if (activeChain.id === baseSepolia.id) {
+            tokenAddress = (selectedToken as any).baseSepolia || selectedToken.sepolia;
+        } else if (activeChain.id === celo.id) {
+            tokenAddress = (selectedToken as any).celoMainnet || selectedToken.mainnet;
+        } else {
+            // Defaults to Celo Alfajores
+            tokenAddress = (selectedToken as any).celoSepolia || selectedToken.sepolia;
+        }
+
         const balanceWei = await publicClient.readContract({ address: tokenAddress as `0x${string}`, abi: ERC20_ABI, functionName: 'balanceOf', args: [address] });
         setWalletBalance(parseFloat(formatUnits(balanceWei as bigint, selectedToken.decimals)).toFixed(4));
       } catch (error) { setWalletBalance("0.00"); }
