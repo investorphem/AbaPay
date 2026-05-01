@@ -95,8 +95,15 @@ export default function AdminDashboard() {
           setClient(walletClient);
 
           const publicClient = createPublicClient({ chain: tempChain, transport: http() });
-          const contractOwner = await publicClient.readContract({
-            address: CELO_CONTRACT,
+          
+          // Fallback bypass if CELO_CONTRACT is not set yet, but BASE_CONTRACT is
+          const targetCheckContract = (CELO_CONTRACT && CELO_CONTRACT.length === 42) ? CELO_CONTRACT : BASE_CONTRACT;
+          const targetCheckChain = (CELO_CONTRACT && CELO_CONTRACT.length === 42) ? tempChain : (isMainnet ? base : baseSepolia);
+          
+          const contractChecker = createPublicClient({ chain: targetCheckChain, transport: http() });
+
+          const contractOwner = await contractChecker.readContract({
+            address: targetCheckContract,
             abi: ABAPAY_ADMIN_ABI,
             functionName: 'owner',
           }) as string;
@@ -121,7 +128,7 @@ export default function AdminDashboard() {
       }
     }
     initAdmin();
-  }, [CELO_CONTRACT, isMainnet]);
+  }, [CELO_CONTRACT, BASE_CONTRACT, isMainnet]);
 
   const refreshAllData = async () => {
     setIsFetching(true);
@@ -203,26 +210,30 @@ export default function AdminDashboard() {
     const basePublic = createPublicClient({ chain: isMainnet ? base : baseSepolia, transport: http() });
 
     try {
-      // Fetch Celo Vaults
-      const cUsdtBal = await celoPublic.readContract({ address: (isMainnet ? TOKENS["USD₮"].celoMainnet : TOKENS["USD₮"].celoSepolia) as `0x${string}`, abi: ERC20_ABI, functionName: 'balanceOf', args: [CELO_CONTRACT] }) as bigint;
-      const cUsdcBal = await celoPublic.readContract({ address: (isMainnet ? TOKENS["USDC"].celoMainnet : TOKENS["USDC"].celoSepolia) as `0x${string}`, abi: ERC20_ABI, functionName: 'balanceOf', args: [CELO_CONTRACT] }) as bigint;
-      const cUsdmBal = await celoPublic.readContract({ address: (isMainnet ? TOKENS["USDm"].celoMainnet : TOKENS["USDm"].celoSepolia) as `0x${string}`, abi: ERC20_ABI, functionName: 'balanceOf', args: [CELO_CONTRACT] }) as bigint;
+      // Safe check: Only fetch Celo if the address is a valid 42-character hex string
+      if (CELO_CONTRACT && CELO_CONTRACT.length === 42) {
+          const cUsdtBal = await celoPublic.readContract({ address: (isMainnet ? TOKENS["USD₮"].celoMainnet : TOKENS["USD₮"].celoSepolia) as `0x${string}`, abi: ERC20_ABI, functionName: 'balanceOf', args: [CELO_CONTRACT] }) as bigint;
+          const cUsdcBal = await celoPublic.readContract({ address: (isMainnet ? TOKENS["USDC"].celoMainnet : TOKENS["USDC"].celoSepolia) as `0x${string}`, abi: ERC20_ABI, functionName: 'balanceOf', args: [CELO_CONTRACT] }) as bigint;
+          const cUsdmBal = await celoPublic.readContract({ address: (isMainnet ? TOKENS["USDm"].celoMainnet : TOKENS["USDm"].celoSepolia) as `0x${string}`, abi: ERC20_ABI, functionName: 'balanceOf', args: [CELO_CONTRACT] }) as bigint;
 
-      setCeloVaults({
-          usdt: formatUnits(cUsdtBal, TOKENS["USD₮"].decimals),
-          usdc: formatUnits(cUsdcBal, TOKENS["USDC"].decimals),
-          usdm: formatUnits(cUsdmBal, TOKENS["USDm"].decimals),
-      });
+          setCeloVaults({
+              usdt: formatUnits(cUsdtBal, TOKENS["USD₮"].decimals),
+              usdc: formatUnits(cUsdcBal, TOKENS["USDC"].decimals),
+              usdm: formatUnits(cUsdmBal, TOKENS["USDm"].decimals),
+          });
+      }
 
-      // Fetch Base Vaults
-      const bUsdtBal = await basePublic.readContract({ address: (isMainnet ? TOKENS["USD₮"].baseMainnet : TOKENS["USD₮"].baseSepolia) as `0x${string}`, abi: ERC20_ABI, functionName: 'balanceOf', args: [BASE_CONTRACT] }) as bigint;
-      const bUsdcBal = await basePublic.readContract({ address: (isMainnet ? TOKENS["USDC"].baseMainnet : TOKENS["USDC"].baseSepolia) as `0x${string}`, abi: ERC20_ABI, functionName: 'balanceOf', args: [BASE_CONTRACT] }) as bigint;
+      // Safe check: Only fetch Base if the address is a valid 42-character hex string
+      if (BASE_CONTRACT && BASE_CONTRACT.length === 42) {
+          const bUsdtBal = await basePublic.readContract({ address: (isMainnet ? TOKENS["USD₮"].baseMainnet : TOKENS["USD₮"].baseSepolia) as `0x${string}`, abi: ERC20_ABI, functionName: 'balanceOf', args: [BASE_CONTRACT] }) as bigint;
+          const bUsdcBal = await basePublic.readContract({ address: (isMainnet ? TOKENS["USDC"].baseMainnet : TOKENS["USDC"].baseSepolia) as `0x${string}`, abi: ERC20_ABI, functionName: 'balanceOf', args: [BASE_CONTRACT] }) as bigint;
 
-      setBaseVaults({
-          usdt: formatUnits(bUsdtBal, TOKENS["USD₮"].decimals),
-          usdc: formatUnits(bUsdcBal, TOKENS["USDC"].decimals)
-      });
-    } catch (error) { console.error("Failed to fetch multi-chain vault balances"); }
+          setBaseVaults({
+              usdt: formatUnits(bUsdtBal, TOKENS["USD₮"].decimals),
+              usdc: formatUnits(bUsdcBal, TOKENS["USDC"].decimals)
+          });
+      }
+    } catch (error) { console.error("Failed to fetch multi-chain vault balances", error); }
   };
 
   const fetchVtPassHealth = async () => {
@@ -257,7 +268,16 @@ export default function AdminDashboard() {
          ? (isMainnet ? (TOKENS[tokenSymbol] as any).baseMainnet : (TOKENS[tokenSymbol] as any).baseSepolia)
          : (isMainnet ? TOKENS[tokenSymbol].celoMainnet : TOKENS[tokenSymbol].celoSepolia);
 
-      const hash = await client.writeContract({ address: targetContract, abi: ABAPAY_ADMIN_ABI, functionName: 'withdrawFunds', args: [tokenAddr], account: address });
+      // ⚡ ADDED 'chain: targetChain' to bypass viem strict mode error
+      const hash = await client.writeContract({ 
+          chain: targetChain, 
+          address: targetContract, 
+          abi: ABAPAY_ADMIN_ABI, 
+          functionName: 'withdrawFunds', 
+          args: [tokenAddr], 
+          account: address 
+      });
+      
       setStatus(`Success! Hash: ${hash.slice(0, 10)}`);
       setTimeout(() => refreshAllData(), 5000);
     } catch (error) { setStatus("Rejected or Insufficient Gas."); }
@@ -283,7 +303,7 @@ export default function AdminDashboard() {
       const isBaseTx = (tx.blockchain || "").toUpperCase().includes("BASE");
       const targetChain = isBaseTx ? (isMainnet ? base : baseSepolia) : (isMainnet ? celo : celoSepolia);
       const targetContract = isBaseTx ? BASE_CONTRACT : CELO_CONTRACT;
-      
+
       // ⚡ TYPE FIX APPLIED ⚡
       const tokenAddr = isBaseTx ? (isMainnet ? (tokenData as any).baseMainnet : (tokenData as any).baseSepolia) : (isMainnet ? tokenData.celoMainnet : tokenData.celoSepolia);
 
@@ -298,7 +318,15 @@ export default function AdminDashboard() {
       const cleanAmountString = rawAmount.toFixed(decimals);
       const valueInWei = parseUnits(cleanAmountString, decimals);
 
-      const refundHash = await client.writeContract({ address: targetContract as `0x${string}`, abi: ABAPAY_ADMIN_ABI, functionName: 'refundUser', args: [tokenAddr, tx.wallet_address, valueInWei], account: address });
+      // ⚡ ADDED 'chain: targetChain' to bypass viem strict mode error
+      const refundHash = await client.writeContract({ 
+          chain: targetChain, 
+          address: targetContract as `0x${string}`, 
+          abi: ABAPAY_ADMIN_ABI, 
+          functionName: 'refundUser', 
+          args: [tokenAddr, tx.wallet_address, valueInWei], 
+          account: address 
+      });
 
       const publicClient = createPublicClient({ chain: targetChain, transport: http() });
       const receipt = await publicClient.waitForTransactionReceipt({ hash: refundHash });
@@ -670,7 +698,7 @@ export default function AdminDashboard() {
 
                         const walletInfo = allWalletsMap.find(w => w.wallet_address?.toLowerCase() === tx.wallet_address?.toLowerCase());
                         const verifiedPhone = walletInfo?.abapay_users?.verified_phone || "N/A";
-                        
+
                         // ⚡ DB BLOCKCHAIN UI FIX APPLIED ⚡
                         const isBaseTx = (tx.blockchain || "").toUpperCase().includes("BASE");
 
