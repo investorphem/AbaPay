@@ -592,8 +592,8 @@ export default function Home() {
                       { to: tokenAddress, data: encodedApprove, value: BigInt(0) },
                       { to: ABAPAY_CONTRACT, data: encodedPayBill, value: BigInt(0) }
                   ],
-                  capabilities: {
-                      paymasterService: { url: process.env.NEXT_PUBLIC_PAYMASTER_URL }
+                                    capabilities: {
+                      paymasterService: { url: process.env.NEXT_PUBLIC_PAYMASTER_URL as string }
                   }
               });
 
