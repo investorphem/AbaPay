@@ -27,7 +27,7 @@ const ERC20_ABI = [
 
 // ⚡ MULTI-CHAIN TOKENS CONFIG ⚡
 const TOKENS = {
-  "USD₮": { decimals: 6, celoMainnet: "0x48065fbbe25f71c9282ddf5e1cd6d6a887483d5e", celoSepolia: "0xd077A400968890Eacc75cdc901F0356c943e4fDb", baseMainnet: "0xfde4C3ce781b4bA68120d6261cbad65ce0aB00b", baseSepolia: "0x1d5728a887e1fa1a191467094ac7761d019b4c2c" },
+  "USD₮": { decimals: 6, celoMainnet: "0x48065fbbe25f71c9282ddf5e1cd6d6a887483d5e", celoSepolia: "0xd077A400968890Eacc75cdc901F0356c943e4fDb", baseMainnet: "0xfde4C96c8593536E31F229EA8f37b2ADa2699bb2", baseSepolia: "0x1d5728a887e1fa1a191467094ac7761d019b4c2c" },
   "USDC": { decimals: 6, celoMainnet: "0xcebA9300f2b948710d2653dD7B07f33A8B32118C", celoSepolia: "0x2F25deB3848C207fc8E0c34035B3Ba7fC157602B", baseMainnet: "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913", baseSepolia: "0x036CbD53842c5426634e7929541eC2318f3dCF7e" },
   "USDm": { decimals: 18, celoMainnet: "0x765DE816845861e75A25fCA122bb6898B8B1282a", celoSepolia: "0xdE9e4C3ce781b4bA68120d6261cbad65ce0aB00b" } // Exclusive to Celo
 };
