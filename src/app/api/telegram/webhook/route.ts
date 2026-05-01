@@ -1,7 +1,8 @@
 // src/app/api/telegram/webhook/route.ts
 import { NextResponse } from 'next/server';
 
-const TELEGRAM_BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN as string;
+// ⚡ CHANGED: Now explicitly uses the DEAI token, completely ignoring the Admin token
+const DEAI_BOT_TOKEN = process.env.DEAI_TELEGRAM_BOT_TOKEN as string;
 
 export async function POST(req: Request) {
   try {
@@ -19,7 +20,7 @@ export async function POST(req: Request) {
 
     // Delete PIN instantly for security (if it looks like a 4 digit number)
     if (/^\d{4}$/.test(text.trim())) {
-      await fetch(`https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/deleteMessage`, {
+      await fetch(`https://api.telegram.org/bot${DEAI_BOT_TOKEN}/deleteMessage`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ chat_id: chatId, message_id: messageId })
@@ -41,7 +42,7 @@ export async function POST(req: Request) {
 
     // Execute the Brain's instructions
     if (engineData.action === 'REPLY' || engineData.action === 'SUCCESS_RECEIPT' || engineData.action === 'REQUIRE_TOKEN_SELECTION') {
-      await fetch(`https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage`, {
+      await fetch(`https://api.telegram.org/bot${DEAI_BOT_TOKEN}/sendMessage`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ 
