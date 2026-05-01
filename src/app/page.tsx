@@ -3,6 +3,7 @@
 import React, { useState, useEffect, useMemo, useRef } from "react";
 import sdk from "@farcaster/miniapp-sdk";
 import { createWalletClient, createPublicClient, custom, http, parseUnits, formatUnits, type WalletClient } from "viem";
+import { eip5792Actions } from "viem/experimental";
 import { celo, celoSepolia, base, baseSepolia } from "viem/chains";
 import Link from "next/link";
 import { 
@@ -646,7 +647,7 @@ export default function Home() {
     notifyFarcaster();
   }, []);
 
-    // ⚡ WAGMI TO ABAPAY BRIDGE ⚡
+      // ⚡ WAGMI TO ABAPAY BRIDGE ⚡
   useEffect(() => {
     if (environment === 'WEB' && isWagmiConnected && wagmiAddress) {
       setAddress(wagmiAddress);
@@ -654,12 +655,13 @@ export default function Home() {
       const targetChain = wagmiChain || (isMainnet ? base : baseSepolia);
       setActiveChain(targetChain);
 
-      // ⚡ THE FIX: Automatically create the Wallet Client for auto-connected apps like Base
       if (!client && typeof window !== "undefined" && (window as any).ethereum) {
+          // ⚡ UPGRADED WITH eip5792Actions FOR PAYMASTER SUPPORT
           const webClient = createWalletClient({ 
               chain: targetChain as any, 
               transport: custom((window as any).ethereum) 
-          });
+          }).extend(eip5792Actions()); 
+          
           setClient(webClient);
       }
     }
