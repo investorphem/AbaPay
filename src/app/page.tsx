@@ -748,18 +748,21 @@ export default function Home() {
     }
   }, [environment, isWagmiConnected, wagmiAddress, wagmiChain, isMainnet, client]);
 
-  // ⚡ 2. THE CHAMELEON ENVIRONMENT DETECTOR ⚡
+    // ⚡ 2. THE CHAMELEON ENVIRONMENT DETECTOR ⚡
   useEffect(() => {
     let timeoutId: NodeJS.Timeout;
 
-            // Option 1: Farcaster SDK
+    // ⚡ Notice the 'async' word right here! That's what Vercel was crying about.
+    const detectAndConnect = async () => {
+      try {
+        // Option 1: Farcaster SDK
         const context = await sdk.context;
         if (context && context.client) {
           setEnvironment('FARCASTER');
           const targetChain = isMainnet ? base : baseSepolia;
           setActiveChain(targetChain);
           
-          // ⚡ Don't forget to keep eip5792Actions() here for the Paymaster!
+          // ⚡ Keep eip5792Actions() here for the Paymaster!
           const farcasterClient = createWalletClient({ 
               chain: targetChain, 
               transport: custom(sdk.wallet.ethProvider) 
@@ -776,7 +779,7 @@ export default function Home() {
              setClient(farcasterClient);
           } catch(e) {
              console.log("User rejected auto-connect");
-             // It fails silently here, which leaves the "Connect Wallet" button visible!
+             // Fails silently, leaving the fallback "Connect Wallet" button visible
           }
           return;
         }
@@ -787,6 +790,7 @@ export default function Home() {
           const targetChain = isMainnet ? celo : celoSepolia;
           setActiveChain(targetChain);
           const miniPayClient = createWalletClient({ chain: targetChain, transport: custom((window as any).ethereum) });
+          
           const [acc] = await miniPayClient.requestAddresses();
           const currentChainId = await miniPayClient.getChainId();
           if (currentChainId !== targetChain.id) await miniPayClient.switchChain({ id: targetChain.id }).catch(()=>{});
