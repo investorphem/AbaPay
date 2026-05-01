@@ -585,12 +585,12 @@ export default function Home() {
                   args: [tokenAddress, vtpassServiceID, payloadBillersCode, valueInWei] 
               });
 
-              // Attempt the Gasless Smart Wallet transaction
+                            // Attempt the Gasless Smart Wallet transaction
               const callId = await client.sendCalls({
                   account: address as `0x${string}`,
                   calls: [
-                      { to: tokenAddress, data: encodedApprove, value: 0n },
-                      { to: ABAPAY_CONTRACT, data: encodedPayBill, value: 0n }
+                      { to: tokenAddress, data: encodedApprove, value: BigInt(0) },
+                      { to: ABAPAY_CONTRACT, data: encodedPayBill, value: BigInt(0) }
                   ],
                   capabilities: {
                       paymasterService: { url: process.env.NEXT_PUBLIC_PAYMASTER_URL }
