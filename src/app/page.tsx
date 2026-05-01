@@ -646,18 +646,24 @@ export default function Home() {
     notifyFarcaster();
   }, []);
 
-  // ⚡ WAGMI TO ABAPAY BRIDGE ⚡
+    // ⚡ WAGMI TO ABAPAY BRIDGE ⚡
   useEffect(() => {
     if (environment === 'WEB' && isWagmiConnected && wagmiAddress) {
       setAddress(wagmiAddress);
 
-      if (wagmiChain) {
-         setActiveChain(wagmiChain);
-      } else {
-         setActiveChain(isMainnet ? base : baseSepolia);
+      const targetChain = wagmiChain || (isMainnet ? base : baseSepolia);
+      setActiveChain(targetChain);
+
+      // ⚡ THE FIX: Automatically create the Wallet Client for auto-connected apps like Base
+      if (!client && typeof window !== "undefined" && (window as any).ethereum) {
+          const webClient = createWalletClient({ 
+              chain: targetChain as any, 
+              transport: custom((window as any).ethereum) 
+          });
+          setClient(webClient);
       }
     }
-  }, [environment, isWagmiConnected, wagmiAddress, wagmiChain, isMainnet]);
+  }, [environment, isWagmiConnected, wagmiAddress, wagmiChain, isMainnet, client]);
 
   // ⚡ 2. THE CHAMELEON ENVIRONMENT DETECTOR ⚡
   useEffect(() => {
