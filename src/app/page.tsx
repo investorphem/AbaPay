@@ -752,19 +752,32 @@ export default function Home() {
   useEffect(() => {
     let timeoutId: NodeJS.Timeout;
 
-    const detectAndConnect = async () => {
-      try {
-        // Option 1: Farcaster SDK
+            // Option 1: Farcaster SDK
         const context = await sdk.context;
         if (context && context.client) {
           setEnvironment('FARCASTER');
           const targetChain = isMainnet ? base : baseSepolia;
           setActiveChain(targetChain);
-          const farcasterClient = createWalletClient({ chain: targetChain, transport: custom(sdk.wallet.ethProvider) });
-          const [acc] = await farcasterClient.requestAddresses();
-          const currentChainId = await farcasterClient.getChainId();
-          if (currentChainId !== targetChain.id) await farcasterClient.switchChain({ id: targetChain.id }).catch(()=>{});
-          setAddress(acc); setClient(farcasterClient);
+          
+          // ⚡ Don't forget to keep eip5792Actions() here for the Paymaster!
+          const farcasterClient = createWalletClient({ 
+              chain: targetChain, 
+              transport: custom(sdk.wallet.ethProvider) 
+          }).extend(eip5792Actions());
+          
+          try {
+             // ⚡ REVERTED: Back to the instant auto-connect you had before!
+             const [acc] = await farcasterClient.requestAddresses();
+             const currentChainId = await farcasterClient.getChainId();
+             if (currentChainId !== targetChain.id) {
+                 await farcasterClient.switchChain({ id: targetChain.id }).catch(()=>{});
+             }
+             setAddress(acc); 
+             setClient(farcasterClient);
+          } catch(e) {
+             console.log("User rejected auto-connect");
+             // It fails silently here, which leaves the "Connect Wallet" button visible!
+          }
           return;
         }
 
