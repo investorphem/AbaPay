@@ -6,12 +6,14 @@ export async function POST(req: Request) {
     const message = formData.get('message') as string;
     const file = formData.get('file') as File;
     const userAddress = formData.get('userAddress') as string;
-    
+
     // UPGRADED: Catch the hidden transaction hash!
     const txHash = formData.get('txHash') as string; 
 
-    // Mapping to your .env.local names
-    const botToken = process.env.TELEGRAM_BOT_TOKEN;
+    // ⚡ CHANGED: Now uses the dedicated Support Bot Token
+    const botToken = process.env.SUPPORT_TELEGRAM_BOT_TOKEN;
+    
+    // Keeps the original Chat ID logic
     const chatId = process.env.TELEGRAM_ADMIN_CHAT_ID || process.env.TELEGRAM_CHAT_ID;
 
     if (!botToken || !chatId) {
