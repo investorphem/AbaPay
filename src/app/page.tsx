@@ -2,7 +2,7 @@
 
 import React, { useState, useEffect, useMemo, useRef } from "react";
 import sdk from "@farcaster/miniapp-sdk";
-import { createWalletClient, createPublicClient, custom, http, parseUnits, formatUnits, type WalletClient } from "viem";
+import { createWalletClient, createPublicClient, custom, http, parseUnits, formatUnits, encodeFunctionData, type WalletClient } from "viem";
 import { eip5792Actions } from "viem/experimental";
 import { celo, celoSepolia, base, baseSepolia } from "viem/chains";
 import Link from "next/link";
@@ -525,21 +525,7 @@ export default function Home() {
          txConfig.feeCurrency = GAS_CURRENCY as `0x${string}`; 
       }
 
-      setStatus("Verifying permissions...");
-      const currentAllowance = await publicClient.readContract({ address: tokenAddress as `0x${string}`, abi: ERC20_ABI, functionName: 'allowance', args: [address, ABAPAY_CONTRACT], blockTag: 'latest' }) as bigint;
-
-      if (currentAllowance < valueInWei) {
-          if (currentAllowance > BigInt(0) && selectedToken.symbol === "USD₮") {
-              const resetHash = await client.writeContract({ address: tokenAddress as `0x${string}`, abi: ERC20_ABI, functionName: 'approve', args: [ABAPAY_CONTRACT, BigInt(0)], ...txConfig });
-              await publicClient.waitForTransactionReceipt({ hash: resetHash });
-          }
-          setStatus("Awaiting token approval...");
-          const approvalHash = await client.writeContract({ address: tokenAddress as `0x${string}`, abi: ERC20_ABI, functionName: 'approve', args: [ABAPAY_CONTRACT, parseUnits("100000", selectedToken.decimals)], ...txConfig });
-          await publicClient.waitForTransactionReceipt({ hash: approvalHash, confirmations: 1 });
-      }
-
-      setStatus("Please sign the final payment...");
-
+            // 1. Calculate Backend Variables First
       let vtpassServiceID = ""; let displayNetwork = ""; let finalVariationCode = 'prepaid'; let payloadBillersCode = accountNumber; let uiCategory = "";
 
       if (isInternational) {
@@ -556,8 +542,97 @@ export default function Home() {
         else { vtpassServiceID = telecomProvider; displayNetwork = telecomProvider; }
       }
 
-      const realNonce = await publicClient.getTransactionCount({ address: address as `0x${string}`, blockTag: 'latest' });
-      const hash = await client.writeContract({ address: ABAPAY_CONTRACT, abi: ABAPAY_ABI, functionName: 'payBill', args: [tokenAddress, vtpassServiceID, payloadBillersCode, valueInWei], nonce: realNonce, ...txConfig });
+      let hash = "";
+      const isBaseNetwork = activeChain.id === base.id || activeChain.id === baseSepolia.id;
+
+      if (!isBaseNetwork) {
+          // 🟢 ==========================================
+          // 🟢 CELO FLOW (Standard Transactions)
+          // 🟢 ==========================================
+          setStatus("Verifying permissions...");
+          const currentAllowance = await publicClient.readContract({ address: tokenAddress as `0x${string}`, abi: ERC20_ABI, functionName: 'allowance', args: [address, ABAPAY_CONTRACT], blockTag: 'latest' }) as bigint;
+
+          if (currentAllowance < valueInWei) {
+              if (currentAllowance > BigInt(0) && selectedToken.symbol === "USD₮") {
+                  const resetHash = await client.writeContract({ address: tokenAddress as `0x${string}`, abi: ERC20_ABI, functionName: 'approve', args: [ABAPAY_CONTRACT, BigInt(0)], ...txConfig });
+                  await publicClient.waitForTransactionReceipt({ hash: resetHash });
+              }
+              setStatus("Awaiting token approval...");
+              const approvalHash = await client.writeContract({ address: tokenAddress as `0x${string}`, abi: ERC20_ABI, functionName: 'approve', args: [ABAPAY_CONTRACT, parseUnits("100000", selectedToken.decimals)], ...txConfig });
+              await publicClient.waitForTransactionReceipt({ hash: approvalHash, confirmations: 1 });
+          }
+
+          setStatus("Please sign the final payment...");
+          const realNonce = await publicClient.getTransactionCount({ address: address as `0x${string}`, blockTag: 'latest' });
+          hash = await client.writeContract({ address: ABAPAY_CONTRACT, abi: ABAPAY_ABI, functionName: 'payBill', args: [tokenAddress, vtpassServiceID, payloadBillersCode, valueInWei], nonce: realNonce, ...txConfig });
+          
+      } else {
+          // 🔵 ==========================================
+          // 🔵 BASE NETWORK FLOW (Smart Wallet & Fallback)
+          // 🔵 ==========================================
+          try {
+              setStatus("Awaiting Signature (Gas Sponsored) ⛽...");
+
+              const encodedApprove = encodeFunctionData({
+                  abi: ERC20_ABI,
+                  functionName: 'approve',
+                  args: [ABAPAY_CONTRACT, valueInWei] 
+              });
+
+              const encodedPayBill = encodeFunctionData({
+                  abi: ABAPAY_ABI,
+                  functionName: 'payBill',
+                  args: [tokenAddress, vtpassServiceID, payloadBillersCode, valueInWei] 
+              });
+
+              // Attempt the Gasless Smart Wallet transaction
+              const callId = await client.sendCalls({
+                  account: address as `0x${string}`,
+                  calls: [
+                      { to: tokenAddress, data: encodedApprove, value: 0n },
+                      { to: ABAPAY_CONTRACT, data: encodedPayBill, value: 0n }
+                  ],
+                  capabilities: {
+                      paymasterService: { url: process.env.NEXT_PUBLIC_PAYMASTER_URL }
+                  }
+              });
+
+              setStatus("Processing gasless transaction on Base...");
+
+              let hashReceived = null;
+              while (!hashReceived) {
+                  const statusRes = await client.getCallsStatus({ id: callId });
+                  if (statusRes.receipts && statusRes.receipts.length > 0) {
+                      hashReceived = statusRes.receipts[0].transactionHash;
+                  } else {
+                      await new Promise(r => setTimeout(r, 2000));
+                  }
+              }
+              hash = hashReceived;
+
+          } catch (error: any) {
+              // ⚠️ FALLBACK FOR METAMASK/LEGACY WALLETS ON BASE
+              console.warn("Smart Wallet Paymaster failed. Falling back to standard transaction.", error);
+              
+              setStatus("Verifying permissions (Standard Wallet)...");
+              const currentAllowance = await publicClient.readContract({ address: tokenAddress as `0x${string}`, abi: ERC20_ABI, functionName: 'allowance', args: [address, ABAPAY_CONTRACT], blockTag: 'latest' }) as bigint;
+
+              if (currentAllowance < valueInWei) {
+                  if (currentAllowance > BigInt(0) && selectedToken.symbol === "USD₮") {
+                      const resetHash = await client.writeContract({ address: tokenAddress as `0x${string}`, abi: ERC20_ABI, functionName: 'approve', args: [ABAPAY_CONTRACT, BigInt(0)], ...txConfig });
+                      await publicClient.waitForTransactionReceipt({ hash: resetHash });
+                  }
+                  setStatus("Awaiting token approval...");
+                  const approvalHash = await client.writeContract({ address: tokenAddress as `0x${string}`, abi: ERC20_ABI, functionName: 'approve', args: [ABAPAY_CONTRACT, parseUnits("100000", selectedToken.decimals)], ...txConfig });
+                  await publicClient.waitForTransactionReceipt({ hash: approvalHash, confirmations: 1 });
+              }
+
+              setStatus("Please sign the final payment...");
+              const realNonce = await publicClient.getTransactionCount({ address: address as `0x${string}`, blockTag: 'latest' });
+              hash = await client.writeContract({ address: ABAPAY_CONTRACT, abi: ABAPAY_ABI, functionName: 'payBill', args: [tokenAddress, vtpassServiceID, payloadBillersCode, valueInWei], nonce: realNonce, ...txConfig });
+          }
+      }
+
       setStatus(`Secured. Processing...`);
 
                   const backendPayload = {
