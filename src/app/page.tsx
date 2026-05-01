@@ -599,9 +599,10 @@ export default function Home() {
 
               setStatus("Processing gasless transaction on Base...");
 
-              let hashReceived = null;
+                            let hashReceived = null;
               while (!hashReceived) {
-                  const statusRes = await client.getCallsStatus({ id: callId });
+                  // ⚡ Bypass the experimental TypeScript bug with 'as any'
+                  const statusRes = await (client as any).getCallsStatus({ id: callId });
                   if (statusRes.receipts && statusRes.receipts.length > 0) {
                       hashReceived = statusRes.receipts[0].transactionHash;
                   } else {
