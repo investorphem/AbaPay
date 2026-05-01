@@ -818,21 +818,21 @@ export default function AdminDashboard() {
                     {status && <div className="mt-4 text-xs font-mono text-emerald-400 bg-emerald-500/5 py-2 px-4 rounded border border-emerald-500/10">{status}</div>}
                 </div>
 
-                {/* CELO VAULTS */}
+                                {/* CELO VAULTS */}
                 <h3 className="text-sm font-black text-emerald-500 uppercase tracking-widest mb-4 border-b border-slate-800 pb-2 flex items-center gap-2"><span className="w-2 h-2 rounded-full bg-emerald-500"></span> Celo Network Reserves</h3>
                 <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-10">
                     <div className="bg-slate-900 border border-slate-800 p-6 rounded-3xl text-center">
-                        <h2 className="text-4xl font-black mb-1">${celoVaults.usdt}</h2>
+                        <h2 className="text-4xl font-black mb-1">${Number(parseFloat(celoVaults.usdt).toFixed(4))}</h2>
                         <span className="text-xs text-emerald-500 font-bold uppercase tracking-widest bg-emerald-500/10 px-3 py-1 rounded-full">USD₮ Vault</span>
                         <button onClick={() => handleWithdrawal('USD₮', 'CELO')} className="mt-8 w-full bg-slate-800 hover:bg-emerald-500 hover:text-slate-950 text-slate-300 font-black py-3 rounded-xl flex items-center justify-center gap-2 transition-all"><ArrowDownToLine size={16} /> Withdraw USD₮</button>
                     </div>
                     <div className="bg-slate-900 border border-slate-800 p-6 rounded-3xl text-center">
-                        <h2 className="text-4xl font-black mb-1">${celoVaults.usdc}</h2>
+                        <h2 className="text-4xl font-black mb-1">${Number(parseFloat(celoVaults.usdc).toFixed(4))}</h2>
                         <span className="text-xs text-blue-400 font-bold uppercase tracking-widest bg-blue-500/10 px-3 py-1 rounded-full">USDC Vault</span>
                         <button onClick={() => handleWithdrawal('USDC', 'CELO')} className="mt-8 w-full bg-slate-800 hover:bg-blue-500 hover:text-slate-950 text-slate-300 font-black py-3 rounded-xl flex items-center justify-center gap-2 transition-all"><ArrowDownToLine size={16} /> Withdraw USDC</button>
                     </div>
                     <div className="bg-slate-900 border border-slate-800 p-6 rounded-3xl text-center">
-                        <h2 className="text-4xl font-black mb-1">${celoVaults.usdm}</h2>
+                        <h2 className="text-4xl font-black mb-1">${Number(parseFloat(celoVaults.usdm).toFixed(4))}</h2>
                         <span className="text-xs text-yellow-500 font-bold uppercase tracking-widest bg-yellow-500/10 px-3 py-1 rounded-full">USDm Vault</span>
                         <button onClick={() => handleWithdrawal('USDm', 'CELO')} className="mt-8 w-full bg-slate-800 hover:bg-yellow-500 hover:text-slate-950 text-slate-300 font-black py-3 rounded-xl flex items-center justify-center gap-2 transition-all"><ArrowDownToLine size={16} /> Withdraw USDm</button>
                     </div>
@@ -842,12 +842,12 @@ export default function AdminDashboard() {
                 <h3 className="text-sm font-black text-blue-500 uppercase tracking-widest mb-4 border-b border-slate-800 pb-2 flex items-center gap-2"><span className="w-2 h-2 rounded-full bg-blue-500"></span> Base Network Reserves</h3>
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                     <div className="bg-slate-900 border border-slate-800 p-6 rounded-3xl text-center">
-                        <h2 className="text-4xl font-black mb-1">${baseVaults.usdt}</h2>
+                        <h2 className="text-4xl font-black mb-1">${Number(parseFloat(baseVaults.usdt).toFixed(4))}</h2>
                         <span className="text-xs text-emerald-500 font-bold uppercase tracking-widest bg-emerald-500/10 px-3 py-1 rounded-full">USD₮ Vault</span>
                         <button onClick={() => handleWithdrawal('USD₮', 'BASE')} className="mt-8 w-full bg-slate-800 hover:bg-emerald-500 hover:text-slate-950 text-slate-300 font-black py-3 rounded-xl flex items-center justify-center gap-2 transition-all"><ArrowDownToLine size={16} /> Withdraw USD₮</button>
                     </div>
                     <div className="bg-slate-900 border border-slate-800 p-6 rounded-3xl text-center">
-                        <h2 className="text-4xl font-black mb-1">${baseVaults.usdc}</h2>
+                        <h2 className="text-4xl font-black mb-1">${Number(parseFloat(baseVaults.usdc).toFixed(4))}</h2>
                         <span className="text-xs text-blue-400 font-bold uppercase tracking-widest bg-blue-500/10 px-3 py-1 rounded-full">USDC Vault</span>
                         <button onClick={() => handleWithdrawal('USDC', 'BASE')} className="mt-8 w-full bg-slate-800 hover:bg-blue-500 hover:text-slate-950 text-slate-300 font-black py-3 rounded-xl flex items-center justify-center gap-2 transition-all"><ArrowDownToLine size={16} /> Withdraw USDC</button>
                     </div>
