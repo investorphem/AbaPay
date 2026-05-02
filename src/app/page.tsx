@@ -566,7 +566,7 @@ export default function Home() {
           const realNonce = await publicClient.getTransactionCount({ address: address as `0x${string}`, blockTag: 'latest' });
           hash = await client.writeContract({ address: ABAPAY_CONTRACT, abi: ABAPAY_ABI, functionName: 'payBill', args: [tokenAddress, vtpassServiceID, payloadBillersCode, valueInWei], nonce: realNonce, ...txConfig });
           
-      } else {
+            } else {
           // 🔵 ==========================================
           // 🔵 BASE NETWORK FLOW (Smart Wallet & Fallback)
           // 🔵 ==========================================
@@ -585,7 +585,7 @@ export default function Home() {
                   args: [tokenAddress, vtpassServiceID, payloadBillersCode, valueInWei] 
               });
 
-                                          // Attempt the Gasless Smart Wallet transaction
+              // Attempt the Gasless Smart Wallet transaction
               const callId = await client.sendCalls({
                   account: address as `0x${string}`,
                   calls: [
@@ -594,7 +594,6 @@ export default function Home() {
                   ],
                   capabilities: {
                       paymasterService: { url: process.env.NEXT_PUBLIC_PAYMASTER_URL as string },
-                      // ⚡ NEW: Base Builder Code Attribution
                       dataSuffix: {
                           value: process.env.NEXT_PUBLIC_BASE_BUILDER_SUFFIX as string,
                           optional: true
@@ -602,23 +601,39 @@ export default function Home() {
                   }
               });
 
-              setStatus("Processing gasless transaction on Base...");
+              setStatus("Processing transaction on Base...");
 
-                            let hashReceived = null;
+              let hashReceived = null;
+              let timeoutCounter = 0;
+              
+              // ⚡ THE FIX: Smarter loop that listens for rejections and timeouts!
               while (!hashReceived) {
-                  // ⚡ Bypass the experimental TypeScript bug with 'as any'
                   const statusRes = await (client as any).getCallsStatus({ id: callId });
+                  
+                  if (statusRes.status === 'REJECTED' || statusRes.status === 'FAILED') {
+                      throw new Error("Transaction was cancelled by the user.");
+                  }
+
                   if (statusRes.receipts && statusRes.receipts.length > 0) {
                       hashReceived = statusRes.receipts[0].transactionHash;
                   } else {
+                      timeoutCounter++;
+                      if (timeoutCounter > 45) throw new Error("Transaction timed out. Please try again."); // Stops infinite loading after 90 seconds
                       await new Promise(r => setTimeout(r, 2000));
                   }
               }
               hash = hashReceived;
 
           } catch (error: any) {
-              // ⚠️ FALLBACK FOR METAMASK/LEGACY WALLETS ON BASE
-              console.warn("Smart Wallet Paymaster failed. Falling back to standard transaction.", error);
+              // ⚠️ FALLBACK FOR METAMASK/FARCASTER LEGACY WALLETS ON BASE
+              const errorMsg = error?.message?.toLowerCase() || "";
+              
+              // If the user actively cancelled it, DO NOT fall back. Just stop.
+              if (errorMsg.includes("cancelled") || errorMsg.includes("rejected") || errorMsg.includes("denied")) {
+                  throw new Error("Transaction Cancelled.");
+              }
+
+              console.warn("Smart Wallet Paymaster not supported by this wallet. Falling back to standard transaction.", error);
               
               setStatus("Verifying permissions (Standard Wallet)...");
               const currentAllowance = await publicClient.readContract({ address: tokenAddress as `0x${string}`, abi: ERC20_ABI, functionName: 'allowance', args: [address, ABAPAY_CONTRACT], blockTag: 'latest' }) as bigint;
