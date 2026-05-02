@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server';
-import { supabaseAdmin } from '@/lib/supabase'; // Your secure backend DB client
+import { supabaseAdmin } from '@/utils/supabase'; // Your secure backend DB client
 
 export async function POST(req: Request) {
     try {
