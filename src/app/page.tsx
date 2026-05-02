@@ -615,20 +615,20 @@ if (isBaseNetwork) {
         
         // --- PASTE THE NEW CODE STARTING FROM HERE ---
         const callId = await client.sendCalls({
-            account: address as `0x${string}`,
-            calls: [{ 
-                to: ABAPAY_CONTRACT, 
-                data: encodeFunctionData({
-                    abi: ABAPAY_ABI,
-                    functionName: 'payBill',
-                    args: [tokenAddress, vtpassServiceID, payloadBillersCode, valueInWei]
-                }, 
-                value, BigInt(0) 
-            }],
-            capabilities: { 
-                paymasterService: { url: process.env.NEXT_PUBLIC_PAYMASTER_URL as string } 
-            }
-        });
+    account: address as `0x${string}`,
+    calls: [{ 
+        to: ABAPAY_CONTRACT, 
+        data: encodeFunctionData({
+            abi: ABAPAY_ABI,
+            functionName: 'payBill',
+            args: [tokenAddress, vtpassServiceID, payloadBillersCode, valueInWei]
+        }), 
+        value: BigInt(0) // <--- Change the comma to a colon right here!
+    }],
+    capabilities: { 
+        paymasterService: { url: process.env.NEXT_PUBLIC_PAYMASTER_URL as string } 
+    }
+});
 
         setStatus("Transaction Submitted! Syncing with network...");
 
