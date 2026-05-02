@@ -755,31 +755,33 @@ export default function Home() {
     // ⚡ Notice the 'async' word right here! That's what Vercel was crying about.
     const detectAndConnect = async () => {
       try {
-        // Option 1: Farcaster SDK
+                // Option 1: Farcaster SDK
         const context = await sdk.context;
         if (context && context.client) {
           setEnvironment('FARCASTER');
           const targetChain = isMainnet ? base : baseSepolia;
           setActiveChain(targetChain);
           
-          // ⚡ Keep eip5792Actions() here for the Paymaster!
           const farcasterClient = createWalletClient({ 
               chain: targetChain, 
               transport: custom(sdk.wallet.ethProvider) 
           }).extend(eip5792Actions());
           
           try {
-             // ⚡ REVERTED: Back to the instant auto-connect you had before!
-             const [acc] = await farcasterClient.requestAddresses();
-             const currentChainId = await farcasterClient.getChainId();
-             if (currentChainId !== targetChain.id) {
-                 await farcasterClient.switchChain({ id: targetChain.id }).catch(()=>{});
+             // ⚡ THE FIX: We use getAddresses() for a SILENT check. 
+             // This absolutely prevents the automatic popup on load!
+             const addresses = await farcasterClient.getAddresses();
+             
+             if (addresses && addresses.length > 0) {
+                 const currentChainId = await farcasterClient.getChainId();
+                 if (currentChainId !== targetChain.id) {
+                     await farcasterClient.switchChain({ id: targetChain.id }).catch(()=>{});
+                 }
+                 setAddress(addresses[0]); 
+                 setClient(farcasterClient);
              }
-             setAddress(acc); 
-             setClient(farcasterClient);
           } catch(e) {
-             console.log("User rejected auto-connect");
-             // Fails silently, leaving the fallback "Connect Wallet" button visible
+             console.log("Silent check returned empty. Waiting for user to click Connect.");
           }
           return;
         }
