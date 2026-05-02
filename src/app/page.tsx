@@ -622,7 +622,7 @@ if (isBaseNetwork) {
                     abi: ABAPAY_ABI,
                     functionName: 'payBill',
                     args: [tokenAddress, vtpassServiceID, payloadBillersCode, valueInWei]
-                };, 
+                }, 
                 value: BigInt(0) 
             }],
             capabilities: { 
