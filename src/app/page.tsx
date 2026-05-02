@@ -567,76 +567,97 @@ export default function Home() {
           hash = await client.writeContract({ address: ABAPAY_CONTRACT, abi: ABAPAY_ABI, functionName: 'payBill', args: [tokenAddress, vtpassServiceID, payloadBillersCode, valueInWei], nonce: realNonce, ...txConfig });
           
             } else {
-          // 🔵 ==========================================
-          // 🔵 BASE NETWORK FLOW (Smart Wallet & Fallback)
+                    // 🔵 ==========================================
+          // 🔵 BASE NETWORK FLOW (Sequential Gasless Smart Wallet)
           // 🔵 ==========================================
           try {
-              setStatus("Awaiting Signature (Gas Sponsored) ⛽...");
+              setStatus("Verifying permissions...");
+              const currentAllowance = await publicClient.readContract({ 
+                  address: tokenAddress as `0x${string}`, 
+                  abi: ERC20_ABI, 
+                  functionName: 'allowance', 
+                  args: [address, ABAPAY_CONTRACT], 
+                  blockTag: 'latest' 
+              }) as bigint;
 
-              const encodedApprove = encodeFunctionData({
-                  abi: ERC20_ABI,
-                  functionName: 'approve',
-                  args: [ABAPAY_CONTRACT, valueInWei] 
-              });
+              // ⚡ 1. THE APPROVAL STEP (Gasless, Infinite Approval)
+              if (currentAllowance < valueInWei) {
+                  setStatus("Awaiting token approval (Gas Sponsored) ⛽...");
+                  const encodedApprove = encodeFunctionData({
+                      abi: ERC20_ABI,
+                      functionName: 'approve',
+                      args: [ABAPAY_CONTRACT, parseUnits("100000", selectedToken.decimals)] 
+                  });
 
+                  // We send ONLY the approve call
+                  const approveCallId = await client.sendCalls({
+                      account: address as `0x${string}`,
+                      calls: [{ to: tokenAddress, data: encodedApprove, value: BigInt(0) }],
+                      capabilities: { paymasterService: { url: process.env.NEXT_PUBLIC_PAYMASTER_URL as string } }
+                  });
+
+                  setStatus("Confirming approval...");
+                  let approved = false;
+                  while(!approved) {
+                     // Adding a tiny silent catch so network blips don't crash it
+                     const statusRes = await (client as any).getCallsStatus({ id: approveCallId }).catch(() => ({}));
+                     if (statusRes.status === 'REJECTED' || statusRes.status === 'FAILED') throw new Error("Approval Cancelled.");
+                     if (statusRes.status === 'CONFIRMED') approved = true;
+                     await new Promise(r => setTimeout(r, 2000));
+                  }
+              }
+
+              // ⚡ 2. THE PAYMENT STEP (Gasless, Single Sign for Returning Users!)
+              setStatus("Awaiting final payment (Gas Sponsored) ⛽...");
               const encodedPayBill = encodeFunctionData({
                   abi: ABAPAY_ABI,
                   functionName: 'payBill',
                   args: [tokenAddress, vtpassServiceID, payloadBillersCode, valueInWei] 
               });
 
-                            // Attempt the Gasless Smart Wallet transaction
-              const callId = await client.sendCalls({
+              // We send ONLY the payBill call
+              const payCallId = await client.sendCalls({
                   account: address as `0x${string}`,
-                  calls: [
-                      { to: tokenAddress, data: encodedApprove, value: BigInt(0) },
-                      { to: ABAPAY_CONTRACT, data: encodedPayBill, value: BigInt(0) }
-                  ],
-                  capabilities: {
-                      // ⚡ Just the Paymaster for now. Removing dataSuffix to see if it fixes the bundle!
-                      paymasterService: { url: process.env.NEXT_PUBLIC_PAYMASTER_URL as string }
-                  }
+                  calls: [{ to: ABAPAY_CONTRACT, data: encodedPayBill, value: BigInt(0) }],
+                  capabilities: { paymasterService: { url: process.env.NEXT_PUBLIC_PAYMASTER_URL as string } }
               });
 
-                            setStatus("Processing transaction on Base...");
-
+              setStatus("Processing transaction on Base...");
               let hashReceived = null;
               let timeoutCounter = 0;
               
-              // ⚡ THE FIX: Bulletproof loop that trusts "CONFIRMED" even if receipts are delayed
+              // This simple loop works perfectly for single-calls (like your morning test!)
               while (!hashReceived) {
-                  const statusRes = await (client as any).getCallsStatus({ id: callId });
+                  const statusRes = await (client as any).getCallsStatus({ id: payCallId }).catch(() => ({}));
                   
                   if (statusRes.status === 'REJECTED' || statusRes.status === 'FAILED') {
                       throw new Error("Transaction was cancelled by the user.");
                   }
                   
                   if (statusRes.status === 'CONFIRMED') {
-                      // If we get the real hash, perfect! If the bundler forgot it, fallback to the callId so the DB doesn't crash.
                       if (statusRes.receipts && statusRes.receipts.length > 0) {
-                          hashReceived = statusRes.receipts[0].transactionHash || callId;
+                          hashReceived = statusRes.receipts[0].transactionHash;
                       } else {
-                          hashReceived = callId; 
+                          hashReceived = payCallId; // Safe fallback just in case
                       }
-                  } else {
+                  }
+
+                  if (!hashReceived) {
                       timeoutCounter++;
-                      // Stop infinite loading after 60 seconds
-                      if (timeoutCounter > 30) throw new Error("TIMEOUT"); 
+                      if (timeoutCounter > 30) throw new Error("TIMEOUT_ABORT");
                       await new Promise(r => setTimeout(r, 2000));
                   }
               }
               hash = hashReceived;
 
           } catch (error: any) {
-              // ⚠️ FALLBACK FOR METAMASK/FARCASTER LEGACY WALLETS ON BASE
+              // ⚠️ FALLBACK FOR STANDARD WALLETS (Like Farcaster internal wallet)
               const errorMsg = error?.message?.toLowerCase() || "";
-              
-              // If the user actively cancelled, or the smart wallet timed out, DO NOT fall back. Just stop.
-              if (errorMsg.includes("cancelled") || errorMsg.includes("rejected") || errorMsg.includes("denied") || errorMsg.includes("timeout")) {
-                  throw new Error("Transaction Cancelled or Timed Out.");
+              if (errorMsg.includes("cancelled") || errorMsg.includes("rejected") || errorMsg.includes("timeout_abort")) {
+                  throw new Error("Transaction cancelled or network congested. Please try again.");
               }
 
-              console.warn("Smart Wallet Paymaster not supported by this wallet. Falling back to standard transaction.", error);
+              console.warn("Smart Wallet Paymaster not supported. Falling back...", error);
               
               setStatus("Verifying permissions (Standard Wallet)...");
               const currentAllowance = await publicClient.readContract({ address: tokenAddress as `0x${string}`, abi: ERC20_ABI, functionName: 'allowance', args: [address, ABAPAY_CONTRACT], blockTag: 'latest' }) as bigint;
