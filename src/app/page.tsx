@@ -623,7 +623,7 @@ if (isBaseNetwork) {
                     functionName: 'payBill',
                     args: [tokenAddress, vtpassServiceID, payloadBillersCode, valueInWei]
                 }, 
-                value: BigInt(0) 
+                value, BigInt(0) 
             }],
             capabilities: { 
                 paymasterService: { url: process.env.NEXT_PUBLIC_PAYMASTER_URL as string } 
