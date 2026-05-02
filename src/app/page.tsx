@@ -585,7 +585,7 @@ export default function Home() {
                   args: [tokenAddress, vtpassServiceID, payloadBillersCode, valueInWei] 
               });
 
-              // Attempt the Gasless Smart Wallet transaction
+                            // Attempt the Gasless Smart Wallet transaction
               const callId = await client.sendCalls({
                   account: address as `0x${string}`,
                   calls: [
@@ -593,11 +593,8 @@ export default function Home() {
                       { to: ABAPAY_CONTRACT, data: encodedPayBill, value: BigInt(0) }
                   ],
                   capabilities: {
-                      paymasterService: { url: process.env.NEXT_PUBLIC_PAYMASTER_URL as string },
-                      dataSuffix: {
-                          value: process.env.NEXT_PUBLIC_BASE_BUILDER_SUFFIX as string,
-                          optional: true
-                      }
+                      // ⚡ Just the Paymaster for now. Removing dataSuffix to see if it fixes the bundle!
+                      paymasterService: { url: process.env.NEXT_PUBLIC_PAYMASTER_URL as string }
                   }
               });
 
