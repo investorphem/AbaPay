@@ -601,24 +601,30 @@ export default function Home() {
                   }
               });
 
-              setStatus("Processing transaction on Base...");
+                            setStatus("Processing transaction on Base...");
 
               let hashReceived = null;
               let timeoutCounter = 0;
               
-              // ⚡ THE FIX: Smarter loop that listens for rejections and timeouts!
+              // ⚡ THE FIX: Bulletproof loop that trusts "CONFIRMED" even if receipts are delayed
               while (!hashReceived) {
                   const statusRes = await (client as any).getCallsStatus({ id: callId });
                   
                   if (statusRes.status === 'REJECTED' || statusRes.status === 'FAILED') {
                       throw new Error("Transaction was cancelled by the user.");
                   }
-
-                  if (statusRes.receipts && statusRes.receipts.length > 0) {
-                      hashReceived = statusRes.receipts[0].transactionHash;
+                  
+                  if (statusRes.status === 'CONFIRMED') {
+                      // If we get the real hash, perfect! If the bundler forgot it, fallback to the callId so the DB doesn't crash.
+                      if (statusRes.receipts && statusRes.receipts.length > 0) {
+                          hashReceived = statusRes.receipts[0].transactionHash || callId;
+                      } else {
+                          hashReceived = callId; 
+                      }
                   } else {
                       timeoutCounter++;
-                      if (timeoutCounter > 45) throw new Error("Transaction timed out. Please try again."); // Stops infinite loading after 90 seconds
+                      // Stop infinite loading after 60 seconds
+                      if (timeoutCounter > 30) throw new Error("TIMEOUT"); 
                       await new Promise(r => setTimeout(r, 2000));
                   }
               }
@@ -628,9 +634,9 @@ export default function Home() {
               // ⚠️ FALLBACK FOR METAMASK/FARCASTER LEGACY WALLETS ON BASE
               const errorMsg = error?.message?.toLowerCase() || "";
               
-              // If the user actively cancelled it, DO NOT fall back. Just stop.
-              if (errorMsg.includes("cancelled") || errorMsg.includes("rejected") || errorMsg.includes("denied")) {
-                  throw new Error("Transaction Cancelled.");
+              // If the user actively cancelled, or the smart wallet timed out, DO NOT fall back. Just stop.
+              if (errorMsg.includes("cancelled") || errorMsg.includes("rejected") || errorMsg.includes("denied") || errorMsg.includes("timeout")) {
+                  throw new Error("Transaction Cancelled or Timed Out.");
               }
 
               console.warn("Smart Wallet Paymaster not supported by this wallet. Falling back to standard transaction.", error);
