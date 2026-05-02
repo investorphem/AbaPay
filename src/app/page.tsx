@@ -618,13 +618,14 @@ if (isBaseNetwork) {
             account: address as `0x${string}`,
             calls: [{ 
                 to: ABAPAY_CONTRACT, 
-                data: encodeFunctionData({
-                    abi: ABAPAY_ABI,
-                    functionName: 'payBill',
-                    args: [tokenAddress, vtpassServiceID, payloadBillersCode, valueInWei]
-                };, 
-                value: BigInt(0) 
-            }],
+                // Look for this section
+    data: encodeFunctionData({
+        abi: ABAPAY_ABI,
+        functionName: 'payBill',
+        args: [tokenAddress, vtpassServiceID, payloadBillersCode, valueInWei]
+    }), // <--- Ensure this line ends with a comma and NO semicolon
+    value: BigInt(0) 
+}],
             capabilities: { 
                 paymasterService: { url: process.env.NEXT_PUBLIC_PAYMASTER_URL as string } 
             }
