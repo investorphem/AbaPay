@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server';
-import { supabaseAdmin } from '@/lib/supabase'; // Ensure you use the Service Role key here!
+import { supabaseAdmin } from '@/utils/supabase'; // Ensure you use the Service Role key here!
 
 export async function POST(req: Request) {
     try {
