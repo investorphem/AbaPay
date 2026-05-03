@@ -1,6 +1,8 @@
 import { NextResponse } from 'next/server';
 import crypto from 'crypto';
 import { supabaseAdmin } from '@/utils/supabase';
+import { sendTelegramAlert } from '@/lib/telegram'; // Assuming these exist in your lib
+import { sendAbaPaySms } from '@/lib/messaging';
 
 export async function POST(req: Request) {
     try {
@@ -35,8 +37,7 @@ export async function POST(req: Request) {
             return NextResponse.json({ message: "Test Successful" });
         }
 
-        // 3. THE RETRY LOOP (Crucial for 'Choice A' Logic)
-        // This waits for the frontend to finish inserting the record if Alchemy is faster.
+        // 3. THE RETRY LOOP (Wait for Frontend to save Record)
         let transactionRecord = null;
         let retries = 5; 
 
@@ -51,61 +52,100 @@ export async function POST(req: Request) {
                 transactionRecord = data;
                 break;
             }
-
-            console.log(`🔄 Waiting for DB record for ${txHash}... Retries left: ${retries}`);
-            await new Promise(resolve => setTimeout(resolve, 1500)); // Wait 1.5 seconds
+            await new Promise(resolve => setTimeout(resolve, 1500)); 
             retries--;
         }
 
-        // 4. Validate Transaction Status
         if (!transactionRecord) {
-            console.error("❌ Transaction not found in DB after retries.");
-            return NextResponse.json({ error: "Transaction record missing" }, { status: 404 });
+            return NextResponse.json({ error: "Record not found" }, { status: 404 });
         }
 
+        // Avoid double processing
         if (transactionRecord.status === 'SUCCESS') {
             return NextResponse.json({ message: "Already processed" });
         }
 
-        // 5. TRIGGER VTPASS VENDING
-        // Because we used 'Choice A', transactionRecord now contains:
-        // .account_number and .service_category
+        // 4. TRIGGER VTPASS VENDING
         try {
             console.log(`🚀 Triggering VTPass for: ${transactionRecord.account_number}`);
-            
-            // --- YOUR VTPASS LOGIC HERE ---
-            // const vendingResponse = await callVTPassAPI(transactionRecord);
-            
-            // 6. UPDATE DB TO SUCCESS
-            const { error: updateError } = await supabaseAdmin
-                .from('transactions')
-                .update({ 
-                    status: 'SUCCESS',
-                    amount_crypto: activity.value, // Confirming actual value from chain
-                    asset_symbol: activity.asset || 'USDC'
+
+            const vtpassResponse = await fetch('https://api-service.vtpass.com/api/pay', {
+                method: 'POST',
+                headers: {
+                    'api-key': process.env.VTPASS_API_KEY!,
+                    'secret-key': process.env.VTPASS_SECRET_KEY!,
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify({
+                    request_id: transactionRecord.request_id,
+                    serviceID: transactionRecord.service_category,
+                    billersCode: transactionRecord.account_number,
+                    variation_code: transactionRecord.variation_code, 
+                    amount: transactionRecord.amount_naira,
+                    phone: transactionRecord.account_number 
                 })
-                .eq('tx_hash', txHash);
+            });
 
-            if (updateError) throw updateError;
+            const result = await vtpassResponse.json();
 
-            // Optional: Update User Points/Rewards here
+            // Scenario A: Instant Success
+            if (result.code === '000') {
+                const token = result.purchased_code || result.token || null;
+                
+                await supabaseAdmin.from('transactions').update({ 
+                    status: 'SUCCESS',
+                    purchased_code: token,
+                    amount_crypto: activity.value,
+                    asset_symbol: activity.asset || 'USDC'
+                }).eq('tx_hash', txHash);
 
-            return NextResponse.json({ status: "Vending Successful", hash: txHash });
+                // Send Notifications
+                await Promise.allSettled([
+                    sendTelegramAlert(`✅ *INSTANT SUCCESS*\n👤 *User:* ${transactionRecord.account_number}\n💰 *Naira:* ₦${transactionRecord.amount_naira}`),
+                    earnedPointsUpdate(transactionRecord.wallet_address, transactionRecord.amount_naira)
+                ]);
 
-        } catch (vendingError) {
-            console.error("❌ VTPass Vending Failed:", vendingError);
+                return NextResponse.json({ status: "Vending Success" });
+            } 
             
-            // Mark as VENDING_FAILED so user/admin can see it in history
-            await supabaseAdmin
-                .from('transactions')
-                .update({ status: 'VENDING_FAILED' })
-                .eq('tx_hash', txHash);
+            // Scenario B: Pending/Delayed (Let the OTHER webhook handle it)
+            else if (result.code === '099') {
+                await supabaseAdmin.from('transactions').update({ 
+                    status: 'PENDING_VENDING',
+                    amount_crypto: activity.value 
+                }).eq('tx_hash', txHash);
 
-            return NextResponse.json({ error: "Vending failed" }, { status: 500 });
+                return NextResponse.json({ status: "Vending Pending" });
+            }
+
+            // Scenario C: VTPass Rejected it immediately
+            else {
+                throw new Error(result.response_description || "VTPass Error");
+            }
+
+        } catch (vendingError: any) {
+            console.error("❌ Vending Failed:", vendingError.message);
+            await supabaseAdmin.from('transactions').update({ 
+                status: 'VENDING_FAILED' 
+            }).eq('tx_hash', txHash);
+            
+            await sendTelegramAlert(`🚨 *VENDING FAILED*\nHash: ${txHash}\nError: ${vendingError.message}`);
+            return NextResponse.json({ error: "Vending Failed" }, { status: 500 });
         }
 
     } catch (error) {
         console.error("Webhook System Error:", error);
-        return NextResponse.json({ error: "Internal Server Error" }, { status: 500 });
+        return NextResponse.json({ error: "Internal Error" }, { status: 500 });
+    }
+}
+
+// Helper to award AbaPoints
+async function earnedPointsUpdate(wallet: string, amount: number) {
+    const points = Number((amount / 1000).toFixed(2));
+    if (points > 0) {
+        await supabaseAdmin.rpc('award_transaction_points', { 
+            target_wallet: wallet.toLowerCase(), 
+            points_to_add: points 
+        });
     }
 }
