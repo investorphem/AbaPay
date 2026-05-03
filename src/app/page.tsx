@@ -607,7 +607,7 @@ export default function Home() {
                   }
               }
 
-              // ⚡ 2. THE PAYMENT STEP (Gasless, Single Sign for Returning Users!)
+                            // ⚡ 2. THE PAYMENT STEP (Gasless, Single Sign for Returning Users!)
               setStatus("Awaiting final payment (Gas Sponsored) ⛽...");
               const encodedPayBill = encodeFunctionData({
                   abi: ABAPAY_ABI,
@@ -615,42 +615,73 @@ export default function Home() {
                   args: [tokenAddress, vtpassServiceID, payloadBillersCode, valueInWei] 
               });
 
-              // We send ONLY the payBill call
-              const payCallId = await client.sendCalls({
+              // We send ONLY the payBill call (Single Signing Flow)
+              const callId = await client.sendCalls({
                   account: address as `0x${string}`,
                   calls: [{ to: ABAPAY_CONTRACT, data: encodedPayBill, value: BigInt(0) }],
                   capabilities: { paymasterService: { url: process.env.NEXT_PUBLIC_PAYMASTER_URL as string } }
               });
 
-              setStatus("Processing transaction on Base...");
-              let hashReceived = null;
-              let timeoutCounter = 0;
-              
-              // This simple loop works perfectly for single-calls (like your morning test!)
-              while (!hashReceived) {
-                  const statusRes = await (client as any).getCallsStatus({ id: payCallId }).catch(() => ({}));
-                  
-                  if (statusRes.status === 'REJECTED' || statusRes.status === 'FAILED') {
-                      throw new Error("Transaction was cancelled by the user.");
-                  }
-                  
-                  if (statusRes.status === 'CONFIRMED') {
-                      if (statusRes.receipts && statusRes.receipts.length > 0) {
-                          hashReceived = statusRes.receipts[0].transactionHash;
-                      } else {
-                          hashReceived = payCallId; // Safe fallback just in case
-                      }
-                  }
+              setStatus("Transaction Submitted! Syncing with network...");
 
-                  if (!hashReceived) {
-                      timeoutCounter++;
-                      if (timeoutCounter > 30) throw new Error("TIMEOUT_ABORT");
-                      await new Promise(r => setTimeout(r, 2000));
-                  }
-              }
-              hash = hashReceived;
+              // 1. INSTANTLY save to Supabase. 
+              const { data: txRecord, error: dbError } = await supabase
+                  .from('transactions')
+                  .insert([{
+                      wallet_address: address,
+                      tx_hash: callId, 
+                      status: 'PENDING',
+                      service_category: vtpassServiceID,
+                      account_number: payloadBillersCode,
+                      amount_crypto: valueInWei.toString() // Converted to string for DB safety
+                  }])
+                  .select()
+                  .single();
+
+              if (dbError) throw new Error("Failed to record transaction locally.");
+
+              // 2. Set up the Supabase Real-Time Listener (Replaces the while loop!)
+              await new Promise((resolve, reject) => {
+                  const channel = supabase
+                      .channel(`tx_watch_${txRecord.id}`)
+                      .on('postgres_changes', { 
+                          event: 'UPDATE', 
+                          schema: 'public', 
+                          table: 'transactions', 
+                          filter: `id=eq.${txRecord.id}` 
+                      }, (payload) => {
+                          const updatedRow = payload.new;
+
+                          if (updatedRow.status === 'SUCCESS') {
+                              setStatus("Payment Successful! ✅");
+                              showNotification("Success", "Utility Delivered successfully!");
+                              if (typeof triggerPointsNotification === 'function') {
+                                  triggerPointsNotification(50);
+                              }
+                              channel.unsubscribe();
+                              resolve(updatedRow);
+                          } 
+                          else if (updatedRow.status === 'FAILED_VENDING') {
+                              setStatus("Payment Failed ❌");
+                              showNotification("Error", "Vending failed. Please contact support.");
+                              channel.unsubscribe();
+                              reject(new Error("Vending Failed"));
+                          }
+                      })
+                      .subscribe();
+                      
+                  // 3 Minute Safety Net
+                  setTimeout(() => {
+                      setStatus("Processing in background...");
+                      showNotification("Info", "Your transaction is safely processing in the background. You can close the app.");
+                      channel.unsubscribe();
+                      resolve(txRecord); 
+                  }, 180000); 
+              });
 
           } catch (error: any) {
+              // ... Your existing error handling stays exactly the same here
+
               // ⚠️ FALLBACK FOR STANDARD WALLETS (Like Farcaster internal wallet)
               const errorMsg = error?.message?.toLowerCase() || "";
               if (errorMsg.includes("cancelled") || errorMsg.includes("rejected") || errorMsg.includes("timeout_abort")) {
