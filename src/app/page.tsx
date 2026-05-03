@@ -608,94 +608,49 @@ export default function Home() {
               }
 
               // ⚡ 2. THE PAYMENT STEP (Gasless, Single Sign for Returning Users!)
-              // Look for this section in src/app/page.tsx
-if (isBaseNetwork) {
-    try {
-        setStatus("Awaiting final payment (Gas Sponsored) ⛽...");
-        
-        // --- PASTE THE NEW CODE STARTING FROM HERE ---
-        const callId = await client.sendCalls({
-            account: address as `0x${string}`,
-            calls: [{ 
-                to: ABAPAY_CONTRACT, 
-                // Look for this section
-    data: encodeFunctionData({
-        abi: ABAPAY_ABI,
-        functionName: 'payBill',
-        args: [tokenAddress, vtpassServiceID, payloadBillersCode, valueInWei]
-    }), // <--- Ensure this line ends with a comma and NO semicolon
-    value: BigInt(0) 
-}],
-            capabilities: { 
-                paymasterService: { url: process.env.NEXT_PUBLIC_PAYMASTER_URL as string } 
-            }
-        });
+              setStatus("Awaiting final payment (Gas Sponsored) ⛽...");
+              const encodedPayBill = encodeFunctionData({
+                  abi: ABAPAY_ABI,
+                  functionName: 'payBill',
+                  args: [tokenAddress, vtpassServiceID, payloadBillersCode, valueInWei] 
+              });
 
-        setStatus("Transaction Submitted! Syncing with network...");
+              // We send ONLY the payBill call
+              const payCallId = await client.sendCalls({
+                  account: address as `0x${string}`,
+                  calls: [{ to: ABAPAY_CONTRACT, data: encodedPayBill, value: BigInt(0) }],
+                  capabilities: { paymasterService: { url: process.env.NEXT_PUBLIC_PAYMASTER_URL as string } }
+              });
 
-        // 1. Save locally so it's in the history immediately
-        const { data: txRecord, error: dbError } = await supabase
-            .from('transactions')
-            .insert([{
-                wallet_address: address,
-                tx_hash: callId, 
-                status: 'PENDING',
-                service_category: vtpassServiceID,
-                account_number: payloadBillersCode,
-                amount_crypto: valueInWei.toString() // Convert BigInt to string for DB
-            }])
-            .select()
-            .single();
+              setStatus("Processing transaction on Base...");
+              let hashReceived = null;
+              let timeoutCounter = 0;
+              
+              // This simple loop works perfectly for single-calls (like your morning test!)
+              while (!hashReceived) {
+                  const statusRes = await (client as any).getCallsStatus({ id: payCallId }).catch(() => ({}));
+                  
+                  if (statusRes.status === 'REJECTED' || statusRes.status === 'FAILED') {
+                      throw new Error("Transaction was cancelled by the user.");
+                  }
+                  
+                  if (statusRes.status === 'CONFIRMED') {
+                      if (statusRes.receipts && statusRes.receipts.length > 0) {
+                          hashReceived = statusRes.receipts[0].transactionHash;
+                      } else {
+                          hashReceived = payCallId; // Safe fallback just in case
+                      }
+                  }
 
-        if (dbError) throw new Error("Failed to record transaction locally.");
+                  if (!hashReceived) {
+                      timeoutCounter++;
+                      if (timeoutCounter > 30) throw new Error("TIMEOUT_ABORT");
+                      await new Promise(r => setTimeout(r, 2000));
+                  }
+              }
+              hash = hashReceived;
 
-        // 2. The Real-time "Wait" Handshake
-        return new Promise((resolve, reject) => {
-            const channel = supabase
-                .channel(`tx_watch_${txRecord.id}`)
-                .on('postgres_changes', { 
-                    event: 'UPDATE', 
-                    schema: 'public', 
-                    table: 'transactions', 
-                    filter: `id=eq.${txRecord.id}` 
-                }, (payload) => {
-                    const updatedRow = payload.new;
-
-                    if (updatedRow.status === 'SUCCESS') {
-                        setStatus("Payment Successful! ✅");
-                        // YOUR ORIGINAL NOTIFICATIONS GO HERE:
-                        showNotification("Success", "Utility Delivered successfully!");
-                        if (typeof triggerPointsNotification === 'function') {
-                            triggerPointsNotification(50); 
-                        }
-                        
-                        channel.unsubscribe();
-                        resolve(updatedRow);
-                    } 
-                    else if (updatedRow.status === 'FAILED_VENDING') {
-                        setStatus("Payment Failed ❌");
-                        showNotification("Error", "Vending failed. Please contact support.");
-                        channel.unsubscribe();
-                        reject(new Error("Vending Failed"));
-                    }
-                })
-                .subscribe();
-                
-            // Safety timeout (3 minutes)
-            setTimeout(() => {
-                setStatus("Still processing...");
-                showNotification("Info", "Safe to close. Processing in background.");
-                channel.unsubscribe();
-                resolve(txRecord); 
-            }, 180000); 
-        });
-        // --- END OF NEW CODE ---
-
-    } catch (error: any) {
-        // Your existing fallback/error handling code remains here...
-    }
-}
-
+          } catch (error: any) {
               // ⚠️ FALLBACK FOR STANDARD WALLETS (Like Farcaster internal wallet)
               const errorMsg = error?.message?.toLowerCase() || "";
               if (errorMsg.includes("cancelled") || errorMsg.includes("rejected") || errorMsg.includes("timeout_abort")) {
@@ -721,6 +676,7 @@ if (isBaseNetwork) {
               const realNonce = await publicClient.getTransactionCount({ address: address as `0x${string}`, blockTag: 'latest' });
               hash = await client.writeContract({ address: ABAPAY_CONTRACT, abi: ABAPAY_ABI, functionName: 'payBill', args: [tokenAddress, vtpassServiceID, payloadBillersCode, valueInWei], nonce: realNonce, ...txConfig });
           }
+      }
 
       setStatus(`Secured. Processing...`);
 
