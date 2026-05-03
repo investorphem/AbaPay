@@ -607,7 +607,7 @@ export default function Home() {
                   }
               }
 
-                            // ⚡ 2. THE PAYMENT STEP (Gasless, Single Sign for Returning Users!)
+                                          // ⚡ 2. THE PAYMENT STEP (Gasless, Single Sign for Returning Users!)
               setStatus("Awaiting final payment (Gas Sponsored) ⛽...");
               const encodedPayBill = encodeFunctionData({
                   abi: ABAPAY_ABI,
@@ -624,16 +624,19 @@ export default function Home() {
 
               setStatus("Transaction Submitted! Syncing with network...");
 
-              // 1. INSTANTLY save to Supabase. 
+              // 1. INSTANTLY save to Supabase (Matches your Schema)
               const { data: txRecord, error: dbError } = await supabase
                   .from('transactions')
                   .insert([{
                       wallet_address: address,
+                      service_category: vtpassServiceID,
+                      network: displayNetwork || "BASE", 
+                      account_number: payloadBillersCode,
                       tx_hash: callId, 
                       status: 'PENDING',
-                      service_category: vtpassServiceID,
-                      account_number: payloadBillersCode,
-                      amount_crypto: valueInWei.toString() // Stringified for DB safety
+                      blockchain: 'BASE',
+                      token_used: selectedToken?.symbol || 'USDC',
+                      amount_crypto: valueInWei.toString() 
                   }])
                   .select()
                   .single();
@@ -656,19 +659,36 @@ export default function Home() {
                           const updatedRow = payload.new;
 
                           if (updatedRow.status === 'SUCCESS') {
-                              setStatus("Payment Successful! ✅");
-                              showToast("Success", "Utility Delivered successfully!", "success");
+                              setStatus("Success! Token/Ref Dispatched."); 
                               
-                              // Check if points function exists before calling
-                              if (typeof triggerPointsNotification === 'function') {
-                                  triggerPointsNotification(50);
+                              // RESTORED: Dynamic Points Logic
+                              // Pulls from your 'api_response' or 'earned_points' column updated by webhook
+                              const pointsEarned = Number(updatedRow.earned_points || updatedRow.api_response?.earnedPoints || 0);
+                              
+                              if (pointsEarned > 0) {
+                                  window.dispatchEvent(new CustomEvent('abapoints-awarded', { 
+                                      detail: pointsEarned 
+                                  }));
+                                  
+                                  showToast(
+                                      "Transaction Successful", 
+                                      `Payment confirmed! You earned +${pointsEarned.toFixed(2).replace(/\.00$/, '')} AbaPoints ✨`, 
+                                      "success"
+                                  );
+                              } else {
+                                  showToast("Transaction Successful", "Your transaction has been successfully processed.", "success");
                               }
-                              
+
+                              // Display Voucher/Token Code immediately
+                              if (updatedRow.purchased_code) {
+                                  setStatus(`Code: ${updatedRow.purchased_code}`);
+                              }
+
                               channel.unsubscribe();
                               resolve(updatedRow);
                           } 
                           else if (updatedRow.status === 'FAILED_VENDING') {
-                              setStatus("Payment Failed ❌");
+                              setStatus(`Error: ${updatedRow.api_response?.message || 'Vending Failed'}`);
                               showToast("Error", "Vending failed. Please contact support.", "error");
                               
                               channel.unsubscribe();
@@ -679,7 +699,7 @@ export default function Home() {
                       
                   // 3-Minute Safety Timeout
                   setTimeout(() => {
-                      setStatus("Processing in background...");
+                      setStatus("Background Sync Active...");
                       showToast("Info", "Transaction is still syncing. You can safely close the app.", "success");
                       channel.unsubscribe();
                       resolve(txRecord); 
@@ -687,8 +707,7 @@ export default function Home() {
               });
 
           } catch (error: any) {
-              // This is your existing catch block
-              // ⚠️ FALLBACK FOR STANDARD WALLETS (Like Farcaster internal wallet)
+              // ⚠️ FALLBACK FOR STANDARD WALLETS (Matches your original flow)
               const errorMsg = error?.message?.toLowerCase() || "";
               if (errorMsg.includes("cancelled") || errorMsg.includes("rejected") || errorMsg.includes("timeout_abort")) {
                   throw new Error("Transaction cancelled or network congested. Please try again.");
@@ -697,21 +716,46 @@ export default function Home() {
               console.warn("Smart Wallet Paymaster not supported. Falling back...", error);
               
               setStatus("Verifying permissions (Standard Wallet)...");
-              const currentAllowance = await publicClient.readContract({ address: tokenAddress as `0x${string}`, abi: ERC20_ABI, functionName: 'allowance', args: [address, ABAPAY_CONTRACT], blockTag: 'latest' }) as bigint;
+              const currentAllowance = await publicClient.readContract({ 
+                  address: tokenAddress as `0x${string}`, 
+                  abi: ERC20_ABI, 
+                  functionName: 'allowance', 
+                  args: [address, ABAPAY_CONTRACT], 
+                  blockTag: 'latest' 
+              }) as bigint;
 
               if (currentAllowance < valueInWei) {
                   if (currentAllowance > BigInt(0) && selectedToken.symbol === "USD₮") {
-                      const resetHash = await client.writeContract({ address: tokenAddress as `0x${string}`, abi: ERC20_ABI, functionName: 'approve', args: [ABAPAY_CONTRACT, BigInt(0)], ...txConfig });
+                      const resetHash = await client.writeContract({ 
+                          address: tokenAddress as `0x${string}`, 
+                          abi: ERC20_ABI, 
+                          functionName: 'approve', 
+                          args: [ABAPAY_CONTRACT, BigInt(0)], 
+                          ...txConfig 
+                      });
                       await publicClient.waitForTransactionReceipt({ hash: resetHash });
                   }
                   setStatus("Awaiting token approval...");
-                  const approvalHash = await client.writeContract({ address: tokenAddress as `0x${string}`, abi: ERC20_ABI, functionName: 'approve', args: [ABAPAY_CONTRACT, parseUnits("100000", selectedToken.decimals)], ...txConfig });
+                  const approvalHash = await client.writeContract({ 
+                      address: tokenAddress as `0x${string}`, 
+                      abi: ERC20_ABI, 
+                      functionName: 'approve', 
+                      args: [ABAPAY_CONTRACT, parseUnits("100000", selectedToken.decimals)], 
+                      ...txConfig 
+                  });
                   await publicClient.waitForTransactionReceipt({ hash: approvalHash, confirmations: 1 });
               }
 
               setStatus("Please sign the final payment...");
               const realNonce = await publicClient.getTransactionCount({ address: address as `0x${string}`, blockTag: 'latest' });
-              hash = await client.writeContract({ address: ABAPAY_CONTRACT, abi: ABAPAY_ABI, functionName: 'payBill', args: [tokenAddress, vtpassServiceID, payloadBillersCode, valueInWei], nonce: realNonce, ...txConfig });
+              hash = await client.writeContract({ 
+                  address: ABAPAY_CONTRACT, 
+                  abi: ABAPAY_ABI, 
+                  functionName: 'payBill', 
+                  args: [tokenAddress, vtpassServiceID, payloadBillersCode, valueInWei], 
+                  nonce: realNonce, 
+                  ...txConfig 
+              });
           }
       }
 
