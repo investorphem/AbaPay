@@ -615,7 +615,7 @@ export default function Home() {
                   args: [tokenAddress, vtpassServiceID, payloadBillersCode, valueInWei] 
               });
 
-              // We send ONLY the payBill call (Single Signing Flow)
+              // We send ONLY the payBill call
               const callId = await client.sendCalls({
                   account: address as `0x${string}`,
                   calls: [{ to: ABAPAY_CONTRACT, data: encodedPayBill, value: BigInt(0) }],
@@ -633,14 +633,17 @@ export default function Home() {
                       status: 'PENDING',
                       service_category: vtpassServiceID,
                       account_number: payloadBillersCode,
-                      amount_crypto: valueInWei.toString() // Converted to string for DB safety
+                      amount_crypto: valueInWei.toString() // Stringified for DB safety
                   }])
                   .select()
                   .single();
 
-              if (dbError) throw new Error("Failed to record transaction locally.");
+              if (dbError) {
+                  console.error("Supabase Insert Error:", dbError);
+                  throw new Error("Failed to record transaction locally.");
+              }
 
-              // 2. Set up the Supabase Real-Time Listener (Replaces the while loop!)
+              // 2. Set up the Supabase Real-Time Listener
               await new Promise((resolve, reject) => {
                   const channel = supabase
                       .channel(`tx_watch_${txRecord.id}`)
@@ -654,34 +657,37 @@ export default function Home() {
 
                           if (updatedRow.status === 'SUCCESS') {
                               setStatus("Payment Successful! ✅");
-                              showNotification("Success", "Utility Delivered successfully!");
+                              showToast("Success", "Utility Delivered successfully!", "success");
+                              
+                              // Check if points function exists before calling
                               if (typeof triggerPointsNotification === 'function') {
                                   triggerPointsNotification(50);
                               }
+                              
                               channel.unsubscribe();
                               resolve(updatedRow);
                           } 
                           else if (updatedRow.status === 'FAILED_VENDING') {
                               setStatus("Payment Failed ❌");
-                              showNotification("Error", "Vending failed. Please contact support.");
+                              showToast("Error", "Vending failed. Please contact support.", "error");
+                              
                               channel.unsubscribe();
                               reject(new Error("Vending Failed"));
                           }
                       })
                       .subscribe();
                       
-                  // 3 Minute Safety Net
+                  // 3-Minute Safety Timeout
                   setTimeout(() => {
                       setStatus("Processing in background...");
-                      showNotification("Info", "Your transaction is safely processing in the background. You can close the app.");
+                      showToast("Info", "Transaction is still syncing. You can safely close the app.", "success");
                       channel.unsubscribe();
                       resolve(txRecord); 
                   }, 180000); 
               });
 
           } catch (error: any) {
-              // ... Your existing error handling stays exactly the same here
-
+              // This is your existing catch block
               // ⚠️ FALLBACK FOR STANDARD WALLETS (Like Farcaster internal wallet)
               const errorMsg = error?.message?.toLowerCase() || "";
               if (errorMsg.includes("cancelled") || errorMsg.includes("rejected") || errorMsg.includes("timeout_abort")) {
