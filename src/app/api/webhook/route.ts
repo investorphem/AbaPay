@@ -4,12 +4,11 @@ import { supabaseAdmin } from '@/utils/supabase';
 
 export async function POST(req: Request) {
     try {
-        // 1. MUST read as text to verify the signature accurately
+        // 1. Signature Verification (Security)
         const rawBody = await req.text();
         const signature = req.headers.get('x-alchemy-signature');
         const secret = process.env.ALCHEMY_WEBHOOK_SECRET;
 
-        // Security Check
         if (!signature || !secret) {
             return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
         }
@@ -18,65 +17,95 @@ export async function POST(req: Request) {
         const digest = hmac.update(rawBody).digest('hex');
 
         if (signature !== digest) {
-            console.error("❌ Invalid Webhook Signature");
             return NextResponse.json({ error: "Invalid signature" }, { status: 401 });
         }
 
-        // 2. Parse the verified data
         const body = JSON.parse(rawBody);
         const activity = body.event?.activity?.[0];
 
         if (!activity) {
-            return NextResponse.json({ message: "No activity found" });
+            return NextResponse.json({ message: "No activity" });
         }
 
         const txHash = activity.hash;
-        const userWallet = activity.fromAddress;
 
-        // 3. Handle Alchemy Test Pings (Don't save to DB)
+        // 2. Handle Alchemy Test Ping
         if (txHash === "0xTestTransactionHash") {
-            console.log("✅ Alchemy Test Notification Received for abapays.com");
+            console.log("✅ Alchemy Test Successful for abapays.com");
             return NextResponse.json({ message: "Test Successful" });
         }
 
-        // 4. Idempotency Check (Prevent double points/double vending)
-        const { data: existingTx } = await supabaseAdmin
-            .from('transactions')
-            .select('tx_hash')
-            .eq('tx_hash', txHash)
-            .single();
+        // 3. THE RETRY LOOP (Crucial for 'Choice A' Logic)
+        // This waits for the frontend to finish inserting the record if Alchemy is faster.
+        let transactionRecord = null;
+        let retries = 5; 
 
-        if (existingTx) {
-            return NextResponse.json({ message: "Transaction already processed." });
+        while (retries > 0) {
+            const { data } = await supabaseAdmin
+                .from('transactions')
+                .select('*')
+                .eq('tx_hash', txHash)
+                .single();
+
+            if (data) {
+                transactionRecord = data;
+                break;
+            }
+
+            console.log(`🔄 Waiting for DB record for ${txHash}... Retries left: ${retries}`);
+            await new Promise(resolve => setTimeout(resolve, 1500)); // Wait 1.5 seconds
+            retries--;
         }
 
-        /* NOTE: Alchemy Address Activity doesn't send Smart Contract 'args' (like account_number) directly.
-           You will need to fetch the 'Pending' transaction from your DB that matches this txHash
-           OR use a Trace API. For now, we update the status of the hash we just found.
-        */
+        // 4. Validate Transaction Status
+        if (!transactionRecord) {
+            console.error("❌ Transaction not found in DB after retries.");
+            return NextResponse.json({ error: "Transaction record missing" }, { status: 404 });
+        }
 
-        // 5. Update/Insert into Supabase
-        // We use 'upsert' or 'update' assuming the frontend already created a pending record
-        const { error: dbError } = await supabaseAdmin.from('transactions').upsert({
-            wallet_address: userWallet,
-            tx_hash: txHash,
-            amount_crypto: activity.value,
-            status: 'PENDING_VENDING',
-            blockchain: 'BASE',
-            // If you have the asset type (USDC/USDT)
-            asset_symbol: activity.asset || 'USDC' 
-        });
+        if (transactionRecord.status === 'SUCCESS') {
+            return NextResponse.json({ message: "Already processed" });
+        }
 
-        if (dbError) throw dbError;
+        // 5. TRIGGER VTPASS VENDING
+        // Because we used 'Choice A', transactionRecord now contains:
+        // .account_number and .service_category
+        try {
+            console.log(`🚀 Triggering VTPass for: ${transactionRecord.account_number}`);
+            
+            // --- YOUR VTPASS LOGIC HERE ---
+            // const vendingResponse = await callVTPassAPI(transactionRecord);
+            
+            // 6. UPDATE DB TO SUCCESS
+            const { error: updateError } = await supabaseAdmin
+                .from('transactions')
+                .update({ 
+                    status: 'SUCCESS',
+                    amount_crypto: activity.value, // Confirming actual value from chain
+                    asset_symbol: activity.asset || 'USDC'
+                })
+                .eq('tx_hash', txHash);
 
-        // 6. TODO: Trigger VTPass API 
-        // This is where you call your vending logic using the accountNumber saved in your DB
-        // const response = await triggerVTPassVending(txHash);
+            if (updateError) throw updateError;
 
-        return NextResponse.json({ status: "Success", hash: txHash });
+            // Optional: Update User Points/Rewards here
+
+            return NextResponse.json({ status: "Vending Successful", hash: txHash });
+
+        } catch (vendingError) {
+            console.error("❌ VTPass Vending Failed:", vendingError);
+            
+            // Mark as VENDING_FAILED so user/admin can see it in history
+            await supabaseAdmin
+                .from('transactions')
+                .update({ status: 'VENDING_FAILED' })
+                .eq('tx_hash', txHash);
+
+            return NextResponse.json({ error: "Vending failed" }, { status: 500 });
+        }
 
     } catch (error) {
-        console.error("Webhook Error:", error);
+        console.error("Webhook System Error:", error);
         return NextResponse.json({ error: "Internal Server Error" }, { status: 500 });
     }
 }
