@@ -475,7 +475,7 @@ export default function Home() {
     setIsVerifying(false);
   };
 
-  const processBlockchainPayment = async () => {
+    const processBlockchainPayment = async () => {
     if (!address || !client) return setStatus("Connect Wallet First");
     if (parseFloat(cryptoToCharge) > parseFloat(walletBalance)) return setStatus(`Insufficient ${selectedToken.symbol} Balance.`);
 
@@ -492,7 +492,8 @@ export default function Home() {
       activeCooldownKey = cooldownKey; 
     }
 
-    setIsProcessing(true); setStatus("Initiating Blockchain Escrow...");
+    setIsProcessing(true); 
+    setStatus("Initiating Blockchain Escrow...");
 
     try {
       try {
@@ -502,30 +503,19 @@ export default function Home() {
 
       const valueInWei = parseUnits(cryptoToCharge, selectedToken.decimals);
 
-      // ⚡ Handle Token Address Selection safely across chains
       let tokenAddress;
-      if (activeChain.id === base.id) {
-          tokenAddress = (selectedToken as any).baseMainnet || selectedToken.mainnet;
-      } else if (activeChain.id === baseSepolia.id) {
-          tokenAddress = (selectedToken as any).baseSepolia || selectedToken.sepolia;
-      } else if (activeChain.id === celo.id) {
-          tokenAddress = (selectedToken as any).celoMainnet || selectedToken.mainnet;
-      } else {
-          // Defaults to Celo Alfajores if nothing else matches
-          tokenAddress = (selectedToken as any).celoSepolia || selectedToken.sepolia;
-      }
+      if (activeChain.id === base.id) tokenAddress = (selectedToken as any).baseMainnet || selectedToken.mainnet;
+      else if (activeChain.id === baseSepolia.id) tokenAddress = (selectedToken as any).baseSepolia || selectedToken.sepolia;
+      else if (activeChain.id === celo.id) tokenAddress = (selectedToken as any).celoMainnet || selectedToken.mainnet;
+      else tokenAddress = (selectedToken as any).celoSepolia || selectedToken.sepolia;
 
       const publicClient = createPublicClient({ chain: activeChain, transport: http(undefined, { fetchOptions: { cache: 'no-store' } }), pollingInterval: 4000 });
-
       const txConfig: any = { account: address as `0x${string}` };
-
-      // ⚡ Only append feeCurrency if on Celo and not MiniPay
+      
       const isCelo = activeChain.id === celo.id || activeChain.id === celoSepolia.id;
-      if (isCelo && environment !== 'MINIPAY') {
-         txConfig.feeCurrency = GAS_CURRENCY as `0x${string}`; 
-      }
+      if (isCelo && environment !== 'MINIPAY') txConfig.feeCurrency = GAS_CURRENCY as `0x${string}`; 
 
-            // 1. Calculate Backend Variables First
+      // 1. Calculate Backend Variables First
       let vtpassServiceID = ""; let displayNetwork = ""; let finalVariationCode = 'prepaid'; let payloadBillersCode = accountNumber; let uiCategory = "";
 
       if (isInternational) {
@@ -542,64 +532,28 @@ export default function Home() {
         else { vtpassServiceID = telecomProvider; displayNetwork = telecomProvider; }
       }
 
-      let hash = "";
       const isBaseNetwork = activeChain.id === base.id || activeChain.id === baseSepolia.id;
+      let hash = "";
 
-      if (!isBaseNetwork) {
-          // 🟢 ==========================================
-          // 🟢 CELO FLOW (Standard Transactions)
-          // 🟢 ==========================================
-          setStatus("Verifying permissions...");
-          const currentAllowance = await publicClient.readContract({ address: tokenAddress as `0x${string}`, abi: ERC20_ABI, functionName: 'allowance', args: [address, ABAPAY_CONTRACT], blockTag: 'latest' }) as bigint;
-
-          if (currentAllowance < valueInWei) {
-              if (currentAllowance > BigInt(0) && selectedToken.symbol === "USD₮") {
-                  const resetHash = await client.writeContract({ address: tokenAddress as `0x${string}`, abi: ERC20_ABI, functionName: 'approve', args: [ABAPAY_CONTRACT, BigInt(0)], ...txConfig });
-                  await publicClient.waitForTransactionReceipt({ hash: resetHash });
-              }
-              setStatus("Awaiting token approval...");
-              const approvalHash = await client.writeContract({ address: tokenAddress as `0x${string}`, abi: ERC20_ABI, functionName: 'approve', args: [ABAPAY_CONTRACT, parseUnits("100000", selectedToken.decimals)], ...txConfig });
-              await publicClient.waitForTransactionReceipt({ hash: approvalHash, confirmations: 1 });
-          }
-
-          setStatus("Please sign the final payment...");
-          const realNonce = await publicClient.getTransactionCount({ address: address as `0x${string}`, blockTag: 'latest' });
-          hash = await client.writeContract({ address: ABAPAY_CONTRACT, abi: ABAPAY_ABI, functionName: 'payBill', args: [tokenAddress, vtpassServiceID, payloadBillersCode, valueInWei], nonce: realNonce, ...txConfig });
-          
-            } else {
-                    // 🔵 ==========================================
-          // 🔵 BASE NETWORK FLOW (Sequential Gasless Smart Wallet)
+      if (isBaseNetwork) {
+          // 🔵 ==========================================
+          // 🔵 BASE NETWORK FLOW (Smart Wallet + Webhook)
           // 🔵 ==========================================
           try {
               setStatus("Verifying permissions...");
-              const currentAllowance = await publicClient.readContract({ 
-                  address: tokenAddress as `0x${string}`, 
-                  abi: ERC20_ABI, 
-                  functionName: 'allowance', 
-                  args: [address, ABAPAY_CONTRACT], 
-                  blockTag: 'latest' 
-              }) as bigint;
+              const currentAllowance = await publicClient.readContract({ address: tokenAddress as `0x${string}`, abi: ERC20_ABI, functionName: 'allowance', args: [address, ABAPAY_CONTRACT], blockTag: 'latest' }) as bigint;
 
-              // ⚡ 1. THE APPROVAL STEP (Gasless, Infinite Approval)
               if (currentAllowance < valueInWei) {
                   setStatus("Awaiting token approval (Gas Sponsored) ⛽...");
-                  const encodedApprove = encodeFunctionData({
-                      abi: ERC20_ABI,
-                      functionName: 'approve',
-                      args: [ABAPAY_CONTRACT, parseUnits("100000", selectedToken.decimals)] 
-                  });
-
-                  // We send ONLY the approve call
+                  const encodedApprove = encodeFunctionData({ abi: ERC20_ABI, functionName: 'approve', args: [ABAPAY_CONTRACT, parseUnits("100000", selectedToken.decimals)] });
                   const approveCallId = await client.sendCalls({
                       account: address as `0x${string}`,
                       calls: [{ to: tokenAddress, data: encodedApprove, value: BigInt(0) }],
                       capabilities: { paymasterService: { url: process.env.NEXT_PUBLIC_PAYMASTER_URL as string } }
                   });
 
-                  setStatus("Confirming approval...");
                   let approved = false;
                   while(!approved) {
-                     // Adding a tiny silent catch so network blips don't crash it
                      const statusRes = await (client as any).getCallsStatus({ id: approveCallId }).catch(() => ({}));
                      if (statusRes.status === 'REJECTED' || statusRes.status === 'FAILED') throw new Error("Approval Cancelled.");
                      if (statusRes.status === 'CONFIRMED') approved = true;
@@ -607,178 +561,116 @@ export default function Home() {
                   }
               }
 
-                                          // ⚡ 2. THE PAYMENT STEP (Gasless, Single Sign for Returning Users!)
               setStatus("Awaiting final payment (Gas Sponsored) ⛽...");
-              const encodedPayBill = encodeFunctionData({
-                  abi: ABAPAY_ABI,
-                  functionName: 'payBill',
-                  args: [tokenAddress, vtpassServiceID, payloadBillersCode, valueInWei] 
-              });
-
-              // We send ONLY the payBill call
+              const encodedPayBill = encodeFunctionData({ abi: ABAPAY_ABI, functionName: 'payBill', args: [tokenAddress, vtpassServiceID, payloadBillersCode, valueInWei] });
+              
               const callId = await client.sendCalls({
                   account: address as `0x${string}`,
                   calls: [{ to: ABAPAY_CONTRACT, data: encodedPayBill, value: BigInt(0) }],
                   capabilities: { paymasterService: { url: process.env.NEXT_PUBLIC_PAYMASTER_URL as string } }
               });
 
-              setStatus("Transaction Submitted! Syncing with network...");
+              setStatus("Transaction Sent! Vending in progress...");
 
-              // 1. INSTANTLY save to Supabase (Matches your Schema)
-              const { data: txRecord, error: dbError } = await supabase
-                  .from('transactions')
-                  .insert([{
-                      wallet_address: address,
-                      service_category: vtpassServiceID,
-                      network: displayNetwork || "BASE", 
-                      account_number: payloadBillersCode,
-                      tx_hash: callId, 
-                      status: 'PENDING',
-                      blockchain: 'BASE',
-                      token_used: selectedToken?.symbol || 'USDC',
-                      amount_crypto: valueInWei.toString() 
-                  }])
-                  .select()
-                  .single();
+              // 1. INSTANTLY save to Supabase
+              const { data: txRecord } = await supabase.from('transactions').insert([{
+                  wallet_address: address, service_category: vtpassServiceID, network: displayNetwork || "BASE", 
+                  account_number: payloadBillersCode, tx_hash: callId, status: 'PENDING', blockchain: 'BASE',
+                  token_used: selectedToken?.symbol || 'USDC', amount_crypto: valueInWei.toString(), amount_naira: calculatedNairaAmount
+              }]).select().single();
 
-              if (dbError) {
-                  console.error("Supabase Insert Error:", dbError);
-                  throw new Error("Failed to record transaction locally.");
-              }
+              // 2. Add to Local History UI immediately as PENDING
+              const newTx: any = { 
+                  id: callId.slice(0,8), date: new Date().toLocaleString(), status: "PENDING", 
+                  amountNaira: isInternational ? `${intlCurrency || activeCountry.code} ${displayForeignAmount}` : calculatedNairaAmount, 
+                  amountCrypto: cryptoToCharge, tokenUsed: selectedToken.symbol, service: uiCategory, network: displayNetwork.toUpperCase(), 
+                  blockchain: 'BASE', txHash: callId, account: payloadBillersCode 
+              };
+              setTransactions(prev => [newTx, ...prev]);
 
-              // 2. Set up the Supabase Real-Time Listener
-              await new Promise((resolve, reject) => {
-                  const channel = supabase
-                      .channel(`tx_watch_${txRecord.id}`)
-                      .on('postgres_changes', { 
-                          event: 'UPDATE', 
-                          schema: 'public', 
-                          table: 'transactions', 
-                          filter: `id=eq.${txRecord.id}` 
-                      }, (payload) => {
-                          const updatedRow = payload.new;
+              // 3. START HYBRID 20-SECOND TIMER
+              const hybridTimer = setTimeout(() => {
+                  setStatus("");
+                  showToast("Background Sync Active", "Payment verified! Vending is finishing in the background. You can safely leave this page.", "success");
+                  setIsProcessing(false); // <--- STOP THE SPINNER!
+              }, 20000);
 
-                          if (updatedRow.status === 'SUCCESS') {
-                              setStatus("Success! Token/Ref Dispatched."); 
-                              
-                              // RESTORED: Dynamic Points Logic
-                              // Pulls from your 'api_response' or 'earned_points' column updated by webhook
-                              const pointsEarned = Number(updatedRow.earned_points || updatedRow.api_response?.earnedPoints || 0);
-                              
-                              if (pointsEarned > 0) {
-                                  window.dispatchEvent(new CustomEvent('abapoints-awarded', { 
-                                      detail: pointsEarned 
-                                  }));
-                                  
-                                  showToast(
-                                      "Transaction Successful", 
-                                      `Payment confirmed! You earned +${pointsEarned.toFixed(2).replace(/\.00$/, '')} AbaPoints ✨`, 
-                                      "success"
-                                  );
-                              } else {
-                                  showToast("Transaction Successful", "Your transaction has been successfully processed.", "success");
-                              }
-
-                              // Display Voucher/Token Code immediately
-                              if (updatedRow.purchased_code) {
-                                  setStatus(`Code: ${updatedRow.purchased_code}`);
-                              }
-
-                              channel.unsubscribe();
-                              resolve(updatedRow);
-                          } 
-                          else if (updatedRow.status === 'FAILED_VENDING') {
-                              setStatus(`Error: ${updatedRow.api_response?.message || 'Vending Failed'}`);
-                              showToast("Error", "Vending failed. Please contact support.", "error");
-                              
-                              channel.unsubscribe();
-                              reject(new Error("Vending Failed"));
-                          }
-                      })
-                      .subscribe();
+              // 4. SUPABASE LISTENER (Watches for Webhook completion)
+              const channel = supabase.channel(`tx_watch_${txRecord.id}`).on('postgres_changes', { 
+                  event: 'UPDATE', schema: 'public', table: 'transactions', filter: `id=eq.${txRecord.id}` 
+              }, (payload) => {
+                  const updatedRow = payload.new;
+                  if (updatedRow.status === 'SUCCESS') {
+                      clearTimeout(hybridTimer);
+                      setStatus("Success! Token/Ref Dispatched."); 
+                      setIsProcessing(false); // Turn off spinner if it finished fast
                       
-                  // 3-Minute Safety Timeout
-                  setTimeout(() => {
-                      setStatus("Background Sync Active...");
-                      showToast("Info", "Transaction is still syncing. You can safely close the app.", "success");
+                      const pointsEarned = Number(updatedRow.earned_points || 0);
+                      if (pointsEarned > 0) window.dispatchEvent(new CustomEvent('abapoints-awarded', { detail: pointsEarned }));
+                      
+                      showToast("Transaction Successful", "Payment confirmed and vended!", "success");
+
+                      // Update history item to SUCCESS
+                      setTransactions(prev => prev.map(t => t.txHash === callId ? { ...t, status: 'SUCCESS', purchased_code: updatedRow.purchased_code } : t));
                       channel.unsubscribe();
-                      resolve(txRecord); 
-                  }, 180000); 
-              });
+                  } 
+                  else if (updatedRow.status === 'FAILED_VENDING' || updatedRow.status === 'VENDING_FAILED') {
+                      clearTimeout(hybridTimer);
+                      setStatus("Vending Failed");
+                      setIsProcessing(false);
+                      showToast("Error", "Vending failed. Please contact support.", "error");
+                      setTransactions(prev => prev.map(t => t.txHash === callId ? { ...t, status: 'FAILED_VENDING' } : t));
+                      channel.unsubscribe();
+                  }
+              }).subscribe();
+
+              // Clean up and RETURN EARLY (Prevents hitting the direct API below)
+              saveBeneficiary(accountNumber, customerName);
+              handleResetService(SERVICES[0]);
+              return;
 
           } catch (error: any) {
-              // ⚠️ FALLBACK FOR STANDARD WALLETS (Matches your original flow)
               const errorMsg = error?.message?.toLowerCase() || "";
-              if (errorMsg.includes("cancelled") || errorMsg.includes("rejected") || errorMsg.includes("timeout_abort")) {
-                  throw new Error("Transaction cancelled or network congested. Please try again.");
-              }
-
-              console.warn("Smart Wallet Paymaster not supported. Falling back...", error);
-              
-              setStatus("Verifying permissions (Standard Wallet)...");
-              const currentAllowance = await publicClient.readContract({ 
-                  address: tokenAddress as `0x${string}`, 
-                  abi: ERC20_ABI, 
-                  functionName: 'allowance', 
-                  args: [address, ABAPAY_CONTRACT], 
-                  blockTag: 'latest' 
-              }) as bigint;
-
-              if (currentAllowance < valueInWei) {
-                  if (currentAllowance > BigInt(0) && selectedToken.symbol === "USD₮") {
-                      const resetHash = await client.writeContract({ 
-                          address: tokenAddress as `0x${string}`, 
-                          abi: ERC20_ABI, 
-                          functionName: 'approve', 
-                          args: [ABAPAY_CONTRACT, BigInt(0)], 
-                          ...txConfig 
-                      });
-                      await publicClient.waitForTransactionReceipt({ hash: resetHash });
-                  }
-                  setStatus("Awaiting token approval...");
-                  const approvalHash = await client.writeContract({ 
-                      address: tokenAddress as `0x${string}`, 
-                      abi: ERC20_ABI, 
-                      functionName: 'approve', 
-                      args: [ABAPAY_CONTRACT, parseUnits("100000", selectedToken.decimals)], 
-                      ...txConfig 
-                  });
-                  await publicClient.waitForTransactionReceipt({ hash: approvalHash, confirmations: 1 });
-              }
-
-              setStatus("Please sign the final payment...");
-              const realNonce = await publicClient.getTransactionCount({ address: address as `0x${string}`, blockTag: 'latest' });
-              hash = await client.writeContract({ 
-                  address: ABAPAY_CONTRACT, 
-                  abi: ABAPAY_ABI, 
-                  functionName: 'payBill', 
-                  args: [tokenAddress, vtpassServiceID, payloadBillersCode, valueInWei], 
-                  nonce: realNonce, 
-                  ...txConfig 
-              });
+              if (errorMsg.includes("cancelled") || errorMsg.includes("rejected")) throw new Error("Transaction cancelled.");
+              // Fallback to standard flow happens naturally below if this fails
           }
       }
 
-      setStatus(`Secured. Processing...`);
+      // 🟢 ==========================================
+      // 🟢 STANDARD WALLET / CELO FLOW (Fallback)
+      // 🟢 ==========================================
+      setStatus("Verifying permissions...");
+      const currentAllowance = await publicClient.readContract({ address: tokenAddress as `0x${string}`, abi: ERC20_ABI, functionName: 'allowance', args: [address, ABAPAY_CONTRACT], blockTag: 'latest' }) as bigint;
 
-                  const backendPayload = {
-        serviceID: vtpassServiceID, serviceCategory: uiCategory, network: displayNetwork.toUpperCase(), 
-        blockchain: activeChain.name.toUpperCase(), // ⚡ INJECTING BLOCKCHAIN FOR THE API ⚡
-        billersCode: payloadBillersCode, amount: cryptoToCharge, 
-        nairaAmount: calculatedNairaAmount, token: selectedToken.symbol, txHash: hash, variation_code: finalVariationCode, 
-        phone: customerPhone || accountNumber, email: customerEmail, wallet_address: address, 
-        subscription_type: activeTab === "pay" && activeService.id === "CABLE" && ['dstv', 'gotv'].includes(cableProvider) ? cableSubscriptionType : undefined,
-        meter_account_type: meterAccountType, operator_id: isInternational ? selectedIntlOperator?.operator_id : undefined, country_code: isInternational ? activeCountry.code : undefined, product_type_id: isInternational ? selectedIntlProduct?.product_type_id : undefined
+      if (currentAllowance < valueInWei) {
+          setStatus("Awaiting token approval...");
+          const approvalHash = await client.writeContract({ address: tokenAddress as `0x${string}`, abi: ERC20_ABI, functionName: 'approve', args: [ABAPAY_CONTRACT, parseUnits("100000", selectedToken.decimals)], ...txConfig });
+          await publicClient.waitForTransactionReceipt({ hash: approvalHash, confirmations: 1 });
+      }
+
+      setStatus("Please sign the final payment...");
+      const realNonce = await publicClient.getTransactionCount({ address: address as `0x${string}`, blockTag: 'latest' });
+      hash = await client.writeContract({ address: ABAPAY_CONTRACT, abi: ABAPAY_ABI, functionName: 'payBill', args: [tokenAddress, vtpassServiceID, payloadBillersCode, valueInWei], nonce: realNonce, ...txConfig });
+      
+      setStatus(`Secured. Processing Vending...`);
+
+      const backendPayload = {
+          serviceID: vtpassServiceID, serviceCategory: uiCategory, network: displayNetwork.toUpperCase(), 
+          blockchain: activeChain.name.toUpperCase(), billersCode: payloadBillersCode, amount: cryptoToCharge, 
+          nairaAmount: calculatedNairaAmount, token: selectedToken.symbol, txHash: hash, variation_code: finalVariationCode, 
+          phone: customerPhone || accountNumber, email: customerEmail, wallet_address: address, 
+          subscription_type: activeTab === "pay" && activeService.id === "CABLE" && ['dstv', 'gotv'].includes(cableProvider) ? cableSubscriptionType : undefined,
+          meter_account_type: meterAccountType, operator_id: isInternational ? selectedIntlOperator?.operator_id : undefined, country_code: isInternational ? activeCountry.code : undefined, product_type_id: isInternational ? selectedIntlProduct?.product_type_id : undefined
       };
 
       const newTx: any = { 
           id: hash.slice(0,8), date: new Date().toLocaleString(), status: "PENDING", 
           amountNaira: isInternational ? `${intlCurrency || activeCountry.code} ${displayForeignAmount}` : calculatedNairaAmount, 
           amountCrypto: cryptoToCharge, tokenUsed: selectedToken.symbol, service: uiCategory, network: displayNetwork.toUpperCase(), 
-          blockchain: activeChain.name.toUpperCase(), // ⚡ INJECTING BLOCKCHAIN FOR THE UI ⚡
-          txHash: hash, account: payloadBillersCode 
+          blockchain: activeChain.name.toUpperCase(), txHash: hash, account: payloadBillersCode 
       };
 
+      // Direct VTPass Call for standard wallets
       const res = await fetch('/api/pay', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(backendPayload) });
       const result = await res.json();
 
@@ -795,9 +687,9 @@ export default function Home() {
            newTx.status = "SUCCESS"; 
            if (result.earnedPoints && result.earnedPoints > 0) {
                window.dispatchEvent(new CustomEvent('abapoints-awarded', { detail: result.earnedPoints }));
-               showToast("Transaction Successful", `Payment confirmed! You earned +${result.earnedPoints.toFixed(2).replace(/\.00$/, '')} AbaPoints ✨`, "success");
+               showToast("Transaction Successful", `You earned +${result.earnedPoints.toFixed(2).replace(/\.00$/, '')} AbaPoints ✨`, "success");
            } else {
-               showToast("Transaction Successful", "Your transaction has been successfully processed.", "success");
+               showToast("Transaction Successful", "Processed.", "success");
            }
         }
         newTx.purchased_code = result.purchased_code; newTx.units = result.units; newTx.request_id = result.data?.requestId;
@@ -805,16 +697,15 @@ export default function Home() {
         setStatus(`Error: ${result.message || 'Transaction Failed'}`); newTx.status = "FAILED_VENDING";
       }
 
-      const updatedHistory = [newTx, ...transactions];
-      setTransactions(updatedHistory); localStorage.setItem(`abapay_history_${address}`, JSON.stringify(updatedHistory));
+      setTransactions(prev => [newTx, ...prev]);
       setCurrentPage(1);
 
-      const balanceWei = await publicClient.readContract({ address: tokenAddress as `0x${string}`, abi: ERC20_ABI, functionName: 'balanceOf', args: [address] });
-      setWalletBalance(parseFloat(formatUnits(balanceWei as bigint, selectedToken.decimals)).toFixed(4));
     } catch (e: any) { 
         if (activeCooldownKey) localStorage.removeItem(activeCooldownKey);
         setStatus(`Error: ${e.shortMessage?.slice(0, 40) || "Transaction Cancelled"}`); 
-    } finally { setIsProcessing(false); }
+    } finally { 
+        setIsProcessing(false); // For Celo/Failed transactions, we turn off spinner here
+    }
   };
 
   useEffect(() => { if (status && !isProcessing) { const timer = setTimeout(() => setStatus(""), 5000); return () => clearTimeout(timer); } }, [status, isProcessing]);
