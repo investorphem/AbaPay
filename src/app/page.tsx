@@ -580,15 +580,10 @@ export default function Home() {
               console.warn("No Paymaster URL configured. Transactions will not be sponsored.");
           }
 
-                    const callId: any = await client.request({
-              method: 'wallet_sendCalls',
-              params: [{
-                  version: '1.0',
-                  chainId: `0x${activeChain.id.toString(16)}`,
-                  from: address as `0x${string}`, // <--- ADD THIS CAST HERE
-                  calls: callsToBundle,
-                  capabilities: capabilities
-              }]
+                              const callId: any = await client.sendCalls({
+              account: address as `0x${string}`,
+              calls: callsToBundle,
+              capabilities: capabilities
           });
           
           txHashString = typeof callId === 'string' ? callId : callId.id;
