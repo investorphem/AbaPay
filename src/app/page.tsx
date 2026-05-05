@@ -654,20 +654,21 @@ export default function Home() {
       
       setStatus(`Secured. Processing Vending...`);
 
+            // 1. EXTRACT THE ACTUAL STRING HASH SAFELY
+      const txHashString = typeof callId === 'string' ? callId : callId.id;
+
       const backendPayload = {
-          serviceID: vtpassServiceID, serviceCategory: uiCategory, network: displayNetwork.toUpperCase(), 
-          blockchain: activeChain.name.toUpperCase(), billersCode: payloadBillersCode, amount: cryptoToCharge, 
-          nairaAmount: calculatedNairaAmount, token: selectedToken.symbol, txHash: hash, variation_code: finalVariationCode, 
-          phone: customerPhone || accountNumber, email: customerEmail, wallet_address: address, 
-          subscription_type: activeTab === "pay" && activeService.id === "CABLE" && ['dstv', 'gotv'].includes(cableProvider) ? cableSubscriptionType : undefined,
-          meter_account_type: meterAccountType, operator_id: isInternational ? selectedIntlOperator?.operator_id : undefined, country_code: isInternational ? activeCountry.code : undefined, product_type_id: isInternational ? selectedIntlProduct?.product_type_id : undefined
+        serviceID: vtpassServiceID, serviceCategory: uiCategory, network: displayNetwork.toUpperCase(), billersCode: payloadBillersCode, amount: cryptoToCharge, 
+        nairaAmount: calculatedNairaAmount, token: selectedToken.symbol, txHash: txHashString, variation_code: finalVariationCode, 
+        phone: customerPhone || accountNumber, email: customerEmail, wallet_address: address, 
+        subscription_type: activeTab === "pay" && activeService.id === "CABLE" && ['dstv', 'gotv'].includes(cableProvider) ? cableSubscriptionType : undefined,
+        meter_account_type: meterAccountType, operator_id: isInternational ? selectedIntlOperator?.operator_id : undefined, country_code: isInternational ? activeCountry.code : undefined, product_type_id: isInternational ? selectedIntlProduct?.product_type_id : undefined
       };
 
       const newTx: any = { 
-          id: hash.slice(0,8), date: new Date().toLocaleString(), status: "PENDING", 
+          id: txHashString.slice(0,8), date: new Date().toLocaleString(), status: "PENDING", 
           amountNaira: isInternational ? `${intlCurrency || activeCountry.code} ${displayForeignAmount}` : calculatedNairaAmount, 
-          amountCrypto: cryptoToCharge, tokenUsed: selectedToken.symbol, service: uiCategory, network: displayNetwork.toUpperCase(), 
-          blockchain: activeChain.name.toUpperCase(), txHash: hash, account: payloadBillersCode 
+          amountCrypto: cryptoToCharge, tokenUsed: selectedToken.symbol, service: uiCategory, network: displayNetwork.toUpperCase(), txHash: txHashString, account: payloadBillersCode 
       };
 
       // Direct VTPass Call for standard wallets
