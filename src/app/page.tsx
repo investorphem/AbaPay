@@ -434,7 +434,7 @@ export default function Home() {
     setIsVerifying(false);
   };
 
-    const processBlockchainPayment = async () => {
+  const processBlockchainPayment = async () => {
     if (!address || !client) return setStatus("Connect Wallet First");
     if (parseFloat(cryptoToCharge) > parseFloat(walletBalance)) return setStatus(`Insufficient ${selectedToken.symbol} Balance.`);
 
@@ -473,20 +473,11 @@ export default function Home() {
       if (currentAllowance < valueInWei) {
           if (currentAllowance > BigInt(0) && selectedToken.symbol === "USD₮") {
               const resetHash = await client.writeContract({ address: tokenAddress as `0x${string}`, abi: ERC20_ABI, functionName: 'approve', args: [ABAPAY_CONTRACT, BigInt(0)], ...txConfig });
-              try { await publicClient.waitForTransactionReceipt({ hash: resetHash }); } catch (e) { console.log("Reset wait bypassed"); }
+              await publicClient.waitForTransactionReceipt({ hash: resetHash });
           }
           setStatus("Awaiting token approval...");
           const approvalHash = await client.writeContract({ address: tokenAddress as `0x${string}`, abi: ERC20_ABI, functionName: 'approve', args: [ABAPAY_CONTRACT, parseUnits("100000", selectedToken.decimals)], ...txConfig });
-          
-          // FIX 1: Prevent "Infinite Loading" on Approval for Bundlers/Paymasters
-          try {
-              await Promise.race([
-                  publicClient.waitForTransactionReceipt({ hash: approvalHash, confirmations: 1 }),
-                  new Promise((_, reject) => setTimeout(() => reject(new Error("Approval receipt timeout")), 8000))
-              ]);
-          } catch (e) {
-              console.log("Approval confirmation skipped/timed out (Normal for Account Abstraction). Proceeding...");
-          }
+          await publicClient.waitForTransactionReceipt({ hash: approvalHash, confirmations: 1 });
       }
 
       setStatus("Please sign the final payment...");
@@ -509,8 +500,7 @@ export default function Home() {
 
       const realNonce = await publicClient.getTransactionCount({ address: address as `0x${string}`, blockTag: 'latest' });
       const hash = await client.writeContract({ address: ABAPAY_CONTRACT, abi: ABAPAY_ABI, functionName: 'payBill', args: [tokenAddress, vtpassServiceID, payloadBillersCode, valueInWei], nonce: realNonce, ...txConfig });
-      
-      setStatus(`Secured. Vending in progress...`);
+      setStatus(`Secured. Processing...`);
 
       const backendPayload = {
         serviceID: vtpassServiceID, serviceCategory: uiCategory, network: displayNetwork.toUpperCase(), billersCode: payloadBillersCode, amount: cryptoToCharge, 
@@ -526,63 +516,30 @@ export default function Home() {
           amountCrypto: cryptoToCharge, tokenUsed: selectedToken.symbol, service: uiCategory, network: displayNetwork.toUpperCase(), txHash: hash, account: payloadBillersCode 
       };
 
-      // Call API to save to DB (Assume /api/pay now handles insertion and the Webhook handles vending)
-      await fetch('/api/pay', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(backendPayload) });
+      const res = await fetch('/api/pay', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(backendPayload) });
+      const result = await res.json();
 
       saveBeneficiary(accountNumber, customerName);
       handleResetService(SERVICES[0]);
 
-      // FIX 2: Start the Hybrid Timeout & Listener
-      const finalStatus: any = await new Promise((resolve) => {
-          let isResolved = false;
-
-          const timer = setTimeout(() => {
-              if (!isResolved) {
-                  isResolved = true;
-                  resolve('TIMEOUT');
-              }
-          }, 20000); // 20 seconds maximum wait
-
-          const channel = supabase.channel(`tx-${hash}`)
-              .on('postgres_changes', 
-                  { event: 'UPDATE', schema: 'public', table: 'transactions', filter: `tx_hash=eq.${hash}` },
-                  (payload) => {
-                      if (!isResolved) {
-                          const newStatus = payload.new.status;
-                          if (newStatus === 'SUCCESS' || newStatus === 'VENDING_FAILED') {
-                              isResolved = true;
-                              clearTimeout(timer);
-                              channel.unsubscribe();
-                              resolve(payload.new);
-                          }
-                      }
-                  }
-              )
-              .subscribe();
-      });
-
-      if (finalStatus === 'TIMEOUT') {
-          setStatus("Payment Sent! We're finishing your vending in the background.");
-          newTx.status = "PENDING";
-          showToast("Processing", "You can safely leave this page. Receipt will be in History.", "success");
-      } else if (finalStatus.status === 'SUCCESS') {
-          setStatus("Success! Token/Ref Dispatched."); 
-          newTx.status = "SUCCESS"; 
-          newTx.purchased_code = finalStatus.purchased_code; 
-          newTx.units = finalStatus.units; 
-          newTx.request_id = finalStatus.request_id;
-          
-          const earnedPoints = Number((parseFloat(calculatedNairaAmount) / 1000).toFixed(2));
-          if (earnedPoints > 0) {
-              window.dispatchEvent(new CustomEvent('abapoints-awarded', { detail: earnedPoints }));
-              showToast("Transaction Successful", `Payment confirmed! You earned +${earnedPoints.toFixed(2).replace(/\.00$/, '')} AbaPoints ✨`, "success");
-          } else {
-              showToast("Transaction Successful", "Your transaction has been successfully processed.", "success");
-          }
+      if (result.success) {
+        if (result.message && result.message.toLowerCase().includes("processing")) {
+           setStatus("Transaction Processing...");
+           newTx.status = "PENDING";
+           showToast("Transaction Pending", result.message, "success");
+        } else {
+           setStatus("Success! Token/Ref Dispatched."); 
+           newTx.status = "SUCCESS"; 
+           if (result.earnedPoints && result.earnedPoints > 0) {
+               window.dispatchEvent(new CustomEvent('abapoints-awarded', { detail: result.earnedPoints }));
+               showToast("Transaction Successful", `Payment confirmed! You earned +${result.earnedPoints.toFixed(2).replace(/\.00$/, '')} AbaPoints ✨`, "success");
+           } else {
+               showToast("Transaction Successful", "Your transaction has been successfully processed.", "success");
+           }
+        }
+        newTx.purchased_code = result.purchased_code; newTx.units = result.units; newTx.request_id = result.data?.requestId;
       } else {
-          setStatus("Vending Failed. Admin alerted."); 
-          newTx.status = "FAILED_VENDING";
-          showToast("Vending Error", "Payment received, but vending failed. Please contact support.", "error");
+        setStatus(`Error: ${result.message || 'Transaction Failed'}`); newTx.status = "FAILED_VENDING";
       }
 
       const updatedHistory = [newTx, ...transactions];
