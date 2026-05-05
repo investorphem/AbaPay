@@ -534,9 +534,12 @@ export default function Home() {
 
       let txHashString = "";
 
-      // 3. EXECUTE TRANSACTION (BUNDLED FOR BASE/FARCASTER, SEQUENTIAL FOR MINIPAY)
+            // 3. EXECUTE TRANSACTION (BUNDLED FOR BASE/FARCASTER, SEQUENTIAL FOR MINIPAY)
+      let txHashString = "";
+      const currentBlockchainName = activeChain?.name?.toUpperCase() || "CELO";
+
       if (environment === 'MINIPAY') {
-          // MINIPAY (CELO) FLOW: Uses feeCurrency (cUSD) natively
+          // MINIPAY (CELO) FLOW
           if (currentAllowance < valueInWei) {
               setStatus("Awaiting token approval...");
               const appHash = await client.writeContract({ address: tokenAddress as `0x${string}`, abi: ERC20_ABI, functionName: 'approve', args: [ABAPAY_CONTRACT, parseUnits("100000", selectedToken.decimals)], ...txConfig });
@@ -546,47 +549,53 @@ export default function Home() {
           const realNonce = await publicClient.getTransactionCount({ address: address as `0x${string}`, blockTag: 'latest' });
           txHashString = await client.writeContract({ address: ABAPAY_CONTRACT, abi: ABAPAY_ABI, functionName: 'payBill', args: [tokenAddress, vtpassServiceID, payloadBillersCode, valueInWei], nonce: realNonce, ...txConfig });
       } else {
-          // BASE / FARCASTER FLOW: EIP-5792 Account Abstraction (Sponsored Gas)
+          // BASE / FARCASTER FLOW: EIP-5792 Account Abstraction
           setStatus("Please approve the gasless transaction...");
           
           const callsToBundle = [];
-
           if (currentAllowance < valueInWei) {
               callsToBundle.push({
                   to: tokenAddress as `0x${string}`,
-                  data: encodeFunctionData({
-                      abi: ERC20_ABI,
-                      functionName: 'approve',
-                      args: [ABAPAY_CONTRACT, parseUnits("100000", selectedToken.decimals)]
-                  })
+                  data: encodeFunctionData({ abi: ERC20_ABI, functionName: 'approve', args: [ABAPAY_CONTRACT, parseUnits("100000", selectedToken.decimals)] })
               });
           }
-
           callsToBundle.push({
               to: ABAPAY_CONTRACT as `0x${string}`,
-              data: encodeFunctionData({
-                  abi: ABAPAY_ABI,
-                  functionName: 'payBill',
-                  args: [tokenAddress, vtpassServiceID, payloadBillersCode, valueInWei]
-              })
+              data: encodeFunctionData({ abi: ABAPAY_ABI, functionName: 'payBill', args: [tokenAddress, vtpassServiceID, payloadBillersCode, valueInWei] })
           });
 
           const paymasterUrl = process.env.NEXT_PUBLIC_PAYMASTER_URL;
-          const capabilities: any = {};
-          
-          if (paymasterUrl) {
-              capabilities.paymasterService = { url: paymasterUrl };
-          } else {
-              console.warn("No Paymaster URL configured. Transactions will not be sponsored.");
-          }
+          const capabilities: any = paymasterUrl ? { paymasterService: { url: paymasterUrl } } : {};
 
-                              const callId: any = await client.sendCalls({
+          const callId: any = await client.sendCalls({
               account: address as `0x${string}`,
               calls: callsToBundle,
               capabilities: capabilities
           });
           
-          txHashString = typeof callId === 'string' ? callId : callId.id;
+          const bundleId = typeof callId === 'string' ? callId : callId.id;
+          setStatus("Waiting for Bundler confirmation...");
+
+          // ⚡ THE FIX: Poll the bundler to get the REAL on-chain transaction hash
+          let realTxHash = bundleId;
+          let attempts = 0;
+          while (attempts < 15) { // Try for 30 seconds max
+              try {
+                  const callStatus: any = await client.getCallsStatus({ id: bundleId });
+                  if (callStatus.status === 'CONFIRMED' && callStatus.receipts && callStatus.receipts.length > 0) {
+                      // Grab the actual blockchain transaction hash
+                      const hashStr = callStatus.receipts[0].transactionHash || callStatus.receipts[0].logs?.[0]?.transactionHash;
+                      if (hashStr) {
+                          realTxHash = hashStr;
+                          break;
+                      }
+                  }
+              } catch (err) { console.log("Waiting for block..."); }
+              await new Promise(res => setTimeout(res, 2000));
+              attempts++;
+          }
+          
+          txHashString = realTxHash;
       }
       
       setStatus(`Secured. Vending in progress...`);
@@ -597,13 +606,15 @@ export default function Home() {
         nairaAmount: calculatedNairaAmount, token: selectedToken.symbol, txHash: txHashString, variation_code: finalVariationCode, 
         phone: customerPhone || accountNumber, email: customerEmail, wallet_address: address, 
         subscription_type: activeTab === "pay" && activeService.id === "CABLE" && ['dstv', 'gotv'].includes(cableProvider) ? cableSubscriptionType : undefined,
-        meter_account_type: meterAccountType, operator_id: isInternational ? selectedIntlOperator?.operator_id : undefined, country_code: isInternational ? activeCountry.code : undefined, product_type_id: isInternational ? selectedIntlProduct?.product_type_id : undefined
+        meter_account_type: meterAccountType, operator_id: isInternational ? selectedIntlOperator?.operator_id : undefined, country_code: isInternational ? activeCountry.code : undefined, product_type_id: isInternational ? selectedIntlProduct?.product_type_id : undefined,
+        blockchain: currentBlockchainName // ⚡ FIX 2: Explicitly send BASE or CELO to the database
       };
 
       const newTx: any = { 
           id: txHashString.slice(0,8), date: new Date().toLocaleString(), status: "PENDING", 
           amountNaira: isInternational ? `${intlCurrency || activeCountry.code} ${displayForeignAmount}` : calculatedNairaAmount, 
-          amountCrypto: cryptoToCharge, tokenUsed: selectedToken.symbol, service: uiCategory, network: displayNetwork.toUpperCase(), txHash: txHashString, account: payloadBillersCode 
+          amountCrypto: cryptoToCharge, tokenUsed: selectedToken.symbol, service: uiCategory, network: displayNetwork.toUpperCase(), txHash: txHashString, account: payloadBillersCode,
+          blockchain: currentBlockchainName // ⚡ FIX 3: Update local UI immediately
       };
 
       await fetch('/api/pay', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(backendPayload) });
