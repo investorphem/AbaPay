@@ -104,8 +104,9 @@ export async function POST(req: Request) {
                     logs: receipt.logs
                 });
 
-                if (logs && logs.length > 0) {
-                    const eventArgs: any = logs[0].args;
+                                if (logs && logs.length > 0) {
+                    const firstLog: any = logs[0]; // ⚡ Bypass TS strictness on the Log object
+                    const eventArgs = firstLog.args;
                     const onChainAccountNumber = eventArgs.accountNumber as string;
 
                     // Match up against the ghost PENDING row saved via Bundle ID
