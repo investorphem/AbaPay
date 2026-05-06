@@ -79,22 +79,33 @@ export async function POST(req: Request) {
             return NextResponse.json({ message: "Test Successful" });
         }
 
-        // 3. THE RETRY LOOP (Clean & Simple Match)
+                // 3. THE RETRY LOOP (With Atomic Locking)
         let record = null;
-        let retries = 5; // Fast 10-second wait since the hash is instant
+        let retries = 5;
 
         while (retries > 0) {
-            // Because we abandoned the bundler, the hash Alchemy sends will ALWAYS 
-            // match the exact hash our frontend saved to the database. 
             const { data: exactMatch } = await supabaseAdmin
                 .from('transactions')
                 .select('*')
                 .eq('tx_hash', txHash)
                 .single();
 
+            // ⚡ ATOMIC LOCK: Claim the transaction so no duplicate webhooks can touch it
             if (exactMatch && exactMatch.status === 'PENDING') {
-                record = exactMatch;
-                break;
+                const { data: lockedRecord, error: lockError } = await supabaseAdmin
+                    .from('transactions')
+                    .update({ status: 'PROCESSING' })
+                    .eq('tx_hash', txHash)
+                    .eq('status', 'PENDING') // Optimistic locking
+                    .select()
+                    .single();
+
+                if (lockedRecord && !lockError) {
+                    record = lockedRecord;
+                    break;
+                } else {
+                    return NextResponse.json({ message: "Already processing by another webhook execution" });
+                }
             }
 
             if (exactMatch && exactMatch.status !== 'PENDING') {
