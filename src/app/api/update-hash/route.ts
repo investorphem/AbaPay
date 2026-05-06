@@ -9,11 +9,10 @@ export async function POST(req: Request) {
             return NextResponse.json({ error: "Missing parameters" }, { status: 400 });
         }
 
-        // Find the ghost transaction and update it with the real blockchain hash
         const { error } = await supabaseAdmin
             .from('transactions')
             .update({ tx_hash: realTxHash })
-            .eq('tx_hash', bundleId)
+            .eq('bundle_id', bundleId)
             .eq('status', 'PENDING');
 
         if (error) throw error;
