@@ -8,16 +8,14 @@ import { Resend } from 'resend';
 
 // ⚡ ADDED IMPORTS FOR PAYLOAD DECODER ⚡
 import { createPublicClient, http, decodeFunctionData } from 'viem';
-import { base } from 'viem/chains';
+import { base, baseSepolia } from 'viem/chains'; // Added baseSepolia for testing
 import { ABAPAY_ABI } from '@/constants'; 
 
 const resend = new Resend(process.env.RESEND_API_KEY || "re_dummy_key_for_build");
 
-// ⚡ Setup Viem to read the Base blockchain directly
-const baseClient = createPublicClient({ 
-    chain: base, 
-    transport: http("https://mainnet.base.org") 
-});
+// ⚡ Setup Viem to read BOTH Base and Sepolia
+const baseClient = createPublicClient({ chain: base, transport: http("https://mainnet.base.org") });
+const sepoliaClient = createPublicClient({ chain: baseSepolia, transport: http("https://sepolia.base.org") });
 
 // ⚡ ERROR CODES MOVED HERE ⚡
 const error_messages: Record<string, string> = {
@@ -80,7 +78,7 @@ export async function POST(req: Request) {
 
         // 3. THE RETRY LOOP & SECURE PAYLOAD DECODER ⚡
         let record = null;
-        let retries = 4; 
+        let retries = 20; // ⚡ INCREASED: Wait up to 40 seconds for frontend to save
 
         while (retries > 0) {
             // First, look for the exact real transaction hash (Normal Flow)
@@ -99,11 +97,16 @@ export async function POST(req: Request) {
                 return NextResponse.json({ message: "Already processed" });
             }
 
-                        // ⚡ THE BLOCKCHAIN DECODER (For Bundler Delays) ⚡
+            // ⚡ THE BLOCKCHAIN DECODER (For Bundler Delays) ⚡
             try {
-                // Fetch the transaction directly from the Base blockchain
-                const tx = await baseClient.getTransaction({ hash: txHash as `0x${string}` });
-                
+                let tx;
+                // Try Mainnet first, if it fails, try Sepolia (for your testing)
+                try {
+                    tx = await baseClient.getTransaction({ hash: txHash as `0x${string}` });
+                } catch (e) {
+                    tx = await sepoliaClient.getTransaction({ hash: txHash as `0x${string}` });
+                }
+
                 // Decode the data sent to your smart contract (Bypass strict TS with ': any')
                 const decoded: any = decodeFunctionData({
                     abi: ABAPAY_ABI,
@@ -131,19 +134,19 @@ export async function POST(req: Request) {
                 // If found, and it has a fake Bundler ID (> 66 chars), rescue it!
                 if (smartMatch && smartMatch.tx_hash.length > 66) {
                     console.log(`🎯 Payload Match! Rescuing tx for ${onChainAccountNumber}`);
-                    
+
                     // Overwrite the Bundle ID with the real hash in the database
                     await supabaseAdmin
                         .from('transactions')
                         .update({ tx_hash: txHash })
                         .eq('id', smartMatch.id);
-                    
+
                     record = smartMatch;
                     record.tx_hash = txHash; // Update local memory so VTpass can use the real hash
                     break;
                 }
             } catch (err) {
-                console.log("Could not decode payload, waiting...", err);
+                console.log("Could not decode payload yet, waiting...");
             }
 
             await new Promise(resolve => setTimeout(resolve, 2000)); 
