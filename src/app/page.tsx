@@ -573,11 +573,13 @@ export default function Home() {
           await publicClient.waitForTransactionReceipt({ hash: appHash, confirmations: 1 });
       }
 
+            // ... (Keep the ERC20 token approval block just above this) ...
+
       setStatus("Please sign the final payment...");
       const realNonce = await publicClient.getTransactionCount({ address: address as `0x${string}`, blockTag: 'latest' });
-      
-      // ⚡ INSTANT REAL HASH: Wagmi returns the true 66-character hash instantly!
-      txHashString = await client.writeContract({ 
+
+      // 3. EXECUTE & GET RAW HASH
+      const rawHash = await client.writeContract({ 
           address: ABAPAY_CONTRACT, 
           abi: ABAPAY_ABI, 
           functionName: 'payBill', 
@@ -586,82 +588,38 @@ export default function Home() {
           ...txConfig 
       });
 
-      setStatus(`Payment Secured! Vending in the background...`);
+      // ⚡ FORCE LOWERCASE FOR PERFECT WEBHOOK MATCHING ⚡
+      txHashString = rawHash.toLowerCase(); 
 
-      // 4. SAVE INTENT TO DATABASE
       const backendPayload = {
         serviceID: vtpassServiceID, serviceCategory: uiCategory, network: displayNetwork.toUpperCase(), billersCode: payloadBillersCode, amount: cryptoToCharge, 
         nairaAmount: calculatedNairaAmount, token: selectedToken.symbol, txHash: txHashString, variation_code: finalVariationCode, 
         phone: customerPhone || accountNumber, email: customerEmail, wallet_address: address, 
         subscription_type: activeTab === "pay" && activeService.id === "CABLE" && ['dstv', 'gotv'].includes(cableProvider) ? cableSubscriptionType : undefined,
         meter_account_type: meterAccountType, operator_id: isInternational ? selectedIntlOperator?.operator_id : undefined, country_code: isInternational ? activeCountry.code : undefined, product_type_id: isInternational ? selectedIntlProduct?.product_type_id : undefined,
-        blockchain: currentBlockchainName // ⚡ FIX 2: Explicitly send BASE or CELO to the database
+        blockchain: currentBlockchainName 
       };
 
-      const newTx: any = { 
-          id: txHashString.slice(0,8), date: new Date().toLocaleString(), status: "PENDING", 
-          amountNaira: isInternational ? `${intlCurrency || activeCountry.code} ${displayForeignAmount}` : calculatedNairaAmount, 
-          amountCrypto: cryptoToCharge, tokenUsed: selectedToken.symbol, service: uiCategory, network: displayNetwork.toUpperCase(), txHash: txHashString, account: payloadBillersCode,
-          blockchain: currentBlockchainName // ⚡ FIX 3: Update local UI immediately
-      };
+      // 4. INSTANT SAFETY NET (Save Intent BEFORE network confirmation)
+      setStatus("Securing transaction intent...");
+      await fetch('/api/pay', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ ...backendPayload, intent_only: true }) });
 
-      await fetch('/api/pay', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(backendPayload) });
+      // 5. WAIT FOR BLOCKCHAIN
+      setStatus("Confirming on blockchain... Please hold.");
+      await publicClient.waitForTransactionReceipt({ hash: txHashString as `0x${string}`, confirmations: 1 });
+
+      setStatus(`Payment Secured! Vending in progress...`);
+
+      // 6. INSTANT SYNCHRONOUS VENDING (Bypass WebSockets)
+      const res = await fetch('/api/pay', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ ...backendPayload, intent_only: false }) });
+      const finalStatus = await res.json();
 
       saveBeneficiary(accountNumber, customerName);
       handleResetService(SERVICES[0]);
 
-            // 5. HYBRID UI LISTENER
-      const finalStatus: any = await new Promise((resolve) => {
-          let isResolved = false;
-
-          // ⚡ Increased to 35 seconds to allow Base + VTpass to fully complete
-          const timer = setTimeout(() => {
-              if (!isResolved) {
-                  isResolved = true;
-                  resolve('TIMEOUT');
-              }
-          }, 35000); 
-
-          const channel = supabase.channel(`tx-${txHashString}`)
-              .on('postgres_changes', 
-                  { event: 'UPDATE', schema: 'public', table: 'transactions', filter: `tx_hash=eq.${txHashString}` },
-                  (payload) => {
-                      if (!isResolved) {
-                          const newStatus = payload.new.status;
-                          if (newStatus === 'SUCCESS' || newStatus === 'VENDING_FAILED') {
-                              isResolved = true;
-                              clearTimeout(timer);
-                              channel.unsubscribe();
-                              resolve(payload.new);
-                          }
-                      }
-                  }
-              )
-              .subscribe(async (status) => {
-                  // ⚡ DOUBLE CHECK: In case the webhook beat our listener!
-                  if (status === 'SUBSCRIBED' && !isResolved) {
-                      const { data } = await supabase.from('transactions').select('*').eq('tx_hash', txHashString).single();
-                      if (data && (data.status === 'SUCCESS' || data.status === 'VENDING_FAILED')) {
-                          isResolved = true;
-                          clearTimeout(timer);
-                          channel.unsubscribe();
-                          resolve(data);
-                      }
-                  }
-              });
-      });
-
-      if (finalStatus === 'TIMEOUT') {
-          setStatus("Payment Sent! We're finishing your vending in the background.");
-          newTx.status = "PENDING";
-          showToast("Processing", "You can safely leave this page. Receipt will be in History.", "success");
-      } else if (finalStatus.status === 'SUCCESS') {
+      // 7. INSTANT UI FEEDBACK
+      if (finalStatus.status === 'SUCCESS') {
           setStatus("Success! Token/Ref Dispatched."); 
-          newTx.status = "SUCCESS"; 
-          newTx.purchased_code = finalStatus.purchased_code; 
-          newTx.units = finalStatus.units; 
-          newTx.request_id = finalStatus.request_id;
-
           const earnedPoints = Number((parseFloat(calculatedNairaAmount) / 1000).toFixed(2));
           if (earnedPoints > 0) {
               window.dispatchEvent(new CustomEvent('abapoints-awarded', { detail: earnedPoints }));
@@ -669,19 +627,28 @@ export default function Home() {
           } else {
               showToast("Transaction Successful", "Your transaction has been successfully processed.", "success");
           }
+      } else if (finalStatus.status === 'TIMEOUT') {
+          setStatus("Payment Sent! We're finishing your vending in the background.");
+          showToast("Processing", "You can safely leave this page. Receipt will be in History.", "success");
       } else {
           setStatus("Vending Failed. Admin alerted."); 
-          newTx.status = "FAILED_VENDING";
-          showToast("Vending Error", "Payment received, but vending failed. Please contact support.", "error");
+          showToast("Vending Error", finalStatus.message || "Payment received, but vending failed.", "error");
       }
 
-      const updatedHistory = [newTx, ...transactions];
-      setTransactions(updatedHistory); localStorage.setItem(`abapay_history_${address}`, JSON.stringify(updatedHistory));
+      // Refresh Local History and Balance
+      const updatedHistory = [{ 
+          id: txHashString.slice(0,8), date: new Date().toLocaleString(), status: finalStatus.status === 'TIMEOUT' ? "PENDING" : finalStatus.status, 
+          amountNaira: isInternational ? `${intlCurrency || activeCountry.code} ${displayForeignAmount}` : calculatedNairaAmount, 
+          amountCrypto: cryptoToCharge, tokenUsed: selectedToken.symbol, service: uiCategory, network: displayNetwork.toUpperCase(), txHash: txHashString, account: payloadBillersCode,
+          blockchain: currentBlockchainName, purchased_code: finalStatus.purchased_code, units: finalStatus.units
+      }, ...transactions];
+      setTransactions(updatedHistory); 
+      localStorage.setItem(`abapay_history_${address}`, JSON.stringify(updatedHistory));
       setCurrentPage(1);
 
       const balanceWei = await publicClient.readContract({ address: tokenAddress as `0x${string}`, abi: ERC20_ABI, functionName: 'balanceOf', args: [address] });
       setWalletBalance(parseFloat(formatUnits(balanceWei as bigint, selectedToken.decimals)).toFixed(4));
-      
+
     } catch (e: any) { 
         setStatus(`Error: ${e.shortMessage?.slice(0, 40) || "Transaction Cancelled"}`); 
     } finally { 
@@ -877,14 +844,21 @@ export default function Home() {
     try { const saved = localStorage.getItem(`abapay_beneficiaries_${address}`); if (saved) setBeneficiaries(JSON.parse(saved)); else setBeneficiaries({}); } catch (e) {}
   }, [address]);
 
-    useEffect(() => {
+      useEffect(() => {
     async function fetchBalance() {
-      if (!address) return;
+      if (!address || !activeChain) return;
       setIsFetchingBalance(true);
+      
       try {
-        const publicClient = createPublicClient({ chain: activeChain, transport: http() });
-        
-        // ⚡ THE FIX: Dynamically select the token address based on the active chain
+        // ⚡ THE MINIPAY FIX: Route read requests through MiniPay's internal node
+        const isMiniPay = environment === 'MINIPAY' && typeof window !== "undefined" && (window as any).ethereum;
+        const transport = isMiniPay 
+            ? custom((window as any).ethereum) 
+            : http(undefined, { fetchOptions: { cache: 'no-store' } });
+
+        const publicClient = createPublicClient({ chain: activeChain, transport });
+
+        // ⚡ DYNAMIC TOKEN SELECTION
         let tokenAddress;
         if (activeChain.id === base.id) {
             tokenAddress = (selectedToken as any).baseMainnet || selectedToken.mainnet;
@@ -893,17 +867,25 @@ export default function Home() {
         } else if (activeChain.id === celo.id) {
             tokenAddress = (selectedToken as any).celoMainnet || selectedToken.mainnet;
         } else {
-            // Defaults to Celo Alfajores
             tokenAddress = (selectedToken as any).celoSepolia || selectedToken.sepolia;
+        }
+
+        if (!tokenAddress) {
+            setWalletBalance("0.00");
+            setIsFetchingBalance(false);
+            return;
         }
 
         const balanceWei = await publicClient.readContract({ address: tokenAddress as `0x${string}`, abi: ERC20_ABI, functionName: 'balanceOf', args: [address] });
         setWalletBalance(parseFloat(formatUnits(balanceWei as bigint, selectedToken.decimals)).toFixed(4));
-      } catch (error) { setWalletBalance("0.00"); }
+      } catch (error) { 
+        console.error("Balance fetch error:", error);
+        setWalletBalance("0.00"); 
+      }
       setIsFetchingBalance(false);
     }
     fetchBalance();
-  }, [address, selectedToken, activeChain, isMainnet]);
+  }, [address, selectedToken, activeChain, environment]);
 
   useEffect(() => { fetchBanksManual(); }, []);
 
