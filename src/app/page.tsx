@@ -587,37 +587,44 @@ export default function Home() {
           const paymasterUrl = process.env.NEXT_PUBLIC_PAYMASTER_URL;
           const capabilities: any = paymasterUrl ? { paymasterService: { url: paymasterUrl } } : {};
 
-                              const callId: any = await client.sendCalls({
+                                        const callId: any = await client.sendCalls({
               account: address as `0x${string}`,
               calls: callsToBundle,
               capabilities: capabilities
           });
 
           const bundleId = typeof callId === 'string' ? callId : callId.id;
-          setStatus("Sponsoring your network fee... Processing.");
+          
+          // 1. INSTANT FRONTEND FINISH
+          // We immediately set the hash string to the 130-char ticket to keep the app moving fast
+          txHashString = bundleId;
 
-          // ⚡ ENTERPRISE FIRE-AND-FORGET (Wait max 10 seconds for instant blocks)
-          let realTxHash = "";
-          let attempts = 0;
-
-          while (attempts < 5) { 
-              try {
-                  const callStatus: any = await client.getCallsStatus({ id: bundleId });
-                  if (callStatus.status === 'CONFIRMED' && callStatus.receipts && callStatus.receipts.length > 0) {
-                      const hashStr = callStatus.receipts[0].transactionHash || callStatus.receipts[0].logs?.[0]?.transactionHash;
-
-                      if (hashStr && hashStr.length === 66) {
-                          realTxHash = hashStr;
-                          break;
+          // 2. SILENT BACKGROUND SYNC
+          // We fire off an invisible background task that watches the network for the real hash
+          // without forcing the user to wait for it.
+          (async () => {
+              let attempts = 0;
+              while (attempts < 15) { // Watch silently for up to 30 seconds
+                  try {
+                      const callStatus: any = await client.getCallsStatus({ id: bundleId });
+                      if (callStatus.status === 'CONFIRMED' && callStatus.receipts?.length > 0) {
+                          const realHash = callStatus.receipts[0].transactionHash || callStatus.receipts[0].logs?.[0]?.transactionHash;
+                          
+                          if (realHash && realHash.length === 66) {
+                              // Ping our new API route to silently fix the database!
+                              await fetch('/api/update-hash', {
+                                  method: 'POST',
+                                  headers: { 'Content-Type': 'application/json' },
+                                  body: JSON.stringify({ bundleId, realTxHash: realHash })
+                              });
+                              break;
+                          }
                       }
-                  }
-              } catch (err) { console.log("Waiting for block..."); }
-              await new Promise(res => setTimeout(res, 2000));
-              attempts++;
-          }
-
-          // ⚡ If we caught the real hash in 10s, great. If not, store the ticket safely!
-          txHashString = realTxHash && realTxHash.length === 66 ? realTxHash : bundleId;
+                  } catch (err) {}
+                  await new Promise(res => setTimeout(res, 2000));
+                  attempts++;
+              }
+          })();
       }
 
       setStatus(`Payment Secured! Vending in progress...`);
