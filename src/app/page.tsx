@@ -536,7 +536,7 @@ export default function Home() {
       setStatus("Verifying permissions...");
       const currentAllowance = await publicClient.readContract({ address: tokenAddress as `0x${string}`, abi: ERC20_ABI, functionName: 'allowance', args: [address, ABAPAY_CONTRACT], blockTag: 'latest' }) as bigint;
 
-            // 2. Format VTPass Variables
+                  // 2. Format VTPass Variables
       let vtpassServiceID = ""; let displayNetwork = ""; let finalVariationCode = 'none'; let payloadBillersCode = accountNumber; let uiCategory = "";
 
       if (isInternational) {
@@ -587,26 +587,25 @@ export default function Home() {
           const paymasterUrl = process.env.NEXT_PUBLIC_PAYMASTER_URL;
           const capabilities: any = paymasterUrl ? { paymasterService: { url: paymasterUrl } } : {};
 
-                    const callId: any = await client.sendCalls({
+                              const callId: any = await client.sendCalls({
               account: address as `0x${string}`,
               calls: callsToBundle,
               capabilities: capabilities
           });
 
           const bundleId = typeof callId === 'string' ? callId : callId.id;
-          setStatus("Sponsoring your network fee... Please hold.");
+          setStatus("Sponsoring your network fee... Processing.");
 
-          // ⚡ ENTERPRISE FIRE-AND-FORGET: Wait up to ~15 seconds for the real hash
+          // ⚡ ENTERPRISE FIRE-AND-FORGET (Wait max 10 seconds for instant blocks)
           let realTxHash = "";
           let attempts = 0;
-          
-          while (attempts < 8) { 
+
+          while (attempts < 5) { 
               try {
                   const callStatus: any = await client.getCallsStatus({ id: bundleId });
                   if (callStatus.status === 'CONFIRMED' && callStatus.receipts && callStatus.receipts.length > 0) {
                       const hashStr = callStatus.receipts[0].transactionHash || callStatus.receipts[0].logs?.[0]?.transactionHash;
-                      
-                      // Strict Check: Ensure it is exactly 66 characters long
+
                       if (hashStr && hashStr.length === 66) {
                           realTxHash = hashStr;
                           break;
@@ -616,12 +615,12 @@ export default function Home() {
               await new Promise(res => setTimeout(res, 2000));
               attempts++;
           }
-          
-          // ⚡ If we got the real hash, great! If not, save the bundleId and let the backend handle it.
+
+          // ⚡ If we caught the real hash in 10s, great. If not, store the ticket safely!
           txHashString = realTxHash && realTxHash.length === 66 ? realTxHash : bundleId;
       }
 
-      setStatus(`Payment Secured! Vending in the background...`);
+      setStatus(`Payment Secured! Vending in progress...`);
 
       // 4. SAVE INTENT TO DATABASE
       const backendPayload = {
