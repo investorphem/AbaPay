@@ -8,6 +8,31 @@ import { Resend } from 'resend';
 
 const resend = new Resend(process.env.RESEND_API_KEY || "re_dummy_key_for_build");
 
+// ⚡ ERROR CODES MOVED HERE ⚡
+const error_messages: Record<string, string> = {
+    "011": "Invalid details provided. Please check your phone/meter number and try again.",
+    "012": "This product is currently unavailable.",
+    "013": "Amount is below the minimum allowed.",
+    "014": "Transaction exceeds your daily limit with this provider.",
+    "016": "The provider network is currently unstable. Please try again.",
+    "017": "Amount is above the maximum allowed for this product.",
+    "018": "Service is temporarily unavailable. Try again shortly.", 
+    "019": "Duplicate transaction detected. Please wait 30 seconds before retrying.",
+    "021": "Service is temporarily undergoing maintenance. Please try again later.",
+    "022": "Service is temporarily undergoing maintenance. Please try again later.",
+    "023": "Service is temporarily undergoing maintenance. Please try again later.",
+    "024": "Service is temporarily undergoing maintenance. Please try again later.",
+    "027": "Service is temporarily undergoing maintenance. Please try again later.", 
+    "028": "This specific product is temporarily unavailable. Please try another service.", 
+    "030": "Provider network is currently down. Please try again.",
+    "034": "Service is currently suspended by the provider. Please try again later.",
+    "035": "Service is inactive at the moment. Please try again later.",
+    "041": "A network error occurred. Please contact support if your funds were deducted.",
+    "089": "The network is processing your previous request. Please wait.",
+    "400": "Transaction failed due to a system error. Please try again.",
+    "FAILED_VERIFICATION": "Verification failed. The provided meter or account number is invalid."
+};
+
 export async function POST(req: Request) {
     try {
         // 1. Signature Verification (Security)
@@ -33,7 +58,6 @@ export async function POST(req: Request) {
             return NextResponse.json({ message: "No activity" });
         }
 
-        // Use exact hash from the blockchain event
         const txHash = activity.hash;
 
         // 2. Handle Alchemy Test Ping
@@ -44,7 +68,7 @@ export async function POST(req: Request) {
 
         // 3. THE RETRY LOOP (Wait for Frontend to save the PENDING record)
         let record = null;
-        let retries = 4; // Max wait ~6 seconds (Leaves enough Vercel time for VTPass)
+        let retries = 5; 
 
         while (retries > 0) {
             const { data } = await supabaseAdmin
@@ -115,13 +139,25 @@ export async function POST(req: Request) {
         }
 
         // 5. EXECUTE VENDING
-        const payRes = await fetch(`${baseUrl}/pay`, {
-            method: 'POST',
-            headers: getHeaders(), 
-            body: JSON.stringify(vtpassPayload)
-        });
-        
-        const payData = await payRes.json();
+        let payRes, payData;
+        try {
+            payRes = await fetch(`${baseUrl}/pay`, {
+                method: 'POST',
+                headers: getHeaders(), 
+                body: JSON.stringify(vtpassPayload)
+            });
+            payData = await payRes.json();
+        } catch (e: any) {
+            await supabaseAdmin.from('transactions').update({ 
+                status: 'VENDING_FAILED',
+                error_code: '502_TIMEOUT',
+                api_response: e.message || 'Fetch failed entirely'
+            }).eq('tx_hash', txHash);
+            
+            try { await sendTelegramAlert(`❌ *NETWORK CRASH (LIVE)*\n⛓️ *Chain:* ${record.blockchain}\n🛒 *Product:* ${record.network} ${record.service_category}\n👤 *User:* ${record.account_number}\n⚠️ Connection to VTpass timed out.`); } catch (err) {}
+            // Return 200 so Alchemy knows we logged the error and doesn't retry
+            return NextResponse.json({ status: "Vending Failed (Network)" }, { status: 200 }); 
+        }
 
         // 6. HANDLE SUCCESS / PENDING (000 or 099)
         if (payData.code === '000' || payData.code === '099') {
@@ -207,25 +243,29 @@ export async function POST(req: Request) {
                 return NextResponse.json({ status: "Vending Success" });
 
             } else {
-                // Keep as pending
+                // Keep as pending in DB
                 return NextResponse.json({ status: "Vending Delayed" });
             }
 
         } else {
-            // VTPASS FAILED
+            // ⚡ VTPASS FAILED: Use error_messages dictionary ⚡
+            const friendlyMessage = error_messages[payData.code as string] || "Service is temporarily undergoing maintenance. Please try again later.";
+            const rawTechnicalError = payData.response_description || payData.content?.errors || "Unknown VTpass Rejection";
+
             await supabaseAdmin.from('transactions').update({ 
                 status: 'VENDING_FAILED',
                 error_code: payData.code,
-                api_response: payData.response_description || payData.content?.errors || "Unknown VTpass Rejection"
+                api_response: rawTechnicalError
             }).eq('tx_hash', txHash);
 
-            await sendTelegramAlert(`❌ *VENDING REJECTED*\n⛓️ *Chain:* ${record.blockchain || 'CELO'}\n🛒 *Product:* ${record.network} ${record.service_category}\n🚨 *Error:* Code ${payData.code} - ${payData.response_description}`);
+            await sendTelegramAlert(`❌ *VENDING REJECTED*\n⛓️ *Chain:* ${record.blockchain || 'CELO'}\n🛒 *Product:* ${record.network} ${record.service_category}\n👤 *User:* ${record.account_number}\n🚨 *Admin Error:* Code ${payData.code} - ${rawTechnicalError}\n🗣 *User Message:* ${friendlyMessage}`);
             
-            return NextResponse.json({ error: "Vending Failed" }, { status: 500 });
+            // Return 200 so Alchemy knows the webhook handled the failure and doesn't retry
+            return NextResponse.json({ status: "Vending Rejected by Provider" }, { status: 200 }); 
         }
 
     } catch (error: any) {
         console.error("Webhook System Error:", error);
-        return NextResponse.json({ error: "Internal Error" }, { status: 500 });
+        return NextResponse.json({ error: "Internal Server Error" }, { status: 500 });
     }
 }
