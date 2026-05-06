@@ -535,7 +535,6 @@ export default function Home() {
       let txHashString = "";
 
             // 3. EXECUTE TRANSACTION (BUNDLED FOR BASE/FARCASTER, SEQUENTIAL FOR MINIPAY)
-      let txHashString = "";
       const currentBlockchainName = activeChain?.name?.toUpperCase() || "CELO";
 
       if (environment === 'MINIPAY') {
