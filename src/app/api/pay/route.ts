@@ -30,14 +30,14 @@ export async function POST(req: Request) {
     const { 
       serviceID, serviceCategory, network, billersCode, amount, 
       token: tokenSymbol, txHash, variation_code, phone, 
-      nairaAmount, wallet_address, subscription_type = 'change',
+      nairaAmount, wallet_address, subscription_type,
       operator_id, country_code, product_type_id, email,
       meter_account_type, blockchain 
     } = body;
 
     const requestedNaira = parseFloat(nairaAmount);
     const isForeign = serviceID === 'foreign-airtime';
-    
+
     // Determine Verification Needs for Fee Calculation
     const needsVerification = !isForeign && (serviceCategory === 'ELECTRICITY' || serviceCategory === 'BANK' || (serviceCategory === 'EDUCATION' && serviceID === 'jamb') || (serviceCategory === 'CABLE' && network !== 'SHOWMAX'));
     const serviceFee = (needsVerification || serviceCategory === 'EDUCATION') ? 100 : 0;
