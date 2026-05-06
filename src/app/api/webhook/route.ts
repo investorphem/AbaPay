@@ -66,12 +66,12 @@ export async function POST(req: Request) {
             return NextResponse.json({ message: "Test Successful" });
         }
 
-        // 3. RETRY LOOP & ENTERPRISE EVENT LOG PARSER
+                // 3. RETRY LOOP WITH FAIL-SAFE DUAL HASH MATCHING
         let record = null;
-        let retries = 20; // Patiently wait up to 40 seconds for frontend DB sync
+        let retries = 20;
 
         while (retries > 0) {
-            // Flow A: Exact real hash matching
+            // Flow A: Check if the frontend already swapped it to a 66-char hash
             const { data: exactMatch } = await supabaseAdmin
                 .from('transactions')
                 .select('*')
@@ -87,41 +87,42 @@ export async function POST(req: Request) {
                 return NextResponse.json({ message: "Already processed" });
             }
 
-                        // Flow B: Extract immutable event logs from transaction receipt
+            // Flow B: Internet dropped fallback - parse logs, look for bundle_id
             try {
                 let receipt;
-                
                 try {
                     receipt = await baseClient.getTransactionReceipt({ hash: txHash as `0x${string}` });
                 } catch (e) {
                     receipt = await sepoliaClient.getTransactionReceipt({ hash: txHash as `0x${string}` });
                 }
 
-                // Look for the clean, unpacked event logs printed by AbaPay
                 const logs = parseEventLogs({
                     abi: ABAPAY_ABI,
                     eventName: 'PaymentReceived',
                     logs: receipt.logs
                 });
 
-                                if (logs && logs.length > 0) {
-                    const firstLog: any = logs[0]; // ⚡ Bypass TS strictness on the Log object
+                if (logs && logs.length > 0) {
+                    const firstLog: any = logs[0]; 
                     const eventArgs = firstLog.args;
                     const onChainAccountNumber = eventArgs.accountNumber as string;
+                    const onChainWallet = eventArgs.user as string; 
+                    const fifteenMinutesAgo = new Date(Date.now() - 15 * 60 * 1000).toISOString();
 
-                    // Match up against the ghost PENDING row saved via Bundle ID
+                    // Query using the immutable fields from the on-chain log
                     const { data: smartMatch } = await supabaseAdmin
                         .from('transactions')
                         .select('*')
                         .eq('status', 'PENDING')
-                        .ilike('wallet_address', userWallet)
+                        .ilike('wallet_address', onChainWallet)
                         .eq('account_number', onChainAccountNumber)
-                        .order('created_at', { ascending: true }) // FIFO strategy protects chronological duplicate batches
+                        .gte('created_at', fifteenMinutesAgo)
+                        .order('created_at', { ascending: true }) 
                         .limit(1)
                         .single();
 
-                    if (smartMatch && smartMatch.tx_hash.length > 66) {
-                        console.log(`🎯 Event Log Match! Swapping Bundle ID for real hash.`);
+                    if (smartMatch) {
+                        console.log(`🎯 Rescue Match! Syncing real hash for dropped connection.`);
                         
                         await supabaseAdmin
                             .from('transactions')
@@ -134,7 +135,7 @@ export async function POST(req: Request) {
                     }
                 }
             } catch (err) {
-                console.log("Waiting for block receipt indexing...");
+                console.log("Waiting for block indexing...");
             }
 
             await new Promise(resolve => setTimeout(resolve, 2000)); 
