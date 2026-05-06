@@ -6,7 +6,18 @@ import { sendAbaPaySms } from '@/lib/messaging';
 import { getHeaders } from '@/lib/vtpass'; 
 import { Resend } from 'resend';
 
+// ⚡ ADDED IMPORTS FOR PAYLOAD DECODER ⚡
+import { createPublicClient, http, decodeFunctionData } from 'viem';
+import { base } from 'viem/chains';
+import { ABAPAY_ABI } from '@/constants'; 
+
 const resend = new Resend(process.env.RESEND_API_KEY || "re_dummy_key_for_build");
+
+// ⚡ Setup Viem to read the Base blockchain directly
+const baseClient = createPublicClient({ 
+    chain: base, 
+    transport: http("https://mainnet.base.org") 
+});
 
 // ⚡ ERROR CODES MOVED HERE ⚡
 const error_messages: Record<string, string> = {
@@ -59,6 +70,7 @@ export async function POST(req: Request) {
         }
 
         const txHash = activity.hash;
+        const userWallet = activity.fromAddress; // ⚡ Alchemy tells us who sent it
 
         // 2. Handle Alchemy Test Ping
         if (txHash === "0xTestTransactionHash") {
@@ -66,25 +78,72 @@ export async function POST(req: Request) {
             return NextResponse.json({ message: "Test Successful" });
         }
 
-        // 3. THE RETRY LOOP (Wait for Frontend to save the PENDING record)
+        // 3. THE RETRY LOOP & SECURE PAYLOAD DECODER ⚡
         let record = null;
-        let retries = 5; 
+        let retries = 4; 
 
         while (retries > 0) {
-            const { data } = await supabaseAdmin
+            // First, look for the exact real transaction hash (Normal Flow)
+            const { data: exactMatch } = await supabaseAdmin
                 .from('transactions')
                 .select('*')
                 .eq('tx_hash', txHash)
                 .single();
 
-            if (data && data.status === 'PENDING') {
-                record = data;
+            if (exactMatch && exactMatch.status === 'PENDING') {
+                record = exactMatch;
                 break;
             }
-            if (data && data.status !== 'PENDING') {
+
+            if (exactMatch && exactMatch.status !== 'PENDING') {
                 return NextResponse.json({ message: "Already processed" });
             }
-            await new Promise(resolve => setTimeout(resolve, 1500)); 
+
+            // ⚡ THE BLOCKCHAIN DECODER (For Bundler Delays) ⚡
+            try {
+                // Fetch the transaction directly from the Base blockchain
+                const tx = await baseClient.getTransaction({ hash: txHash as `0x${string}` });
+                
+                // Decode the data sent to your smart contract
+                const decoded = decodeFunctionData({
+                    abi: ABAPAY_ABI,
+                    data: tx.input
+                });
+
+                // Extract the exact phone/meter number from the blockchain payload
+                // ABAPAY_ABI args: [tokenAddress, serviceType, accountNumber, amount]
+                const onChainAccountNumber = decoded.args[2] as string;
+
+                // Search Supabase for a PENDING tx for this Wallet WITH THIS EXACT PHONE NUMBER
+                const { data: smartMatch } = await supabaseAdmin
+                    .from('transactions')
+                    .select('*')
+                    .eq('status', 'PENDING')
+                    .ilike('wallet_address', userWallet)
+                    .eq('account_number', onChainAccountNumber) 
+                    .order('created_at', { ascending: true }) // Oldest first (FIFO) protects against duplicates
+                    .limit(1)
+                    .single();
+
+                // If found, and it has a fake Bundler ID (> 66 chars), rescue it!
+                if (smartMatch && smartMatch.tx_hash.length > 66) {
+                    console.log(`🎯 Payload Match! Rescuing tx for ${onChainAccountNumber}`);
+                    
+                    // Overwrite the Bundle ID with the real hash in the database
+                    await supabaseAdmin
+                        .from('transactions')
+                        .update({ tx_hash: txHash })
+                        .eq('id', smartMatch.id);
+                    
+                    record = smartMatch;
+                    record.tx_hash = txHash; // Update local memory so VTpass can use the real hash
+                    break;
+                }
+            } catch (err) {
+                console.log("Could not decode payload, waiting...", err);
+            }
+
+            await new Promise(resolve => setTimeout(resolve, 2000)); 
             retries--;
         }
 
@@ -153,7 +212,7 @@ export async function POST(req: Request) {
                 error_code: '502_TIMEOUT',
                 api_response: e.message || 'Fetch failed entirely'
             }).eq('tx_hash', txHash);
-            
+
             try { await sendTelegramAlert(`❌ *NETWORK CRASH (LIVE)*\n⛓️ *Chain:* ${record.blockchain}\n🛒 *Product:* ${record.network} ${record.service_category}\n👤 *User:* ${record.account_number}\n⚠️ Connection to VTpass timed out.`); } catch (err) {}
             // Return 200 so Alchemy knows we logged the error and doesn't retry
             return NextResponse.json({ status: "Vending Failed (Network)" }, { status: 200 }); 
@@ -164,7 +223,7 @@ export async function POST(req: Request) {
             const actualStatus = payData.content?.transactions?.status || 'pending';
 
             if (actualStatus === 'delivered' || actualStatus === 'successful') {
-                
+
                 // Extract Token/PIN
                 let dbPurchasedCode = null;
                 let vendedUnits = null;
@@ -259,7 +318,7 @@ export async function POST(req: Request) {
             }).eq('tx_hash', txHash);
 
             await sendTelegramAlert(`❌ *VENDING REJECTED*\n⛓️ *Chain:* ${record.blockchain || 'CELO'}\n🛒 *Product:* ${record.network} ${record.service_category}\n👤 *User:* ${record.account_number}\n🚨 *Admin Error:* Code ${payData.code} - ${rawTechnicalError}\n🗣 *User Message:* ${friendlyMessage}`);
-            
+
             // Return 200 so Alchemy knows the webhook handled the failure and doesn't retry
             return NextResponse.json({ status: "Vending Rejected by Provider" }, { status: 200 }); 
         }
