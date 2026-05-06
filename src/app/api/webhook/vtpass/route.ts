@@ -74,8 +74,11 @@ export async function POST(req: Request) {
         const typeLabel = txData.service_category === 'ELECTRICITY' ? 'Token' : 'PIN';
         const networkDisplay = txData.network || txData.service_category;
         
+        // Use txData.phone first! Fallback to account_number for data/airtime
+        const smsTarget = txData.phone || txData.account_number; 
+
         notifications.push(
-          sendAbaPaySms(txData.account_number, `AbaPay: Your ${networkDisplay} ${typeLabel} is ${alertTokenRef}. Amount: N${txData.amount_naira}. Thank you.`)
+          sendAbaPaySms(smsTarget, `AbaPay: Your ${networkDisplay} ${typeLabel} is ${alertTokenRef}. Amount: N${txData.amount_naira}. Thank you.`)
         );
       }
 
