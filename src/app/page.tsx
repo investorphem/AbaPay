@@ -271,6 +271,38 @@ export default function Home() {
     }
     return { title, recipient, recipientLabel };
   }, [isInternational, activeCountry, selectedIntlProduct, activeTab, activeService, selectedBank, educationProvider, telecomProvider, currentInternet, internetProvider, currentDisco, meterType, currentCable, accountNumber, customerPhone]);
+  // ⚡ THE PENDING DUPLICATE DETECTOR ⚡
+  const hasPendingDuplicate = useMemo(() => {
+    if (!checkoutDetails.recipient) return false;
+    
+    return transactions.some(tx => 
+        tx.status === 'PENDING' &&
+        tx.account === checkoutDetails.recipient &&
+        (tx.amountNaira === calculatedNairaAmount || tx.amountNaira.includes(displayForeignAmount || "xyz"))
+    );
+  }, [transactions, checkoutDetails.recipient, calculatedNairaAmount, displayForeignAmount]);
+
+  // ⚡ SMART ELECTRICITY DAILY BLOCKER ⚡
+  const electricityDailyDuplicate = useMemo(() => {
+    if (activeTab !== "pay" || activeService.id !== "ELECTRICITY" || isInternational) return false;
+    if (!accountNumber || !nairaAmount) return false;
+
+    const todayStr = new Date().toLocaleDateString();
+
+    return transactions.some(tx => {
+        if (tx.status !== 'SUCCESS') return false;
+        if (tx.service !== 'ELECTRICITY') return false;
+        if (tx.account !== accountNumber) return false;
+        if (tx.amountNaira !== nairaAmount) return false;
+
+        try {
+            const txDateStr = new Date(tx.date).toLocaleDateString();
+            return txDateStr === todayStr;
+        } catch (e) {
+            return false;
+        }
+    });
+  }, [activeTab, activeService.id, isInternational, accountNumber, nairaAmount, transactions]);
 
   const isFormValid = useMemo(() => {
     if (isCurrentServiceDisabled) return false;
@@ -302,7 +334,10 @@ export default function Home() {
         else if (internetProvider === 'spectranet') return accountNumber.length >= 5 && selectedInternetPlan !== null;
         else return accountNumber.length === 11 && accountNumber.startsWith("0") && selectedInternetPlan !== null;
       }
-      if (activeService.id === "ELECTRICITY") return accountNumber.length >= 10 && customerName !== null && customerPhone.length >= 10;
+            if (activeService.id === "ELECTRICITY") {
+          if (electricityDailyDuplicate) return false; // ⚡ Block identical daily payments
+          return accountNumber.length >= 10 && customerName !== null && customerPhone.length >= 10;
+      }
       if (activeService.id === "CABLE") {
         if (cableProvider === "showmax") return accountNumber.length >= 11 && selectedCablePlan !== null;
         if (accountNumber.length < 10 || customerName === null) return false;
@@ -478,20 +513,6 @@ export default function Home() {
         const processBlockchainPayment = async () => {
     if (!address || !client) return setStatus("Connect Wallet First");
     if (parseFloat(cryptoToCharge) > parseFloat(walletBalance)) return setStatus(`Insufficient ${selectedToken.symbol} Balance.`);
-
-    let activeCooldownKey: string | null = null; 
-
-    // Prevent double-clicks for local electricity
-    if (activeTab === "pay" && activeService.id === "ELECTRICITY" && !isInternational) {
-      const cooldownKey = `abapay_elec_${address}_${elecProvider}_${accountNumber}_${nairaAmount}`;
-      const lastTxTime = localStorage.getItem(cooldownKey);
-      if (lastTxTime) {
-        const timeSinceLast = new Date().getTime() - parseInt(lastTxTime);
-        if (timeSinceLast < 300000) { setStatus("Duplicate detected. Please wait."); return; }
-      }
-      localStorage.setItem(cooldownKey, new Date().getTime().toString());
-      activeCooldownKey = cooldownKey; 
-    }
 
     setIsProcessing(true); 
     setStatus("Initiating Blockchain Escrow...");
@@ -685,7 +706,6 @@ export default function Home() {
       setWalletBalance(parseFloat(formatUnits(balanceWei as bigint, selectedToken.decimals)).toFixed(4));
       
     } catch (e: any) { 
-        if (activeCooldownKey) localStorage.removeItem(activeCooldownKey);
         setStatus(`Error: ${e.shortMessage?.slice(0, 40) || "Transaction Cancelled"}`); 
     } finally { 
         setIsProcessing(false); 
@@ -1095,10 +1115,23 @@ export default function Home() {
            <div className="bg-white w-full max-w-md rounded-t-[2.5rem] sm:rounded-[2.5rem] p-6 pb-10 sm:pb-6 shadow-2xl relative animate-in slide-in-from-bottom-10 sm:zoom-in-95 duration-300">
               <div className="w-12 h-1.5 bg-slate-200 rounded-full mx-auto mb-6 sm:hidden"></div>
 
-              <div className="flex justify-between items-center mb-6">
+                            <div className="flex justify-between items-center mb-6">
                  <h3 className="text-xl font-black text-slate-900 tracking-tight">Confirm Payment</h3>
                  <button onClick={() => setIsConfirmModalOpen(false)} className="bg-slate-100 p-2 rounded-full text-slate-500 hover:bg-slate-200 transition-colors"><XCircle size={20}/></button>
               </div>
+
+              {/* ⚡ NEW: PENDING DUPLICATE WARNING ⚡ */}
+              {hasPendingDuplicate && (
+                 <div className="bg-orange-50 border border-orange-200 p-4 rounded-2xl mb-6 flex items-start gap-3 animate-in slide-in-from-top-2">
+                    <AlertTriangle className="text-orange-500 shrink-0 mt-0.5" size={20} />
+                    <div>
+                       <p className="text-sm font-black text-orange-800 tracking-tight">Pending Transaction Detected</p>
+                       <p className="text-xs font-bold text-orange-600 leading-snug mt-1">
+                          You already have a processing transaction for this exact amount and number. Proceed only if you intend to pay twice.
+                       </p>
+                    </div>
+                 </div>
+              )}
 
               <div className="text-center mb-8">
                  <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-2">Total Payable</p>
@@ -1136,12 +1169,12 @@ export default function Home() {
                  </div>
               </div>
 
-              <button 
+                            <button 
                   onClick={() => { setIsConfirmModalOpen(false); processBlockchainPayment(); }}
-                  className="w-full bg-slate-900 hover:bg-black text-white font-black py-5 rounded-2xl flex items-center justify-center gap-2.5 transition-all active:scale-95 shadow-xl shadow-slate-900/20 text-lg tracking-tight"
+                  className={`w-full text-white font-black py-5 rounded-2xl flex items-center justify-center gap-2.5 transition-all active:scale-95 shadow-xl text-lg tracking-tight ${hasPendingDuplicate ? 'bg-orange-500 hover:bg-orange-600 shadow-orange-500/20' : 'bg-slate-900 hover:bg-black shadow-slate-900/20'}`}
               >
-                  <ShieldCheck size={22} className="text-emerald-400" />
-                  CONFIRM & PAY
+                  {hasPendingDuplicate ? <AlertTriangle size={22} className="text-white" /> : <ShieldCheck size={22} className="text-emerald-400" />}
+                  {hasPendingDuplicate ? 'PROCEED ANYWAY' : 'CONFIRM & PAY'}
               </button>
            </div>
         </div>
@@ -2240,7 +2273,21 @@ export default function Home() {
                                 </p>
                             </div>
                         )}
-
+                        {/* ⚡ ELECTRICITY DAILY DUPLICATE WARNING ⚡ */}
+                        {electricityDailyDuplicate && (
+                            <div className="bg-orange-50 border border-orange-200 p-4 rounded-xl mt-2 flex items-start gap-3 animate-in fade-in">
+                                <AlertTriangle size={18} className="text-orange-500 shrink-0 mt-0.5" />
+                                <div>
+                                    <p className="text-sm font-black text-orange-800">Daily Limit Reached</p>
+                                    <p className="text-xs font-bold text-orange-700 leading-snug mt-1">
+                                        You already successfully purchased exactly ₦{parseInt(nairaAmount).toLocaleString()} for this meter today. 
+                                    </p>
+                                    <p className="text-[10px] font-black text-orange-600 bg-orange-100 p-2 rounded-lg mt-2 uppercase">
+                                        💡 Hint: To buy more electricity today, change the amount slightly (e.g., ₦{(parseInt(nairaAmount) + 100).toLocaleString()}).
+                                    </p>
+                                </div>
+                            </div>
+                        )}
                         <div className="flex gap-2.5 overflow-x-auto py-1.5 mt-3 no-scrollbar bg-slate-100 p-2 rounded-2xl shadow-inner">
                           {(activeService.id === "AIRTIME" ? PRE_SELECT_AMOUNTS : ELEC_PRE_SELECT_AMOUNTS).map(amountStr => {
                             const amountVal = parseInt(amountStr);
