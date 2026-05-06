@@ -6,15 +6,7 @@ import { sendAbaPaySms } from '@/lib/messaging';
 import { getHeaders } from '@/lib/vtpass'; 
 import { Resend } from 'resend';
 
-// ⚡ ENTERPRISE LOG IMPORTS ⚡
-import { createPublicClient, http, parseEventLogs } from 'viem';
-import { base, baseSepolia } from 'viem/chains';
-import { ABAPAY_ABI } from '@/constants'; 
-
 const resend = new Resend(process.env.RESEND_API_KEY || "re_dummy_key_for_build");
-
-const baseClient = createPublicClient({ chain: base, transport: http("https://mainnet.base.org") });
-const sepoliaClient = createPublicClient({ chain: baseSepolia, transport: http("https://sepolia.base.org") });
 
 const error_messages: Record<string, string> = {
     "011": "Invalid details provided. Please check your phone/meter number and try again.",
@@ -44,14 +36,35 @@ export async function POST(req: Request) {
     try {
         const rawBody = await req.text();
         const signature = req.headers.get('x-alchemy-signature');
-        const secret = process.env.ALCHEMY_WEBHOOK_SECRET;
+        
+        // ⚡ LOAD BOTH SECRETS (Base and Celo) ⚡
+        const baseSecret = process.env.ALCHEMY_WEBHOOK_SECRET;
+        const celoSecret = process.env.ALCHEMY_CELO_WEBHOOK_SECRET;
 
-        if (!signature || !secret) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+        if (!signature || (!baseSecret && !celoSecret)) {
+            return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+        }
 
-        const hmac = crypto.createHmac('sha256', secret);
-        const digest = hmac.update(rawBody).digest('hex');
+        let isValid = false;
 
-        if (signature !== digest) return NextResponse.json({ error: "Invalid signature" }, { status: 401 });
+        // 1. Try checking against the Base Secret
+        if (baseSecret) {
+            const hmac = crypto.createHmac('sha256', baseSecret);
+            const digest = hmac.update(rawBody).digest('hex');
+            if (signature === digest) isValid = true;
+        }
+
+        // 2. If it wasn't Base, try checking against the Celo Secret
+        if (!isValid && celoSecret) {
+            const hmacCelo = crypto.createHmac('sha256', celoSecret);
+            const digestCelo = hmacCelo.update(rawBody).digest('hex');
+            if (signature === digestCelo) isValid = true;
+        }
+
+        // If neither key matched, reject the request
+        if (!isValid) {
+            return NextResponse.json({ error: "Invalid signature" }, { status: 401 });
+        }
 
         const body = JSON.parse(rawBody);
         const activity = body.event?.activity?.[0];
@@ -59,20 +72,20 @@ export async function POST(req: Request) {
         if (!activity) return NextResponse.json({ message: "No activity" });
 
         const txHash = activity.hash;
-        const userWallet = activity.fromAddress;
 
+        // Handle Alchemy Test Ping
         if (txHash === "0xTestTransactionHash") {
             console.log("✅ Alchemy Test Successful for abapays.com");
             return NextResponse.json({ message: "Test Successful" });
         }
 
-                        // 3. THE RETRY LOOP (Clean & Simple Match)
+        // 3. THE RETRY LOOP (Clean & Simple Match)
         let record = null;
         let retries = 5; // Fast 10-second wait since the hash is instant
 
         while (retries > 0) {
             // Because we abandoned the bundler, the hash Alchemy sends will ALWAYS 
-            // match the hash our frontend saved to the database. 
+            // match the exact hash our frontend saved to the database. 
             const { data: exactMatch } = await supabaseAdmin
                 .from('transactions')
                 .select('*')
@@ -98,7 +111,7 @@ export async function POST(req: Request) {
 
         console.log(`🚀 Triggering VTPass for: ${record.account_number} on ${record.blockchain}`);
 
-
+        // 4. CONSTRUCT VTPASS PAYLOAD
         const isForeign = record.service_id === 'foreign-airtime';
         const appMode = process.env.NEXT_PUBLIC_APP_MODE || "sandbox";
         const baseUrl = appMode === "live" ? "https://vtpass.com/api" : "https://sandbox.vtpass.com/api";
@@ -142,6 +155,7 @@ export async function POST(req: Request) {
             }
         }
 
+        // 5. EXECUTE VENDING
         let payRes, payData;
         try {
             payRes = await fetch(`${baseUrl}/pay`, { method: 'POST', headers: getHeaders(), body: JSON.stringify(vtpassPayload) });
@@ -152,6 +166,7 @@ export async function POST(req: Request) {
             return NextResponse.json({ status: "Vending Failed (Network)" }, { status: 200 }); 
         }
 
+        // 6. HANDLE SUCCESS / PENDING (000 or 099)
         if (payData.code === '000' || payData.code === '099') {
             const actualStatus = payData.content?.transactions?.status || 'pending';
 
