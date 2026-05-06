@@ -536,8 +536,8 @@ export default function Home() {
       setStatus("Verifying permissions...");
       const currentAllowance = await publicClient.readContract({ address: tokenAddress as `0x${string}`, abi: ERC20_ABI, functionName: 'allowance', args: [address, ABAPAY_CONTRACT], blockTag: 'latest' }) as bigint;
 
-      // 2. Format VTPass Variables
-      let vtpassServiceID = ""; let displayNetwork = ""; let finalVariationCode = 'prepaid'; let payloadBillersCode = accountNumber; let uiCategory = "";
+            // 2. Format VTPass Variables
+      let vtpassServiceID = ""; let displayNetwork = ""; let finalVariationCode = 'none'; let payloadBillersCode = accountNumber; let uiCategory = "";
 
       if (isInternational) {
           vtpassServiceID = "foreign-airtime"; displayNetwork = selectedIntlOperator.name; finalVariationCode = selectedIntlVariation.variation_code; uiCategory = `INTL ${selectedIntlProduct.name.toUpperCase()}`;
