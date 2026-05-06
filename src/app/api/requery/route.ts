@@ -2,6 +2,10 @@ import { NextResponse } from 'next/server';
 import { getHeaders } from '@/lib/vtpass';
 import { supabaseAdmin as supabase } from '@/utils/supabase';
 import { sendTelegramAlert } from '@/lib/telegram';
+import { sendAbaPaySms } from '@/lib/messaging';
+import { Resend } from 'resend';
+
+const resend = new Resend(process.env.RESEND_API_KEY || "re_dummy_key_for_build");
 
 export async function POST(req: Request) {
   try {
@@ -11,12 +15,16 @@ export async function POST(req: Request) {
       return NextResponse.json({ success: false, message: "Missing request_id" }, { status: 400 });
     }
 
-    // ⚡ 1. Fetch the original transaction to know if we are expecting a code
-    const { data: txData } = await supabase
+    // ⚡ 1. FETCH FULL RECORD: We need points, emails, and phone numbers ⚡
+    const { data: record } = await supabase
       .from('transactions')
-      .select('service_category')
+      .select('*')
       .eq('request_id', request_id)
       .single();
+
+    if (!record) {
+        return NextResponse.json({ success: false, message: "Transaction record not found" }, { status: 404 });
+    }
 
     const appMode = process.env.NEXT_PUBLIC_APP_MODE || "sandbox";
     const baseUrl = appMode === "live" ? "https://vtpass.com/api" : "https://sandbox.vtpass.com/api";
@@ -48,12 +56,11 @@ export async function POST(req: Request) {
 
       let vendedUnits = requeryData.units || requeryData.content?.transactions?.units || null;
 
-      // ⚡ NEW: STRICT TOKEN REQUIREMENT FOR REQUERY ⚡
-      const serviceCategory = txData?.service_category;
+      // STRICT TOKEN REQUIREMENT FOR REQUERY
+      const serviceCategory = record.service_category;
       const requiresCode = serviceCategory === 'ELECTRICITY' || serviceCategory === 'EDUCATION';
 
       if (requiresCode && !dbPurchasedCode) {
-          // It's still missing the code! Refuse to mark as success.
           return NextResponse.json({ success: true, status: 'PENDING', message: 'Provider is still generating the Token/PIN. Please check back again.' });
       }
 
@@ -64,14 +71,64 @@ export async function POST(req: Request) {
         units: vendedUnits?.toString()
       }).eq('request_id', request_id);
 
-      try { await sendTelegramAlert(`✅ *DELAYED TX SUCCESS*\nHash: \`${tx_hash}\`\nVTpass eventually delivered this pending transaction!`); } catch (e) {}
+      // ⚡ 3. FIRE DELAYED NOTIFICATIONS & POINTS ⚡
+      const alertTokenRef = dbPurchasedCode || requeryData.content?.transactions?.transactionId || "Success";
+      const notifications = [];
 
-      return NextResponse.json({ success: true, status: 'SUCCESS', purchased_code: dbPurchasedCode, units: vendedUnits });
+      notifications.push(
+          sendTelegramAlert(`✅ *DELAYED TX SUCCESS (REQUERY)*\n⛓️ *Chain:* ${record.blockchain || 'CELO'}\n🛒 *Product:* ${record.network} ${record.service_category}\n💰 *Naira:* ₦${record.amount_naira}\n🪙 *Asset:* ${record.amount_usdt} ${record.token_used || 'USD₮'}\n👤 *User:* ${record.account_number}\n🧾 *Ref:* ${alertTokenRef}`)
+      );
+
+      if (record.service_category === 'ELECTRICITY' || record.service_category === 'EDUCATION') {
+          const typeLabel = record.service_category === 'ELECTRICITY' ? 'Token' : 'PIN';
+          notifications.push(
+              sendAbaPaySms(record.phone || record.account_number, `AbaPay: Your delayed ${record.network || record.service_category} ${typeLabel} is ${alertTokenRef}. Amount: N${record.amount_naira}. Thank you.`)
+          );
+      }
+
+      if (record.customer_email) {
+          notifications.push(resend.emails.send({
+              from: 'AbaPay Receipts <receipts@abapays.com>',
+              to: record.customer_email,
+              replyTo: 'support@abapays.com', 
+              subject: `AbaPay Receipt - ${record.network} ${record.service_category} (Delayed)`,
+              html: `
+                <div style="font-family: -apple-system, sans-serif; background-color: #f4f4f5; padding: 40px 0;">
+                  <div style="max-width: 600px; margin: 0 auto; background-color: #ffffff; border-radius: 12px; overflow: hidden;">
+                    <div style="background: linear-gradient(135deg, #18181b 0%, #000000 100%); padding: 40px 30px; text-align: center; border-bottom: 3px solid #10b981;">
+                      <h1 style="color: white; margin: 0;">AbaPay.</h1>
+                    </div>
+                    <div style="padding: 40px 30px;">
+                      <p style="margin: 0 0 10px; color: #52525b; font-size: 14px; text-transform: uppercase; font-weight: 600;">Delayed Transaction Successful</p>
+                      <h2 style="margin: 0 0 30px; color: #18181b; font-size: 32px;">₦${record.amount_naira.toLocaleString()}</h2>
+                      <p style="color: #71717a;">Your pending transaction has been successfully processed.</p>
+                      ${dbPurchasedCode ? `
+                      <div style="margin-top: 20px; padding: 15px; border: 2px dashed #10b981; text-align: center; border-radius: 8px;">
+                          <p style="color: #71717a; margin: 0 0 5px;">Your Token / PIN:</p>
+                          <h3 style="color: #10b981; font-size: 24px; margin: 0; letter-spacing: 2px;">${dbPurchasedCode}</h3>
+                      </div>
+                      ` : ''}
+                    </div>
+                  </div>
+                </div>
+              `
+          }));
+      }
+
+      const points = Number((record.amount_naira / 1000).toFixed(2));
+      if (points > 0 && record.wallet_address) {
+          notifications.push(supabase.rpc('award_transaction_points', { target_wallet: record.wallet_address.toLowerCase(), points_to_add: points }));
+      }
+
+      await Promise.allSettled(notifications);
+
+      return NextResponse.json({ success: true, status: 'SUCCESS', purchased_code: dbPurchasedCode, units: vendedUnits, earnedPoints: points });
 
     } else if (actualStatus === 'failed') {
 
       await supabase.from('transactions').update({ status: 'FAILED_VENDING' }).eq('request_id', request_id);
-      try { await sendTelegramAlert(`🚨 *DELAYED TX FAILED*\nHash: \`${tx_hash}\`\nVTpass rejected this pending transaction. User is ready for a refund.`); } catch (e) {}
+      
+      try { await sendTelegramAlert(`🚨 *DELAYED TX FAILED (REQUERY)*\n⛓️ *Chain:* ${record.blockchain || 'CELO'}\n🛒 *Product:* ${record.network} ${record.service_category}\n👤 *User:* ${record.account_number}\nVTpass finally rejected this pending transaction. User is ready for a refund.`); } catch (e) {}
 
       return NextResponse.json({ success: true, status: 'FAILED_VENDING' });
 
