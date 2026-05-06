@@ -6,18 +6,16 @@ import { sendAbaPaySms } from '@/lib/messaging';
 import { getHeaders } from '@/lib/vtpass'; 
 import { Resend } from 'resend';
 
-// ⚡ ADDED IMPORTS FOR PAYLOAD DECODER ⚡
-import { createPublicClient, http, decodeFunctionData } from 'viem';
-import { base, baseSepolia } from 'viem/chains'; // Added baseSepolia for testing
+// ⚡ ENTERPRISE LOG IMPORTS ⚡
+import { createPublicClient, http, parseEventLogs } from 'viem';
+import { base, baseSepolia } from 'viem/chains';
 import { ABAPAY_ABI } from '@/constants'; 
 
 const resend = new Resend(process.env.RESEND_API_KEY || "re_dummy_key_for_build");
 
-// ⚡ Setup Viem to read BOTH Base and Sepolia
 const baseClient = createPublicClient({ chain: base, transport: http("https://mainnet.base.org") });
 const sepoliaClient = createPublicClient({ chain: baseSepolia, transport: http("https://sepolia.base.org") });
 
-// ⚡ ERROR CODES MOVED HERE ⚡
 const error_messages: Record<string, string> = {
     "011": "Invalid details provided. Please check your phone/meter number and try again.",
     "012": "This product is currently unavailable.",
@@ -44,44 +42,36 @@ const error_messages: Record<string, string> = {
 
 export async function POST(req: Request) {
     try {
-        // 1. Signature Verification (Security)
         const rawBody = await req.text();
         const signature = req.headers.get('x-alchemy-signature');
         const secret = process.env.ALCHEMY_WEBHOOK_SECRET;
 
-        if (!signature || !secret) {
-            return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-        }
+        if (!signature || !secret) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
         const hmac = crypto.createHmac('sha256', secret);
         const digest = hmac.update(rawBody).digest('hex');
 
-        if (signature !== digest) {
-            return NextResponse.json({ error: "Invalid signature" }, { status: 401 });
-        }
+        if (signature !== digest) return NextResponse.json({ error: "Invalid signature" }, { status: 401 });
 
         const body = JSON.parse(rawBody);
         const activity = body.event?.activity?.[0];
 
-        if (!activity) {
-            return NextResponse.json({ message: "No activity" });
-        }
+        if (!activity) return NextResponse.json({ message: "No activity" });
 
         const txHash = activity.hash;
-        const userWallet = activity.fromAddress; // ⚡ Alchemy tells us who sent it
+        const userWallet = activity.fromAddress;
 
-        // 2. Handle Alchemy Test Ping
         if (txHash === "0xTestTransactionHash") {
             console.log("✅ Alchemy Test Successful for abapays.com");
             return NextResponse.json({ message: "Test Successful" });
         }
 
-        // 3. THE RETRY LOOP & SECURE PAYLOAD DECODER ⚡
+        // 3. RETRY LOOP & ENTERPRISE EVENT LOG PARSER
         let record = null;
-        let retries = 20; // ⚡ INCREASED: Wait up to 40 seconds for frontend to save
+        let retries = 20; // Patiently wait up to 40 seconds for frontend DB sync
 
         while (retries > 0) {
-            // First, look for the exact real transaction hash (Normal Flow)
+            // Flow A: Exact real hash matching
             const { data: exactMatch } = await supabaseAdmin
                 .from('transactions')
                 .select('*')
@@ -97,69 +87,65 @@ export async function POST(req: Request) {
                 return NextResponse.json({ message: "Already processed" });
             }
 
-            // ⚡ THE BLOCKCHAIN DECODER (For Bundler Delays) ⚡
+            // Flow B: Extract immutable event logs from transaction receipt
             try {
-                let tx;
-                // Try Mainnet first, if it fails, try Sepolia (for your testing)
+                let clientInstance = baseClient;
+                let receipt;
+                
                 try {
-                    tx = await baseClient.getTransaction({ hash: txHash as `0x${string}` });
+                    receipt = await baseClient.getTransactionReceipt({ hash: txHash as `0x${string}` });
                 } catch (e) {
-                    tx = await sepoliaClient.getTransaction({ hash: txHash as `0x${string}` });
+                    receipt = await sepoliaClient.getTransactionReceipt({ hash: txHash as `0x${string}` });
+                    clientInstance = sepoliaClient;
                 }
 
-                // Decode the data sent to your smart contract (Bypass strict TS with ': any')
-                const decoded: any = decodeFunctionData({
+                // Look for the clean, unpacked event logs printed by AbaPay
+                const logs = parseEventLogs({
                     abi: ABAPAY_ABI,
-                    data: tx.input
+                    eventName: 'PaymentReceived',
+                    logs: receipt.logs
                 });
 
-                // Satisfy TypeScript by ensuring args exists before reading it
-                if (!decoded || !decoded.args) throw new Error("No payload arguments found");
+                if (logs && logs.length > 0) {
+                    const eventArgs: any = logs[0].args;
+                    const onChainAccountNumber = eventArgs.accountNumber as string;
 
-                // Extract the exact phone/meter number from the blockchain payload
-                // ABAPAY_ABI args: [tokenAddress, serviceType, accountNumber, amount]
-                const onChainAccountNumber = decoded.args[2] as string;
-
-                // Search Supabase for a PENDING tx for this Wallet WITH THIS EXACT PHONE NUMBER
-                const { data: smartMatch } = await supabaseAdmin
-                    .from('transactions')
-                    .select('*')
-                    .eq('status', 'PENDING')
-                    .ilike('wallet_address', userWallet)
-                    .eq('account_number', onChainAccountNumber) 
-                    .order('created_at', { ascending: true }) // Oldest first (FIFO) protects against duplicates
-                    .limit(1)
-                    .single();
-
-                // If found, and it has a fake Bundler ID (> 66 chars), rescue it!
-                if (smartMatch && smartMatch.tx_hash.length > 66) {
-                    console.log(`🎯 Payload Match! Rescuing tx for ${onChainAccountNumber}`);
-
-                    // Overwrite the Bundle ID with the real hash in the database
-                    await supabaseAdmin
+                    // Match up against the ghost PENDING row saved via Bundle ID
+                    const { data: smartMatch } = await supabaseAdmin
                         .from('transactions')
-                        .update({ tx_hash: txHash })
-                        .eq('id', smartMatch.id);
+                        .select('*')
+                        .eq('status', 'PENDING')
+                        .ilike('wallet_address', userWallet)
+                        .eq('account_number', onChainAccountNumber)
+                        .order('created_at', { ascending: true }) // FIFO strategy protects chronological duplicate batches
+                        .limit(1)
+                        .single();
 
-                    record = smartMatch;
-                    record.tx_hash = txHash; // Update local memory so VTpass can use the real hash
-                    break;
+                    if (smartMatch && smartMatch.tx_hash.length > 66) {
+                        console.log(`🎯 Event Log Match! Swapping Bundle ID for real hash.`);
+                        
+                        await supabaseAdmin
+                            .from('transactions')
+                            .update({ tx_hash: txHash })
+                            .eq('id', smartMatch.id);
+                        
+                        record = smartMatch;
+                        record.tx_hash = txHash;
+                        break;
+                    }
                 }
             } catch (err) {
-                console.log("Could not decode payload yet, waiting...");
+                console.log("Waiting for block receipt indexing...");
             }
 
             await new Promise(resolve => setTimeout(resolve, 2000)); 
             retries--;
         }
 
-        if (!record) {
-            return NextResponse.json({ error: "Record not found or not PENDING" }, { status: 404 });
-        }
+        if (!record) return NextResponse.json({ error: "Record not found or not PENDING" }, { status: 404 });
 
         console.log(`🚀 Triggering VTPass for: ${record.account_number} on ${record.blockchain}`);
 
-        // 4. CONSTRUCT VTPASS PAYLOAD
         const isForeign = record.service_id === 'foreign-airtime';
         const appMode = process.env.NEXT_PUBLIC_APP_MODE || "sandbox";
         const baseUrl = appMode === "live" ? "https://vtpass.com/api" : "https://sandbox.vtpass.com/api";
@@ -203,34 +189,20 @@ export async function POST(req: Request) {
             }
         }
 
-        // 5. EXECUTE VENDING
         let payRes, payData;
         try {
-            payRes = await fetch(`${baseUrl}/pay`, {
-                method: 'POST',
-                headers: getHeaders(), 
-                body: JSON.stringify(vtpassPayload)
-            });
+            payRes = await fetch(`${baseUrl}/pay`, { method: 'POST', headers: getHeaders(), body: JSON.stringify(vtpassPayload) });
             payData = await payRes.json();
         } catch (e: any) {
-            await supabaseAdmin.from('transactions').update({ 
-                status: 'VENDING_FAILED',
-                error_code: '502_TIMEOUT',
-                api_response: e.message || 'Fetch failed entirely'
-            }).eq('tx_hash', txHash);
-
+            await supabaseAdmin.from('transactions').update({ status: 'VENDING_FAILED', error_code: '502_TIMEOUT', api_response: e.message || 'Fetch failed entirely' }).eq('tx_hash', txHash);
             try { await sendTelegramAlert(`❌ *NETWORK CRASH (LIVE)*\n⛓️ *Chain:* ${record.blockchain}\n🛒 *Product:* ${record.network} ${record.service_category}\n👤 *User:* ${record.account_number}\n⚠️ Connection to VTpass timed out.`); } catch (err) {}
-            // Return 200 so Alchemy knows we logged the error and doesn't retry
             return NextResponse.json({ status: "Vending Failed (Network)" }, { status: 200 }); 
         }
 
-        // 6. HANDLE SUCCESS / PENDING (000 or 099)
         if (payData.code === '000' || payData.code === '099') {
             const actualStatus = payData.content?.transactions?.status || 'pending';
 
             if (actualStatus === 'delivered' || actualStatus === 'successful') {
-
-                // Extract Token/PIN
                 let dbPurchasedCode = null;
                 let vendedUnits = null;
                 let alertTokenRef = "Success";
@@ -250,24 +222,14 @@ export async function POST(req: Request) {
                     alertTokenRef = payData.content?.transactions?.transactionId || payData.requestId || "Success";
                 }
 
-                // Update Database
-                await supabaseAdmin.from('transactions').update({ 
-                    status: 'SUCCESS',
-                    purchased_code: dbPurchasedCode, 
-                    units: vendedUnits 
-                }).eq('tx_hash', txHash);
+                await supabaseAdmin.from('transactions').update({ status: 'SUCCESS', purchased_code: dbPurchasedCode, units: vendedUnits }).eq('tx_hash', txHash);
 
-                // 7. FIRE OFF NOTIFICATIONS IN BACKGROUND
                 const notifications = [];
-                notifications.push(
-                    sendTelegramAlert(`✅ *SALE SUCCESSFUL*\n⛓️ *Chain:* ${record.blockchain || 'CELO'}\n🛒 *Product:* ${record.network} ${record.service_category}\n💰 *Naira:* ₦${record.amount_naira}\n🪙 *Asset:* ${record.amount_usdt} ${record.token_used || 'USD₮'}\n👤 *User:* ${record.account_number}\n🧾 *Ref:* ${alertTokenRef}`)
-                );
+                notifications.push(sendTelegramAlert(`✅ *SALE SUCCESSFUL*\n⛓️ *Chain:* ${record.blockchain || 'CELO'}\n🛒 *Product:* ${record.network} ${record.service_category}\n💰 *Naira:* ₦${record.amount_naira}\n🪙 *Asset:* ${record.amount_usdt} ${record.token_used || 'USD₮'}\n👤 *User:* ${record.account_number}\n🧾 *Ref:* ${alertTokenRef}`));
 
                 if (record.service_category === 'ELECTRICITY' || record.service_category === 'EDUCATION') {
                     const typeLabel = record.service_category === 'ELECTRICITY' ? 'Token' : 'PIN';
-                    notifications.push(
-                        sendAbaPaySms(record.phone || record.account_number, `AbaPay: Your ${record.network || record.service_category} ${typeLabel} is ${alertTokenRef}. Amount: N${record.amount_naira}. Thank you.`)
-                    );
+                    notifications.push(sendAbaPaySms(record.phone || record.account_number, `AbaPay: Your ${record.network || record.service_category} ${typeLabel} is ${alertTokenRef}. Amount: N${record.amount_naira}. Thank you.`));
                 }
 
                 if (record.customer_email) {
@@ -276,26 +238,7 @@ export async function POST(req: Request) {
                         to: record.customer_email,
                         replyTo: 'support@abapays.com', 
                         subject: `AbaPay Receipt - ${record.network} ${record.service_category}`,
-                        html: `
-                          <div style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; background-color: #f4f4f5; padding: 40px 0; margin: 0;">
-                            <div style="max-width: 600px; margin: 0 auto; background-color: #ffffff; border-radius: 12px; overflow: hidden; box-shadow: 0 4px 6px rgba(0, 0, 0, 0.05);">
-                              <div style="background: linear-gradient(135deg, #18181b 0%, #000000 100%); padding: 40px 30px; text-align: center; border-bottom: 3px solid #10b981;">
-                                <img src="https://abapays.com/logo.png" alt="AbaPay" style="max-height: 45px; width: auto; margin: 0 auto; display: block;" />
-                              </div>
-                              <div style="padding: 40px 30px;">
-                                <p style="margin: 0 0 10px; color: #52525b; font-size: 14px; text-transform: uppercase; font-weight: 600;">Transaction Successful</p>
-                                <h2 style="margin: 0 0 30px; color: #18181b; font-size: 32px;">₦${record.amount_naira.toLocaleString()}</h2>
-                                <table style="width: 100%; border-collapse: collapse; margin-bottom: 30px;">
-                                  <tr><td style="padding: 15px 0; border-bottom: 1px solid #e4e4e7; color: #71717a;">Network</td><td style="padding: 15px 0; border-bottom: 1px solid #e4e4e7; color: #18181b; text-align: right; font-weight: 500;">${record.blockchain || 'CELO'}</td></tr>
-                                  <tr><td style="padding: 15px 0; border-bottom: 1px solid #e4e4e7; color: #71717a;">Service</td><td style="padding: 15px 0; border-bottom: 1px solid #e4e4e7; color: #18181b; text-align: right; font-weight: 500;">${record.network} ${record.service_category}</td></tr>
-                                  <tr><td style="padding: 15px 0; border-bottom: 1px solid #e4e4e7; color: #71717a;">Account</td><td style="padding: 15px 0; border-bottom: 1px solid #e4e4e7; color: #18181b; text-align: right; font-weight: 500;">${record.account_number}</td></tr>
-                                  <tr><td style="padding: 15px 0; border-bottom: 1px solid #e4e4e7; color: #71717a;">Tx Hash</td><td style="padding: 15px 0; border-bottom: 1px solid #e4e4e7; color: #18181b; text-align: right; font-weight: 500; word-break: break-all;">${txHash}</td></tr>
-                                  ${dbPurchasedCode ? `<tr><td style="padding: 15px 0; border-bottom: 1px solid #e4e4e7; color: #71717a;">Token / PIN</td><td style="padding: 15px 0; border-bottom: 1px solid #e4e4e7; color: #10b981; font-size: 18px; text-align: right; font-weight: bold; letter-spacing: 2px;">${dbPurchasedCode}</td></tr>` : ``}
-                                </table>
-                              </div>
-                            </div>
-                          </div>
-                        `
+                        html: `<div style="font-family: sans-serif; background-color: #f4f4f5; padding: 40px 0;"><div style="max-width: 600px; margin: 0 auto; background-color: #ffffff; border-radius: 12px; overflow: hidden;"><div style="background: #18181b; padding: 40px 30px; text-align: center;"><h1 style="color:white">AbaPay</h1></div><div style="padding: 40px 30px;"><h2 style="color: #18181b; font-size: 32px;">₦${record.amount_naira.toLocaleString()}</h2><p>Account: ${record.account_number}</p><p>Tx Hash: ${txHash}</p>${dbPurchasedCode ? `<p style="color:#10b981; font-weight:bold;">Token / PIN: ${dbPurchasedCode}</p>` : ``}</div></div></div>`
                     }));
                 }
 
@@ -308,25 +251,17 @@ export async function POST(req: Request) {
                 return NextResponse.json({ status: "Vending Success" });
 
             } else {
-                // Keep as pending in DB
                 return NextResponse.json({ status: "Vending Delayed" });
             }
 
         } else {
-            // ⚡ VTPASS FAILED: Use error_messages dictionary ⚡
-            const friendlyMessage = error_messages[payData.code as string] || "Service is temporarily undergoing maintenance. Please try again later.";
+            const friendlyMessage = error_messages[payData.code as string] || "Service is temporarily undergoing maintenance.";
             const rawTechnicalError = payData.response_description || payData.content?.errors || "Unknown VTpass Rejection";
 
-            await supabaseAdmin.from('transactions').update({ 
-                status: 'VENDING_FAILED',
-                error_code: payData.code,
-                api_response: rawTechnicalError
-            }).eq('tx_hash', txHash);
-
+            await supabaseAdmin.from('transactions').update({ status: 'VENDING_FAILED', error_code: payData.code, api_response: rawTechnicalError }).eq('tx_hash', txHash);
             await sendTelegramAlert(`❌ *VENDING REJECTED*\n⛓️ *Chain:* ${record.blockchain || 'CELO'}\n🛒 *Product:* ${record.network} ${record.service_category}\n👤 *User:* ${record.account_number}\n🚨 *Admin Error:* Code ${payData.code} - ${rawTechnicalError}\n🗣 *User Message:* ${friendlyMessage}`);
 
-            // Return 200 so Alchemy knows the webhook handled the failure and doesn't retry
-            return NextResponse.json({ status: "Vending Rejected by Provider" }, { status: 200 }); 
+            return NextResponse.json({ status: "Vending Rejected" }, { status: 200 }); 
         }
 
     } catch (error: any) {
