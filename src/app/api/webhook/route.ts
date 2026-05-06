@@ -87,16 +87,14 @@ export async function POST(req: Request) {
                 return NextResponse.json({ message: "Already processed" });
             }
 
-            // Flow B: Extract immutable event logs from transaction receipt
+                        // Flow B: Extract immutable event logs from transaction receipt
             try {
-                let clientInstance = baseClient;
                 let receipt;
                 
                 try {
                     receipt = await baseClient.getTransactionReceipt({ hash: txHash as `0x${string}` });
                 } catch (e) {
                     receipt = await sepoliaClient.getTransactionReceipt({ hash: txHash as `0x${string}` });
-                    clientInstance = sepoliaClient;
                 }
 
                 // Look for the clean, unpacked event logs printed by AbaPay
