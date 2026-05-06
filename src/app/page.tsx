@@ -610,16 +610,17 @@ export default function Home() {
       saveBeneficiary(accountNumber, customerName);
       handleResetService(SERVICES[0]);
 
-      // 5. HYBRID UI LISTENER
+            // 5. HYBRID UI LISTENER
       const finalStatus: any = await new Promise((resolve) => {
           let isResolved = false;
 
+          // ⚡ Increased to 35 seconds to allow Base + VTpass to fully complete
           const timer = setTimeout(() => {
               if (!isResolved) {
                   isResolved = true;
                   resolve('TIMEOUT');
               }
-          }, 20000); 
+          }, 35000); 
 
           const channel = supabase.channel(`tx-${txHashString}`)
               .on('postgres_changes', 
@@ -636,7 +637,18 @@ export default function Home() {
                       }
                   }
               )
-              .subscribe();
+              .subscribe(async (status) => {
+                  // ⚡ DOUBLE CHECK: In case the webhook beat our listener!
+                  if (status === 'SUBSCRIBED' && !isResolved) {
+                      const { data } = await supabase.from('transactions').select('*').eq('tx_hash', txHashString).single();
+                      if (data && (data.status === 'SUCCESS' || data.status === 'VENDING_FAILED')) {
+                          isResolved = true;
+                          clearTimeout(timer);
+                          channel.unsubscribe();
+                          resolve(data);
+                      }
+                  }
+              });
       });
 
       if (finalStatus === 'TIMEOUT') {
@@ -649,7 +661,7 @@ export default function Home() {
           newTx.purchased_code = finalStatus.purchased_code; 
           newTx.units = finalStatus.units; 
           newTx.request_id = finalStatus.request_id;
-          
+
           const earnedPoints = Number((parseFloat(calculatedNairaAmount) / 1000).toFixed(2));
           if (earnedPoints > 0) {
               window.dispatchEvent(new CustomEvent('abapoints-awarded', { detail: earnedPoints }));
