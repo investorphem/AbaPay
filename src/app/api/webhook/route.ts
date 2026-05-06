@@ -99,16 +99,19 @@ export async function POST(req: Request) {
                 return NextResponse.json({ message: "Already processed" });
             }
 
-            // ⚡ THE BLOCKCHAIN DECODER (For Bundler Delays) ⚡
+                        // ⚡ THE BLOCKCHAIN DECODER (For Bundler Delays) ⚡
             try {
                 // Fetch the transaction directly from the Base blockchain
                 const tx = await baseClient.getTransaction({ hash: txHash as `0x${string}` });
                 
-                // Decode the data sent to your smart contract
-                const decoded = decodeFunctionData({
+                // Decode the data sent to your smart contract (Bypass strict TS with ': any')
+                const decoded: any = decodeFunctionData({
                     abi: ABAPAY_ABI,
                     data: tx.input
                 });
+
+                // Satisfy TypeScript by ensuring args exists before reading it
+                if (!decoded || !decoded.args) throw new Error("No payload arguments found");
 
                 // Extract the exact phone/meter number from the blockchain payload
                 // ABAPAY_ABI args: [tokenAddress, serviceType, accountNumber, amount]
