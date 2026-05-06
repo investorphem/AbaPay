@@ -587,44 +587,92 @@ export default function Home() {
           const paymasterUrl = process.env.NEXT_PUBLIC_PAYMASTER_URL;
           const capabilities: any = paymasterUrl ? { paymasterService: { url: paymasterUrl } } : {};
 
-                                        const callId: any = await client.sendCalls({
+                                                  const callId: any = await client.sendCalls({
               account: address as `0x${string}`,
               calls: callsToBundle,
               capabilities: capabilities
           });
 
           const bundleId = typeof callId === 'string' ? callId : callId.id;
-          
-          // 1. INSTANT FRONTEND FINISH
-          // We immediately set the hash string to the 130-char ticket to keep the app moving fast
+          setStatus("Securing payment...");
+
+          // ⚡ STAGE 1: IMMEDIATE DATABASE SAVE (The Safety Net) ⚡
+          // We temporarily set txHash to bundleId so it hits history immediately.
           txHashString = bundleId;
 
-          // 2. SILENT BACKGROUND SYNC
-          // We fire off an invisible background task that watches the network for the real hash
-          // without forcing the user to wait for it.
-          (async () => {
-              let attempts = 0;
-              while (attempts < 15) { // Watch silently for up to 30 seconds
-                  try {
-                      const callStatus: any = await client.getCallsStatus({ id: bundleId });
-                      if (callStatus.status === 'CONFIRMED' && callStatus.receipts?.length > 0) {
-                          const realHash = callStatus.receipts[0].transactionHash || callStatus.receipts[0].logs?.[0]?.transactionHash;
-                          
-                          if (realHash && realHash.length === 66) {
-                              // Ping our new API route to silently fix the database!
-                              await fetch('/api/update-hash', {
-                                  method: 'POST',
-                                  headers: { 'Content-Type': 'application/json' },
-                                  body: JSON.stringify({ bundleId, realTxHash: realHash })
-                              });
-                              break;
-                          }
+          const initialPayload = {
+            serviceID: vtpassServiceID, 
+            serviceCategory: uiCategory, 
+            network: displayNetwork.toUpperCase(), 
+            billersCode: payloadBillersCode, 
+            amount: cryptoToCharge, 
+            nairaAmount: calculatedNairaAmount, 
+            token: selectedToken.symbol, 
+            txHash: bundleId,       // 👈 The 130-char ID acts as the primary lookup for now
+            bundle_id: bundleId,    // 👈 Saved explicitly in our tracking column
+            variation_code: finalVariationCode, 
+            phone: customerPhone || accountNumber, 
+            email: customerEmail, 
+            wallet_address: address, 
+            subscription_type: activeTab === "pay" && activeService.id === "CABLE" && ['dstv', 'gotv'].includes(cableProvider) ? cableSubscriptionType : undefined,
+            meter_account_type: meterAccountType, 
+            operator_id: isInternational ? selectedIntlOperator?.operator_id : undefined, 
+            country_code: isInternational ? activeCountry.code : undefined, 
+            product_type_id: isInternational ? selectedIntlProduct?.product_type_id : undefined,
+            blockchain: currentBlockchainName 
+          };
+
+          const newLocalTx: any = { 
+              id: bundleId.slice(0,8), 
+              date: new Date().toLocaleString(), 
+              status: "PENDING", 
+              amountNaira: isInternational ? `${intlCurrency || activeCountry.code} ${displayForeignAmount}` : calculatedNairaAmount, 
+              amountCrypto: cryptoToCharge, 
+              tokenUsed: selectedToken.symbol, 
+              service: uiCategory, 
+              network: displayNetwork.toUpperCase(), 
+              txHash: bundleId, 
+              bundle_id: bundleId,
+              account: payloadBillersCode,
+              blockchain: currentBlockchainName 
+          };
+
+          // Write the intent to the database instantly
+          await fetch('/api/pay', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(initialPayload) });
+
+          setStatus("Mined! Extracting network receipt... Do not close.");
+
+          // ⚡ STAGE 2: POLL FOR THE REAL ON-CHAIN HASH ⚡
+          let realTxHash = "";
+          let attempts = 0;
+
+          while (attempts < 20) { // Polling up to 40 seconds
+              try {
+                  const callStatus: any = await client.getCallsStatus({ id: bundleId });
+                  if (callStatus.status === 'CONFIRMED' && callStatus.receipts && callStatus.receipts.length > 0) {
+                      const hashStr = callStatus.receipts[0].transactionHash || callStatus.receipts[0].logs?.[0]?.transactionHash;
+
+                      if (hashStr && hashStr.length === 66) {
+                          realTxHash = hashStr;
+                          break;
                       }
-                  } catch (err) {}
-                  await new Promise(res => setTimeout(res, 2000));
-                  attempts++;
-              }
-          })();
+                  }
+              } catch (err) { console.log("Extracting real hash..."); }
+              await new Promise(res => setTimeout(res, 2000));
+              attempts++;
+          }
+
+          // ⚡ STAGE 3: SILENT UPDATE IF FRONTEND IS ALIVE ⚡
+          if (realTxHash && realTxHash.length === 66) {
+              await fetch('/api/update-hash', {
+                  method: 'POST',
+                  headers: { 'Content-Type': 'application/json' },
+                  body: JSON.stringify({ bundleId, realTxHash })
+              });
+              txHashString = realTxHash; // Overwrite memory for local app state
+              newLocalTx.txHash = realTxHash;
+              newLocalTx.id = realTxHash.slice(0, 8);
+          }
       }
 
       setStatus(`Payment Secured! Vending in progress...`);
