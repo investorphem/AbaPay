@@ -66,12 +66,13 @@ export async function POST(req: Request) {
             return NextResponse.json({ message: "Test Successful" });
         }
 
-                // 3. RETRY LOOP WITH FAIL-SAFE DUAL HASH MATCHING
+                        // 3. THE RETRY LOOP (Clean & Simple Match)
         let record = null;
-        let retries = 20;
+        let retries = 5; // Fast 10-second wait since the hash is instant
 
         while (retries > 0) {
-            // Flow A: Check if the frontend already swapped it to a 66-char hash
+            // Because we abandoned the bundler, the hash Alchemy sends will ALWAYS 
+            // match the hash our frontend saved to the database. 
             const { data: exactMatch } = await supabaseAdmin
                 .from('transactions')
                 .select('*')
@@ -87,64 +88,16 @@ export async function POST(req: Request) {
                 return NextResponse.json({ message: "Already processed" });
             }
 
-            // Flow B: Internet dropped fallback - parse logs, look for bundle_id
-            try {
-                let receipt;
-                try {
-                    receipt = await baseClient.getTransactionReceipt({ hash: txHash as `0x${string}` });
-                } catch (e) {
-                    receipt = await sepoliaClient.getTransactionReceipt({ hash: txHash as `0x${string}` });
-                }
-
-                const logs = parseEventLogs({
-                    abi: ABAPAY_ABI,
-                    eventName: 'PaymentReceived',
-                    logs: receipt.logs
-                });
-
-                if (logs && logs.length > 0) {
-                    const firstLog: any = logs[0]; 
-                    const eventArgs = firstLog.args;
-                    const onChainAccountNumber = eventArgs.accountNumber as string;
-                    const onChainWallet = eventArgs.user as string; 
-                    const fifteenMinutesAgo = new Date(Date.now() - 15 * 60 * 1000).toISOString();
-
-                    // Query using the immutable fields from the on-chain log
-                    const { data: smartMatch } = await supabaseAdmin
-                        .from('transactions')
-                        .select('*')
-                        .eq('status', 'PENDING')
-                        .ilike('wallet_address', onChainWallet)
-                        .eq('account_number', onChainAccountNumber)
-                        .gte('created_at', fifteenMinutesAgo)
-                        .order('created_at', { ascending: true }) 
-                        .limit(1)
-                        .single();
-
-                    if (smartMatch) {
-                        console.log(`🎯 Rescue Match! Syncing real hash for dropped connection.`);
-                        
-                        await supabaseAdmin
-                            .from('transactions')
-                            .update({ tx_hash: txHash })
-                            .eq('id', smartMatch.id);
-                        
-                        record = smartMatch;
-                        record.tx_hash = txHash;
-                        break;
-                    }
-                }
-            } catch (err) {
-                console.log("Waiting for block indexing...");
-            }
-
             await new Promise(resolve => setTimeout(resolve, 2000)); 
             retries--;
         }
 
-        if (!record) return NextResponse.json({ error: "Record not found or not PENDING" }, { status: 404 });
+        if (!record) {
+            return NextResponse.json({ error: "Record not found or not PENDING" }, { status: 404 });
+        }
 
         console.log(`🚀 Triggering VTPass for: ${record.account_number} on ${record.blockchain}`);
+
 
         const isForeign = record.service_id === 'foreign-airtime';
         const appMode = process.env.NEXT_PUBLIC_APP_MODE || "sandbox";
