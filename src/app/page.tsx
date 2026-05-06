@@ -566,25 +566,27 @@ export default function Home() {
           const paymasterUrl = process.env.NEXT_PUBLIC_PAYMASTER_URL;
           const capabilities: any = paymasterUrl ? { paymasterService: { url: paymasterUrl } } : {};
 
-          const callId: any = await client.sendCalls({
+                    const callId: any = await client.sendCalls({
               account: address as `0x${string}`,
               calls: callsToBundle,
               capabilities: capabilities
           });
-          
-          const bundleId = typeof callId === 'string' ? callId : callId.id;
-          setStatus("Waiting for Bundler confirmation...");
 
-          // ⚡ THE FIX: Poll the bundler to get the REAL on-chain transaction hash
-          let realTxHash = bundleId;
+          const bundleId = typeof callId === 'string' ? callId : callId.id;
+          setStatus("Sponsoring your network fee... Please hold.");
+
+          // ⚡ ENTERPRISE FIRE-AND-FORGET: Wait up to ~15 seconds for the real hash
+          let realTxHash = "";
           let attempts = 0;
-          while (attempts < 15) { // Try for 30 seconds max
+          
+          while (attempts < 8) { 
               try {
                   const callStatus: any = await client.getCallsStatus({ id: bundleId });
                   if (callStatus.status === 'CONFIRMED' && callStatus.receipts && callStatus.receipts.length > 0) {
-                      // Grab the actual blockchain transaction hash
                       const hashStr = callStatus.receipts[0].transactionHash || callStatus.receipts[0].logs?.[0]?.transactionHash;
-                      if (hashStr) {
+                      
+                      // Strict Check: Ensure it is exactly 66 characters long
+                      if (hashStr && hashStr.length === 66) {
                           realTxHash = hashStr;
                           break;
                       }
@@ -594,10 +596,11 @@ export default function Home() {
               attempts++;
           }
           
-          txHashString = realTxHash;
+          // ⚡ If we got the real hash, great! If not, save the bundleId and let the backend handle it.
+          txHashString = realTxHash && realTxHash.length === 66 ? realTxHash : bundleId;
       }
-      
-      setStatus(`Secured. Vending in progress...`);
+
+      setStatus(`Payment Secured! Vending in the background...`);
 
       // 4. SAVE INTENT TO DATABASE
       const backendPayload = {
