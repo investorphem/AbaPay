@@ -3,30 +3,30 @@ import { ShieldCheck, Scale, AlertTriangle, FileText, Globe } from "lucide-react
 
 export default function TermsOfService() {
   return (
-    <main className="min-h-screen bg-slate-50 text-slate-900 font-sans p-4 sm:p-8 flex flex-col items-center pb-20">
-      <div className="w-full max-w-4xl bg-white border border-slate-200 rounded-[2.5rem] p-8 sm:p-12 shadow-xl shadow-slate-200/50">
+    <main className="min-h-screen bg-slate-50 dark:bg-black text-slate-900 dark:text-slate-100 font-sans p-4 sm:p-8 flex flex-col items-center pb-20 transition-colors">
+      <div className="w-full max-w-4xl bg-white dark:bg-[#111114] border border-slate-200 dark:border-slate-800/60 rounded-[2.5rem] p-8 sm:p-12 shadow-xl shadow-slate-200/50 dark:shadow-black/50 transition-colors">
 
         {/* HEADER SECTION */}
-        <div className="border-b border-slate-100 pb-8 mb-8 text-center sm:text-left flex flex-col sm:flex-row items-center sm:items-start justify-between gap-4">
+        <div className="border-b border-slate-100 dark:border-slate-800/60 pb-8 mb-8 text-center sm:text-left flex flex-col sm:flex-row items-center sm:items-start justify-between gap-4 transition-colors">
           <div>
             <div className="flex items-center justify-center sm:justify-start gap-3 mb-2">
               <ShieldCheck className="text-emerald-500" size={32} />
-              <h1 className="text-3xl font-black text-slate-900 tracking-tight">Terms of Service</h1>
+              <h1 className="text-3xl font-black text-slate-900 dark:text-white tracking-tight">Terms of Service</h1>
             </div>
-            <p className="text-sm font-bold text-slate-400 uppercase tracking-widest">AbaPay Global Web3 Protocol</p>
+            <p className="text-sm font-bold text-slate-400 dark:text-slate-500 uppercase tracking-widest">AbaPay Global Web3 Protocol</p>
           </div>
           <div className="text-right">
-            <p className="text-xs font-bold text-slate-500 bg-slate-100 px-3 py-1.5 rounded-lg inline-block">
+            <p className="text-xs font-bold text-slate-500 dark:text-slate-400 bg-slate-100 dark:bg-[#1a1a1f] px-3 py-1.5 rounded-lg inline-block transition-colors">
               Effective Date: April 2026
             </p>
           </div>
         </div>
 
         {/* CONTENT SECTION */}
-        <div className="space-y-8 text-sm sm:text-base text-slate-600 leading-relaxed font-medium">
+        <div className="space-y-8 text-sm sm:text-base text-slate-600 dark:text-slate-300 leading-relaxed font-medium">
 
-          <section className="bg-emerald-50/50 p-6 rounded-2xl border border-emerald-100">
-            <h2 className="text-lg font-black text-slate-900 mb-3 flex items-center gap-2">
+          <section className="bg-emerald-50/50 dark:bg-emerald-900/10 p-6 rounded-2xl border border-emerald-100 dark:border-emerald-900/30 transition-colors">
+            <h2 className="text-lg font-black text-slate-900 dark:text-white mb-3 flex items-center gap-2">
               <Globe size={18} className="text-emerald-500"/> 1. Introduction & Global Acceptance
             </h2>
             <p className="mb-3">
@@ -38,7 +38,7 @@ export default function TermsOfService() {
           </section>
 
           <section>
-            <h2 className="text-lg font-black text-slate-900 mb-3">2. Nature of Services</h2>
+            <h2 className="text-lg font-black text-slate-900 dark:text-white mb-3">2. Nature of Services</h2>
             <p className="mb-3">
               AbaPay operates strictly as a <strong>Technology Interface and Borderless Digital Intermediary</strong>. We provide a non-custodial software protocol that allows users to interact with smart contracts on 
               {/* ⚡ MULTI-CHAIN UPDATE HERE ⚡ */}
@@ -50,7 +50,7 @@ export default function TermsOfService() {
           </section>
 
           <section>
-            <h2 className="text-lg font-black text-slate-900 mb-3">3. Anti-Money Laundering (AML) & Compliance</h2>
+            <h2 className="text-lg font-black text-slate-900 dark:text-white mb-3">3. Anti-Money Laundering (AML) & Compliance</h2>
             <p className="mb-3">
               To comply with the Special Control Unit Against Money Laundering (SCUML), the Securities and Exchange Commission (SEC) of Nigeria, and international Financial Action Task Force (FATF) guidelines, AbaPay reserves the right to monitor transactions for illicit activities. 
             </p>
@@ -60,7 +60,7 @@ export default function TermsOfService() {
           </section>
 
           <section>
-            <h2 className="text-lg font-black text-slate-900 mb-3 flex items-center gap-2">
+            <h2 className="text-lg font-black text-slate-900 dark:text-white mb-3 flex items-center gap-2">
               <AlertTriangle size={18} className="text-orange-500"/> 4. Blockchain Irreversibility & User Responsibility
             </h2>
             <ul className="list-disc pl-5 space-y-2">
@@ -71,7 +71,7 @@ export default function TermsOfService() {
           </section>
 
           <section>
-            <h2 className="text-lg font-black text-slate-900 mb-3">5. Exchange Rates, Fees, and Taxes</h2>
+            <h2 className="text-lg font-black text-slate-900 dark:text-white mb-3">5. Exchange Rates, Fees, and Taxes</h2>
             <p className="mb-3">
               <strong>Exchange Rates:</strong> The cryptocurrency-to-fiat exchange rate (e.g., NGN, GHS, KES, ZAR, USD) is determined dynamically at the time of your transaction via live international market APIs. By clicking "Pay", you lock in the displayed rate. AbaPay is not liable for crypto market volatility.
             </p>
@@ -84,7 +84,7 @@ export default function TermsOfService() {
           </section>
 
           <section>
-            <h2 className="text-lg font-black text-slate-900 mb-3">6. Third-Party Services & Limitation of Liability</h2>
+            <h2 className="text-lg font-black text-slate-900 dark:text-white mb-3">6. Third-Party Services & Limitation of Liability</h2>
             <p className="mb-3">
               AbaPay relies on external utility providers and international telecommunications networks (e.g., MTN Global, Airtel Africa, DSTV, global electricity boards) and API aggregators. 
             </p>
@@ -99,15 +99,15 @@ export default function TermsOfService() {
           </section>
 
           <section>
-            <h2 className="text-lg font-black text-slate-900 mb-3">7. Refunds and Reversals</h2>
+            <h2 className="text-lg font-black text-slate-900 dark:text-white mb-3">7. Refunds and Reversals</h2>
             <p>
               If your Web3 transaction is successfully confirmed but the Third-Party utility provider fails to deliver the service (e.g., failed token generation or foreign network rejection), AbaPay will automatically flag the transaction. Upon verification of the failure, AbaPay will issue a refund in the original stablecoin asset (less blockchain gas fees) to your connected wallet within 24 to 72 hours.
             </p>
           </section>
 
-          <section className="bg-slate-100 p-6 rounded-2xl">
-            <h2 className="text-lg font-black text-slate-900 mb-3 flex items-center gap-2">
-              <Scale size={18} className="text-slate-700"/> 8. Governing Law & Dispute Resolution
+          <section className="bg-slate-100 dark:bg-[#1a1a1f] p-6 rounded-2xl transition-colors">
+            <h2 className="text-lg font-black text-slate-900 dark:text-white mb-3 flex items-center gap-2">
+              <Scale size={18} className="text-slate-700 dark:text-slate-400"/> 8. Governing Law & Dispute Resolution
             </h2>
             <p className="mb-3">
               Because MASONODE TECHNOLOGIES LIMITED is headquartered in Nigeria, these Terms shall be governed by and construed in accordance with the laws of the Federal Republic of Nigeria, without regard to international conflict of law principles.
@@ -120,12 +120,12 @@ export default function TermsOfService() {
         </div>
 
         {/* FOOTER */}
-        <div className="mt-12 pt-8 border-t border-slate-100 text-center">
-          <p className="text-xs font-bold text-slate-400 mb-4">
+        <div className="mt-12 pt-8 border-t border-slate-100 dark:border-slate-800/60 text-center transition-colors">
+          <p className="text-xs font-bold text-slate-400 dark:text-slate-500 mb-4">
             If you have any questions regarding these Terms, please contact us at support@abapays.com
           </p>
           <Link href="/">
-            <button className="bg-slate-900 hover:bg-black text-white px-6 py-3 rounded-xl font-black text-sm transition-all shadow-md hover:shadow-xl active:scale-95 flex items-center gap-2 mx-auto">
+            <button className="bg-slate-900 dark:bg-white hover:bg-black dark:hover:bg-slate-200 text-white dark:text-slate-900 px-6 py-3 rounded-xl font-black text-sm transition-all shadow-md hover:shadow-xl active:scale-95 flex items-center gap-2 mx-auto shadow-slate-900/20 dark:shadow-white/10">
               Return to AbaPay
             </button>
           </Link>
