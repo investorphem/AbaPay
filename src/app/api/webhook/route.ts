@@ -73,7 +73,7 @@ export async function POST(req: Request) {
 
         const txHash = activity.hash;
 
-                // Handle Alchemy Test Ping
+                        // Handle Alchemy Test Ping
         if (txHash === "0xTestTransactionHash") {
             console.log("✅ Alchemy Test Successful for abapays.com");
             return NextResponse.json({ message: "Test Successful" });
@@ -83,11 +83,12 @@ export async function POST(req: Request) {
         // This guarantees the frontend has enough time to show the instant success screen!
         await new Promise(resolve => setTimeout(resolve, 15000));
 
-        // 3. THE RETRY LOOP (Clean & Simple Match)
+        // 3. THE RETRY LOOP (With Atomic Locking)
         let record = null;
-        let retries = 5; 
+        let retries = 5;
 
-        while (retries > 0) 
+        // 👇 Make sure the curly brace is right here!
+        while (retries > 0) { 
             const { data: exactMatch } = await supabaseAdmin
                 .from('transactions')
                 .select('*')
