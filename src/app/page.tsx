@@ -844,19 +844,19 @@ export default function Home() {
     try { const saved = localStorage.getItem(`abapay_beneficiaries_${address}`); if (saved) setBeneficiaries(JSON.parse(saved)); else setBeneficiaries({}); } catch (e) {}
   }, [address]);
 
-      useEffect(() => {
+        useEffect(() => {
     async function fetchBalance() {
       if (!address || !activeChain) return;
       setIsFetchingBalance(true);
       
       try {
-        // ⚡ THE MINIPAY FIX: Route read requests through MiniPay's internal node
-        const isMiniPay = environment === 'MINIPAY' && typeof window !== "undefined" && (window as any).ethereum;
-        const transport = isMiniPay 
-            ? custom((window as any).ethereum) 
-            : http(undefined, { fetchOptions: { cache: 'no-store' } });
+        // ⚡ THE MINIPAY FIX: Force Wagmi to use rock-solid public RPCs for reading balances!
+        let rpcUrl = activeChain.rpcUrls.default.http[0];
+        if (activeChain.id === celo.id) rpcUrl = "https://forno.celo.org";
+        if (activeChain.id === base.id) rpcUrl = "https://mainnet.base.org";
 
-        const publicClient = createPublicClient({ chain: activeChain, transport });
+        // We use http(rpcUrl) instead of MiniPay's custom injected provider for reads
+        const publicClient = createPublicClient({ chain: activeChain, transport: http(rpcUrl) });
 
         // ⚡ DYNAMIC TOKEN SELECTION
         let tokenAddress;
