@@ -1222,14 +1222,27 @@ export default function Home() {
           </div>
           <div className="flex items-center gap-2">
 
-            {address && (
+                        {address && (
                 <div className={`hidden sm:flex px-2.5 py-1.5 rounded-xl border items-center gap-1.5 shadow-sm ${activeChain?.name?.toLowerCase().includes('base') ? 'bg-blue-50 border-blue-200 text-blue-700' : 'bg-emerald-50 border-emerald-200 text-emerald-700'}`}>
                     <div className={`w-1.5 h-1.5 rounded-full animate-pulse ${activeChain?.name?.toLowerCase().includes('base') ? 'bg-blue-500' : 'bg-emerald-500'}`}></div>
                     <span className="text-[9px] font-black uppercase tracking-widest">{activeNetworkDisplay}</span>
                 </div>
             )}
 
-            <PointsBadge walletAddress={address || undefined} />
+            {/* ⚡ NEW: Dynamic Connect Button / AbaPoints Swap ⚡ */}
+            {!address && environment === 'WEB' ? (
+                <button 
+                  onClick={() => connect({ connector: connectors[0] })}
+                  disabled={isProcessing}
+                  className="bg-emerald-50 hover:bg-emerald-100 border border-emerald-200 text-emerald-700 font-black text-[10px] px-3 py-1.5 rounded-xl transition-all shadow-sm active:scale-95 disabled:opacity-50 flex items-center gap-1.5 uppercase tracking-widest"
+                >
+                  {isProcessing ? <Loader2 size={12} className="animate-spin"/> : <Zap size={12}/>}
+                  {isProcessing ? "Wait" : "Connect"}
+                </button>
+            ) : (
+                <PointsBadge walletAddress={address || undefined} />
+            )}
+
             <button 
               onClick={() => openSelectionModal('country', "Select Region", intlCountries.length ? intlCountries : SUPPORTED_COUNTRIES, handleCountryChange)}
               className="bg-slate-50 border border-slate-100 hover:border-emerald-200 px-3 py-1.5 rounded-xl flex items-center gap-2 transition-all shadow-sm active:scale-95"
@@ -1245,30 +1258,6 @@ export default function Home() {
             </button>
           </div>
         </div>
-
-        {!address && environment === 'WEB' && (
-          <div className="bg-slate-900 p-1 rounded-[1.25rem] md:rounded-[1.5rem] mb-6 shadow-xl shadow-slate-900/10 animate-in fade-in slide-in-from-top-4 transition-all">
-            <div className="bg-slate-800/50 backdrop-blur-md rounded-xl p-3.5 flex justify-between items-center border border-slate-700/50">
-               <div className="flex items-center gap-3">
-                  <div className="bg-emerald-500/10 p-2 rounded-full border border-emerald-500/20">
-                     <Zap size={16} className="text-emerald-400"/>
-                  </div>
-                  <div className="text-left">
-                     <p className="text-white font-black text-sm tracking-tight leading-none">Secure Connection</p>
-                     <p className="text-slate-400 text-[10px] font-bold mt-1 uppercase tracking-wider">Access AbaPay</p>
-                  </div>
-               </div>
-               <button 
-                  onClick={() => connect({ connector: connectors[0] })}
-                  disabled={isProcessing}
-                  className="bg-emerald-500 hover:bg-emerald-400 text-slate-900 font-black text-xs px-5 py-2.5 rounded-full transition-all active:scale-95 disabled:opacity-50 shadow-md flex items-center gap-1.5"
-               >
-                  {isProcessing ? <Loader2 size={14} className="animate-spin"/> : null}
-                  {isProcessing ? "WAIT" : "CONNECT"}
-               </button>
-            </div>
-          </div>
-        )}
 
         {/* THE TABS */}
         <div className="flex gap-2 bg-slate-200/50 p-1.5 rounded-2xl md:rounded-[1.25rem] mb-6 shadow-inner overflow-x-auto no-scrollbar transition-all">
