@@ -1,5 +1,5 @@
-import React, { useRef } from "react";
-import { CheckCircle2, ExternalLink, Share2, HelpCircle, XCircle, Loader2 } from "lucide-react";
+import React, { useRef, useState, useEffect } from "react";
+import { CheckCircle2, ExternalLink, Share2, HelpCircle, XCircle, Loader2, Search } from "lucide-react";
 import { SUPPORTED_COUNTRIES, SUPPORTED_TOKENS } from "@/constants";
 
 export function TermsModal({ isOpen, onClose }: any) {
@@ -174,7 +174,7 @@ export function ReceiptModal({ receipt, isMainnet, onClose, onSupport }: any) {
                         const refundUrl = isBaseTx 
                             ? (isMainnet ? `https://basescan.org/tx/${receipt.refund_hash}` : `https://sepolia.basescan.org/tx/${receipt.refund_hash}`)
                             : (isMainnet ? `https://celoscan.io/tx/${receipt.refund_hash}` : `https://alfajores.celoscan.io/tx/${receipt.refund_hash}`);
-                        
+
                         return (
                             <a data-html2canvas-ignore="true" href={refundUrl} target="_blank" rel="noopener noreferrer" className="text-blue-600 font-mono font-bold text-xs flex items-center justify-end gap-1 hover:underline">
                                 View Transfer <ExternalLink size={10}/>
@@ -231,18 +231,56 @@ export function ReceiptModal({ receipt, isMainnet, onClose, onSupport }: any) {
 export function SelectionModal({
   isOpen, onClose, title, type, options, onSelect, isFetchingBanks, selectedValue, onRetryBanks
 }: any) {
+  const [searchQuery, setSearchQuery] = useState("");
+
+  // Clear the search bar whenever the modal opens
+  useEffect(() => {
+    if (isOpen) setSearchQuery("");
+  }, [isOpen]);
+
   if (!isOpen) return null;
+
+  // ⚡ SMART FILTER: Searches by name, displayName, or code ⚡
+  const filteredOptions = (options || []).filter((opt: any) => {
+    if (!searchQuery) return true;
+    const nameToSearch = (opt.name || opt.displayName || opt.code || "").toLowerCase();
+    return nameToSearch.includes(searchQuery.toLowerCase());
+  });
+
   return (
     <div className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-sm flex justify-center items-center p-4 animate-in fade-in" onClick={onClose}>
        <div className="bg-white w-full max-w-sm rounded-[2rem] shadow-2xl p-6 animate-in zoom-in-95 duration-200" onClick={(e) => e.stopPropagation()}>
-          <div className="flex justify-between items-center mb-6 shrink-0 border-b border-slate-100 pb-4">
+          <div className="flex justify-between items-center mb-4 shrink-0 border-b border-slate-100 pb-4">
             <h2 className="text-xl font-black text-slate-900 tracking-tight">{title}</h2>
             <button onClick={onClose} className="p-2 bg-slate-100 rounded-full hover:bg-slate-200 transition-colors"><XCircle size={20} className="text-slate-500" /></button>
           </div>
+
+          {/* ⚡ NEW SEARCH BAR ⚡ */}
+          {(type === 'country' || type === 'bank' || (options && options.length > 10)) && (
+            <div className="relative mb-4">
+                <Search className="absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-400" size={16} />
+                <input 
+                    type="text" 
+                    placeholder={`Search ${type === 'country' ? 'country' : 'options'}...`}
+                    value={searchQuery}
+                    onChange={(e) => setSearchQuery(e.target.value)}
+                    className="w-full bg-slate-50 border border-slate-200 rounded-xl py-3 pl-10 pr-4 text-sm font-bold text-slate-700 outline-none focus:border-emerald-500 transition-all shadow-inner"
+                />
+            </div>
+          )}
+
           <div className="space-y-2.5 max-h-[50vh] overflow-y-auto pr-1">
 
-             {/* ⚡ COUNTRY SELECTOR WITH DYNAMIC OPTIONS ⚡ */}
-             {type === 'country' && (options || []).map((country: any) => (
+             {/* NO RESULTS FALLBACK */}
+             {filteredOptions.length === 0 && !isFetchingBanks && (
+                <div className="p-6 text-center text-slate-400 font-bold text-xs flex flex-col items-center gap-2">
+                   <Search size={24} className="text-slate-300 mb-1" />
+                   No results found for "{searchQuery}"
+                </div>
+             )}
+
+             {/* ⚡ COUNTRY SELECTOR ⚡ */}
+             {type === 'country' && filteredOptions.map((country: any) => (
                <button key={country.code} disabled={country.disabled} onClick={() => { if (!country.disabled) { onSelect(country.code); onClose(); } }}
                  className={`w-full text-left p-4 rounded-xl font-bold text-sm transition-all flex justify-between items-center ${country.disabled ? 'bg-slate-50 border border-slate-100 text-slate-400 cursor-not-allowed' : 'text-slate-700 bg-slate-50 border border-slate-100 hover:border-emerald-300 hover:bg-emerald-50/50'}`}>
                  <div className="flex items-center gap-3">
@@ -258,6 +296,7 @@ export function SelectionModal({
                </button>
              ))}
 
+             {/* ⚡ BANK SELECTOR ⚡ */}
              {type === 'bank' && isFetchingBanks && (
                <div className="flex flex-col items-center justify-center p-6 gap-3 text-slate-400">
                  <Loader2 className="animate-spin text-blue-500" size={24} />
@@ -270,22 +309,23 @@ export function SelectionModal({
                  <button onClick={onRetryBanks} className="bg-blue-100 text-blue-600 px-4 py-2 rounded-xl text-xs font-bold w-full">Retry Connection</button>
                </div>
              )}
-             {type === 'bank' && !isFetchingBanks && options?.map((bank: any) => (
+             {type === 'bank' && !isFetchingBanks && filteredOptions.map((bank: any) => (
                <button key={bank.variation_code} onClick={() => { onSelect(bank.variation_code); onClose(); }} className="w-full text-left p-4 rounded-xl font-bold text-slate-700 bg-slate-50 border border-slate-100 text-xs hover:border-blue-300 hover:bg-blue-50/50 transition-all flex justify-between items-center">
                  <span>{bank.name}</span>
                  {selectedValue === bank.variation_code && <CheckCircle2 size={18} className="text-blue-500"/>}
                </button>
              ))}
 
-             {/* ⚡ TOKEN SELECTOR WITH DYNAMIC OPTIONS ⚡ */}
-             {type === 'token' && (options || []).map((token: any) => (
+             {/* ⚡ TOKEN SELECTOR ⚡ */}
+             {type === 'token' && filteredOptions.map((token: any) => (
                <button key={token.symbol} onClick={() => { onSelect(token.symbol); onClose(); }} className="w-full text-left p-4 rounded-xl font-bold text-slate-700 bg-slate-50 border border-slate-100 uppercase text-xs hover:border-emerald-300 hover:bg-emerald-50/50 transition-all flex justify-between items-center">
                  <div className="flex items-center gap-3"><img src={token.logo} alt={token.symbol} className="w-6 h-6 object-contain rounded-full shadow-sm bg-white" /><span className="text-sm font-black text-slate-800 tracking-tight">{token.symbol}</span></div>
                  {selectedValue === token.symbol && <CheckCircle2 size={18} className="text-emerald-500"/>}
                </button>
              ))}
 
-             {type === 'provider' && (options || []).map((provider: any) => (
+             {/* ⚡ PROVIDER SELECTOR ⚡ */}
+             {type === 'provider' && filteredOptions.map((provider: any) => (
                 <button 
                   key={provider.serviceID} 
                   disabled={provider.disabled}
@@ -305,7 +345,8 @@ export function SelectionModal({
                 </button>
              ))}
 
-             {type === 'standard' && (options || []).map((provider: any) => (
+             {/* ⚡ STANDARD SELECTOR ⚡ */}
+             {type === 'standard' && filteredOptions.map((provider: any) => (
                 <button 
                   key={provider.serviceID} 
                   disabled={provider.disabled}
