@@ -1282,8 +1282,8 @@ export default function Home() {
         {/* BANK BLOCK */}
         {/* ======================================= */}
         {activeTab === 'bank' && (
-          {/* ⚡ 4. UPDATED CARD: Increased padding (md:p-10) and rounded corners (md:rounded-[3rem]) on PC ⚡ */}
-          <div className="bg-white border border-slate-100 rounded-[2.5rem] md:rounded-[3rem] p-8 md:p-10 shadow-2xl shadow-emerald-900/10 animate-in fade-in zoom-in-95 transition-all">
+          {activeTab === 'bank' && (
+  <div className="bg-white border border-slate-100 rounded-[2.5rem] md:rounded-[3rem] p-8 md:p-10 shadow-2xl shadow-emerald-900/10 animate-in fade-in zoom-in-95 transition-all">
             <div className="space-y-5">
                 <div className="bg-slate-50 border border-slate-100 p-4 rounded-2xl flex justify-between items-center animate-in fade-in">
                   <div 
@@ -1486,8 +1486,7 @@ export default function Home() {
         {/* ======================================= */}
         {/* EDUCATION BLOCK */}
         {/* ======================================= */}
-        {activeTab === 'education' && (
-          {/* ⚡ 4. UPDATED CARD: Increased padding (md:p-10) and rounded corners (md:rounded-[3rem]) on PC ⚡ */}
+                {activeTab === 'education' && (
           <div className="bg-white border border-slate-100 rounded-[2.5rem] md:rounded-[3rem] p-8 md:p-10 shadow-2xl shadow-emerald-900/10 animate-in fade-in zoom-in-95 transition-all">
             <div className="space-y-5">
                 <div className="bg-slate-50 border border-slate-100 p-4 rounded-2xl flex justify-between items-center animate-in fade-in">
@@ -1680,8 +1679,7 @@ export default function Home() {
         {/* ======================================= */}
         {/* PAY BLOCK */}
         {/* ======================================= */}
-        {activeTab === 'pay' && (
-          {/* ⚡ 4. UPDATED CARD: Increased padding (md:p-10) and rounded corners (md:rounded-[3rem]) on PC ⚡ */}
+                {activeTab === 'pay' && (
           <div className="bg-white border border-slate-100 rounded-[2.5rem] md:rounded-[3rem] p-8 md:p-10 shadow-2xl shadow-emerald-900/10 animate-in fade-in zoom-in-95 transition-all">
 
             {!isInternational && (
