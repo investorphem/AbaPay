@@ -48,11 +48,11 @@ export default function DocsPage() {
             <div className="space-y-6">
               <FeatureBlock 
                 icon={<Wallet />} title="No Deposits. No Fiat Wallets." 
-                desc="You never have to 'fund' an AbaPay account. Your money stays securely in your own wallet (MetaMask, MiniPay, Trust Wallet, etc.) until the exact moment you pay a bill."
+                desc="You never have to 'fund' an AbaPay account. Your money stays securely in your own wallet (MetaMask, MiniPay, Coinbase Smart Wallet, etc.) until the exact moment you pay a bill."
               />
               <FeatureBlock 
                 icon={<Lock />} title="Smart Contract Escrow" 
-                desc="Your crypto isn't blindly sent to an admin. It is locked in our secure Smart Contract on the Celo network. The contract only releases the funds to our treasury after the utility provider confirms the transaction."
+                desc="Your crypto isn't blindly sent to an admin. It is locked in our secure Smart Contracts on the Base and Celo networks. The contract only releases the funds to our treasury after the utility provider confirms the transaction."
               />
               <FeatureBlock 
                 icon={<Globe />} title="Borderless Payments" 
@@ -67,15 +67,17 @@ export default function DocsPage() {
               <Star className="text-purple-500" size={20} /> AbaPoints & Rewards
             </h2>
             <p className="text-slate-600 font-medium mb-6 leading-relaxed">
-              AbaPoints (⚡) are our way of rewarding loyal users. You can see your live AbaPoints balance glowing in the top right corner of the app next to your region selector.
+              AbaPoints (⚡) are our way of rewarding loyal users. You can see your live AbaPoints balance glowing in the top right corner of the app, directly in the header.
             </p>
 
             <div className="bg-purple-50 border border-purple-100 p-6 rounded-3xl mb-6">
               <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-4">
-                <h3 className="text-sm font-black text-purple-900 uppercase tracking-widest">Earning Ratio</h3>
-                <p className="text-2xl font-black text-emerald-600 bg-white px-4 py-2 rounded-2xl shadow-sm border border-purple-100">₦1,000 = <span className="text-purple-600">1.00 Point</span></p>
+                <h3 className="text-sm font-black text-purple-900 uppercase tracking-widest">Global Earning Ratio</h3>
+                <p className="text-lg sm:text-2xl font-black text-emerald-600 bg-white px-4 py-2 rounded-2xl shadow-sm border border-purple-100">1 Stablecoin = <span className="text-purple-600">1.00 Point</span></p>
               </div>
-              <p className="text-sm text-purple-800 font-medium">Points are calculated automatically based on your total transaction volume. Spend the equivalent of ₦500 in any currency? You earn 0.50 points instantly!</p>
+              <p className="text-sm text-purple-800 font-medium leading-relaxed">
+                AbaPoints are globally pegged to the stablecoin (cUSD, USDC, USDT) value of your utility purchase. Spend exactly 5.50 USDC on a utility bill? You earn exactly 5.50 points instantly. This ensures your rewards are completely protected against local fiat currency inflation!
+              </p>
             </div>
 
             <div className="bg-slate-50 border border-slate-100 p-5 rounded-2xl flex items-start gap-4">
@@ -155,15 +157,15 @@ export default function DocsPage() {
             <ul className="space-y-4">
               <li className="bg-slate-50 p-5 rounded-2xl border border-slate-100">
                 <strong className="block text-sm font-black text-slate-800 mb-1">Strict Token Requirements</strong>
-                <span className="text-sm text-slate-600 font-medium leading-relaxed">If a provider claims "Success" but fails to generate your Electricity Token or Airtime PIN, our system refuses to accept it. Your transaction goes into a PENDING state while our Requery Engine safely hunts down your token.</span>
+                <span className="text-sm text-slate-600 font-medium leading-relaxed">If a provider claims "Success" but fails to generate your Electricity Token or Airtime PIN, our system refuses to accept it. Your transaction goes into a PENDING state while our background webhook safely hunts down your token.</span>
               </li>
               <li className="bg-slate-50 p-5 rounded-2xl border border-slate-100">
-                <strong className="block text-sm font-black text-slate-800 mb-1">Rate Mismatch Protection</strong>
-                <span className="text-sm text-slate-600 font-medium leading-relaxed">Our platform locks in your exchange rate at the moment of the transaction. If you underpay due to crypto market slippage, the smart contract instantly reverts the transaction to protect your funds.</span>
+                <strong className="block text-sm font-black text-slate-800 mb-1">Deep On-Chain Payload Decoding</strong>
+                <span className="text-sm text-slate-600 font-medium leading-relaxed">Our API does not trust front-end claims. It directly fetches your blockchain transaction and decodes the smart contract data to verify the exact amount and service you paid for before vending.</span>
               </li>
               <li className="bg-slate-50 p-5 rounded-2xl border border-slate-100">
-                <strong className="block text-sm font-black text-slate-800 mb-1">Guaranteed Auto-Refunds</strong>
-                <span className="text-sm text-slate-600 font-medium leading-relaxed">If an international telco or utility provider is completely offline and rejects the payment, your transaction is FAILED. Because funds are held in escrow, you become immediately eligible for a crypto refund.</span>
+                <strong className="block text-sm font-black text-slate-800 mb-1">Preflight Intent Recovery</strong>
+                <span className="text-sm text-slate-600 font-medium leading-relaxed">If your mobile app crashes or your network drops immediately after signing the transaction in your wallet, your funds are not lost. The system actively scans the blockchain to recover your "abandoned" preflight intent and completes the vending in the background.</span>
               </li>
             </ul>
           </section>
@@ -174,17 +176,17 @@ export default function DocsPage() {
             <div className="space-y-3">
               <FAQItem q="Which countries do you support?" a="We support comprehensive utility payments (Electricity, Transfers, Cable TV, Education) in Nigeria, and Mobile Airtime/Data top-ups across 30+ international countries including Ghana, Kenya, South Africa, the US, and the UK." />
               <FAQItem q="What cryptocurrencies do you accept?" a="Currently, AbaPay supports major stablecoins designed for everyday commerce. We accept USD₮ (Tether), USDC, and cUSD natively." />
-              <FAQItem q="Which blockchain networks are supported?" a="AbaPay is currently live on the Celo Network, chosen for its blazing-fast transaction speeds, sub-cent gas fees, and mobile-first architecture." />
-              <FAQItem q="Do you charge hidden fees?" a="No. The live Crypto-to-Fiat exchange rate (e.g., NGN, GHS, KES) is openly displayed. Certain heavy-infrastructure utilities (like Bank Transfers or Electricity) carry a small flat processing fee, which is explicitly shown in your total before you pay. Airtime and Data are completely free of platform fees." />
+              <FAQItem q="Which blockchain networks are supported?" a="AbaPay is a multi-chain protocol! We are natively live on the Base Network (for deep Coinbase smart wallet integration) and the Celo Network (chosen for its blazing-fast speeds and mobile-first architecture)." />
+              <FAQItem q="Do you charge hidden fees?" a="No. The live Crypto-to-Fiat exchange rate is openly displayed. Certain heavy-infrastructure utilities (like Bank Transfers or Electricity) carry a small flat processing fee, which is explicitly shown in your total before you pay. Airtime and Data are completely free of platform fees." />
               <FAQItem q="How long does a transaction take?" a="Because we build on high-speed EVM networks, the blockchain portion confirms in roughly 3 to 5 seconds. The utility delivery typically arrives immediately after block confirmation." />
-              <FAQItem q="What happens if I pay, but my electricity token isn't generated?" a="Utility networks occasionally lag. If this happens, your dashboard will display a 'Transaction Processing' badge. Our backend Requery API will continuously ping the utility provider until they generate your token." />
+              <FAQItem q="What happens if I pay, but my electricity token isn't generated?" a="Utility networks occasionally lag. If this happens, your dashboard will display a 'Transaction Processing' badge. Our backend Webhook will continuously ping the utility provider until they generate your token, and will text/email you the result." />
               <FAQItem q="Who controls the funds?" a="You do. AbaPay is a non-custodial gateway. We do not have access to your private keys, and we cannot move your funds without you explicitly signing a transaction in your wallet." />
             </div>
           </section>
 
         </div>
 
-        {/* ⚡ FOOTER WITH NATIVE SVG TWITTER ICON ⚡ */}
+        {/* ⚡ FOOTER ⚡ */}
         <footer className="mt-12 w-full pt-8 pb-4 flex flex-col items-center gap-4">
 
           <div className="flex items-center gap-4 mb-2">
@@ -194,7 +196,6 @@ export default function DocsPage() {
               rel="noopener noreferrer" 
               className="w-12 h-12 rounded-full border-2 border-slate-200 bg-white flex items-center justify-center text-slate-500 hover:text-emerald-600 hover:border-emerald-200 hover:bg-emerald-50 transition-all shadow-sm group"
             >
-              {/* ⚡ Native SVG Twitter/X Replacement ⚡ */}
               <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="group-hover:scale-110 transition-transform">
                 <path d="M22 4s-.7 2.1-2 3.4c1.6 10-9.4 17.3-18 11.6 2.2.1 4.4-.6 6-2C3 15.5.5 9.6 3 5c2.2 2.6 5.6 4.1 9 4-.9-4.2 4-6.6 7-3.8 1.1 0 3-1.2 3-1.2z"></path>
               </svg>
@@ -211,7 +212,7 @@ export default function DocsPage() {
 
           <div className="flex items-center gap-2.5 bg-white px-4 py-1.5 rounded-full shadow-sm border border-slate-200">
              <ShieldCheck size={16} className="text-emerald-600" />
-             <span className="text-[11px] font-bold text-slate-500 uppercase tracking-widest">Secured by Celo Network</span>
+             <span className="text-[11px] font-bold text-slate-500 uppercase tracking-widest">Secured by Base & Celo Networks</span>
           </div>
           <p className="text-[9px] font-medium text-slate-400 uppercase tracking-[0.2em] mt-2">© 2026 MASONODE ORGANISATION</p>
         </footer>
