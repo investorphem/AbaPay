@@ -45,7 +45,8 @@ export default function PrivacyPolicy() {
 
             <h3 className="font-bold text-slate-800 mt-4 mb-2">A. On-Chain & Web3 Data</h3>
             <ul className="list-disc pl-5 space-y-2 mb-4">
-              <li><strong>Public Wallet Addresses:</strong> We collect your Celo/EVM public wallet address to facilitate stablecoin escrow and transaction tracking.</li>
+              {/* ⚡ MULTI-CHAIN UPDATE HERE ⚡ */}
+              <li><strong>Public Wallet Addresses:</strong> We collect your Base, Celo, or other EVM public wallet addresses to facilitate stablecoin escrow and transaction tracking.</li>
               <li><strong>Transaction Hashes:</strong> Public blockchain metadata confirming your payment.</li>
               <li><strong className="text-emerald-600">Strict Self-Custody Guarantee:</strong> AbaPay NEVER collects, stores, or requests access to your private keys, seed phrases, or wallet passwords.</li>
             </ul>
@@ -77,7 +78,8 @@ export default function PrivacyPolicy() {
             </p>
             <ul className="list-disc pl-5 space-y-2 mb-3">
               <li><strong>Utility Aggregators:</strong> We share necessary vending data with our API partners (e.g., VTpass Global) strictly for the purpose of executing your transaction across borders.</li>
-              <li><strong>Blockchain Networks:</strong> Your public wallet address and transaction amount are permanently broadcasted to the public, immutable Celo blockchain.</li>
+              {/* ⚡ MULTI-CHAIN UPDATE HERE ⚡ */}
+              <li><strong>Blockchain Networks:</strong> Your public wallet address and transaction amount are permanently broadcasted to the public, immutable Base or Celo blockchains.</li>
               <li><strong>Law Enforcement:</strong> If compelled by a valid subpoena or directive from relevant local or international law enforcement (e.g., EFCC, SEC, or FATF-aligned agencies), we may disclose metadata to prevent cross-border financial crimes.</li>
             </ul>
           </section>
@@ -117,7 +119,8 @@ export default function PrivacyPolicy() {
               If you have any questions, complaints, or require clarification regarding how MASONODE TECHNOLOGIES LIMITED handles your international data, please contact our support team and Data Protection Officer at:
             </p>
             <div className="mt-3 bg-slate-100 p-4 rounded-xl inline-block">
-              <p className="font-bold text-slate-800">Email: <a href="mailto:support@abapay.com" className="text-emerald-600 hover:underline">support@abapays.com</a></p>
+              {/* ⚡ EMAIL TYPO FIX HERE ⚡ */}
+              <p className="font-bold text-slate-800">Email: <a href="mailto:support@abapays.com" className="text-emerald-600 hover:underline">support@abapays.com</a></p>
             </div>
           </section>
 
