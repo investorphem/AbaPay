@@ -251,7 +251,8 @@ export async function POST(req: Request) {
             }).catch(()=>{});
         }
 
-        const points = Number((vendAmount / 1000).toFixed(2));
+                // ⚡ EXCLUDES FEE: vendAmount divided by the exact exchange rate used
+        const points = Number((vendAmount / baseRate).toFixed(2));
         if (points > 0 && wallet_address) {
             supabase.rpc('award_transaction_points', { target_wallet: wallet_address.toLowerCase(), points_to_add: points }).then(({ error }) => {
                 if (error) console.error("Points Error:", error.message);
