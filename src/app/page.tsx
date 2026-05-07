@@ -510,7 +510,7 @@ export default function Home() {
     setIsVerifying(false);
   };
 
-        const processBlockchainPayment = async () => {
+          const processBlockchainPayment = async () => {
     if (!address || !client) return setStatus("Connect Wallet First");
     if (parseFloat(cryptoToCharge) > parseFloat(walletBalance)) return setStatus(`Insufficient ${selectedToken.symbol} Balance.`);
 
@@ -527,16 +527,22 @@ export default function Home() {
       }
 
       const valueInWei = parseUnits(cryptoToCharge, selectedToken.decimals);
-      const tokenAddress = isMainnet ? selectedToken.mainnet : selectedToken.sepolia;
-      const publicClient = createPublicClient({ chain: activeChain, transport: http(undefined, { fetchOptions: { cache: 'no-store' } }), pollingInterval: 4000 });
+      
+      // Multi-chain token selector
+      let tokenAddress;
+      if (activeChain.id === base.id) tokenAddress = (selectedToken as any).baseMainnet || selectedToken.mainnet;
+      else if (activeChain.id === baseSepolia.id) tokenAddress = (selectedToken as any).baseSepolia || selectedToken.sepolia;
+      else if (activeChain.id === celo.id) tokenAddress = (selectedToken as any).celoMainnet || selectedToken.mainnet;
+      else tokenAddress = (selectedToken as any).celoSepolia || selectedToken.sepolia;
 
+      const publicClient = createPublicClient({ chain: activeChain, transport: http(undefined, { fetchOptions: { cache: 'no-store' } }), pollingInterval: 4000 });
       const txConfig: any = { account: address as `0x${string}` };
       if (environment === 'MINIPAY') txConfig.feeCurrency = GAS_CURRENCY as `0x${string}`; 
 
       setStatus("Verifying permissions...");
       const currentAllowance = await publicClient.readContract({ address: tokenAddress as `0x${string}`, abi: ERC20_ABI, functionName: 'allowance', args: [address, ABAPAY_CONTRACT], blockTag: 'latest' }) as bigint;
 
-                  // 2. Format VTPass Variables
+      // 2. Format VTPass Variables
       let vtpassServiceID = ""; let displayNetwork = ""; let finalVariationCode = 'none'; let payloadBillersCode = accountNumber; let uiCategory = "";
 
       if (isInternational) {
@@ -553,56 +559,42 @@ export default function Home() {
         else { vtpassServiceID = telecomProvider; displayNetwork = telecomProvider; }
       }
 
-      let txHashString = "";
-
-                  // 3. EXECUTE TRANSACTION (STANDARD WAGMI FOR ALL CHAINS)
       const currentBlockchainName = activeChain?.name?.toUpperCase() || "CELO";
 
       setStatus("Please approve the transaction in your wallet...");
 
-      // Handle standard ERC20 Approval if needed
+      // ERC20 Approval if needed
       if (currentAllowance < valueInWei) {
           setStatus("Awaiting token approval...");
-          const appHash = await client.writeContract({ 
-              address: tokenAddress as `0x${string}`, 
-              abi: ERC20_ABI, 
-              functionName: 'approve', 
-              args: [ABAPAY_CONTRACT, parseUnits("100000", selectedToken.decimals)], 
-              ...txConfig 
-          });
+          const appHash = await client.writeContract({ address: tokenAddress as `0x${string}`, abi: ERC20_ABI, functionName: 'approve', args: [ABAPAY_CONTRACT, parseUnits("100000", selectedToken.decimals)], ...txConfig });
           await publicClient.waitForTransactionReceipt({ hash: appHash, confirmations: 1 });
       }
 
-            // ... (Keep the ERC20 token approval block just above this) ...
-
-      setStatus("Please sign the final payment...");
       const realNonce = await publicClient.getTransactionCount({ address: address as `0x${string}`, blockTag: 'latest' });
 
-      // 3. EXECUTE & GET RAW HASH
-      const rawHash = await client.writeContract({ 
-          address: ABAPAY_CONTRACT, 
-          abi: ABAPAY_ABI, 
-          functionName: 'payBill', 
-          args: [tokenAddress, vtpassServiceID, payloadBillersCode, valueInWei], 
-          nonce: realNonce, 
-          ...txConfig 
-      });
-
-      // ⚡ FORCE LOWERCASE FOR PERFECT WEBHOOK MATCHING ⚡
-      txHashString = rawHash.toLowerCase(); 
-
+      // ⚡ 3. TRUE PRE-FLIGHT INTENT: Save to DB BEFORE the wallet opens! ⚡
+      const preflightHash = `preflight_${address}_${Date.now()}`;
+      
       const backendPayload = {
         serviceID: vtpassServiceID, serviceCategory: uiCategory, network: displayNetwork.toUpperCase(), billersCode: payloadBillersCode, amount: cryptoToCharge, 
-        nairaAmount: calculatedNairaAmount, token: selectedToken.symbol, txHash: txHashString, variation_code: finalVariationCode, 
-        phone: customerPhone || accountNumber, email: customerEmail, wallet_address: address, 
+        nairaAmount: calculatedNairaAmount, token: selectedToken.symbol, 
+        txHash: preflightHash, // Save with temporary hash first
+        variation_code: finalVariationCode, phone: customerPhone || accountNumber, email: customerEmail, wallet_address: address, 
         subscription_type: activeTab === "pay" && activeService.id === "CABLE" && ['dstv', 'gotv'].includes(cableProvider) ? cableSubscriptionType : undefined,
         meter_account_type: meterAccountType, operator_id: isInternational ? selectedIntlOperator?.operator_id : undefined, country_code: isInternational ? activeCountry.code : undefined, product_type_id: isInternational ? selectedIntlProduct?.product_type_id : undefined,
         blockchain: currentBlockchainName 
       };
 
-      // 4. INSTANT SAFETY NET (Save Intent BEFORE network confirmation)
       setStatus("Securing transaction intent...");
       await fetch('/api/pay', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ ...backendPayload, intent_only: true }) });
+
+      // 4. EXECUTE & GET RAW HASH (Wallet pops up here. If it crashes now, DB is saved!)
+      setStatus("Please sign the final payment...");
+      const rawHash = await client.writeContract({ address: ABAPAY_CONTRACT, abi: ABAPAY_ABI, functionName: 'payBill', args: [tokenAddress, vtpassServiceID, payloadBillersCode, valueInWei], nonce: realNonce, ...txConfig });
+      const txHashString = rawHash.toLowerCase(); 
+
+      // Update payload with real hash
+      backendPayload.txHash = txHashString;
 
       // 5. WAIT FOR BLOCKCHAIN
       setStatus("Confirming on blockchain... Please hold.");
@@ -610,8 +602,8 @@ export default function Home() {
 
       setStatus(`Payment Secured! Vending in progress...`);
 
-      // 6. INSTANT SYNCHRONOUS VENDING (Bypass WebSockets)
-      const res = await fetch('/api/pay', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ ...backendPayload, intent_only: false }) });
+      // 6. INSTANT SYNCHRONOUS VENDING (Pass preflight hash to rename it)
+      const res = await fetch('/api/pay', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ ...backendPayload, intent_only: false, preflight_hash: preflightHash }) });
       const finalStatus = await res.json();
 
       saveBeneficiary(accountNumber, customerName);
