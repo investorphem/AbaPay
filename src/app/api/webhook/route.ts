@@ -36,8 +36,7 @@ export async function POST(req: Request) {
     try {
         const rawBody = await req.text();
         const signature = req.headers.get('x-alchemy-signature');
-        
-        // ⚡ LOAD BOTH SECRETS (Base and Celo) ⚡
+
         const baseSecret = process.env.ALCHEMY_WEBHOOK_SECRET;
         const celoSecret = process.env.ALCHEMY_CELO_WEBHOOK_SECRET;
 
@@ -46,22 +45,18 @@ export async function POST(req: Request) {
         }
 
         let isValid = false;
-
-        // 1. Try checking against the Base Secret
         if (baseSecret) {
             const hmac = crypto.createHmac('sha256', baseSecret);
             const digest = hmac.update(rawBody).digest('hex');
             if (signature === digest) isValid = true;
         }
 
-        // 2. If it wasn't Base, try checking against the Celo Secret
         if (!isValid && celoSecret) {
             const hmacCelo = crypto.createHmac('sha256', celoSecret);
             const digestCelo = hmacCelo.update(rawBody).digest('hex');
             if (signature === digestCelo) isValid = true;
         }
 
-        // If neither key matched, reject the request
         if (!isValid) {
             return NextResponse.json({ error: "Invalid signature" }, { status: 401 });
         }
@@ -73,35 +68,55 @@ export async function POST(req: Request) {
 
         const txHash = activity.hash;
 
-                        // Handle Alchemy Test Ping
         if (txHash === "0xTestTransactionHash") {
             console.log("✅ Alchemy Test Successful for abapays.com");
             return NextResponse.json({ message: "Test Successful" });
         }
 
-        // ⚡ THE FIX: PUT THE WEBHOOK TO SLEEP FOR 15 SECONDS ⚡
-        // This guarantees the frontend has enough time to show the instant success screen!
+        // ⚡ 1. THE 15-SECOND SLEEP ⚡
+        // We wait to give the frontend time to process the transaction synchronously first.
         await new Promise(resolve => setTimeout(resolve, 15000));
 
-        // 3. THE RETRY LOOP (With Atomic Locking)
+        // ⚡ 2. THE RETRY LOOP & CRASH RESCUE MISSION ⚡
         let record = null;
         let retries = 5;
 
-        // 👇 Make sure the curly brace is right here!
+        // Extract the user's wallet address from Alchemy payload to find abandoned preflights
+        const fromAddress = activity.fromAddress || null;
+
         while (retries > 0) { 
-            const { data: exactMatch } = await supabaseAdmin
+            let { data: exactMatch } = await supabaseAdmin
                 .from('transactions')
                 .select('*')
                 .eq('tx_hash', txHash)
                 .single();
 
-            // ⚡ ATOMIC LOCK: Claim the transaction so no duplicate webhooks can touch it
+            // ⚡ RESCUE MISSION: If hash not found, search for an abandoned Pre-Flight intent!
+            if (!exactMatch && fromAddress) {
+                const { data: abandonedIntent } = await supabaseAdmin
+                    .from('transactions')
+                    .select('*')
+                    .eq('wallet_address', fromAddress)
+                    .eq('status', 'PENDING')
+                    .like('tx_hash', 'preflight_%')
+                    .order('created_at', { ascending: false })
+                    .limit(1)
+                    .single();
+
+                if (abandonedIntent) {
+                    // We found the crashed intent! Rename it to the real blockchain hash.
+                    await supabaseAdmin.from('transactions').update({ tx_hash: txHash }).eq('tx_hash', abandonedIntent.tx_hash);
+                    exactMatch = { ...abandonedIntent, tx_hash: txHash };
+                }
+            }
+
+            // ATOMIC LOCK
             if (exactMatch && exactMatch.status === 'PENDING') {
                 const { data: lockedRecord, error: lockError } = await supabaseAdmin
                     .from('transactions')
                     .update({ status: 'PROCESSING' })
                     .eq('tx_hash', txHash)
-                    .eq('status', 'PENDING') // Optimistic locking
+                    .eq('status', 'PENDING') 
                     .select()
                     .single();
 
@@ -127,7 +142,7 @@ export async function POST(req: Request) {
 
         console.log(`🚀 Triggering VTPass for: ${record.account_number} on ${record.blockchain}`);
 
-        // 4. CONSTRUCT VTPASS PAYLOAD
+        // 3. CONSTRUCT VTPASS PAYLOAD
         const isForeign = record.service_id === 'foreign-airtime';
         const appMode = process.env.NEXT_PUBLIC_APP_MODE || "sandbox";
         const baseUrl = appMode === "live" ? "https://vtpass.com/api" : "https://sandbox.vtpass.com/api";
@@ -171,7 +186,7 @@ export async function POST(req: Request) {
             }
         }
 
-        // 5. EXECUTE VENDING
+        // 4. EXECUTE VENDING
         let payRes, payData;
         try {
             payRes = await fetch(`${baseUrl}/pay`, { method: 'POST', headers: getHeaders(), body: JSON.stringify(vtpassPayload) });
@@ -182,7 +197,7 @@ export async function POST(req: Request) {
             return NextResponse.json({ status: "Vending Failed (Network)" }, { status: 200 }); 
         }
 
-        // 6. HANDLE SUCCESS / PENDING (000 or 099)
+        // 5. HANDLE SUCCESS / PENDING (000 or 099)
         if (payData.code === '000' || payData.code === '099') {
             const actualStatus = payData.content?.transactions?.status || 'pending';
 
