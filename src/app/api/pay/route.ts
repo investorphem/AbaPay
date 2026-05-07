@@ -111,7 +111,13 @@ export async function POST(req: Request) {
             return NextResponse.json({ success: false, status: 'FAILED_VENDING', message: "No contract data found." }, { status: 400 });
         }
 
-        const decoded = decodeFunctionData({ abi: ABAPAY_ABI, data: transaction.input });
+                const decoded = decodeFunctionData({ abi: ABAPAY_ABI, data: transaction.input });
+
+        // ⚡ TYPE SAFETY CHECK: Ensure args exist before reading them
+        if (!decoded.args || decoded.args.length < 4) {
+            return NextResponse.json({ success: false, status: 'FAILED_VENDING', message: "Invalid contract payload structure." }, { status: 400 });
+        }
+
         const chainServiceType = decoded.args[1] as string;
         const chainAccountNumber = decoded.args[2] as string;
         const chainAmountWei = decoded.args[3] as bigint;
