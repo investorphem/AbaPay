@@ -311,7 +311,15 @@ export default function Home() {
     if (isInternational) {
         if (!selectedIntlProduct || !selectedIntlOperator || accountNumber.length < 6) return false;
         if (!selectedIntlVariation) return false;
-        if (selectedIntlVariation.fixedPrice !== "Yes" && (!intlFlexibleAmount || parseFloat(intlFlexibleAmount) <= 0)) return false;
+                if (selectedIntlVariation.fixedPrice !== "Yes") {
+            const flexInput = parseFloat(intlFlexibleAmount || "0");
+            if (flexInput <= 0) return false;
+            
+            // ⚡ MINIMUM 1 USD (1 STABLECOIN) CHECK ⚡
+            const flexNairaEquivalent = flexInput * parseFloat(selectedIntlVariation.variation_rate || "1");
+            const flexCryptoEquivalent = flexNairaEquivalent / exchangeRate;
+            if (flexCryptoEquivalent < 1) return false;
+        }
         const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
         if (!emailRegex.test(customerEmail)) return false;
         return true;
