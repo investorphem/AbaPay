@@ -510,12 +510,15 @@ export default function Home() {
     setIsVerifying(false);
   };
 
-          const processBlockchainPayment = async () => {
+            const processBlockchainPayment = async () => {
     if (!address || !client) return setStatus("Connect Wallet First");
     if (parseFloat(cryptoToCharge) > parseFloat(walletBalance)) return setStatus(`Insufficient ${selectedToken.symbol} Balance.`);
 
     setIsProcessing(true); 
     setStatus("Initiating Blockchain Escrow...");
+
+    // ⚡ FIX: Declare the variable outside the try block so the catch block can see it!
+    let preflightHash = "";
 
     try {
       // 1. Network Sync
@@ -572,8 +575,8 @@ export default function Home() {
 
       const realNonce = await publicClient.getTransactionCount({ address: address as `0x${string}`, blockTag: 'latest' });
 
-      // ⚡ 3. TRUE PRE-FLIGHT INTENT: Save to DB BEFORE the wallet opens! ⚡
-      const preflightHash = `preflight_${address}_${Date.now()}`;
+            // ⚡ 3. TRUE PRE-FLIGHT INTENT: Save to DB BEFORE the wallet opens! ⚡
+      preflightHash = `preflight_${address}_${Date.now()}`;
       
       const backendPayload = {
         serviceID: vtpassServiceID, serviceCategory: uiCategory, network: displayNetwork.toUpperCase(), billersCode: payloadBillersCode, amount: cryptoToCharge, 
