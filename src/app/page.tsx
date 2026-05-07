@@ -592,10 +592,43 @@ export default function Home() {
       setStatus("Securing transaction intent...");
       await fetch('/api/pay', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ ...backendPayload, intent_only: true }) });
 
-      // 4. EXECUTE & GET RAW HASH (Wallet pops up here. If it crashes now, DB is saved!)
+            // 4. EXECUTE & GET RAW HASH (Wallet pops up here. If it crashes now, DB is saved!)
       setStatus("Please sign the final payment...");
-      const rawHash = await client.writeContract({ address: ABAPAY_CONTRACT, abi: ABAPAY_ABI, functionName: 'payBill', args: [tokenAddress, vtpassServiceID, payloadBillersCode, valueInWei], nonce: realNonce, ...txConfig });
-      const txHashString = rawHash.toLowerCase(); 
+
+      // ⚡ BASE BUILDER CODE ATTRIBUTION (Code: bc_jcuz1f23) ⚡
+      const builderCodeSuffix = "0x62635f6a63757a316632330b0080218021802180218021802180218021"; 
+      
+      let rawHash;
+      
+      if (activeChain.id === base.id || activeChain.id === baseSepolia.id) {
+          // If on Base, manually encode the data and append the Builder Code suffix so you get paid/rewarded!
+          const callData = encodeFunctionData({ 
+              abi: ABAPAY_ABI, 
+              functionName: 'payBill', 
+              args: [tokenAddress, vtpassServiceID, payloadBillersCode, valueInWei] 
+          });
+          const attributedData = `${callData}${builderCodeSuffix.replace('0x', '')}` as `0x${string}`;
+
+          rawHash = await client.sendTransaction({
+              to: ABAPAY_CONTRACT,
+              data: attributedData,
+              account: address as `0x${string}`,
+              nonce: realNonce,
+              ...txConfig
+          });
+      } else {
+          // If on Celo, do the standard writeContract
+          rawHash = await client.writeContract({ 
+              address: ABAPAY_CONTRACT, 
+              abi: ABAPAY_ABI, 
+              functionName: 'payBill', 
+              args: [tokenAddress, vtpassServiceID, payloadBillersCode, valueInWei], 
+              nonce: realNonce, 
+              ...txConfig 
+          });
+      }
+      
+      const txHashString = rawHash.toLowerCase();  
 
       // Update payload with real hash
       backendPayload.txHash = txHashString;
