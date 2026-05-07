@@ -2018,9 +2018,12 @@ export default function Home() {
                                   <button onClick={() => { setSelectedIntlVariation(null); setIntlFlexibleAmount(""); }} className="absolute -top-3 -right-3 bg-slate-200 text-slate-500 hover:text-slate-800 hover:bg-slate-300 rounded-full p-1 transition-all z-10 shadow-sm border border-white"><XCircle size={16}/></button>
                                   <div className="p-4 rounded-2xl border-2 border-emerald-500 bg-emerald-50 shadow-sm text-left">
                                      <p className="font-black text-slate-900 text-lg">{selectedIntlVariation.name}</p>
-                                     {selectedIntlVariation.fixedPrice !== "Yes" && (
+                                                                          {selectedIntlVariation.fixedPrice !== "Yes" && (
                                          <div className="mt-3 border-t border-emerald-200 pt-3">
-                                            <p className="text-[10px] font-bold text-slate-500 mb-1 uppercase tracking-widest">Enter Amount to Send</p>
+                                            <div className="flex justify-between items-center mb-1">
+                                                <p className="text-[10px] font-bold text-slate-500 uppercase tracking-widest">Enter Amount to Send</p>
+                                                <p className="text-[9px] font-black text-emerald-500">MIN 1.00 {selectedToken.symbol}</p>
+                                            </div>
                                             <input 
                                                 type="number" 
                                                 placeholder="Amount" 
@@ -2028,6 +2031,15 @@ export default function Home() {
                                                 value={intlFlexibleAmount}
                                                 onChange={(e) => setIntlFlexibleAmount(e.target.value)}
                                             />
+                                            {/* ⚡ 1 USD MINIMUM WARNING ⚡ */}
+                                            {intlFlexibleAmount && (parseFloat(intlFlexibleAmount) * parseFloat(selectedIntlVariation.variation_rate || "1") / exchangeRate) < 1 && (
+                                                <div className="bg-red-50 p-2 rounded-lg mt-2 flex items-center gap-1.5 border border-red-100 animate-in fade-in">
+                                                    <AlertTriangle size={12} className="text-red-500 shrink-0" />
+                                                    <p className="text-[9px] font-black text-red-600 uppercase tracking-wide">
+                                                        Amount must be at least 1.00 {selectedToken.symbol}
+                                                    </p>
+                                                </div>
+                                            )}
                                          </div>
                                      )}
                                      <div className="pt-3 mt-2 border-t border-emerald-200/50 flex justify-between items-end">
