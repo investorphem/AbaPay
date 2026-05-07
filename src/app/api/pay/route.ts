@@ -145,7 +145,11 @@ export async function POST(req: Request) {
         }
 
         const points = Number((vendAmount / 1000).toFixed(2));
-        if (points > 0 && wallet_address) supabase.rpc('award_transaction_points', { target_wallet: wallet_address.toLowerCase(), points_to_add: points }).catch(()=>{});
+        if (points > 0 && wallet_address) {
+    supabase.rpc('award_transaction_points', { target_wallet: wallet_address.toLowerCase(), points_to_add: points }).then(({ error }) => {
+        if (error) console.error("Points Error:", error.message);
+    });
+}
 
         // ⚡ INSTANT SUCCESS TO FRONTEND ⚡
         return NextResponse.json({ success: true, status: 'SUCCESS', purchased_code: dbPurchasedCode, units: vendedUnits, request_id: vtRequestId });
