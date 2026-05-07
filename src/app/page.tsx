@@ -616,7 +616,8 @@ export default function Home() {
       // 7. INSTANT UI FEEDBACK
       if (finalStatus.status === 'SUCCESS') {
           setStatus("Success! Token/Ref Dispatched."); 
-          const earnedPoints = Number((parseFloat(calculatedNairaAmount) / 1000).toFixed(2));
+                    // ⚡ EXCLUDES FEE: Only rewards points for the base product value
+          const earnedPoints = Number((parseFloat(calculatedNairaAmount) / exchangeRate).toFixed(2));
           if (earnedPoints > 0) {
               window.dispatchEvent(new CustomEvent('abapoints-awarded', { detail: earnedPoints }));
               showToast("Transaction Successful", `Payment confirmed! You earned +${earnedPoints.toFixed(2).replace(/\.00$/, '')} AbaPoints ✨`, "success");
