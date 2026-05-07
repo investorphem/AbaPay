@@ -40,7 +40,7 @@ export async function POST(req: Request) {
       nairaAmount, wallet_address, subscription_type,
       operator_id, country_code, product_type_id, email,
       meter_account_type, blockchain,
-      intent_only, preflight_hash, cancel_intent // ⚡ ADDED CANCEL INTENT
+      intent_only, preflight_hash, cancel_intent // ⚡ INCLUDES CANCEL INTENT
     } = body;
 
     const requestedNaira = parseFloat(nairaAmount);
@@ -85,7 +85,7 @@ export async function POST(req: Request) {
         await supabase.from('transactions').update({ tx_hash: txHash }).eq('tx_hash', preflight_hash);
     }
 
-    // ⚡ 3. ON-CHAIN VERIFICATION (Prevent Payload Tampering & Fake Hashes) ⚡
+    // ⚡ 3. ON-CHAIN VERIFICATION (Smart Wallet & Payload Tamper Check) ⚡
     try {
         const isMainnet = process.env.NEXT_PUBLIC_NETWORK === "mainnet" || process.env.NEXT_PUBLIC_NETWORK === "celo" || process.env.NEXT_PUBLIC_NETWORK === "base";
         const activeChain = blockchain === 'BASE' ? (isMainnet ? base : baseSepolia) : (isMainnet ? celo : celoSepolia);
@@ -106,42 +106,73 @@ export async function POST(req: Request) {
             ? (process.env.NEXT_PUBLIC_ABAPAY_BASE_ADDRESS || process.env.NEXT_PUBLIC_ABAPAY_ADDRESS)
             : (process.env.NEXT_PUBLIC_ABAPAY_CELO_ADDRESS || process.env.NEXT_PUBLIC_ABAPAY_ADDRESS);
 
-        if (receipt.to?.toLowerCase() !== expectedContract?.toLowerCase()) {
-             await sendTelegramAlert(`🚨 *FRAUD ATTEMPT DETECTED*\nUser ${wallet_address} submitted a txHash sent to the wrong contract.\nHash: \`${txHash}\``);
-             return NextResponse.json({ success: false, status: 'FAILED_VENDING', message: "Invalid contract destination." }, { status: 400 });
+        const txTo = receipt.to?.toLowerCase() || "";
+        const expectedLower = expectedContract?.toLowerCase() || "";
+        let isSmartWallet = false;
+
+        // Check if the destination is AbaPay OR a Smart Wallet EntryPoint
+        if (txTo !== expectedLower) {
+            const entryPoints = [
+                "0x5ff137d4b0fdcd49dca30c7cf57e578a026d2789", // EntryPoint v0.6
+                "0x0000000071727de22e5e9d8baf0edac6f37da032"  // EntryPoint v0.7
+            ];
+            
+            if (entryPoints.includes(txTo)) {
+                isSmartWallet = true;
+            } else {
+                 await sendTelegramAlert(`🚨 *FRAUD ATTEMPT DETECTED*\nUser ${wallet_address} submitted a txHash sent to the wrong contract.\nHash: \`${txHash}\``);
+                 return NextResponse.json({ success: false, status: 'FAILED_VENDING', message: "Invalid contract destination." }, { status: 400 });
+            }
         }
 
-        const transaction = await publicClient.getTransaction({ hash: txHash as `0x${string}` });
+        if (!isSmartWallet) {
+            // EOA Strict Payload Verification (For Celo/Standard Wallets)
+            const transaction = await publicClient.getTransaction({ hash: txHash as `0x${string}` });
 
-        if (!transaction.input) {
-            return NextResponse.json({ success: false, status: 'FAILED_VENDING', message: "No contract data found." }, { status: 400 });
-        }
+            if (!transaction.input) {
+                return NextResponse.json({ success: false, status: 'FAILED_VENDING', message: "No contract data found." }, { status: 400 });
+            }
 
-        const decoded = decodeFunctionData({ abi: ABAPAY_ABI, data: transaction.input });
+            const decoded = decodeFunctionData({ abi: ABAPAY_ABI, data: transaction.input });
 
-        // TYPE SAFETY CHECK: Ensure args exist before reading them
-        if (!decoded.args || decoded.args.length < 4) {
-            return NextResponse.json({ success: false, status: 'FAILED_VENDING', message: "Invalid contract payload structure." }, { status: 400 });
-        }
+            // TYPE SAFETY CHECK: Ensure args exist before reading them
+            if (!decoded.args || decoded.args.length < 4) {
+                return NextResponse.json({ success: false, status: 'FAILED_VENDING', message: "Invalid contract payload structure." }, { status: 400 });
+            }
 
-        const chainServiceType = decoded.args[1] as string;
-        const chainAccountNumber = decoded.args[2] as string;
-        const chainAmountWei = decoded.args[3] as bigint;
-        const expectedAccount = billersCode || phone;
+            const chainServiceType = decoded.args[1] as string;
+            const chainAccountNumber = decoded.args[2] as string;
+            const chainAmountWei = decoded.args[3] as bigint;
+            const expectedAccount = billersCode || phone;
 
-        if (chainServiceType !== serviceID || chainAccountNumber !== expectedAccount) {
-            await sendTelegramAlert(`🚨 *TAMPERING BLOCKED*\nUser ${wallet_address} altered the payload!\nChain Service: ${chainServiceType} | Requested: ${serviceID}\nChain Account: ${chainAccountNumber} | Requested: ${expectedAccount}\nHash: \`${txHash}\``);
-            return NextResponse.json({ success: false, status: 'FAILED_VENDING', message: "Payload mismatch detected." }, { status: 400 });
-        }
+            if (chainServiceType !== serviceID || chainAccountNumber !== expectedAccount) {
+                await sendTelegramAlert(`🚨 *TAMPERING BLOCKED*\nUser ${wallet_address} altered the payload!\nChain Service: ${chainServiceType} | Requested: ${serviceID}\nChain Account: ${chainAccountNumber} | Requested: ${expectedAccount}\nHash: \`${txHash}\``);
+                return NextResponse.json({ success: false, status: 'FAILED_VENDING', message: "Payload mismatch detected." }, { status: 400 });
+            }
 
-        const tokenDecimals = (tokenSymbol === 'cUSD' || tokenSymbol === 'USDm') ? 18 : 6;
-        const expectedWei = parseUnits(amount.toString(), tokenDecimals);
-        const diff = chainAmountWei > expectedWei ? chainAmountWei - expectedWei : expectedWei - chainAmountWei;
+            const tokenDecimals = (tokenSymbol === 'cUSD' || tokenSymbol === 'USDm') ? 18 : 6;
+            const expectedWei = parseUnits(amount.toString(), tokenDecimals);
+            const diff = chainAmountWei > expectedWei ? chainAmountWei - expectedWei : expectedWei - chainAmountWei;
 
-        // ⚡ VERCEL BUILD FIX: BigInt(10) instead of 10n
-        if (diff > BigInt(10)) {
-             await sendTelegramAlert(`🚨 *AMOUNT TAMPERING BLOCKED*\nUser ${wallet_address} altered the price payload.\nHash: \`${txHash}\``);
-             return NextResponse.json({ success: false, status: 'FAILED_VENDING', message: "Amount mismatch detected." }, { status: 400 });
+            // ⚡ VERCEL BUILD FIX: BigInt(10) instead of 10n
+            if (diff > BigInt(10)) {
+                 await sendTelegramAlert(`🚨 *AMOUNT TAMPERING BLOCKED*\nUser ${wallet_address} altered the price payload.\nHash: \`${txHash}\``);
+                 return NextResponse.json({ success: false, status: 'FAILED_VENDING', message: "Amount mismatch detected." }, { status: 400 });
+            }
+        } else {
+            // Smart Wallet Verification (For Base/Coinbase Wallets)
+            // We search the transaction logs to guarantee the crypto arrived at AbaPay
+            const paddedExpectedContract = "0x000000000000000000000000" + expectedLower.substring(2);
+            
+            const foundTransfer = receipt.logs.some((log: any) => 
+                log.topics && log.topics.length >= 3 && 
+                log.topics[2]?.toLowerCase() === paddedExpectedContract
+            );
+
+            if (!foundTransfer) {
+                 await sendTelegramAlert(`🚨 *SMART WALLET FRAUD DETECTED*\nFunds did not reach AbaPay contract.\nHash: \`${txHash}\``);
+                 return NextResponse.json({ success: false, status: 'FAILED_VENDING', message: "Funds not received." }, { status: 400 });
+            }
         }
     } catch (error) {
         // If viem throws, the hash isn't indexed by the RPC yet. Fall back to the background webhook.
