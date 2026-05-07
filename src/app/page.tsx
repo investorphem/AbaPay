@@ -128,7 +128,7 @@ export default function Home() {
     }
     return (process.env.NEXT_PUBLIC_ABAPAY_CELO_ADDRESS || process.env.NEXT_PUBLIC_ABAPAY_ADDRESS) as `0x${string}`;
   }, [activeChain]);
-  
+
   const GAS_CURRENCY = isMainnet ? "0x765DE816845861e75A25fCA122bb6898B8B1282a" : "0xdE9e4C3ce781b4bA68120d6261cbad65ce0aB00b";
 
   const indexOfLastItem = currentPage * ITEMS_PER_PAGE;
@@ -271,10 +271,11 @@ export default function Home() {
     }
     return { title, recipient, recipientLabel };
   }, [isInternational, activeCountry, selectedIntlProduct, activeTab, activeService, selectedBank, educationProvider, telecomProvider, currentInternet, internetProvider, currentDisco, meterType, currentCable, accountNumber, customerPhone]);
+
   // ⚡ THE PENDING DUPLICATE DETECTOR ⚡
   const hasPendingDuplicate = useMemo(() => {
     if (!checkoutDetails.recipient) return false;
-    
+
     return transactions.some(tx => 
         tx.status === 'PENDING' &&
         tx.account === checkoutDetails.recipient &&
@@ -432,7 +433,7 @@ export default function Home() {
     });
   };
 
-    const handleShareReceipt = async () => {
+  const handleShareReceipt = async () => {
     const receiptText = `🧾 AbaPay Receipt\n\nDate: ${selectedReceipt?.date}\nStatus: ${selectedReceipt?.status}\nProduct: ${selectedReceipt?.network} ${selectedReceipt?.service}\nRecipient: ${selectedReceipt?.account}\nAmount Paid: ${selectedReceipt?.amountNaira}\nCrypto Used: ${selectedReceipt?.amountCrypto} ${selectedReceipt?.tokenUsed}\nTx Hash: ${selectedReceipt?.txHash}\n\nSecured by ${selectedReceipt?.blockchain || activeChain.name} Network`;
     if (navigator.share) { try { await navigator.share({ title: 'Receipt', text: receiptText }); } catch (err) {} } 
     else { try { await navigator.clipboard.writeText(receiptText); showToast("Copied!", "Receipt details copied to clipboard.", "success"); } catch (err) {} }
@@ -510,7 +511,7 @@ export default function Home() {
     setIsVerifying(false);
   };
 
-            const processBlockchainPayment = async () => {
+  const processBlockchainPayment = async () => {
     if (!address || !client) return setStatus("Connect Wallet First");
     if (parseFloat(cryptoToCharge) > parseFloat(walletBalance)) return setStatus(`Insufficient ${selectedToken.symbol} Balance.`);
 
@@ -530,7 +531,7 @@ export default function Home() {
       }
 
       const valueInWei = parseUnits(cryptoToCharge, selectedToken.decimals);
-      
+
       // Multi-chain token selector
       let tokenAddress;
       if (activeChain.id === base.id) tokenAddress = (selectedToken as any).baseMainnet || selectedToken.mainnet;
@@ -575,9 +576,9 @@ export default function Home() {
 
       const realNonce = await publicClient.getTransactionCount({ address: address as `0x${string}`, blockTag: 'latest' });
 
-            // ⚡ 3. TRUE PRE-FLIGHT INTENT: Save to DB BEFORE the wallet opens! ⚡
+      // ⚡ 3. TRUE PRE-FLIGHT INTENT: Save to DB BEFORE the wallet opens! ⚡
       preflightHash = `preflight_${address}_${Date.now()}`;
-      
+
       const backendPayload = {
         serviceID: vtpassServiceID, serviceCategory: uiCategory, network: displayNetwork.toUpperCase(), billersCode: payloadBillersCode, amount: cryptoToCharge, 
         nairaAmount: calculatedNairaAmount, token: selectedToken.symbol, 
@@ -644,9 +645,9 @@ export default function Home() {
       const balanceWei = await publicClient.readContract({ address: tokenAddress as `0x${string}`, abi: ERC20_ABI, functionName: 'balanceOf', args: [address] });
       setWalletBalance(parseFloat(formatUnits(balanceWei as bigint, selectedToken.decimals)).toFixed(4));
 
-        } catch (e: any) { 
+    } catch (e: any) { 
         setStatus(`Error: ${e.shortMessage?.slice(0, 40) || "Transaction Cancelled"}`); 
-        
+
         // ⚡ NEW: Silently tell the database to delete the abandoned preflight
         if (preflightHash) {
              fetch('/api/pay', { 
@@ -691,7 +692,7 @@ export default function Home() {
     notifyFarcaster();
   }, []);
 
-      // ⚡ WAGMI TO ABAPAY BRIDGE ⚡
+  // ⚡ WAGMI TO ABAPAY BRIDGE ⚡
   useEffect(() => {
     if (environment === 'WEB' && isWagmiConnected && wagmiAddress) {
       setAddress(wagmiAddress);
@@ -705,36 +706,35 @@ export default function Home() {
               chain: targetChain as any, 
               transport: custom((window as any).ethereum) 
           }).extend(eip5792Actions()); 
-          
+
           setClient(webClient);
       }
     }
   }, [environment, isWagmiConnected, wagmiAddress, wagmiChain, isMainnet, client]);
 
-    // ⚡ 2. THE CHAMELEON ENVIRONMENT DETECTOR ⚡
+  // ⚡ 2. THE CHAMELEON ENVIRONMENT DETECTOR ⚡
   useEffect(() => {
     let timeoutId: NodeJS.Timeout;
 
-    // ⚡ Notice the 'async' word right here! That's what Vercel was crying about.
     const detectAndConnect = async () => {
       try {
-                // Option 1: Farcaster SDK
+        // Option 1: Farcaster SDK
         const context = await sdk.context;
         if (context && context.client) {
           setEnvironment('FARCASTER');
           const targetChain = isMainnet ? base : baseSepolia;
           setActiveChain(targetChain);
-          
+
           const farcasterClient = createWalletClient({ 
               chain: targetChain, 
               transport: custom(sdk.wallet.ethProvider) 
           }).extend(eip5792Actions());
-          
+
           try {
              // ⚡ THE FIX: We use getAddresses() for a SILENT check. 
              // This absolutely prevents the automatic popup on load!
              const addresses = await farcasterClient.getAddresses();
-             
+
              if (addresses && addresses.length > 0) {
                  const currentChainId = await farcasterClient.getChainId();
                  if (currentChainId !== targetChain.id) {
@@ -755,7 +755,7 @@ export default function Home() {
           const targetChain = isMainnet ? celo : celoSepolia;
           setActiveChain(targetChain);
           const miniPayClient = createWalletClient({ chain: targetChain, transport: custom((window as any).ethereum) });
-          
+
           const [acc] = await miniPayClient.requestAddresses();
           const currentChainId = await miniPayClient.getChainId();
           if (currentChainId !== targetChain.id) await miniPayClient.switchChain({ id: targetChain.id }).catch(()=>{});
@@ -825,13 +825,11 @@ export default function Home() {
       try {
         const sixMonthsAgo = new Date(); sixMonthsAgo.setMonth(sixMonthsAgo.getMonth() - 6);
         const { data } = await supabase.from('transactions').select('*').eq('wallet_address', address).gte('created_at', sixMonthsAgo.toISOString()).order('created_at', { ascending: false });
-        // Find this block inside fetchCloudHistory:
-                if (data && data.length > 0) {
+        if (data && data.length > 0) {
           const cloudHistory = data.map((tx: any) => ({ 
              id: tx.tx_hash.slice(0, 8), date: new Date(tx.created_at).toLocaleString(), status: tx.status, 
              amountNaira: tx.amount_naira.toString(), amountCrypto: tx.amount_usdt.toString(), 
              tokenUsed: tx.token_used || "USD₮", service: tx.service_category, network: tx.network, 
-             // ⚡ FETCHING THE BLOCKCHAIN FROM DB ⚡
              blockchain: tx.blockchain || 'CELO',
              txHash: tx.tx_hash, account: tx.account_number, refund_hash: tx.refund_hash, 
              purchased_code: tx.purchased_code, request_id: tx.request_id, units: tx.units 
@@ -848,11 +846,11 @@ export default function Home() {
     try { const saved = localStorage.getItem(`abapay_beneficiaries_${address}`); if (saved) setBeneficiaries(JSON.parse(saved)); else setBeneficiaries({}); } catch (e) {}
   }, [address]);
 
-        useEffect(() => {
+  useEffect(() => {
     async function fetchBalance() {
       if (!address || !activeChain) return;
       setIsFetchingBalance(true);
-      
+
       try {
         // ⚡ THE MINIPAY FIX: Force Wagmi to use rock-solid public RPCs for reading balances!
         let rpcUrl = activeChain.rpcUrls.default.http[0];
@@ -1060,8 +1058,13 @@ export default function Home() {
   };
 
   return (
-    <main className="min-h-screen bg-slate-50 text-slate-900 font-sans p-4 flex flex-col items-center pb-20 relative">
+    // ⚡ 1. UPDATED MAIN TAG: Centers vertically on PC and adds padding
+    <main className="min-h-screen bg-slate-50 text-slate-900 font-sans p-4 md:p-8 lg:p-12 flex flex-col items-center justify-start md:justify-center pb-20 md:pb-12 relative overflow-hidden">
       <style>{`@keyframes logoScale { 0%, 100% { transform: scale(1); opacity: 0.9; } 50% { transform: scale(1.1); opacity: 1; } } .animate-logo-scale { animation: logoScale 1.5s ease-in-out infinite; } .no-scrollbar::-webkit-scrollbar { display: none; } .no-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }`}</style>
+
+      {/* ⚡ 2. NEW: Premium Ambient Web3 Glows (Only visible on PC) ⚡ */}
+      <div className="hidden md:block absolute top-[-10%] left-[-5%] w-[40%] h-[40%] rounded-full bg-emerald-500/10 blur-[120px] pointer-events-none"></div>
+      <div className="hidden md:block absolute bottom-[-10%] right-[-5%] w-[40%] h-[40%] rounded-full bg-blue-500/10 blur-[120px] pointer-events-none"></div>
 
       {environment === 'LOADING' && (
         <div className="fixed inset-0 z-[100] bg-white flex flex-col items-center justify-center animate-in fade-out duration-500 fill-mode-forwards" style={{ animationDelay: '1.5s' }}>
@@ -1078,12 +1081,11 @@ export default function Home() {
            <div className="bg-white w-full max-w-md rounded-t-[2.5rem] sm:rounded-[2.5rem] p-6 pb-10 sm:pb-6 shadow-2xl relative animate-in slide-in-from-bottom-10 sm:zoom-in-95 duration-300">
               <div className="w-12 h-1.5 bg-slate-200 rounded-full mx-auto mb-6 sm:hidden"></div>
 
-                            <div className="flex justify-between items-center mb-6">
+              <div className="flex justify-between items-center mb-6">
                  <h3 className="text-xl font-black text-slate-900 tracking-tight">Confirm Payment</h3>
                  <button onClick={() => setIsConfirmModalOpen(false)} className="bg-slate-100 p-2 rounded-full text-slate-500 hover:bg-slate-200 transition-colors"><XCircle size={20}/></button>
               </div>
 
-              {/* ⚡ NEW: PENDING DUPLICATE WARNING ⚡ */}
               {hasPendingDuplicate && (
                  <div className="bg-orange-50 border border-orange-200 p-4 rounded-2xl mb-6 flex items-start gap-3 animate-in slide-in-from-top-2">
                     <AlertTriangle className="text-orange-500 shrink-0 mt-0.5" size={20} />
@@ -1132,7 +1134,7 @@ export default function Home() {
                  </div>
               </div>
 
-                            <button 
+              <button 
                   onClick={() => { setIsConfirmModalOpen(false); processBlockchainPayment(); }}
                   className={`w-full text-white font-black py-5 rounded-2xl flex items-center justify-center gap-2.5 transition-all active:scale-95 shadow-xl text-lg tracking-tight ${hasPendingDuplicate ? 'bg-orange-500 hover:bg-orange-600 shadow-orange-500/20' : 'bg-slate-900 hover:bg-black shadow-slate-900/20'}`}
               >
@@ -1206,20 +1208,20 @@ export default function Home() {
         </div>
       )}
 
-      <div className="w-full max-w-md">
+      {/* ⚡ 3. UPDATED WRAPPER: Intelligently expands to max-w-lg and max-w-xl on PC ⚡ */}
+      <div className="w-full max-w-md md:max-w-lg lg:max-w-xl transition-all duration-500 relative z-10">
 
-        {/* ⚡ HEADER ⚡ */}
-        <div className="flex justify-between items-center bg-white p-4 rounded-3xl shadow-sm border border-slate-100 mb-6">
+        {/* ⚡ HEADER: Increased padding and border radius on PC ⚡ */}
+        <div className="flex justify-between items-center bg-white p-4 md:p-5 rounded-3xl md:rounded-[2rem] shadow-sm border border-slate-100 mb-6 md:mb-8 transition-all">
           <div className="flex items-center gap-3">
-            <img src="/logo.png" alt="AbaPay" className="h-10 w-auto object-contain" />
+            <img src="/logo.png" alt="AbaPay" className="h-10 md:h-12 w-auto object-contain transition-all" />
             <div className="flex flex-col">
-              <span className="text-xl font-black text-slate-900 leading-none tracking-tight">AbaPay<span className="text-emerald-500">.</span></span>
-              <span className="text-[8px] font-black uppercase text-slate-400 tracking-widest mt-1">Seamless Payments.</span>
+              <span className="text-xl md:text-2xl font-black text-slate-900 leading-none tracking-tight transition-all">AbaPay<span className="text-emerald-500">.</span></span>
+              <span className="text-[8px] md:text-[9px] font-black uppercase text-slate-400 tracking-widest mt-1">Seamless Payments.</span>
             </div>
           </div>
           <div className="flex items-center gap-2">
-            
-            {/* ⚡ NEW: DYNAMIC NETWORK BADGE ⚡ */}
+
             {address && (
                 <div className={`hidden sm:flex px-2.5 py-1.5 rounded-xl border items-center gap-1.5 shadow-sm ${activeChain?.name?.toLowerCase().includes('base') ? 'bg-blue-50 border-blue-200 text-blue-700' : 'bg-emerald-50 border-emerald-200 text-emerald-700'}`}>
                     <div className={`w-1.5 h-1.5 rounded-full animate-pulse ${activeChain?.name?.toLowerCase().includes('base') ? 'bg-blue-500' : 'bg-emerald-500'}`}></div>
@@ -1244,9 +1246,8 @@ export default function Home() {
           </div>
         </div>
 
-        {/* ⚡ PREMIUM CONNECT WALLET BANNER ⚡ */}
         {!address && environment === 'WEB' && (
-          <div className="bg-slate-900 p-1 rounded-[1.25rem] mb-6 shadow-xl shadow-slate-900/10 animate-in fade-in slide-in-from-top-4">
+          <div className="bg-slate-900 p-1 rounded-[1.25rem] md:rounded-[1.5rem] mb-6 shadow-xl shadow-slate-900/10 animate-in fade-in slide-in-from-top-4 transition-all">
             <div className="bg-slate-800/50 backdrop-blur-md rounded-xl p-3.5 flex justify-between items-center border border-slate-700/50">
                <div className="flex items-center gap-3">
                   <div className="bg-emerald-500/10 p-2 rounded-full border border-emerald-500/20">
@@ -1257,8 +1258,6 @@ export default function Home() {
                      <p className="text-slate-400 text-[10px] font-bold mt-1 uppercase tracking-wider">Access AbaPay</p>
                   </div>
                </div>
-
-               {/* ⚡ NEW WAGMI BUTTON PASTED HERE ⚡ */}
                <button 
                   onClick={() => connect({ connector: connectors[0] })}
                   disabled={isProcessing}
@@ -1267,13 +1266,12 @@ export default function Home() {
                   {isProcessing ? <Loader2 size={14} className="animate-spin"/> : null}
                   {isProcessing ? "WAIT" : "CONNECT"}
                </button>
-
             </div>
           </div>
         )}
 
         {/* THE TABS */}
-        <div className="flex gap-2 bg-slate-200/50 p-1.5 rounded-2xl mb-6 shadow-inner overflow-x-auto no-scrollbar">
+        <div className="flex gap-2 bg-slate-200/50 p-1.5 rounded-2xl md:rounded-[1.25rem] mb-6 shadow-inner overflow-x-auto no-scrollbar transition-all">
             <button onClick={() => handleTabSwitch("pay")} className={`flex-1 min-w-[75px] py-3 rounded-xl text-[10px] sm:text-xs font-black transition-all ${activeTab === 'pay' ? 'bg-white text-emerald-600 shadow-xl' : 'text-slate-500 hover:text-slate-700'}`}>BILLS</button>
             <button onClick={() => handleTabSwitch("bank")} disabled={isInternational} className={`flex-1 min-w-[75px] py-3 rounded-xl text-[10px] sm:text-xs font-black transition-all ${isInternational ? 'opacity-30 cursor-not-allowed' : activeTab === 'bank' ? 'bg-white text-emerald-600 shadow-xl' : 'text-slate-500 hover:text-slate-700'}`}>TRANSFER</button>
             <button onClick={() => handleTabSwitch("education")} disabled={isInternational} className={`flex-1 min-w-[75px] py-3 rounded-xl text-[10px] sm:text-xs font-black transition-all ${isInternational ? 'opacity-30 cursor-not-allowed' : activeTab === 'education' ? 'bg-white text-emerald-600 shadow-xl' : 'text-slate-500 hover:text-slate-700'}`}>EDUCATION</button>
@@ -1284,7 +1282,8 @@ export default function Home() {
         {/* BANK BLOCK */}
         {/* ======================================= */}
         {activeTab === 'bank' && (
-          <div className="bg-white border border-slate-100 rounded-[2.5rem] p-8 shadow-2xl shadow-emerald-900/10 animate-in fade-in zoom-in-95">
+          {/* ⚡ 4. UPDATED CARD: Increased padding (md:p-10) and rounded corners (md:rounded-[3rem]) on PC ⚡ */}
+          <div className="bg-white border border-slate-100 rounded-[2.5rem] md:rounded-[3rem] p-8 md:p-10 shadow-2xl shadow-emerald-900/10 animate-in fade-in zoom-in-95 transition-all">
             <div className="space-y-5">
                 <div className="bg-slate-50 border border-slate-100 p-4 rounded-2xl flex justify-between items-center animate-in fade-in">
                   <div 
@@ -1440,7 +1439,7 @@ export default function Home() {
                         <div className="bg-red-50 border border-red-200 p-3 rounded-xl mt-2 flex items-center gap-2 animate-in fade-in">
                             <AlertTriangle size={16} className="text-red-500 shrink-0" />
                             <p className="text-xs font-black text-red-600">
-                                {parseFloat(nairaAmount) < dynamicMinAmount ? `Amount is below the minimum of ₦${dynamicMinAmount.toLocaleString()}` : `Amount exceeds the maximum of ₦${dynamicMaxAmount.toLocaleString()}`}
+                                {parseFloat(nairaAmount) < dynamicMinAmount ? `Amount is below the minimum of ₦{dynamicMinAmount.toLocaleString()}` : `Amount exceeds the maximum of ₦${dynamicMaxAmount.toLocaleString()}`}
                             </p>
                         </div>
                     )}
@@ -1488,7 +1487,8 @@ export default function Home() {
         {/* EDUCATION BLOCK */}
         {/* ======================================= */}
         {activeTab === 'education' && (
-          <div className="bg-white border border-slate-100 rounded-[2.5rem] p-8 shadow-2xl shadow-emerald-900/10 animate-in fade-in zoom-in-95">
+          {/* ⚡ 4. UPDATED CARD: Increased padding (md:p-10) and rounded corners (md:rounded-[3rem]) on PC ⚡ */}
+          <div className="bg-white border border-slate-100 rounded-[2.5rem] md:rounded-[3rem] p-8 md:p-10 shadow-2xl shadow-emerald-900/10 animate-in fade-in zoom-in-95 transition-all">
             <div className="space-y-5">
                 <div className="bg-slate-50 border border-slate-100 p-4 rounded-2xl flex justify-between items-center animate-in fade-in">
                   <div 
@@ -1681,7 +1681,8 @@ export default function Home() {
         {/* PAY BLOCK */}
         {/* ======================================= */}
         {activeTab === 'pay' && (
-          <div className="bg-white border border-slate-100 rounded-[2.5rem] p-8 shadow-2xl shadow-emerald-900/10 animate-in fade-in zoom-in-95">
+          {/* ⚡ 4. UPDATED CARD: Increased padding (md:p-10) and rounded corners (md:rounded-[3rem]) on PC ⚡ */}
+          <div className="bg-white border border-slate-100 rounded-[2.5rem] md:rounded-[3rem] p-8 md:p-10 shadow-2xl shadow-emerald-900/10 animate-in fade-in zoom-in-95 transition-all">
 
             {!isInternational && (
                 <div className="grid grid-cols-4 gap-2 pb-2 mb-4">
