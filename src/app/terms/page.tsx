@@ -40,7 +40,9 @@ export default function TermsOfService() {
           <section>
             <h2 className="text-lg font-black text-slate-900 mb-3">2. Nature of Services</h2>
             <p className="mb-3">
-              AbaPay operates strictly as a <strong>Technology Interface and Borderless Digital Intermediary</strong>. We provide a non-custodial software protocol that allows users to interact with smart contracts on the Celo Blockchain to exchange digital assets (such as cUSD or USDT) for fiat-denominated utility services (Airtime, Data, Electricity, and Bank Transfers) across Nigeria and supported international countries.
+              AbaPay operates strictly as a <strong>Technology Interface and Borderless Digital Intermediary</strong>. We provide a non-custodial software protocol that allows users to interact with smart contracts on 
+              {/* ⚡ MULTI-CHAIN UPDATE HERE ⚡ */}
+              <strong> Base, Celo, and other supported EVM Blockchains</strong> to exchange digital assets (such as cUSD, USDC, or USDT) for fiat-denominated utility services (Airtime, Data, Electricity, and Bank Transfers) across Nigeria and supported international countries.
             </p>
             <p>
               <strong>We are not a bank.</strong> We do not hold fiat currency deposits. All fiat utility vending is processed through licensed domestic and international Third-Party Aggregators (e.g., VTpass) and regulated Payment Solution Service Providers across our active geographic regions.
