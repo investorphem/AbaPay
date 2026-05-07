@@ -40,7 +40,7 @@ export async function POST(req: Request) {
       nairaAmount, wallet_address, subscription_type,
       operator_id, country_code, product_type_id, email,
       meter_account_type, blockchain,
-      intent_only, preflight_hash // ⚡ HANDLES INSTANT UI + CRASH RESCUE
+      intent_only, preflight_hash, cancel_intent // ⚡ ADDED CANCEL INTENT
     } = body;
 
     const requestedNaira = parseFloat(nairaAmount);
@@ -74,6 +74,12 @@ export async function POST(req: Request) {
         return NextResponse.json({ success: true, status: "PENDING" });
     }
 
+    // ⚡ SELF-CLEANING: If user cancels in their wallet, delete the abandoned intent
+    if (cancel_intent) {
+        await supabase.from('transactions').delete().eq('tx_hash', txHash);
+        return NextResponse.json({ success: true, status: "CANCELLED" });
+    }
+
     // If the frontend survived the wallet popup, link the temporary hash to the real blockchain hash
     if (preflight_hash) {
         await supabase.from('transactions').update({ tx_hash: txHash }).eq('tx_hash', preflight_hash);
@@ -83,7 +89,7 @@ export async function POST(req: Request) {
     try {
         const isMainnet = process.env.NEXT_PUBLIC_NETWORK === "mainnet" || process.env.NEXT_PUBLIC_NETWORK === "celo" || process.env.NEXT_PUBLIC_NETWORK === "base";
         const activeChain = blockchain === 'BASE' ? (isMainnet ? base : baseSepolia) : (isMainnet ? celo : celoSepolia);
-        
+
         let rpcUrl = activeChain.rpcUrls.default.http[0];
         if (activeChain.id === celo.id) rpcUrl = "https://forno.celo.org";
         if (activeChain.id === base.id) rpcUrl = "https://mainnet.base.org";
@@ -111,9 +117,9 @@ export async function POST(req: Request) {
             return NextResponse.json({ success: false, status: 'FAILED_VENDING', message: "No contract data found." }, { status: 400 });
         }
 
-                const decoded = decodeFunctionData({ abi: ABAPAY_ABI, data: transaction.input });
+        const decoded = decodeFunctionData({ abi: ABAPAY_ABI, data: transaction.input });
 
-        // ⚡ TYPE SAFETY CHECK: Ensure args exist before reading them
+        // TYPE SAFETY CHECK: Ensure args exist before reading them
         if (!decoded.args || decoded.args.length < 4) {
             return NextResponse.json({ success: false, status: 'FAILED_VENDING', message: "Invalid contract payload structure." }, { status: 400 });
         }
@@ -132,7 +138,8 @@ export async function POST(req: Request) {
         const expectedWei = parseUnits(amount.toString(), tokenDecimals);
         const diff = chainAmountWei > expectedWei ? chainAmountWei - expectedWei : expectedWei - chainAmountWei;
 
-        if (diff > 10n) {
+        // ⚡ VERCEL BUILD FIX: BigInt(10) instead of 10n
+        if (diff > BigInt(10)) {
              await sendTelegramAlert(`🚨 *AMOUNT TAMPERING BLOCKED*\nUser ${wallet_address} altered the price payload.\nHash: \`${txHash}\``);
              return NextResponse.json({ success: false, status: 'FAILED_VENDING', message: "Amount mismatch detected." }, { status: 400 });
         }
@@ -215,7 +222,6 @@ export async function POST(req: Request) {
 
         const points = Number((vendAmount / 1000).toFixed(2));
         if (points > 0 && wallet_address) {
-            // TypeScript fix implemented here
             supabase.rpc('award_transaction_points', { target_wallet: wallet_address.toLowerCase(), points_to_add: points }).then(({ error }) => {
                 if (error) console.error("Points Error:", error.message);
             });
