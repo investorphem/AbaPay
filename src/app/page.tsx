@@ -1278,12 +1278,11 @@ export default function Home() {
             <button onClick={() => handleTabSwitch("history")} className={`flex-1 min-w-[75px] py-3 rounded-xl text-[10px] sm:text-xs font-black transition-all ${activeTab === 'history' ? 'bg-white text-emerald-600 shadow-xl' : 'text-slate-500 hover:text-slate-700'}`}>HISTORY</button>
         </div>
 
-        {/* ======================================= */}
+                {/* ======================================= */}
         {/* BANK BLOCK */}
         {/* ======================================= */}
         {activeTab === 'bank' && (
-          {activeTab === 'bank' && (
-  <div className="bg-white border border-slate-100 rounded-[2.5rem] md:rounded-[3rem] p-8 md:p-10 shadow-2xl shadow-emerald-900/10 animate-in fade-in zoom-in-95 transition-all">
+             <div className="bg-white border border-slate-100 rounded-[2.5rem] md:rounded-[3rem] p-8 md:p-10 shadow-2xl shadow-emerald-900/10 animate-in fade-in zoom-in-95 transition-all">
             <div className="space-y-5">
                 <div className="bg-slate-50 border border-slate-100 p-4 rounded-2xl flex justify-between items-center animate-in fade-in">
                   <div 
