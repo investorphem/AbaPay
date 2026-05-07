@@ -4,6 +4,8 @@ import { sendTelegramAlert } from '@/lib/telegram';
 import { sendAbaPaySms } from '@/lib/messaging';
 import { getHeaders } from '@/lib/vtpass'; 
 import { Resend } from 'resend';
+import { createPublicClient, http, decodeFunctionData, parseUnits } from 'viem';
+import { base, baseSepolia, celo, celoSepolia } from 'viem/chains';
 
 const resend = new Resend(process.env.RESEND_API_KEY || "re_dummy_key_for_build");
 
@@ -15,6 +17,8 @@ const error_messages: Record<string, string> = {
     "030": "Provider network is down.",
     "400": "Transaction failed due to a system error."
 };
+
+const ABAPAY_ABI = [{"inputs":[{"internalType":"address","name":"tokenAddress","type":"address"},{"internalType":"string","name":"serviceType","type":"string"},{"internalType":"string","name":"accountNumber","type":"string"},{"internalType":"uint256","name":"amount","type":"uint256"}],"name":"payBill","outputs":[],"stateMutability":"nonpayable","type":"function"}];
 
 function getStrictRequestId() {
   const date = new Date();
@@ -36,7 +40,7 @@ export async function POST(req: Request) {
       nairaAmount, wallet_address, subscription_type,
       operator_id, country_code, product_type_id, email,
       meter_account_type, blockchain,
-      intent_only // ⚡ THE CRITICAL FLAG FOR INSTANT UI + SAFETY NET ⚡
+      intent_only, preflight_hash // ⚡ HANDLES INSTANT UI + CRASH RESCUE
     } = body;
 
     const requestedNaira = parseFloat(nairaAmount);
@@ -64,27 +68,88 @@ export async function POST(req: Request) {
       operator_id: operator_id || null, country_code: country_code || null, product_type_id: product_type_id || null, subscription_type: subscription_type || null 
     };
 
-    // If the frontend is just saving the intent (before blockchain wait), save as PENDING and exit instantly
+    // Exit instantly if this is the frontend saving the intent before signing
     if (intent_only) {
         await supabase.from('transactions').upsert(dbPayload, { onConflict: 'tx_hash' });
         return NextResponse.json({ success: true, status: "PENDING" });
     }
 
-    // If it's the real vend execution, securely lock the row to PROCESSING
+    // If the frontend survived the wallet popup, link the temporary hash to the real blockchain hash
+    if (preflight_hash) {
+        await supabase.from('transactions').update({ tx_hash: txHash }).eq('tx_hash', preflight_hash);
+    }
+
+    // ⚡ 3. ON-CHAIN VERIFICATION (Prevent Payload Tampering & Fake Hashes) ⚡
+    try {
+        const isMainnet = process.env.NEXT_PUBLIC_NETWORK === "mainnet" || process.env.NEXT_PUBLIC_NETWORK === "celo" || process.env.NEXT_PUBLIC_NETWORK === "base";
+        const activeChain = blockchain === 'BASE' ? (isMainnet ? base : baseSepolia) : (isMainnet ? celo : celoSepolia);
+        
+        let rpcUrl = activeChain.rpcUrls.default.http[0];
+        if (activeChain.id === celo.id) rpcUrl = "https://forno.celo.org";
+        if (activeChain.id === base.id) rpcUrl = "https://mainnet.base.org";
+
+        const publicClient = createPublicClient({ chain: activeChain, transport: http(rpcUrl) });
+
+        const receipt = await publicClient.getTransactionReceipt({ hash: txHash as `0x${string}` });
+
+        if (receipt.status !== 'success') {
+            return NextResponse.json({ success: false, status: 'FAILED_VENDING', message: "Blockchain transaction failed or reverted." }, { status: 400 });
+        }
+
+        const expectedContract = blockchain === 'BASE' 
+            ? (process.env.NEXT_PUBLIC_ABAPAY_BASE_ADDRESS || process.env.NEXT_PUBLIC_ABAPAY_ADDRESS)
+            : (process.env.NEXT_PUBLIC_ABAPAY_CELO_ADDRESS || process.env.NEXT_PUBLIC_ABAPAY_ADDRESS);
+
+        if (receipt.to?.toLowerCase() !== expectedContract?.toLowerCase()) {
+             await sendTelegramAlert(`🚨 *FRAUD ATTEMPT DETECTED*\nUser ${wallet_address} submitted a txHash sent to the wrong contract.\nHash: \`${txHash}\``);
+             return NextResponse.json({ success: false, status: 'FAILED_VENDING', message: "Invalid contract destination." }, { status: 400 });
+        }
+
+        const transaction = await publicClient.getTransaction({ hash: txHash as `0x${string}` });
+
+        if (!transaction.input) {
+            return NextResponse.json({ success: false, status: 'FAILED_VENDING', message: "No contract data found." }, { status: 400 });
+        }
+
+        const decoded = decodeFunctionData({ abi: ABAPAY_ABI, data: transaction.input });
+        const chainServiceType = decoded.args[1] as string;
+        const chainAccountNumber = decoded.args[2] as string;
+        const chainAmountWei = decoded.args[3] as bigint;
+        const expectedAccount = billersCode || phone;
+
+        if (chainServiceType !== serviceID || chainAccountNumber !== expectedAccount) {
+            await sendTelegramAlert(`🚨 *TAMPERING BLOCKED*\nUser ${wallet_address} altered the payload!\nChain Service: ${chainServiceType} | Requested: ${serviceID}\nChain Account: ${chainAccountNumber} | Requested: ${expectedAccount}\nHash: \`${txHash}\``);
+            return NextResponse.json({ success: false, status: 'FAILED_VENDING', message: "Payload mismatch detected." }, { status: 400 });
+        }
+
+        const tokenDecimals = (tokenSymbol === 'cUSD' || tokenSymbol === 'USDm') ? 18 : 6;
+        const expectedWei = parseUnits(amount.toString(), tokenDecimals);
+        const diff = chainAmountWei > expectedWei ? chainAmountWei - expectedWei : expectedWei - chainAmountWei;
+
+        if (diff > 10n) {
+             await sendTelegramAlert(`🚨 *AMOUNT TAMPERING BLOCKED*\nUser ${wallet_address} altered the price payload.\nHash: \`${txHash}\``);
+             return NextResponse.json({ success: false, status: 'FAILED_VENDING', message: "Amount mismatch detected." }, { status: 400 });
+        }
+    } catch (error) {
+        // If viem throws, the hash isn't indexed by the RPC yet. Fall back to the background webhook.
+        return NextResponse.json({ success: true, status: 'TIMEOUT', message: "Transaction verifying in background." });
+    }
+    // ⚡ END ON-CHAIN VERIFICATION ⚡
+
+    // 4. ATOMIC LOCK
     const { data: lockedRecord, error: lockError } = await supabase
       .from('transactions')
       .update({ status: 'PROCESSING', request_id: vtRequestId })
-      .eq('tx_hash', txHash)
-      .eq('status', 'PENDING') // Only lock it if the webhook hasn't touched it yet!
+      .eq('tx_hash', txHash) 
+      .eq('status', 'PENDING') // Stops duplicate vends
       .select()
       .single();
 
     if (!lockedRecord || lockError) {
-        // The Webhook got here first and is already vending it! Let the frontend know to check history.
         return NextResponse.json({ success: true, status: "TIMEOUT", message: "Vending handled by background webhook." });
     }
 
-    // 3. CONSTRUCT VTPASS PAYLOAD
+    // 5. CONSTRUCT VTPASS PAYLOAD
     const appMode = process.env.NEXT_PUBLIC_APP_MODE || "sandbox";
     const baseUrl = appMode === "live" ? "https://vtpass.com/api" : "https://sandbox.vtpass.com/api";
 
@@ -103,18 +168,17 @@ export async function POST(req: Request) {
         }
     }
 
-    // 4. CALL VTPASS DIRECTLY
+    // 6. CALL VTPASS DIRECTLY
     let payRes, payData;
     try {
         payRes = await fetch(`${baseUrl}/pay`, { method: 'POST', headers: getHeaders(), body: JSON.stringify(vtpassPayload) });
         payData = await payRes.json();
     } catch (e: any) {
-        // Revert to pending so the 15-second delay Alchemy Webhook can retry it
         await supabase.from('transactions').update({ status: 'PENDING' }).eq('tx_hash', txHash); 
         return NextResponse.json({ success: true, status: "TIMEOUT", message: "Network slow. Finishing in background." }); 
     }
 
-    // 5. HANDLE VTPASS RESPONSE & RETURN INSTANTLY TO FRONTEND
+    // 7. HANDLE VTPASS RESPONSE & RETURN INSTANTLY
     if (payData.code === '000' || payData.code === '099') {
         let dbPurchasedCode = null; let vendedUnits = null; let alertTokenRef = "Success";
 
@@ -128,15 +192,14 @@ export async function POST(req: Request) {
         } else { alertTokenRef = payData.content?.transactions?.transactionId || payData.requestId || "Success"; }
 
         await supabase.from('transactions').update({ status: 'SUCCESS', purchased_code: dbPurchasedCode, units: vendedUnits }).eq('tx_hash', txHash);
-        
-        // Fire notifications asynchronously so we don't slow down the UI
+
         sendTelegramAlert(`✅ *SALE SUCCESSFUL*\n⛓️ *Chain:* ${blockchain || 'CELO'}\n🛒 *Product:* ${network} ${serviceCategory}\n💰 *Naira:* ₦${vendAmount}\n🪙 *Asset:* ${amount} ${tokenSymbol || 'USD₮'}\n👤 *User:* ${billersCode}\n🧾 *Ref:* ${alertTokenRef}`).catch(()=>{});
-        
+
         if (serviceCategory === 'ELECTRICITY' || serviceCategory === 'EDUCATION') {
             const typeLabel = serviceCategory === 'ELECTRICITY' ? 'Token' : 'PIN';
             sendAbaPaySms(phone || billersCode, `AbaPay: Your ${network || serviceCategory} ${typeLabel} is ${alertTokenRef}. Amount: N${vendAmount}. Thank you.`).catch(()=>{});
         }
-        
+
         if (email) {
             resend.emails.send({
                 from: 'AbaPay Receipts <receipts@abapays.com>', to: email, replyTo: 'support@abapays.com', subject: `AbaPay Receipt - ${network} ${serviceCategory}`,
@@ -146,18 +209,18 @@ export async function POST(req: Request) {
 
         const points = Number((vendAmount / 1000).toFixed(2));
         if (points > 0 && wallet_address) {
-    supabase.rpc('award_transaction_points', { target_wallet: wallet_address.toLowerCase(), points_to_add: points }).then(({ error }) => {
-        if (error) console.error("Points Error:", error.message);
-    });
-}
+            // TypeScript fix implemented here
+            supabase.rpc('award_transaction_points', { target_wallet: wallet_address.toLowerCase(), points_to_add: points }).then(({ error }) => {
+                if (error) console.error("Points Error:", error.message);
+            });
+        }
 
-        // ⚡ INSTANT SUCCESS TO FRONTEND ⚡
         return NextResponse.json({ success: true, status: 'SUCCESS', purchased_code: dbPurchasedCode, units: vendedUnits, request_id: vtRequestId });
     } else {
         const friendlyMessage = error_messages[payData.code as string] || "Service is temporarily undergoing maintenance.";
         await supabase.from('transactions').update({ status: 'VENDING_FAILED', error_code: payData.code, api_response: payData.response_description }).eq('tx_hash', txHash);
         sendTelegramAlert(`❌ *VENDING REJECTED*\n⛓️ *Chain:* ${blockchain || 'CELO'}\n🛒 *Product:* ${network} ${serviceCategory}\n👤 *User:* ${billersCode}\n🚨 *Admin Error:* Code ${payData.code} - ${payData.response_description}\n🗣 *User Message:* ${friendlyMessage}`).catch(()=>{});
-        
+
         return NextResponse.json({ success: false, status: 'FAILED_VENDING', message: friendlyMessage });
     }
 
