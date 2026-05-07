@@ -241,7 +241,10 @@ export async function POST(req: Request) {
                     }));
                 }
 
-                const points = Number((record.amount_naira / 1000).toFixed(2));
+                                // ⚡ EXCLUDES FEE: Reverse engineers the exact checkout rate to strip the fee
+                const effectiveRate = (record.amount_naira + record.fee_naira) / record.amount_usdt;
+                const points = Number((record.amount_naira / effectiveRate).toFixed(2));
+                
                 if (points > 0 && record.wallet_address) {
                     notifications.push(supabaseAdmin.rpc('award_transaction_points', { target_wallet: record.wallet_address.toLowerCase(), points_to_add: points }));
                 }
