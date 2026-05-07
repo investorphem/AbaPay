@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
 import "./globals.css";
 import Providers from "@/components/Providers";
+import { ThemeProvider } from "next-themes"; // ⚡ IMPORT NEXT-THEMES
 
 const geistSans = Geist({
   variable: "--font-geist-sans",
@@ -63,15 +64,20 @@ export default function RootLayout({
   children: React.ReactNode;
 }>) {
   return (
+    // ⚡ ADDED suppressHydrationWarning SO NEXT.JS DOESN'T COMPLAIN ABOUT THEME INJECTION ⚡
     <html
       lang="en"
       className={`${geistSans.variable} ${geistMono.variable} h-full antialiased`}
+      suppressHydrationWarning
     >
       <body className="min-h-full flex flex-col">
-        {/* ⚡ WAGMI PROVIDERS WRAPPER ⚡ */}
-        <Providers>
-          {children}
-        </Providers>
+        {/* ⚡ THEME PROVIDER WRAPPING THE APP (Defaults to Dark Mode) ⚡ */}
+        <ThemeProvider attribute="class" defaultTheme="dark" enableSystem>
+          {/* ⚡ WAGMI PROVIDERS WRAPPER ⚡ */}
+          <Providers>
+            {children}
+          </Providers>
+        </ThemeProvider>
       </body>
     </html>
   );
