@@ -641,8 +641,17 @@ export default function Home() {
       const balanceWei = await publicClient.readContract({ address: tokenAddress as `0x${string}`, abi: ERC20_ABI, functionName: 'balanceOf', args: [address] });
       setWalletBalance(parseFloat(formatUnits(balanceWei as bigint, selectedToken.decimals)).toFixed(4));
 
-    } catch (e: any) { 
+        } catch (e: any) { 
         setStatus(`Error: ${e.shortMessage?.slice(0, 40) || "Transaction Cancelled"}`); 
+        
+        // ⚡ NEW: Silently tell the database to delete the abandoned preflight
+        if (preflightHash) {
+             fetch('/api/pay', { 
+                 method: 'POST', 
+                 headers: { 'Content-Type': 'application/json' }, 
+                 body: JSON.stringify({ txHash: preflightHash, cancel_intent: true }) 
+             }).catch(()=>{});
+        }
     } finally { 
         setIsProcessing(false); 
     }
