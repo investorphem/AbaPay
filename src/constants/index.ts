@@ -3,6 +3,7 @@ import { ELECTRICITY_DISCOS } from "@/app/discos";
 
 export const ABAPAY_ABI = [{"inputs":[{"internalType":"address","name":"tokenAddress","type":"address"},{"internalType":"string","name":"serviceType","type":"string"},{"internalType":"string","name":"accountNumber","type":"string"},{"internalType":"uint256","name":"amount","type":"uint256"}],"name":"payBill","outputs":[],"stateMutability":"nonpayable","type":"function"}];
 
+// ⚡ UPDATED: Added the 'allowance' function so Viem can check permissions
 export const ERC20_ABI = [
   {"inputs":[{"internalType":"address","name":"spender","type":"address"},{"internalType":"uint256","name":"amount","type":"uint256"}],"name":"approve","outputs":[{"internalType":"bool","name":"","type":"bool"}],"stateMutability":"nonpayable","type":"function"},
   {"inputs":[{"internalType":"address","name":"account","type":"address"}],"name":"balanceOf","outputs":[{"internalType":"uint256","name":"","type":"uint256"}],"stateMutability":"view","type":"function"},
@@ -47,29 +48,28 @@ export const SUPPORTED_TOKENS = [
     symbol: "USDm", 
     logo: "/cusd.png",
     decimals: 18,
-    baseMainnet: "", 
-    celoMainnet: "0x765DE816845861e75A25fCA122bb6898B8B1282a",
-    celoSepolia: "0x874069Fa1Eb16D44d622F2e0Ca25eeA172369bC1",
+    mainnet: "0x765DE816845861e75A25fCA122bb6898B8B1282a", // Celo Mainnet
+    sepolia: "0x874069Fa1Eb16D44d622F2e0Ca25eeA172369bC1", // Celo Alfajores
     supportedNetworks: ["celo"] 
   },
   {
     symbol: "USDC",
     logo: "/usdc.png", 
     decimals: 6,
-    baseMainnet: "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913", 
-    baseSepolia: "0x036CbD53842c5426634e7929541eC2318f3dCF7e",
-    celoMainnet: "0xcebA9300f2b948710d2653dD7B07f33A8B32118C", 
-    celoSepolia: "0x2F25deB3848C207fc8E0c34035B3Ba7fC157602B",
+    mainnet: "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913", // Base Mainnet 
+    sepolia: "0x036CbD53842c5426634e7929541eC2318f3dCF7e", // Base Sepolia
+    celoMainnet: "0xcebA9300f2b948710d2653dD7B07f33A8B32118C", // Celo Mainnet USDC
+    celoSepolia: "0x2F25deB3848C207fc8E0c34035B3Ba7fC157602B", // Celo Alfajores USDC
     supportedNetworks: ["base", "celo"] 
   },
   {
     symbol: "USD₮",
     logo: "/usdt.png",
     decimals: 6,
-    baseMainnet: "0xfde4C96c8593536E31F229EA8f37b2ADa2699bb2", 
-    baseSepolia: "0x1d5728a887e1fa1a191467094ac7761d019b4c2c", 
-    celoMainnet: "0x48065fbbe25f71c9282ddf5e1cd6d6a887483d5e", // ⚡ YOUR VERIFIED CONTRACT
-    celoSepolia: "0x1E05bc8B6DEE14B44B3654fD4eb59fF0E9a6D2c7",
+    mainnet: "0xfde4C96c8593536E31F229EA8f37b2ADa2699bb2", // ⚡ Base Mainnet 
+    sepolia: "0x1d5728a887e1fa1a191467094ac7761d019b4c2c", // ⚡ Base Sepolia
+    celoMainnet: "0x48065fbbe25f71c9282ddf5e1cd6d6a887483d5e", // ⚡ Celo Mainnet
+    celoSepolia: "0x1E05bc8B6DEE14B44B3654fD4eb59fF0E9a6D2c7", // ⚡ Celo Sepolia
     supportedNetworks: ["celo", "base"] 
   }
 ];
