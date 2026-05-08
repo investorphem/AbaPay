@@ -109,6 +109,7 @@ export default function Home() {
   const [toast, setToast] = useState<{title: string, message: string, type: 'success' | 'error'} | null>(null);
   const [isSupportOpen, setIsSupportOpen] = useState(false);
   const [supportMessage, setSupportMessage] = useState("");
+  const [supportEmail, setSupportEmail] = useState("");
   const [supportTxHash, setSupportTxHash] = useState<string | null>(null);
   const [supportFile, setSupportFile] = useState<File | null>(null);
   const [isSendingSupport, setIsSendingSupport] = useState(false);
@@ -447,11 +448,17 @@ export default function Home() {
     else { try { await navigator.clipboard.writeText(receiptText); showToast("Copied!", "Receipt details copied to clipboard.", "success"); } catch (err) {} }
   };
 
-  const handleSendSupport = async () => {
+    const handleSendSupport = async () => {
+    // ⚡ 1. VALIDATE EMAIL ⚡
+    if (!supportEmail.trim() || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(supportEmail)) {
+        return showToast("Error", "Please enter a valid email address.", "error");
+    }
     if (!supportMessage.trim()) return showToast("Error", "Please enter a message.", "error");
+    
     setIsSendingSupport(true);
     try {
       const formData = new FormData();
+      formData.append("email", supportEmail); // ⚡ 2. APPEND EMAIL TO PAYLOAD ⚡
       formData.append("message", supportMessage);
       if (address) formData.append("userAddress", address);
       if (supportTxHash) formData.append("txHash", supportTxHash);
@@ -461,7 +468,7 @@ export default function Home() {
       const data = await res.json();
       if (data.success) {
         showToast("Ticket Sent", data.message, "success");
-        setIsSupportOpen(false); setSupportMessage(""); setSupportFile(null);
+        setIsSupportOpen(false); setSupportMessage(""); setSupportEmail(""); setSupportFile(null);
       } else { showToast("Error", data.message || "Failed to send ticket", "error"); }
     } catch (e) { showToast("Error", "Network error. Failed to send ticket.", "error"); } 
     finally { setIsSendingSupport(false); }
@@ -1187,12 +1194,21 @@ export default function Home() {
         </div>
       )}
 
-      {isSupportOpen && (
+            {isSupportOpen && (
         <div className="fixed inset-0 z-[200] flex items-center justify-center p-4 bg-slate-900/50 dark:bg-black/80 backdrop-blur-sm animate-in fade-in transition-colors">
            <div className="bg-white dark:bg-[#111114] w-full max-w-md rounded-[2rem] p-6 shadow-2xl dark:shadow-black/50 relative animate-in zoom-in-95 transition-colors">
-              <button onClick={() => { setIsSupportOpen(false); setSupportFile(null); setSupportMessage(""); }} className="absolute top-4 right-4 bg-slate-100 dark:bg-slate-800 p-2 rounded-full text-slate-500 dark:text-slate-400 hover:bg-slate-200 dark:hover:bg-slate-700 transition-colors"><XCircle size={20}/></button>
+              <button onClick={() => { setIsSupportOpen(false); setSupportFile(null); setSupportMessage(""); setSupportEmail(""); }} className="absolute top-4 right-4 bg-slate-100 dark:bg-slate-800 p-2 rounded-full text-slate-500 dark:text-slate-400 hover:bg-slate-200 dark:hover:bg-slate-700 transition-colors"><XCircle size={20}/></button>
               <h3 className="text-xl font-black text-slate-900 dark:text-white mb-2">Need Help?</h3>
               {supportTxHash && <p className="text-xs text-slate-500 dark:text-slate-400 mb-4">Transaction Ref: <span className="font-mono bg-slate-100 dark:bg-slate-800 px-1.5 py-0.5 rounded text-slate-700 dark:text-slate-300">{supportTxHash.slice(0, 15)}...</span></p>}
+
+              {/* ⚡ NEW COMPULSORY EMAIL FIELD ⚡ */}
+              <input 
+                  type="email"
+                  placeholder="Your Email Address"
+                  className="w-full bg-slate-50 dark:bg-[#1a1a1f] border border-slate-200 dark:border-slate-800/80 p-4 rounded-xl text-sm outline-none focus:border-emerald-500 dark:focus:border-emerald-500 text-slate-900 dark:text-white font-bold mb-3 transition-colors"
+                  value={supportEmail}
+                  onChange={(e) => setSupportEmail(e.target.value)}
+              />
 
               <textarea 
                   className="w-full bg-slate-50 dark:bg-[#1a1a1f] border border-slate-200 dark:border-slate-800/80 p-4 rounded-xl text-sm outline-none focus:border-emerald-500 dark:focus:border-emerald-500 text-slate-900 dark:text-white min-h-[100px] mb-4 font-medium transition-colors" 
@@ -1213,7 +1229,7 @@ export default function Home() {
 
               <button 
                   onClick={handleSendSupport}
-                  disabled={isSendingSupport || !supportMessage.trim()}
+                  disabled={isSendingSupport || !supportMessage.trim() || !supportEmail.trim()}
                   className="w-full bg-emerald-500 hover:bg-emerald-600 disabled:opacity-50 disabled:bg-slate-300 dark:disabled:bg-slate-800 text-white font-black py-4 rounded-xl transition-colors tracking-tight flex justify-center items-center gap-2"
               >
                   {isSendingSupport ? <><Loader2 size={18} className="animate-spin"/> SENDING...</> : "SEND TICKET"}
@@ -1222,7 +1238,19 @@ export default function Home() {
         </div>
       )}
 
-      <ReceiptModal receipt={selectedReceipt} isMainnet={isMainnet} onClose={() => setSelectedReceipt(null)} onShare={handleShareReceipt} onSupport={() => { setSupportTxHash(selectedReceipt.txHash); setSupportMessage(""); setSelectedReceipt(null); setIsSupportOpen(true); }} />
+            <ReceiptModal 
+          receipt={selectedReceipt} 
+          isMainnet={isMainnet} 
+          onClose={() => setSelectedReceipt(null)} 
+          onShare={handleShareReceipt} 
+          onSupport={() => { 
+              setSupportTxHash(selectedReceipt.txHash); 
+              setSupportMessage(""); 
+              setSupportEmail(customerEmail || ""); // ⚡ AUTO-FILLS EMAIL
+              setSelectedReceipt(null); 
+              setIsSupportOpen(true); 
+          }} 
+      />
       <SelectionModal 
         isOpen={isSelectionModalOpen} 
         onClose={() => setIsSelectionModalOpen(false)} 
