@@ -4,6 +4,7 @@ export async function POST(req: Request) {
   try {
     const formData = await req.formData();
     const message = formData.get('message') as string;
+    const email = formData.get('email') as string; // ⚡ NEW: Catch the email
     const file = formData.get('file') as File;
     const userAddress = formData.get('userAddress') as string;
 
@@ -12,7 +13,7 @@ export async function POST(req: Request) {
 
     // ⚡ CHANGED: Now uses the dedicated Support Bot Token
     const botToken = process.env.SUPPORT_TELEGRAM_BOT_TOKEN;
-    
+
     // Keeps the original Chat ID logic
     const chatId = process.env.TELEGRAM_ADMIN_CHAT_ID || process.env.TELEGRAM_CHAT_ID;
 
@@ -21,9 +22,10 @@ export async function POST(req: Request) {
        return NextResponse.json({ success: false, message: "Server configuration error." }, { status: 500 });
     }
 
-    // Professional Support Template (Now dynamically includes the Hash if it exists)
+    // Professional Support Template (Now dynamically includes the Email & Hash)
     const caption = `🎫 *ABAPAY SUPPORT TICKET*\n` +
                     `━━━━━━━━━━━━━━━━━━\n` +
+                    `📧 *Email:* ${email || 'Not provided'}\n` + // ⚡ INJECTED EMAIL HERE
                     `👤 *Wallet:* \`${userAddress || 'Anonymous'}\`\n` +
                     (txHash ? `🔗 *TX ID:* \`${txHash}\`\n` : '') +
                     `💬 *Issue:* ${message}\n` +
