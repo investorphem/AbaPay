@@ -40,7 +40,7 @@ export async function POST(req: Request) {
       nairaAmount, wallet_address, subscription_type,
       operator_id, country_code, product_type_id, email,
       meter_account_type, blockchain,
-      intent_only, preflight_hash, cancel_intent // ⚡ INCLUDES CANCEL INTENT
+      intent_only, preflight_hash, cancel_intent 
     } = body;
 
     const requestedNaira = parseFloat(nairaAmount);
@@ -68,24 +68,21 @@ export async function POST(req: Request) {
       operator_id: operator_id || null, country_code: country_code || null, product_type_id: product_type_id || null, subscription_type: subscription_type || null 
     };
 
-    // Exit instantly if this is the frontend saving the intent before signing
     if (intent_only) {
         await supabase.from('transactions').upsert(dbPayload, { onConflict: 'tx_hash' });
         return NextResponse.json({ success: true, status: "PENDING" });
     }
 
-    // ⚡ SELF-CLEANING: If user cancels in their wallet, delete the abandoned intent
     if (cancel_intent) {
         await supabase.from('transactions').delete().eq('tx_hash', txHash);
         return NextResponse.json({ success: true, status: "CANCELLED" });
     }
 
-    // If the frontend survived the wallet popup, link the temporary hash to the real blockchain hash
     if (preflight_hash) {
         await supabase.from('transactions').update({ tx_hash: txHash }).eq('tx_hash', preflight_hash);
     }
 
-    // ⚡ 3. ON-CHAIN VERIFICATION (Smart Wallet & Payload Tamper Check) ⚡
+    // 3. ON-CHAIN VERIFICATION (Smart Wallet & Payload Tamper Check)
     try {
         const isMainnet = process.env.NEXT_PUBLIC_NETWORK === "mainnet" || process.env.NEXT_PUBLIC_NETWORK === "celo" || process.env.NEXT_PUBLIC_NETWORK === "base";
         const activeChain = blockchain === 'BASE' ? (isMainnet ? base : baseSepolia) : (isMainnet ? celo : celoSepolia);
@@ -95,7 +92,6 @@ export async function POST(req: Request) {
         if (activeChain.id === base.id) rpcUrl = "https://mainnet.base.org";
 
         const publicClient = createPublicClient({ chain: activeChain, transport: http(rpcUrl) });
-
         const receipt = await publicClient.getTransactionReceipt({ hash: txHash as `0x${string}` });
 
         if (receipt.status !== 'success') {
@@ -110,13 +106,8 @@ export async function POST(req: Request) {
         const expectedLower = expectedContract?.toLowerCase() || "";
         let isSmartWallet = false;
 
-        // Check if the destination is AbaPay OR a Smart Wallet EntryPoint
         if (txTo !== expectedLower) {
-            const entryPoints = [
-                "0x5ff137d4b0fdcd49dca30c7cf57e578a026d2789", // EntryPoint v0.6
-                "0x0000000071727de22e5e9d8baf0edac6f37da032"  // EntryPoint v0.7
-            ];
-            
+            const entryPoints = [ "0x5ff137d4b0fdcd49dca30c7cf57e578a026d2789", "0x0000000071727de22e5e9d8baf0edac6f37da032" ];
             if (entryPoints.includes(txTo)) {
                 isSmartWallet = true;
             } else {
@@ -126,19 +117,11 @@ export async function POST(req: Request) {
         }
 
         if (!isSmartWallet) {
-            // EOA Strict Payload Verification (For Celo/Standard Wallets)
             const transaction = await publicClient.getTransaction({ hash: txHash as `0x${string}` });
-
-            if (!transaction.input) {
-                return NextResponse.json({ success: false, status: 'FAILED_VENDING', message: "No contract data found." }, { status: 400 });
-            }
+            if (!transaction.input) return NextResponse.json({ success: false, status: 'FAILED_VENDING', message: "No contract data found." }, { status: 400 });
 
             const decoded = decodeFunctionData({ abi: ABAPAY_ABI, data: transaction.input });
-
-            // TYPE SAFETY CHECK: Ensure args exist before reading them
-            if (!decoded.args || decoded.args.length < 4) {
-                return NextResponse.json({ success: false, status: 'FAILED_VENDING', message: "Invalid contract payload structure." }, { status: 400 });
-            }
+            if (!decoded.args || decoded.args.length < 4) return NextResponse.json({ success: false, status: 'FAILED_VENDING', message: "Invalid contract payload structure." }, { status: 400 });
 
             const chainServiceType = decoded.args[1] as string;
             const chainAccountNumber = decoded.args[2] as string;
@@ -154,20 +137,13 @@ export async function POST(req: Request) {
             const expectedWei = parseUnits(amount.toString(), tokenDecimals);
             const diff = chainAmountWei > expectedWei ? chainAmountWei - expectedWei : expectedWei - chainAmountWei;
 
-            // ⚡ VERCEL BUILD FIX: BigInt(10) instead of 10n
             if (diff > BigInt(10)) {
                  await sendTelegramAlert(`🚨 *AMOUNT TAMPERING BLOCKED*\nUser ${wallet_address} altered the price payload.\nHash: \`${txHash}\``);
                  return NextResponse.json({ success: false, status: 'FAILED_VENDING', message: "Amount mismatch detected." }, { status: 400 });
             }
         } else {
-            // Smart Wallet Verification (For Base/Coinbase Wallets)
-            // We search the transaction logs to guarantee the crypto arrived at AbaPay
             const paddedExpectedContract = "0x000000000000000000000000" + expectedLower.substring(2);
-            
-            const foundTransfer = receipt.logs.some((log: any) => 
-                log.topics && log.topics.length >= 3 && 
-                log.topics[2]?.toLowerCase() === paddedExpectedContract
-            );
+            const foundTransfer = receipt.logs.some((log: any) => log.topics && log.topics.length >= 3 && log.topics[2]?.toLowerCase() === paddedExpectedContract);
 
             if (!foundTransfer) {
                  await sendTelegramAlert(`🚨 *SMART WALLET FRAUD DETECTED*\nFunds did not reach AbaPay contract.\nHash: \`${txHash}\``);
@@ -175,17 +151,15 @@ export async function POST(req: Request) {
             }
         }
     } catch (error) {
-        // If viem throws, the hash isn't indexed by the RPC yet. Fall back to the background webhook.
         return NextResponse.json({ success: true, status: 'TIMEOUT', message: "Transaction verifying in background." });
     }
-    // ⚡ END ON-CHAIN VERIFICATION ⚡
 
     // 4. ATOMIC LOCK
     const { data: lockedRecord, error: lockError } = await supabase
       .from('transactions')
       .update({ status: 'PROCESSING', request_id: vtRequestId })
       .eq('tx_hash', txHash) 
-      .eq('status', 'PENDING') // Stops duplicate vends
+      .eq('status', 'PENDING')
       .select()
       .single();
 
@@ -244,14 +218,78 @@ export async function POST(req: Request) {
             sendAbaPaySms(phone || billersCode, `AbaPay: Your ${network || serviceCategory} ${typeLabel} is ${alertTokenRef}. Amount: N${vendAmount}. Thank you.`).catch(()=>{});
         }
 
+        // ⚡ RESTORED PREMIUM HTML EMAIL TEMPLATE WITH CLICKABLE SOCIALS ⚡
         if (email) {
+            const premiumHtml = `
+            <div style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; background-color: #fdfbf7; padding: 40px 20px;">
+              <div style="max-width: 600px; margin: 0 auto; background-color: #ffffff; border-radius: 16px; overflow: hidden; box-shadow: 0 4px 6px rgba(0,0,0,0.05);">
+                
+                <div style="background-color: #111114; padding: 40px 20px; text-align: center; border-bottom: 4px solid #10b981;">
+                  <img src="https://abapays.com/logo.png" alt="AbaPay" style="height: 48px; width: auto;" />
+                </div>
+                
+                <div style="padding: 40px 30px;">
+                  <p style="font-size: 11px; font-weight: 700; color: #64748b; letter-spacing: 1px; text-transform: uppercase; margin: 0 0 8px 0;">Transaction Successful</p>
+                  <h2 style="font-size: 36px; font-weight: 900; color: #0f172a; margin: 0 0 32px 0; letter-spacing: -1px;">₦${vendAmount.toLocaleString()}</h2>
+
+                  <div style="border-top: 1px solid #e2e8f0; padding: 16px 0; display: table; width: 100%;">
+                    <div style="display: table-cell; width: 40%; font-size: 13px; color: #64748b;">Service</div>
+                    <div style="display: table-cell; width: 60%; font-size: 13px; font-weight: 600; color: #334155; text-align: right; text-transform: uppercase;">${network} ${serviceCategory}</div>
+                  </div>
+
+                  <div style="border-top: 1px solid #e2e8f0; padding: 16px 0; display: table; width: 100%;">
+                    <div style="display: table-cell; width: 40%; font-size: 13px; color: #64748b;">Account / Phone</div>
+                    <div style="display: table-cell; width: 60%; font-size: 13px; font-weight: 600; color: #334155; text-align: right;">${billersCode || phone}</div>
+                  </div>
+
+                  <div style="border-top: 1px solid #e2e8f0; padding: 16px 0; display: table; width: 100%;">
+                    <div style="display: table-cell; width: 40%; font-size: 13px; color: #64748b;">Crypto Charged</div>
+                    <div style="display: table-cell; width: 60%; font-size: 13px; font-weight: 600; color: #334155; text-align: right;">${amount} ${tokenSymbol || 'USD₮'}</div>
+                  </div>
+
+                  <div style="border-top: 1px solid #e2e8f0; padding: 16px 0; display: table; width: 100%;">
+                    <div style="display: table-cell; width: 30%; font-size: 13px; color: #64748b;">Transaction Hash</div>
+                    <div style="display: table-cell; width: 70%; font-size: 12px; font-weight: 500; color: #334155; text-align: right; word-break: break-all; font-family: monospace;">${txHash}</div>
+                  </div>
+
+                  ${dbPurchasedCode ?
+                  `<div style="border-top: 1px solid #e2e8f0; padding: 16px 0; display: table; width: 100%;">
+                    <div style="display: table-cell; width: 40%; font-size: 13px; color: #64748b;">Token / PIN</div>
+                    <div style="display: table-cell; width: 60%; font-size: 14px; font-weight: 800; color: #10b981; text-align: right; letter-spacing: 1px;">Token : ${dbPurchasedCode}</div>
+                  </div>`
+                  :
+                  `<div style="border-top: 1px solid #e2e8f0; padding: 16px 0; display: table; width: 100%;">
+                    <div style="display: table-cell; width: 40%; font-size: 13px; color: #64748b;">Reference ID</div>
+                    <div style="display: table-cell; width: 60%; font-size: 13px; font-weight: 600; color: #334155; text-align: right;">${vtRequestId}</div>
+                  </div>`
+                  }
+
+                  <div style="border-top: 1px solid #e2e8f0; padding-top: 32px; margin-top: 16px;">
+                    <p style="font-size: 12px; color: #64748b; line-height: 1.5; margin: 0;">If you have any issues with this transaction, please reply directly to this email to reach our support desk.</p>
+                  </div>
+                </div>
+
+                <div style="background-color: #f8fafc; padding: 30px; text-align: center; border-top: 1px solid #e2e8f0;">
+                  <p style="font-size: 11px; color: #64748b; margin: 0 0 8px 0;">Join the AbaPay Community</p>
+                  <p style="font-size: 12px; font-weight: 700; margin: 0 0 16px 0;">
+                    <a href="https://x.com/abapays" style="color: #334155; text-decoration: none;">X (Twitter)</a> &nbsp;&nbsp; 
+                    <a href="https://t.me/abapays" style="color: #334155; text-decoration: none;">Telegram</a> &nbsp;&nbsp; 
+                    <a href="https://wa.me/2347075418792" style="color: #334155; text-decoration: none;">WhatsApp</a>
+                  </p>
+                  <p style="font-size: 10px; color: #94a3b8; margin: 0;">&copy; 2026 Masonode Technologies Limited. All rights reserved.</p>
+                </div>
+              </div>
+            </div>`;
+
             resend.emails.send({
-                from: 'AbaPay Receipts <receipts@abapays.com>', to: email, replyTo: 'support@abapays.com', subject: `AbaPay Receipt - ${network} ${serviceCategory}`,
-                html: `<div style="font-family: sans-serif; background-color: #f4f4f5; padding: 40px 0;"><div style="max-width: 600px; margin: 0 auto; background-color: #ffffff; border-radius: 12px; overflow: hidden;"><div style="background: #18181b; padding: 40px 30px; text-align: center;"><h1 style="color:white">AbaPay</h1></div><div style="padding: 40px 30px;"><h2 style="color: #18181b; font-size: 32px;">₦${vendAmount.toLocaleString()}</h2><p>Account: ${billersCode}</p><p>Tx Hash: ${txHash}</p>${dbPurchasedCode ? `<p style="color:#10b981; font-weight:bold;">Token / PIN: ${dbPurchasedCode}</p>` : ``}</div></div></div>`
+                from: 'AbaPay Receipts <receipts@abapays.com>', 
+                to: email, 
+                replyTo: 'support@abapays.com', 
+                subject: `AbaPay Receipt - ${network} ${serviceCategory}`,
+                html: premiumHtml
             }).catch(()=>{});
         }
 
-                // ⚡ EXCLUDES FEE: vendAmount divided by the exact exchange rate used
         const points = Number((vendAmount / baseRate).toFixed(2));
         if (points > 0 && wallet_address) {
             supabase.rpc('award_transaction_points', { target_wallet: wallet_address.toLowerCase(), points_to_add: points }).then(({ error }) => {
