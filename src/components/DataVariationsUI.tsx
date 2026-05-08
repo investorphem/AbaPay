@@ -11,7 +11,7 @@ export default function DataVariationsUI({ variations, onSelectPlan }: DataVaria
 
   const groupedVariations = useMemo(() => {
     const groups: Record<string, any[]> = {};
-    
+
     // 1. Group them into tabs
     variations.forEach((plan) => {
       const categoryName = categorizeDataPlan(plan.name, plan.variation_code);
@@ -46,7 +46,7 @@ export default function DataVariationsUI({ variations, onSelectPlan }: DataVaria
             className={`px-4 py-2 text-sm font-bold rounded-full whitespace-nowrap transition-all ${
               selectedTab === tabName 
                 ? "bg-emerald-600 text-white shadow-md" 
-                : "bg-slate-100 text-slate-500 hover:bg-slate-200"
+                : "bg-slate-100 dark:bg-slate-800 text-slate-500 dark:text-slate-400 hover:bg-slate-200 dark:hover:bg-slate-700"
             }`}
           >
             {tabName}
@@ -59,10 +59,11 @@ export default function DataVariationsUI({ variations, onSelectPlan }: DataVaria
           <div 
              key={plan.variation_code} 
              onClick={() => onSelectPlan(plan)}
-             className="p-4 border border-slate-200 rounded-xl hover:border-emerald-500 hover:bg-emerald-50 cursor-pointer transition-all active:scale-[0.98]"
+             className="p-4 border border-slate-200 dark:border-slate-800/80 rounded-xl hover:border-emerald-500 dark:hover:border-emerald-500 hover:bg-emerald-50 dark:hover:bg-emerald-900/20 cursor-pointer transition-all active:scale-[0.98]"
           >
-            <p className="font-semibold text-slate-800 text-sm leading-snug">{plan.name}</p>
-            <p className="text-emerald-600 font-black mt-1">₦{Number(plan.variation_amount).toLocaleString()}</p>
+            {/* ⚡ THE FIX: Added dark:text-slate-200 right here ⚡ */}
+            <p className="font-semibold text-slate-800 dark:text-slate-200 text-sm leading-snug">{plan.name}</p>
+            <p className="text-emerald-600 dark:text-emerald-400 font-black mt-1">₦{Number(plan.variation_amount).toLocaleString()}</p>
           </div>
         ))}
       </div>
