@@ -536,13 +536,18 @@ export default function Home() {
     // ⚡ FIX: Declare the variable outside the try block so the catch block can see it!
     let preflightHash = "";
 
-    try {
+        try {
       // 1. Network Sync
       try {
         const currentChainId = await client.getChainId();
-        if (currentChainId !== activeChain.id) await client.switchChain({ id: activeChain.id });
+        if (currentChainId !== activeChain.id) {
+            await client.switchChain({ id: activeChain.id });
+            // ⚡ FIX 1: Let the wallet breathe! Give it 1.5 seconds to sync the new network before asking for approval
+            await new Promise(resolve => setTimeout(resolve, 1500)); 
+        }
       } catch (switchError) { 
         await client.addChain({ chain: activeChain }); 
+        await new Promise(resolve => setTimeout(resolve, 1500)); 
       }
 
       const valueInWei = parseUnits(cryptoToCharge, selectedToken.decimals);
@@ -585,7 +590,14 @@ export default function Home() {
       // ERC20 Approval if needed
       if (currentAllowance < valueInWei) {
           setStatus("Awaiting token approval...");
-          const appHash = await client.writeContract({ address: tokenAddress as `0x${string}`, abi: ERC20_ABI, functionName: 'approve', args: [ABAPAY_CONTRACT, parseUnits("100000", selectedToken.decimals)], ...txConfig });
+          const appHash = await client.writeContract({ 
+              chain: activeChain, // ⚡ FIX 2: Explicitly pass the chain to Viem so it doesn't throw a mismatch error!
+              address: tokenAddress as `0x${string}`, 
+              abi: ERC20_ABI, 
+              functionName: 'approve', 
+              args: [ABAPAY_CONTRACT, parseUnits("100000", selectedToken.decimals)], 
+              ...txConfig 
+          });
           await publicClient.waitForTransactionReceipt({ hash: appHash, confirmations: 1 });
       }
 
