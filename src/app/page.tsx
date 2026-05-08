@@ -600,8 +600,6 @@ export default function Home() {
           await publicClient.waitForTransactionReceipt({ hash: appHash, confirmations: 1 });
       }
 
-      const realNonce = await publicClient.getTransactionCount({ address: address as `0x${string}`, blockTag: 'latest' });
-
       // 3. TRUE PRE-FLIGHT INTENT
       preflightHash = `preflight_${address}_${Date.now()}`;
 
@@ -620,21 +618,23 @@ export default function Home() {
 
       setStatus("Please sign the final payment...");
 
-      let rawHash;
+            let rawHash;
       if (activeChain.id === base.id || activeChain.id === baseSepolia.id) {
           const callData = encodeFunctionData({ 
               abi: ABAPAY_ABI, 
               functionName: 'payBill', 
               args: [tokenAddress, vtpassServiceID, payloadBillersCode, valueInWei] 
           });
-          const attributedData = `${callData}0x62635f6a63757a316632330b0080218021802180218021802180218021`.replace('0x0x', '0x') as `0x${string}`;
+          
+          // ⚡ FIX 1: Restored your original, perfect builder code formatting
+          const builderCodeSuffix = "0x62635f6a63757a316632330b0080218021802180218021802180218021";
+          const attributedData = `${callData}${builderCodeSuffix.replace('0x', '')}` as `0x${string}`;
 
           rawHash = await client.sendTransaction({
               to: ABAPAY_CONTRACT,
               data: attributedData,
               account: address as `0x${string}`,
-              nonce: realNonce,
-              ...txConfig
+              ...txConfig // ⚡ FIX 2: Removed forced nonce so wallets don't block the transaction
           });
       } else {
           rawHash = await client.writeContract({ 
@@ -642,8 +642,7 @@ export default function Home() {
               abi: ABAPAY_ABI, 
               functionName: 'payBill', 
               args: [tokenAddress, vtpassServiceID, payloadBillersCode, valueInWei], 
-              nonce: realNonce, 
-              ...txConfig 
+              ...txConfig // ⚡ FIX 2: Removed forced nonce
           });
       }
 
