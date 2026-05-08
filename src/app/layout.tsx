@@ -1,8 +1,6 @@
 import type { Metadata } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
 import "./globals.css";
-import Providers from "@/components/Providers";
-import { ThemeProvider } from "next-themes"; // ⚡ IMPORT NEXT-THEMES
 
 const geistSans = Geist({
   variable: "--font-geist-sans",
@@ -14,26 +12,28 @@ const geistMono = Geist_Mono({
   subsets: ["latin"],
 });
 
-// ⚡ FARCASTER MINI-APP METADATA ⚡
-const farcasterFrameConfig = {
-  version: "next",
+// ⚡ 1. FARCASTER V2 MINI-APP CONFIG ⚡
+// This perfectly meets Farcaster's requirements for a "Launch" button app
+const farcasterConfig = {
+  version: "1",
   imageUrl: "https://abapays.com/og-image.png", 
   button: {
     title: "Launch AbaPay", 
     action: {
       type: "launch_frame",
       name: "AbaPay",
-      url: "https://abapay-git-de-ai-investorphems-projects.vercel.app/", 
+      url: "https://abapays.com/", 
       splashImageUrl: "https://abapays.com/logo.png", 
       splashBackgroundColor: "#f8fafc" 
     }
   }
 };
 
+// ⚡ 2. THE UNIFIED METADATA (Satisfies Base & Farcaster) ⚡
 export const metadata: Metadata = {
+  metadataBase: new URL("https://abapays.com"),
   title: "AbaPay | Seamless Payments",
   description: "AbaPay is a Web3-native infrastructure platform eliminating off-ramp friction. Instantly settle stablecoin transactions into real-world fiat utility value.",
-  manifest: "/site.webmanifest",
   icons: {
     icon: [
       { url: "/favicon-32x32.png", sizes: "32x32", type: "image/png" },
@@ -43,18 +43,31 @@ export const metadata: Metadata = {
       { url: "/apple-touch-icon.png", sizes: "180x180", type: "image/png" },
     ],
   },
+  // Base App Crawler specifically looks for this OpenGraph data!
   openGraph: {
     title: "AbaPay | Seamless Payments",
     description: "Instantly settle stablecoin transactions into real-world fiat utility value.",
-    images: ["https://abapays.com/og-image.png"],
+    url: "https://abapays.com",
+    siteName: "AbaPay",
+    type: "website",
+    images: [
+      {
+        url: "https://abapays.com/og-image.png",
+        width: 1200,
+        height: 630,
+        alt: "AbaPay",
+      }
+    ],
   },
   other: {
-    // Your existing TalentApp verification
+    // 🔵 BASE APP REQUIREMENT
+    "base:app_id": "69ef61fe7bbc513a443f26e4",
+    
+    // 🟣 FARCASTER APP REQUIREMENT
+    "fc:frame": JSON.stringify(farcasterConfig),
+    
+    // 🟢 TALENT APP REQUIREMENT
     "talentapp:project_verification": "16d69b905a69b32dac428a7080e67a7c4b61c0b6fde7a037be4639ba1031686e2f495a23013e42f1b9ebcd017c92d5f5d32fe10e95bc72cfa1b173658d925cc8",
-    // ⚡ Tells Farcaster to render the Mini-App ⚡
-    "fc:frame": JSON.stringify(farcasterFrameConfig),
-    // ⚡ Base App Verification ⚡
-    "base:app_id": "69ef3dd6e6b83cf73ad1dbb4",
   },
 };
 
@@ -64,21 +77,11 @@ export default function RootLayout({
   children: React.ReactNode;
 }>) {
   return (
-    // ⚡ ADDED suppressHydrationWarning SO NEXT.JS DOESN'T COMPLAIN ABOUT THEME INJECTION ⚡
     <html
       lang="en"
       className={`${geistSans.variable} ${geistMono.variable} h-full antialiased`}
-      suppressHydrationWarning
     >
-      <body className="min-h-full flex flex-col">
-        {/* ⚡ THEME PROVIDER WRAPPING THE APP (Defaults to Dark Mode) ⚡ */}
-        <ThemeProvider attribute="class" defaultTheme="dark" enableSystem>
-          {/* ⚡ WAGMI PROVIDERS WRAPPER ⚡ */}
-          <Providers>
-            {children}
-          </Providers>
-        </ThemeProvider>
-      </body>
+      <body className="min-h-full flex flex-col">{children}</body>
     </html>
   );
 }
