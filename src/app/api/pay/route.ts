@@ -43,6 +43,14 @@ export async function POST(req: Request) {
       intent_only, preflight_hash, cancel_intent 
     } = body;
 
+    // ⚡ FIX 1: INSTANT CANCELLATION INTERCEPTOR ⚡
+    // This MUST run before any rate math or upsert logic so it doesn't get blocked by intent_only
+    if (cancel_intent) {
+        const hashToDelete = preflight_hash || txHash;
+        await supabase.from('transactions').delete().eq('tx_hash', hashToDelete);
+        return NextResponse.json({ success: true, status: "CANCELLED" });
+    }
+
     const requestedNaira = parseFloat(nairaAmount);
     const isForeign = serviceID === 'foreign-airtime';
     const needsVerification = !isForeign && (serviceCategory === 'ELECTRICITY' || serviceCategory === 'BANK' || (serviceCategory === 'EDUCATION' && serviceID === 'jamb') || (serviceCategory === 'CABLE' && network !== 'SHOWMAX'));
@@ -71,11 +79,6 @@ export async function POST(req: Request) {
     if (intent_only) {
         await supabase.from('transactions').upsert(dbPayload, { onConflict: 'tx_hash' });
         return NextResponse.json({ success: true, status: "PENDING" });
-    }
-
-    if (cancel_intent) {
-        await supabase.from('transactions').delete().eq('tx_hash', txHash);
-        return NextResponse.json({ success: true, status: "CANCELLED" });
     }
 
     if (preflight_hash) {
@@ -218,7 +221,6 @@ export async function POST(req: Request) {
             sendAbaPaySms(phone || billersCode, `AbaPay: Your ${network || serviceCategory} ${typeLabel} is ${alertTokenRef}. Amount: N${vendAmount}. Thank you.`).catch(()=>{});
         }
 
-        // ⚡ RESTORED PREMIUM HTML EMAIL TEMPLATE WITH CLICKABLE SOCIALS ⚡
         if (email) {
             const premiumHtml = `
             <div style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; background-color: #fdfbf7; padding: 40px 20px;">
@@ -281,13 +283,18 @@ export async function POST(req: Request) {
               </div>
             </div>`;
 
-            resend.emails.send({
-                from: 'AbaPay Receipts <receipts@abapays.com>', 
-                to: email, 
-                replyTo: 'support@abapays.com', 
-                subject: `AbaPay Receipt - ${network} ${serviceCategory}`,
-                html: premiumHtml
-            }).catch(()=>{});
+            // ⚡ FIX 2: AWAIT THE RESEND API CALL ⚡
+            try {
+                await resend.emails.send({
+                    from: 'AbaPay Receipts <receipts@abapays.com>', 
+                    to: email, 
+                    replyTo: 'support@abapays.com', 
+                    subject: `AbaPay Receipt - ${network} ${serviceCategory}`,
+                    html: premiumHtml
+                });
+            } catch (emailError) {
+                console.error("Resend API Error:", emailError);
+            }
         }
 
         const points = Number((vendAmount / baseRate).toFixed(2));
