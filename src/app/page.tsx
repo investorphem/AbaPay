@@ -718,9 +718,10 @@ export default function Home() {
             }
             showToast("Transaction Processing", "Your payment was sent but the network is slow. Check your History tab in a minute.", "success");
         }
-    } finally { 
+        } finally { 
         setIsProcessing(false); 
     }
+}; // <--- THIS IS THE MISSING BRACKET!
 
   useEffect(() => { if (status && !isProcessing) { const timer = setTimeout(() => setStatus(""), 5000); return () => clearTimeout(timer); } }, [status, isProcessing]);
 
