@@ -189,18 +189,34 @@ export default function AdminDashboard() {
       } catch (e) { alert("Network error."); }
   };
 
-  const toggleKillSwitch = async (serviceKey: string, newValue: boolean) => {
+    const toggleKillSwitch = async (serviceKey: string, newValue: boolean) => {
       setIsUpdatingSwitches(true);
+      
+      // 1. Save the old state just in case we need to revert
+      const previousSwitches = { ...killSwitches };
       const newSwitches = { ...killSwitches, [serviceKey]: newValue };
+      
+      // 2. Optimistic UI update (makes the button feel instant)
       setKillSwitches(newSwitches); 
 
       try {
-          await fetch('/api/admin/action', {
+          const res = await fetch('/api/admin/action', {
               method: 'POST',
               headers: { 'Content-Type': 'application/json' },
               body: JSON.stringify({ action: 'UPDATE_KILL_SWITCHES', payload: { switches: newSwitches } })
           });
-      } catch (e) { alert("Network error updating switches."); }
+          
+          const data = await res.json();
+          
+          // 3. ⚡ THE FIX: Actually check if the database saved it!
+          if (!data.success) {
+              alert(`Database Save Failed: ${data.message || 'Unknown error'}`);
+              setKillSwitches(previousSwitches); // Revert the toggle on screen
+          }
+      } catch (e) { 
+          alert("Network error updating switches."); 
+          setKillSwitches(previousSwitches); // Revert the toggle on screen
+      }
       finally { setIsUpdatingSwitches(false); }
   };
 
