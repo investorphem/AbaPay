@@ -533,10 +533,11 @@ export default function Home() {
     setIsProcessing(true); 
     setStatus("Initiating Blockchain Escrow...");
 
-        // ⚡ FIX: Add a safety flag to track if crypto left the wallet!
+            // ⚡ FIX: Add a safety flag to track if crypto left the wallet!
     let preflightHash = "";
     let realTxHash = "";
     let txHasBeenSigned = false; 
+    let backendPayload: any = null; // ⚡ ADD THIS LINE HERE
 
     try {
       // 1. Network Sync
@@ -604,7 +605,7 @@ export default function Home() {
       // 3. TRUE PRE-FLIGHT INTENT
       preflightHash = `preflight_${address}_${Date.now()}`;
 
-      const backendPayload = {
+      backendPayload = {
         serviceID: vtpassServiceID, serviceCategory: uiCategory, network: displayNetwork.toUpperCase(), billersCode: payloadBillersCode, amount: cryptoToCharge, 
         nairaAmount: calculatedNairaAmount, token: selectedToken.symbol, 
         txHash: preflightHash, 
@@ -708,8 +709,8 @@ export default function Home() {
             // CRISIS AVERTED: Crypto left the wallet, but the app crashed/timed out!
             // Force the real hash into the database so your Admin panel can see it!
             setStatus("Network slow. Securing receipt to database..."); 
-            if (preflightHash && realTxHash) {
-                 fetch('/api/pay', { 
+                        if (preflightHash && realTxHash && backendPayload) {
+                 fetch('/api/pay', {  
                      method: 'POST', 
                      headers: { 'Content-Type': 'application/json' }, 
                      // We pass the payload again to force the database to overwrite the fake hash with the real one
