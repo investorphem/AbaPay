@@ -110,7 +110,8 @@ export default function Home() {
   const [isSupportOpen, setIsSupportOpen] = useState(false);
   const [supportMessage, setSupportMessage] = useState("");
   const [supportEmail, setSupportEmail] = useState("");
-  const [supportTxHash, setSupportTxHash] = useState<string | null>(null);
+    const [supportTxHash, setSupportTxHash] = useState<string | null>(null);
+  const [supportChain, setSupportChain] = useState<string | null>(null); // ⚡ ADD THIS LINE
   const [supportFile, setSupportFile] = useState<File | null>(null);
   const [isSendingSupport, setIsSendingSupport] = useState(false);
 
@@ -457,18 +458,22 @@ export default function Home() {
     
     setIsSendingSupport(true);
     try {
-      const formData = new FormData();
-      formData.append("email", supportEmail); // ⚡ 2. APPEND EMAIL TO PAYLOAD ⚡
+            const formData = new FormData();
+      formData.append("email", supportEmail); 
       formData.append("message", supportMessage);
       if (address) formData.append("userAddress", address);
       if (supportTxHash) formData.append("txHash", supportTxHash);
+      
+      // ⚡ ADD THIS: Sends the saved chain, or falls back to the current active network
+      formData.append("chain", supportChain || activeChain?.name || "Unknown"); 
+      
       if (supportFile) formData.append("file", supportFile);
 
       const res = await fetch('/api/support', { method: 'POST', body: formData });
       const data = await res.json();
       if (data.success) {
         showToast("Ticket Sent", data.message, "success");
-        setIsSupportOpen(false); setSupportMessage(""); setSupportEmail(""); setSupportFile(null);
+        setIsSupportOpen(false); setSupportMessage(""); setSupportChain(null); setSupportEmail(""); setSupportFile(null);
       } else { showToast("Error", data.message || "Failed to send ticket", "error"); }
     } catch (e) { showToast("Error", "Network error. Failed to send ticket.", "error"); } 
     finally { setIsSendingSupport(false); }
@@ -1273,15 +1278,16 @@ export default function Home() {
         </div>
       )}
 
-            <ReceiptModal 
+                  <ReceiptModal 
           receipt={selectedReceipt} 
           isMainnet={isMainnet} 
           onClose={() => setSelectedReceipt(null)} 
           onShare={handleShareReceipt} 
           onSupport={() => { 
               setSupportTxHash(selectedReceipt.txHash); 
+              setSupportChain(selectedReceipt.blockchain); // ⚡ ADD THIS TO GRAB THE CHAIN
               setSupportMessage(""); 
-              setSupportEmail(customerEmail || ""); // ⚡ AUTO-FILLS EMAIL
+              setSupportEmail(customerEmail || ""); 
               setSelectedReceipt(null); 
               setIsSupportOpen(true); 
           }} 
