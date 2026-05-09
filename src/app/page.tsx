@@ -587,23 +587,45 @@ export default function Home() {
 
       setStatus("Please approve the transaction in your wallet...");
 
+            // ==========================================
+      // ⚡ STRICT FIREWALL: ISOLATED APPROVAL BLOCK
+      // ==========================================
       if (currentAllowance < valueInWei) {
           setStatus("Awaiting token approval...");
-          const appHash = await client.writeContract({ 
-              chain: activeChain,
-              address: tokenAddress as `0x${string}`, 
-              abi: ERC20_ABI, 
-              functionName: 'approve', 
-              args: [ABAPAY_CONTRACT, parseUnits("100000", selectedToken.decimals)], 
-              ...txConfig 
-          });
-          await publicClient.waitForTransactionReceipt({ hash: appHash, confirmations: 1 });
+          try {
+              const appHash = await client.writeContract({ 
+                  chain: activeChain,
+                  address: tokenAddress as `0x${string}`, 
+                  abi: ERC20_ABI, 
+                  functionName: 'approve', 
+                  args: [ABAPAY_CONTRACT, parseUnits("100000", selectedToken.decimals)], 
+                  ...txConfig 
+              });
+              setStatus("Confirming approval on-chain...");
+              await publicClient.waitForTransactionReceipt({ hash: appHash, confirmations: 1 });
+              
+              // Give the RPC nodes 1 second to update the allowance state globally
+              await new Promise(resolve => setTimeout(resolve, 1000));
+              
+          } catch (appError: any) {
+              // User rejected approval OR wallet glitched. 
+              // Stop everything. Do NOT touch the database.
+              setStatus(`Approval Cancelled: ${appError.shortMessage?.slice(0, 40) || "User rejected."}`);
+              setIsProcessing(false);
+              return; // 🛑 EXIT FUNCTION IMMEDIATELY
+          }
       }
+
+      // ==========================================
+      // ⚡ PREFLIGHT INTENT (Only runs if approval is successful or wasn't needed)
+      // ==========================================
+      const realNonce = await publicClient.getTransactionCount({ address: address as `0x${string}`, blockTag: 'latest' });
 
       // 3. TRUE PRE-FLIGHT INTENT
       preflightHash = `preflight_${address}_${Date.now()}`;
-
+      
       backendPayload = {
+      // ... (rest of your code continues normally here) ...
         serviceID: vtpassServiceID, serviceCategory: uiCategory, network: displayNetwork.toUpperCase(), billersCode: payloadBillersCode, amount: cryptoToCharge, 
         nairaAmount: calculatedNairaAmount, token: selectedToken.symbol, 
         txHash: preflightHash, 
