@@ -13,7 +13,6 @@
     "buttonTitle": "Launch AbaPay",
     "splashImageUrl": "https://abapays.com/logo.png",
     "splashBackgroundColor": "#f8fafc",
-    "webhookUrl": "https://abapays.com/api/webhook",
     "subtitle": "Pay bills with crypto",
     "description": "AbaPay bridges Web3 liquidity to real-world utility. Instantly pay for electricity, airtime, data, and TV subscriptions globally.",
     "primaryCategory": "finance",
