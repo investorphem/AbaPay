@@ -160,7 +160,7 @@ export async function POST(req: Request) {
             vtpassPayload.operator_id = record.operator_id;
             vtpassPayload.country_code = record.country_code;
             vtpassPayload.product_type_id = record.product_type_id;
-            vtpassPayload.email = record.customer_email || "support@abapay.com";
+            vtpassPayload.email = record.customer_email || "support@abapays.com";
         } else {
             if (['DATA', 'ELECTRICITY', 'BANK'].includes(record.service_category)) {
                 vtpassPayload.billersCode = record.account_number;
@@ -223,8 +223,14 @@ export async function POST(req: Request) {
 
                 await supabaseAdmin.from('transactions').update({ status: 'SUCCESS', purchased_code: dbPurchasedCode, units: vendedUnits }).eq('tx_hash', txHash);
 
-                const notifications = [];
-                notifications.push(sendTelegramAlert(`✅ *SALE SUCCESSFUL*\n⛓️ *Chain:* ${record.blockchain || 'CELO'}\n🛒 *Product:* ${record.network} ${record.service_category}\n💰 *Naira:* ₦${record.amount_naira}\n🪙 *Asset:* ${record.amount_usdt} ${record.token_used || 'USD₮'}\n👤 *User:* ${record.account_number}\n🧾 *Ref:* ${alertTokenRef}`));
+                                const notifications = [];
+                
+                // ⚡ AWAIT TELEGRAM SO IT DOESN'T GET KILLED BY VERCEL ⚡
+                try {
+                    await sendTelegramAlert(`✅ *SALE SUCCESSFUL*\n⛓️ *Chain:* ${record.blockchain || 'CELO'}\n🛒 *Product:* ${record.network} ${record.service_category}\n💰 *Naira:* ₦${record.amount_naira}\n🪙 *Asset:* ${record.amount_usdt} ${record.token_used || 'USD₮'}\n👤 *User:* ${record.account_number}\n🧾 *Ref:* ${alertTokenRef}`);
+                } catch (tgError) {
+                    console.error("Telegram Success Alert Error in Webhook:", tgError);
+                }
 
                 if (record.service_category === 'ELECTRICITY' || record.service_category === 'EDUCATION') {
                     const typeLabel = record.service_category === 'ELECTRICITY' ? 'Token' : 'PIN';
@@ -260,10 +266,16 @@ export async function POST(req: Request) {
             const friendlyMessage = error_messages[payData.code as string] || "Service is temporarily undergoing maintenance.";
             const rawTechnicalError = payData.response_description || payData.content?.errors || "Unknown VTpass Rejection";
 
-            await supabaseAdmin.from('transactions').update({ status: 'VENDING_FAILED', error_code: payData.code, api_response: rawTechnicalError }).eq('tx_hash', txHash);
-            await sendTelegramAlert(`❌ *VENDING REJECTED*\n⛓️ *Chain:* ${record.blockchain || 'CELO'}\n🛒 *Product:* ${record.network} ${record.service_category}\n👤 *User:* ${record.account_number}\n🚨 *Admin Error:* Code ${payData.code} - ${rawTechnicalError}\n🗣 *User Message:* ${friendlyMessage}`);
+                        await supabaseAdmin.from('transactions').update({ status: 'VENDING_FAILED', error_code: payData.code, api_response: rawTechnicalError }).eq('tx_hash', txHash);
+            
+            // ⚡ WRAP IN TRY/CATCH SO TELEGRAM ERRORS DON'T CRASH THE WEBHOOK ⚡
+            try {
+                await sendTelegramAlert(`❌ *VENDING REJECTED*\n⛓️ *Chain:* ${record.blockchain || 'CELO'}\n🛒 *Product:* ${record.network} ${record.service_category}\n👤 *User:* ${record.account_number}\n🚨 *Admin Error:* Code ${payData.code} - ${rawTechnicalError}\n🗣 *User Message:* ${friendlyMessage}`);
+            } catch (tgError) {
+                console.error("Telegram Failure Alert Error in Webhook:", tgError);
+            }
 
-            return NextResponse.json({ status: "Vending Rejected" }, { status: 200 }); 
+            return NextResponse.json({ status: "Vending Rejected" }, { status: 200 });  
         }
 
     } catch (error: any) {
