@@ -214,7 +214,11 @@ export async function POST(req: Request) {
 
         await supabase.from('transactions').update({ status: 'SUCCESS', purchased_code: dbPurchasedCode, units: vendedUnits }).eq('tx_hash', txHash);
 
-        sendTelegramAlert(`✅ *SALE SUCCESSFUL*\n⛓️ *Chain:* ${blockchain || 'CELO'}\n🛒 *Product:* ${network} ${serviceCategory}\n💰 *Naira:* ₦${vendAmount}\n🪙 *Asset:* ${amount} ${tokenSymbol || 'USD₮'}\n👤 *User:* ${billersCode}\n🧾 *Ref:* ${alertTokenRef}`).catch(()=>{});
+                try {
+            await sendTelegramAlert(`✅ *SALE SUCCESSFUL*\n⛓️ *Chain:* ${blockchain || 'CELO'}\n🛒 *Product:* ${network} ${serviceCategory}\n💰 *Naira:* ₦${vendAmount}\n🪙 *Asset:* ${amount} ${tokenSymbol || 'USD₮'}\n👤 *User:* ${billersCode}\n🧾 *Ref:* ${alertTokenRef}`);
+        } catch (tgError) {
+            console.error("Telegram Success Alert Error:", tgError);
+        }
 
         if (serviceCategory === 'ELECTRICITY' || serviceCategory === 'EDUCATION') {
             const typeLabel = serviceCategory === 'ELECTRICITY' ? 'Token' : 'PIN';
@@ -308,7 +312,11 @@ export async function POST(req: Request) {
     } else {
         const friendlyMessage = error_messages[payData.code as string] || "Service is temporarily undergoing maintenance.";
         await supabase.from('transactions').update({ status: 'VENDING_FAILED', error_code: payData.code, api_response: payData.response_description }).eq('tx_hash', txHash);
-        sendTelegramAlert(`❌ *VENDING REJECTED*\n⛓️ *Chain:* ${blockchain || 'CELO'}\n🛒 *Product:* ${network} ${serviceCategory}\n👤 *User:* ${billersCode}\n🚨 *Admin Error:* Code ${payData.code} - ${payData.response_description}\n🗣 *User Message:* ${friendlyMessage}`).catch(()=>{});
+                try {
+            await sendTelegramAlert(`❌ *VENDING REJECTED*\n⛓️ *Chain:* ${blockchain || 'CELO'}\n🛒 *Product:* ${network} ${serviceCategory}\n👤 *User:* ${billersCode}\n🚨 *Admin Error:* Code ${payData.code} - ${payData.response_description}\n🗣 *User Message:* ${friendlyMessage}`);
+        } catch (tgError) {
+            console.error("Telegram Failure Alert Error:", tgError);
+        }
 
         return NextResponse.json({ success: false, status: 'FAILED_VENDING', message: friendlyMessage });
     }
