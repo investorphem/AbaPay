@@ -7,6 +7,7 @@ export async function POST(req: Request) {
     const email = formData.get('email') as string; // ⚡ NEW: Catch the email
     const file = formData.get('file') as File;
     const userAddress = formData.get('userAddress') as string;
+    const chain = formData.get('chain') as string || 'Unknown';
 
     // UPGRADED: Catch the hidden transaction hash!
     const txHash = formData.get('txHash') as string; 
@@ -26,6 +27,7 @@ export async function POST(req: Request) {
     const caption = `🎫 *ABAPAY SUPPORT TICKET*\n` +
                     `━━━━━━━━━━━━━━━━━━\n` +
                     `📧 *Email:* ${email || 'Not provided'}\n` + // ⚡ INJECTED EMAIL HERE
+                    `⛓️ *Chain:* ${chain}\n` +          // ⚡ THE NEW CHAIN TAG
                     `👤 *Wallet:* \`${userAddress || 'Anonymous'}\`\n` +
                     (txHash ? `🔗 *TX ID:* \`${txHash}\`\n` : '') +
                     `💬 *Issue:* ${message}\n` +
