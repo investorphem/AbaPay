@@ -1340,10 +1340,14 @@ export default function Home() {
                 </div>
             )}
 
-            {/* ⚡ NEW: Dynamic Connect Button / AbaPoints Swap ⚡ */}
+                        {/* ⚡ NEW: Dynamic Connect Button / AbaPoints Swap ⚡ */}
             {!address && environment === 'WEB' ? (
                 <button 
-                  onClick={() => connect({ connector: connectors[0] })}
+                  onClick={() => {
+                    // ⚡ Look for WalletConnect first, fallback to injected if missing
+                    const wcConnector = connectors.find(c => c.id === 'walletConnect');
+                    connect({ connector: wcConnector || connectors[0] });
+                  }}
                   disabled={isProcessing}
                   className="bg-emerald-50 dark:bg-emerald-900/20 hover:bg-emerald-100 dark:hover:bg-emerald-900/40 border border-emerald-200 dark:border-emerald-800/50 text-emerald-700 dark:text-emerald-400 font-black text-[10px] px-3 py-1.5 rounded-xl transition-all shadow-sm active:scale-95 disabled:opacity-50 flex items-center gap-1.5 uppercase tracking-widest"
                 >
