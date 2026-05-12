@@ -19,7 +19,8 @@ export const config = createConfig({
       metadata: {
         name: 'AbaPay',
         description: 'Seamless Crypto Bill Payments',
-        url: 'https://abapays.com', 
+        // ⚡ DYNAMIC URL: Uses localhost when testing, abapays.com when live
+        url: typeof window !== 'undefined' ? window.location.origin : 'https://abapays.com', 
         icons: ['https://abapays.com/logo.png'] 
       }
     }),
