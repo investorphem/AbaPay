@@ -5,6 +5,8 @@ import { sendTelegramAlert } from '@/lib/telegram';
 import { sendAbaPaySms } from '@/lib/messaging';
 import { getHeaders } from '@/lib/vtpass'; 
 import { Resend } from 'resend';
+import { createPublicClient, http } from 'viem';
+import { base, baseSepolia, celo, celoSepolia } from 'viem/chains';
 
 const resend = new Resend(process.env.RESEND_API_KEY || "re_dummy_key_for_build");
 
@@ -140,6 +142,40 @@ export async function POST(req: Request) {
             return NextResponse.json({ error: "Record not found or not PENDING" }, { status: 404 });
         }
 
+        // ⚡ 2.5 THE WEBHOOK SECURITY FIX: VERIFY ON-CHAIN RECEIPT ⚡
+        const isMainnet = process.env.NEXT_PUBLIC_NETWORK === "mainnet" || process.env.NEXT_PUBLIC_NETWORK === "celo" || process.env.NEXT_PUBLIC_NETWORK === "base";
+        const activeChain = record.blockchain === 'BASE' ? (isMainnet ? base : baseSepolia) : (isMainnet ? celo : celoSepolia);
+
+        let rpcUrl = activeChain.rpcUrls.default.http[0];
+        if (activeChain.id === celo.id) rpcUrl = "https://forno.celo.org";
+        if (activeChain.id === base.id) rpcUrl = "https://mainnet.base.org";
+
+        // SMART EXPLORER URL GENERATOR
+        let explorerBase = isMainnet ? "https://celoscan.io" : "https://alfajores.celoscan.io";
+        if (record.blockchain === 'BASE') {
+            explorerBase = isMainnet ? "https://basescan.org" : "https://sepolia.basescan.org";
+        }
+        const explorerUrl = `${explorerBase}/tx/${txHash}`;
+
+        try {
+            const publicClient = createPublicClient({ chain: activeChain, transport: http(rpcUrl) });
+            const receipt = await publicClient.getTransactionReceipt({ hash: txHash as `0x${string}` });
+
+            // CRITICAL CHECK: Did the transaction fail on the blockchain?
+            if (receipt.status !== 'success') {
+                await supabaseAdmin.from('transactions').update({ status: 'FAILED_VENDING', error_code: 'REVERTED', api_response: 'Transaction failed on-chain' }).eq('tx_hash', txHash);
+                try { await sendTelegramAlert(`🛑 *WEBHOOK BLOCKED: REVERTED TX*\nUser ${record.wallet_address || record.account_number} tried to use a failed/reverted transaction!\nHash: \`${txHash}\`\n🔍 *Explorer:* ${explorerUrl}`); } catch (err) {}
+                return NextResponse.json({ status: "Transaction Reverted On-Chain. Blocked." }, { status: 200 });
+            }
+        } catch (error) {
+            console.error("Webhook Viem Fetch Error:", error);
+            // If the node hiccups, we shouldn't fail instantly, but we definitely shouldn't vend. 
+            // Setting back to PENDING allows a retry or manual review.
+            await supabaseAdmin.from('transactions').update({ status: 'PENDING' }).eq('tx_hash', txHash);
+            return NextResponse.json({ status: "Node Error. Reverted to Pending." });
+        }
+
+
         console.log(`🚀 Triggering VTPass for: ${record.account_number} on ${record.blockchain}`);
 
         // 3. CONSTRUCT VTPASS PAYLOAD
@@ -193,7 +229,7 @@ export async function POST(req: Request) {
             payData = await payRes.json();
         } catch (e: any) {
             await supabaseAdmin.from('transactions').update({ status: 'VENDING_FAILED', error_code: '502_TIMEOUT', api_response: e.message || 'Fetch failed entirely' }).eq('tx_hash', txHash);
-            try { await sendTelegramAlert(`❌ *NETWORK CRASH (LIVE)*\n⛓️ *Chain:* ${record.blockchain}\n🛒 *Product:* ${record.network} ${record.service_category}\n👤 *User:* ${record.account_number}\n⚠️ Connection to VTpass timed out.`); } catch (err) {}
+            try { await sendTelegramAlert(`❌ *NETWORK CRASH (LIVE)*\n⛓️ *Chain:* ${record.blockchain}\n🛒 *Product:* ${record.network} ${record.service_category}\n👤 *User:* ${record.account_number}\n⚠️ Connection to VTpass timed out.\n🔍 *Explorer:* ${explorerUrl}`); } catch (err) {}
             return NextResponse.json({ status: "Vending Failed (Network)" }, { status: 200 }); 
         }
 
@@ -223,11 +259,11 @@ export async function POST(req: Request) {
 
                 await supabaseAdmin.from('transactions').update({ status: 'SUCCESS', purchased_code: dbPurchasedCode, units: vendedUnits }).eq('tx_hash', txHash);
 
-                                const notifications = [];
-                
+                const notifications = [];
+
                 // ⚡ AWAIT TELEGRAM SO IT DOESN'T GET KILLED BY VERCEL ⚡
                 try {
-                    await sendTelegramAlert(`✅ *SALE SUCCESSFUL*\n⛓️ *Chain:* ${record.blockchain || 'CELO'}\n🛒 *Product:* ${record.network} ${record.service_category}\n💰 *Naira:* ₦${record.amount_naira}\n🪙 *Asset:* ${record.amount_usdt} ${record.token_used || 'USD₮'}\n👤 *User:* ${record.account_number}\n🧾 *Ref:* ${alertTokenRef}`);
+                    await sendTelegramAlert(`✅ *SALE SUCCESSFUL (WEBHOOK)*\n⛓️ *Chain:* ${record.blockchain || 'CELO'}\n🛒 *Product:* ${record.network} ${record.service_category}\n💰 *Naira:* ₦${record.amount_naira}\n🪙 *Asset:* ${record.amount_usdt} ${record.token_used || 'USD₮'}\n👤 *User:* ${record.account_number}\n🧾 *Ref:* ${alertTokenRef}\n🔍 *Explorer:* ${explorerUrl}`);
                 } catch (tgError) {
                     console.error("Telegram Success Alert Error in Webhook:", tgError);
                 }
@@ -247,10 +283,10 @@ export async function POST(req: Request) {
                     }));
                 }
 
-                                // ⚡ EXCLUDES FEE: Reverse engineers the exact checkout rate to strip the fee
+                // ⚡ EXCLUDES FEE: Reverse engineers the exact checkout rate to strip the fee
                 const effectiveRate = (record.amount_naira + record.fee_naira) / record.amount_usdt;
                 const points = Number((record.amount_naira / effectiveRate).toFixed(2));
-                
+
                 if (points > 0 && record.wallet_address) {
                     notifications.push(supabaseAdmin.rpc('award_transaction_points', { target_wallet: record.wallet_address.toLowerCase(), points_to_add: points }));
                 }
@@ -266,11 +302,11 @@ export async function POST(req: Request) {
             const friendlyMessage = error_messages[payData.code as string] || "Service is temporarily undergoing maintenance.";
             const rawTechnicalError = payData.response_description || payData.content?.errors || "Unknown VTpass Rejection";
 
-                        await supabaseAdmin.from('transactions').update({ status: 'VENDING_FAILED', error_code: payData.code, api_response: rawTechnicalError }).eq('tx_hash', txHash);
-            
+            await supabaseAdmin.from('transactions').update({ status: 'VENDING_FAILED', error_code: payData.code, api_response: rawTechnicalError }).eq('tx_hash', txHash);
+
             // ⚡ WRAP IN TRY/CATCH SO TELEGRAM ERRORS DON'T CRASH THE WEBHOOK ⚡
             try {
-                await sendTelegramAlert(`❌ *VENDING REJECTED*\n⛓️ *Chain:* ${record.blockchain || 'CELO'}\n🛒 *Product:* ${record.network} ${record.service_category}\n👤 *User:* ${record.account_number}\n🚨 *Admin Error:* Code ${payData.code} - ${rawTechnicalError}\n🗣 *User Message:* ${friendlyMessage}`);
+                await sendTelegramAlert(`❌ *VENDING REJECTED (WEBHOOK)*\n⛓️ *Chain:* ${record.blockchain || 'CELO'}\n🛒 *Product:* ${record.network} ${record.service_category}\n👤 *User:* ${record.account_number}\n🚨 *Admin Error:* Code ${payData.code} - ${rawTechnicalError}\n🗣 *User Message:* ${friendlyMessage}\n🔍 *Explorer:* ${explorerUrl}`);
             } catch (tgError) {
                 console.error("Telegram Failure Alert Error in Webhook:", tgError);
             }
