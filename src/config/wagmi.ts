@@ -1,9 +1,9 @@
 import { http, createConfig, createStorage, cookieStorage } from 'wagmi';
 import { base, baseSepolia, celo, celoAlfajores } from 'wagmi/chains';
-import { baseAccount, injected, walletConnect } from 'wagmi/connectors';
+import { baseAccount, injected, walletConnect } from 'wagmi/connectors'; // ⚡ IMPORTED walletConnect
 
-// ⚡ Falls back to your hardcoded ID so Vercel Preview links work flawlessly!
-const projectId = process.env.NEXT_PUBLIC_WALLETCONNECT_PROJECT_ID || "2fe5da1f6c2f9fdac04aba0ba8023015"; 
+// ⚡ PULL IN YOUR WALLETCONNECT ID
+const projectId = process.env.NEXT_PUBLIC_WALLETCONNECT_PROJECT_ID || "";
 
 export const config = createConfig({
   chains: [base, baseSepolia, celo, celoAlfajores],
@@ -12,21 +12,20 @@ export const config = createConfig({
     baseAccount({
       appName: 'AbaPay',
     }),
-    // ⚡ THE WALLETCONNECT BRIDGE FOR VALORA & MOBILE WALLETS
+    // ⚡ THE NEW WALLETCONNECT BRIDGE FOR VALORA & MOBILE WALLETS
     walletConnect({ 
       projectId, 
       showQrModal: true,
       metadata: {
         name: 'AbaPay',
         description: 'Seamless Crypto Bill Payments',
-        // ⚡ DYNAMIC URL: Uses localhost when testing, abapays.com when live
-        url: typeof window !== 'undefined' ? window.location.origin : 'https://abapays.com', 
+        url: 'https://abapays.com', 
         icons: ['https://abapays.com/logo.png'] 
       }
     }),
   ],
   storage: createStorage({ storage: cookieStorage }),
-  ssr: false,
+  ssr: true,
   transports: {
     [base.id]: http(),
     [baseSepolia.id]: http(),
