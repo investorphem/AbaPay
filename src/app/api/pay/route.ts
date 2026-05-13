@@ -57,6 +57,14 @@ export async function POST(req: Request) {
     const vendAmount = requestedNaira; 
     const vtRequestId = getStrictRequestId();
 
+    // ⚡ SMART EXPLORER URL GENERATOR ⚡
+    const isMainnet = process.env.NEXT_PUBLIC_NETWORK === "mainnet" || process.env.NEXT_PUBLIC_NETWORK === "celo" || process.env.NEXT_PUBLIC_NETWORK === "base";
+    let explorerBase = isMainnet ? "https://celoscan.io" : "https://alfajores.celoscan.io";
+    if (blockchain === 'BASE') {
+        explorerBase = isMainnet ? "https://basescan.org" : "https://sepolia.basescan.org";
+    }
+    const explorerUrl = `${explorerBase}/tx/${txHash}`;
+
     // 1. RATE VERIFICATION (Security Check)
     const { data: settingsData } = await supabase.from('platform_settings').select('exchange_rate').eq('id', 1).single();
     const baseRate = parseFloat(settingsData?.exchange_rate || "1500");
@@ -86,7 +94,6 @@ export async function POST(req: Request) {
 
     // 3. ON-CHAIN VERIFICATION (Smart Wallet & Payload Tamper Check)
     try {
-        const isMainnet = process.env.NEXT_PUBLIC_NETWORK === "mainnet" || process.env.NEXT_PUBLIC_NETWORK === "celo" || process.env.NEXT_PUBLIC_NETWORK === "base";
         const activeChain = blockchain === 'BASE' ? (isMainnet ? base : baseSepolia) : (isMainnet ? celo : celoSepolia);
 
         let rpcUrl = activeChain.rpcUrls.default.http[0];
@@ -94,7 +101,7 @@ export async function POST(req: Request) {
         if (activeChain.id === base.id) rpcUrl = "https://mainnet.base.org";
 
         const publicClient = createPublicClient({ chain: activeChain, transport: http(rpcUrl) });
-        
+
         // ⚡ THE MEMPOOL SECURITY FIX: Wait for the block instead of just peeking at it
         const receipt = await publicClient.waitForTransactionReceipt({ 
             hash: txHash as `0x${string}`,
@@ -105,7 +112,7 @@ export async function POST(req: Request) {
         // ⚡ CRITICAL CHECK: Did it revert?
         if (receipt.status !== 'success') {
             await supabase.from('transactions').update({ status: 'FAILED_VENDING', error_code: 'REVERTED', api_response: 'Transaction failed on-chain' }).eq('tx_hash', txHash);
-            await sendTelegramAlert(`🛑 *DOUBLE SPEND BLOCKED*\nUser ${wallet_address} tried to use a failed/reverted transaction!\nHash: \`${txHash}\``);
+            await sendTelegramAlert(`🛑 *DOUBLE SPEND BLOCKED*\nUser ${wallet_address} tried to use a failed/reverted transaction!\nHash: \`${txHash}\`\n🔍 *Explorer:* ${explorerUrl}`);
             return NextResponse.json({ success: false, status: 'FAILED_VENDING', message: "Transaction failed on the blockchain. Your funds were not deducted." }, { status: 400 });
         }
 
@@ -122,7 +129,7 @@ export async function POST(req: Request) {
             if (entryPoints.includes(txTo)) {
                 isSmartWallet = true;
             } else {
-                 await sendTelegramAlert(`🚨 *FRAUD ATTEMPT DETECTED*\nUser ${wallet_address} submitted a txHash sent to the wrong contract.\nHash: \`${txHash}\``);
+                 await sendTelegramAlert(`🚨 *FRAUD ATTEMPT DETECTED*\nUser ${wallet_address} submitted a txHash sent to the wrong contract.\nHash: \`${txHash}\`\n🔍 *Explorer:* ${explorerUrl}`);
                  return NextResponse.json({ success: false, status: 'FAILED_VENDING', message: "Invalid contract destination." }, { status: 400 });
             }
         }
@@ -140,7 +147,7 @@ export async function POST(req: Request) {
             const expectedAccount = billersCode || phone;
 
             if (chainServiceType !== serviceID || chainAccountNumber !== expectedAccount) {
-                await sendTelegramAlert(`🚨 *TAMPERING BLOCKED*\nUser ${wallet_address} altered the payload!\nChain Service: ${chainServiceType} | Requested: ${serviceID}\nChain Account: ${chainAccountNumber} | Requested: ${expectedAccount}\nHash: \`${txHash}\``);
+                await sendTelegramAlert(`🚨 *TAMPERING BLOCKED*\nUser ${wallet_address} altered the payload!\nChain Service: ${chainServiceType} | Requested: ${serviceID}\nChain Account: ${chainAccountNumber} | Requested: ${expectedAccount}\nHash: \`${txHash}\`\n🔍 *Explorer:* ${explorerUrl}`);
                 return NextResponse.json({ success: false, status: 'FAILED_VENDING', message: "Payload mismatch detected." }, { status: 400 });
             }
 
@@ -149,7 +156,7 @@ export async function POST(req: Request) {
             const diff = chainAmountWei > expectedWei ? chainAmountWei - expectedWei : expectedWei - chainAmountWei;
 
             if (diff > BigInt(10)) {
-                 await sendTelegramAlert(`🚨 *AMOUNT TAMPERING BLOCKED*\nUser ${wallet_address} altered the price payload.\nHash: \`${txHash}\``);
+                 await sendTelegramAlert(`🚨 *AMOUNT TAMPERING BLOCKED*\nUser ${wallet_address} altered the price payload.\nHash: \`${txHash}\`\n🔍 *Explorer:* ${explorerUrl}`);
                  return NextResponse.json({ success: false, status: 'FAILED_VENDING', message: "Amount mismatch detected." }, { status: 400 });
             }
         } else {
@@ -157,7 +164,7 @@ export async function POST(req: Request) {
             const foundTransfer = receipt.logs.some((log: any) => log.topics && log.topics.length >= 3 && log.topics[2]?.toLowerCase() === paddedExpectedContract);
 
             if (!foundTransfer) {
-                 await sendTelegramAlert(`🚨 *SMART WALLET FRAUD DETECTED*\nFunds did not reach AbaPay contract.\nHash: \`${txHash}\``);
+                 await sendTelegramAlert(`🚨 *SMART WALLET FRAUD DETECTED*\nFunds did not reach AbaPay contract.\nHash: \`${txHash}\`\n🔍 *Explorer:* ${explorerUrl}`);
                  return NextResponse.json({ success: false, status: 'FAILED_VENDING', message: "Funds not received." }, { status: 400 });
             }
         }
@@ -222,8 +229,8 @@ export async function POST(req: Request) {
 
         await supabase.from('transactions').update({ status: 'SUCCESS', purchased_code: dbPurchasedCode, units: vendedUnits }).eq('tx_hash', txHash);
 
-                try {
-            await sendTelegramAlert(`✅ *SALE SUCCESSFUL*\n⛓️ *Chain:* ${blockchain || 'CELO'}\n🛒 *Product:* ${network} ${serviceCategory}\n💰 *Naira:* ₦${vendAmount}\n🪙 *Asset:* ${amount} ${tokenSymbol || 'USD₮'}\n👤 *User:* ${billersCode}\n🧾 *Ref:* ${alertTokenRef}`);
+        try {
+            await sendTelegramAlert(`✅ *SALE SUCCESSFUL*\n⛓️ *Chain:* ${blockchain || 'CELO'}\n🛒 *Product:* ${network} ${serviceCategory}\n💰 *Naira:* ₦${vendAmount}\n🪙 *Asset:* ${amount} ${tokenSymbol || 'USD₮'}\n👤 *User:* ${billersCode}\n🧾 *Ref:* ${alertTokenRef}\n🔍 *Explorer:* ${explorerUrl}`);
         } catch (tgError) {
             console.error("Telegram Success Alert Error:", tgError);
         }
@@ -320,8 +327,8 @@ export async function POST(req: Request) {
     } else {
         const friendlyMessage = error_messages[payData.code as string] || "Service is temporarily undergoing maintenance.";
         await supabase.from('transactions').update({ status: 'VENDING_FAILED', error_code: payData.code, api_response: payData.response_description }).eq('tx_hash', txHash);
-                try {
-            await sendTelegramAlert(`❌ *VENDING REJECTED*\n⛓️ *Chain:* ${blockchain || 'CELO'}\n🛒 *Product:* ${network} ${serviceCategory}\n👤 *User:* ${billersCode}\n🚨 *Admin Error:* Code ${payData.code} - ${payData.response_description}\n🗣 *User Message:* ${friendlyMessage}`);
+        try {
+            await sendTelegramAlert(`❌ *VENDING REJECTED*\n⛓️ *Chain:* ${blockchain || 'CELO'}\n🛒 *Product:* ${network} ${serviceCategory}\n👤 *User:* ${billersCode}\n🚨 *Admin Error:* Code ${payData.code} - ${payData.response_description}\n🗣 *User Message:* ${friendlyMessage}\n🔍 *Explorer:* ${explorerUrl}`);
         } catch (tgError) {
             console.error("Telegram Failure Alert Error:", tgError);
         }
