@@ -26,7 +26,7 @@ export const config = createConfig({
     }),
   ],
   storage: createStorage({ storage: cookieStorage }),
-  ssr: true,
+  ssr: false,
   transports: {
     [base.id]: http(),
     [baseSepolia.id]: http(),
