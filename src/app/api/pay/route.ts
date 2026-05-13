@@ -44,7 +44,6 @@ export async function POST(req: Request) {
     } = body;
 
     // ⚡ FIX 1: INSTANT CANCELLATION INTERCEPTOR ⚡
-    // This MUST run before any rate math or upsert logic so it doesn't get blocked by intent_only
     if (cancel_intent) {
         const hashToDelete = preflight_hash || txHash;
         await supabase.from('transactions').delete().eq('tx_hash', hashToDelete);
@@ -95,10 +94,19 @@ export async function POST(req: Request) {
         if (activeChain.id === base.id) rpcUrl = "https://mainnet.base.org";
 
         const publicClient = createPublicClient({ chain: activeChain, transport: http(rpcUrl) });
-        const receipt = await publicClient.getTransactionReceipt({ hash: txHash as `0x${string}` });
+        
+        // ⚡ THE MEMPOOL SECURITY FIX: Wait for the block instead of just peeking at it
+        const receipt = await publicClient.waitForTransactionReceipt({ 
+            hash: txHash as `0x${string}`,
+            confirmations: 1,
+            timeout: 60000 // Failsafe timeout
+        });
 
+        // ⚡ CRITICAL CHECK: Did it revert?
         if (receipt.status !== 'success') {
-            return NextResponse.json({ success: false, status: 'FAILED_VENDING', message: "Blockchain transaction failed or reverted." }, { status: 400 });
+            await supabase.from('transactions').update({ status: 'FAILED_VENDING', error_code: 'REVERTED', api_response: 'Transaction failed on-chain' }).eq('tx_hash', txHash);
+            await sendTelegramAlert(`🛑 *DOUBLE SPEND BLOCKED*\nUser ${wallet_address} tried to use a failed/reverted transaction!\nHash: \`${txHash}\``);
+            return NextResponse.json({ success: false, status: 'FAILED_VENDING', message: "Transaction failed on the blockchain. Your funds were not deducted." }, { status: 400 });
         }
 
         const expectedContract = blockchain === 'BASE' 
