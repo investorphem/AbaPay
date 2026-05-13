@@ -1,19 +1,18 @@
 import { http, createConfig, createStorage, cookieStorage } from 'wagmi';
 import { base, baseSepolia, celo, celoAlfajores } from 'wagmi/chains';
-import { baseAccount, injected, walletConnect } from 'wagmi/connectors'; // ⚡ IMPORTED walletConnect
+import { baseAccount, injected, walletConnect } from 'wagmi/connectors';
 
-// ⚡ PULL IN YOUR WALLETCONNECT ID
-// Temporarily hardcoded for the test!
-const projectId = "2fe5da1f6c2f9fdac04aba0ba8023015"; 
+// ⚡ Falls back to your hardcoded ID so Vercel Preview links work flawlessly!
+const projectId = process.env.NEXT_PUBLIC_WALLETCONNECT_PROJECT_ID || "2fe5da1f6c2f9fdac04aba0ba8023015"; 
 
 export const config = createConfig({
-  chains: [base, celo],
+  chains: [base, baseSepolia, celo, celoAlfajores],
   connectors: [
     injected(),
     baseAccount({
       appName: 'AbaPay',
     }),
-    // ⚡ THE NEW WALLETCONNECT BRIDGE FOR VALORA & MOBILE WALLETS
+    // ⚡ THE WALLETCONNECT BRIDGE FOR VALORA & MOBILE WALLETS
     walletConnect({ 
       projectId, 
       showQrModal: true,
