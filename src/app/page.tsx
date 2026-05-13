@@ -678,8 +678,14 @@ export default function Home() {
       realTxHash = rawHash.toLowerCase();  
       backendPayload.txHash = realTxHash;
 
+            // 5. WAIT FOR BLOCKCHAIN
       setStatus("Confirming on blockchain... Please hold.");
-      await publicClient.waitForTransactionReceipt({ hash: realTxHash as `0x${string}`, confirmations: 1 });
+      const receipt = await publicClient.waitForTransactionReceipt({ hash: txHashString as `0x${string}`, confirmations: 1 });
+
+      // ⚡ CRITICAL FRONTEND FIX: Verify it didn't revert before calling the backend ⚡
+      if (receipt.status !== 'success') {
+          throw new Error("Transaction failed on the blockchain. Your funds were not deducted.");
+      }
 
       setStatus(`Payment Secured! Vending in progress...`);
 
