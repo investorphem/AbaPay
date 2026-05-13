@@ -7,7 +7,7 @@ import { baseAccount, injected, walletConnect } from 'wagmi/connectors'; // ⚡ 
 const projectId = "2fe5da1f6c2f9fdac04aba0ba8023015"; 
 
 export const config = createConfig({
-  chains: [base, baseSepolia, celo, celoAlfajores],
+  chains: [base, celo],
   connectors: [
     injected(),
     baseAccount({
