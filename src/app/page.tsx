@@ -673,14 +673,15 @@ export default function Home() {
           });
       }
 
-      // ⚡ CRITICAL FIX: The transaction is on the blockchain! Lock the safety flag! ⚡
+            // ⚡ CRITICAL FIX: The transaction is on the blockchain! Lock the safety flag! ⚡
       txHasBeenSigned = true;
       realTxHash = rawHash.toLowerCase();  
       backendPayload.txHash = realTxHash;
 
-            // 5. WAIT FOR BLOCKCHAIN
+      // 5. WAIT FOR BLOCKCHAIN
       setStatus("Confirming on blockchain... Please hold.");
-      const receipt = await publicClient.waitForTransactionReceipt({ hash: txHashString as `0x${string}`, confirmations: 1 });
+      // ⚡ CHANGED txHashString TO realTxHash BELOW ⚡
+      const receipt = await publicClient.waitForTransactionReceipt({ hash: realTxHash as `0x${string}`, confirmations: 1 });
 
       // ⚡ CRITICAL FRONTEND FIX: Verify it didn't revert before calling the backend ⚡
       if (receipt.status !== 'success') {
