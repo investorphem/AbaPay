@@ -3,7 +3,8 @@ import { base, baseSepolia, celo, celoAlfajores } from 'wagmi/chains';
 import { baseAccount, injected, walletConnect } from 'wagmi/connectors'; // ⚡ IMPORTED walletConnect
 
 // ⚡ PULL IN YOUR WALLETCONNECT ID
-const projectId = process.env.NEXT_PUBLIC_WALLETCONNECT_PROJECT_ID || "";
+// Temporarily hardcoded for the test!
+const projectId = "2fe5da1f6c2f9fdac04aba0ba8023015"; 
 
 export const config = createConfig({
   chains: [base, baseSepolia, celo, celoAlfajores],
