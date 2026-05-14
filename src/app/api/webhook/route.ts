@@ -233,7 +233,8 @@ export async function POST(req: Request) {
             payRes = await fetch(`${baseUrl}/pay`, { method: 'POST', headers: getHeaders(), body: JSON.stringify(vtpassPayload) });
             payData = await payRes.json();
         } catch (e: any) {
-            await supabaseAdmin.from('transactions').update({ status: 'VENDING_FAILED', error_code: '502_TIMEOUT', api_response: e.message || 'Fetch failed entirely' }).eq('tx_hash', txHash);
+            // ⚡ DASHBOARD FIX: FAILED_VENDING
+            await supabaseAdmin.from('transactions').update({ status: 'FAILED_VENDING', error_code: '502_TIMEOUT', api_response: e.message || 'Fetch failed entirely' }).eq('tx_hash', txHash);
             try { await sendTelegramAlert(`❌ *NETWORK CRASH (LIVE)*\n⛓️ *Chain:* ${record.blockchain}\n🛒 *Product:* ${record.network} ${record.service_category}\n👤 *User:* ${record.account_number}\n⚠️ Connection to VTpass timed out.\n🔍 *Explorer:* ${explorerUrl}`); } catch (err) {}
             return NextResponse.json({ status: "Vending Failed (Network)" }, { status: 200 }); 
         }
@@ -307,7 +308,8 @@ export async function POST(req: Request) {
             const friendlyMessage = error_messages[payData.code as string] || "Service is temporarily undergoing maintenance.";
             const rawTechnicalError = payData.response_description || payData.content?.errors || "Unknown VTpass Rejection";
 
-            await supabaseAdmin.from('transactions').update({ status: 'VENDING_FAILED', error_code: payData.code, api_response: rawTechnicalError }).eq('tx_hash', txHash);
+            // ⚡ DASHBOARD FIX: FAILED_VENDING
+            await supabaseAdmin.from('transactions').update({ status: 'FAILED_VENDING', error_code: payData.code, api_response: rawTechnicalError }).eq('tx_hash', txHash);
 
             // ⚡ WRAP IN TRY/CATCH SO TELEGRAM ERRORS DON'T CRASH THE WEBHOOK ⚡
             try {
