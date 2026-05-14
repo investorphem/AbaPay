@@ -629,11 +629,14 @@ export default function Home() {
       // 3. TRUE PRE-FLIGHT INTENT
       preflightHash = `preflight_${address}_${Date.now()}`;
       
-      backendPayload = {
-      // ... (rest of your code continues normally here) ...
+            backendPayload = {
         serviceID: vtpassServiceID, serviceCategory: uiCategory, network: displayNetwork.toUpperCase(), billersCode: payloadBillersCode, amount: cryptoToCharge, 
-        nairaAmount: calculatedNairaAmount, token: selectedToken.symbol, 
+        nairaAmount: calculatedNairaAmount, 
+        // ⚡ NEW FIX: Send the actual foreign GHS amount to the backend!
+        foreignAmount: isInternational ? (selectedIntlVariation.fixedPrice === "Yes" ? selectedIntlVariation.variation_amount : intlFlexibleAmount) : undefined,
+        token: selectedToken.symbol, 
         txHash: preflightHash, 
+        // ... rest of the fields
         variation_code: finalVariationCode, phone: customerPhone || accountNumber, email: customerEmail, wallet_address: address, 
         subscription_type: activeTab === "pay" && activeService.id === "CABLE" && ['dstv', 'gotv'].includes(cableProvider) ? cableSubscriptionType : undefined,
         meter_account_type: meterAccountType, operator_id: isInternational ? selectedIntlOperator?.operator_id : undefined, country_code: isInternational ? activeCountry.code : undefined, product_type_id: isInternational ? selectedIntlProduct?.product_type_id : undefined,
