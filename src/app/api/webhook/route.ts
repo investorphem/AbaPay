@@ -183,19 +183,24 @@ export async function POST(req: Request) {
         const appMode = process.env.NEXT_PUBLIC_APP_MODE || "sandbox";
         const baseUrl = appMode === "live" ? "https://vtpass.com/api" : "https://sandbox.vtpass.com/api";
 
+        // ⚡ VTPASS AMOUNT & PHONE LOGIC FIX
+        // Admin gets the SMS receipt for international transactions
+        const safeAmount = isForeign ? parseFloat(record.foreignAmount || "1") : record.amount_naira;
+        const safePhone = isForeign ? "08168811821" : (record.phone || record.account_number);
+
         let vtpassPayload: any = {
             request_id: record.request_id,
             serviceID: record.service_id, 
-            amount: record.amount_naira,
-            phone: record.phone || record.account_number
+            amount: safeAmount,
+            phone: safePhone
         };
 
         if (isForeign) {
             vtpassPayload.billersCode = record.account_number;
             vtpassPayload.variation_code = record.variation_code;
-            vtpassPayload.operator_id = record.operator_id;
+            vtpassPayload.operator_id = record.operator_id?.toString();       // ⚡ REQUIRED STRING
             vtpassPayload.country_code = record.country_code;
-            vtpassPayload.product_type_id = record.product_type_id;
+            vtpassPayload.product_type_id = record.product_type_id?.toString(); // ⚡ REQUIRED STRING
             vtpassPayload.email = record.customer_email || "support@abapays.com";
         } else {
             if (['DATA', 'ELECTRICITY', 'BANK'].includes(record.service_category)) {
