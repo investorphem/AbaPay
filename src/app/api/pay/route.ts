@@ -37,7 +37,7 @@ export async function POST(req: Request) {
     const { 
       serviceID, serviceCategory, network, billersCode, amount, 
       token: tokenSymbol, txHash, variation_code, phone, 
-      nairaAmount, wallet_address, subscription_type,
+      nairaAmount, foreignAmount, wallet_address, subscription_type, // ⚡ ADDED foreignAmount HERE
       operator_id, country_code, product_type_id, email,
       meter_account_type, blockchain,
       intent_only, preflight_hash, cancel_intent 
@@ -189,10 +189,24 @@ export async function POST(req: Request) {
     const appMode = process.env.NEXT_PUBLIC_APP_MODE || "sandbox";
     const baseUrl = appMode === "live" ? "https://vtpass.com/api" : "https://sandbox.vtpass.com/api";
 
-    let vtpassPayload: any = { request_id: vtRequestId, serviceID: serviceID, amount: vendAmount, phone: phone || billersCode };
+    // ⚡ FIX: Uses foreignAmount (e.g. 1 GHS) and Dummy NG Phone for International!
+    const safeAmount = isForeign ? parseFloat(foreignAmount || "1") : vendAmount;
+    const safePhone = isForeign ? "08168811821" : (phone || billersCode);
+
+    let vtpassPayload: any = { 
+        request_id: vtRequestId, 
+        serviceID: serviceID, 
+        amount: safeAmount, 
+        phone: safePhone 
+    };
 
     if (isForeign) {
-        vtpassPayload.billersCode = billersCode; vtpassPayload.variation_code = variation_code; vtpassPayload.operator_id = operator_id; vtpassPayload.country_code = country_code; vtpassPayload.product_type_id = product_type_id; vtpassPayload.email = email || "support@abapay.com";
+        vtpassPayload.billersCode = billersCode; 
+        vtpassPayload.variation_code = variation_code; 
+        vtpassPayload.operator_id = operator_id?.toString();          // ⚡ REQUIRED STRING
+        vtpassPayload.country_code = country_code; 
+        vtpassPayload.product_type_id = product_type_id?.toString();  // ⚡ REQUIRED STRING
+        vtpassPayload.email = email || "support@abapay.com";
     } else {
         if (['DATA', 'ELECTRICITY', 'BANK'].includes(serviceCategory)) { vtpassPayload.billersCode = billersCode; vtpassPayload.variation_code = variation_code; } 
         else if (serviceCategory === 'EDUCATION') { vtpassPayload.variation_code = variation_code; if (serviceID === 'jamb') vtpassPayload.billersCode = billersCode; } 
