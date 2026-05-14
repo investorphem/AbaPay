@@ -185,7 +185,7 @@ export async function POST(req: Request) {
 
         // ⚡ VTPASS AMOUNT & PHONE LOGIC FIX
         // Admin gets the SMS receipt for international transactions
-        const safeAmount = isForeign ? parseFloat(record.foreignAmount || "1") : record.amount_naira;
+        const safeAmount = isForeign ? parseFloat(record.foreign_amount || record.foreignAmount || "1") : record.amount_naira;
         const safePhone = isForeign ? "08168811821" : (record.phone || record.account_number);
 
         let vtpassPayload: any = {
@@ -269,7 +269,8 @@ export async function POST(req: Request) {
 
                 // ⚡ AWAIT TELEGRAM SO IT DOESN'T GET KILLED BY VERCEL ⚡
                 try {
-                    await sendTelegramAlert(`✅ *SALE SUCCESSFUL (WEBHOOK)*\n⛓️ *Chain:* ${record.blockchain || 'CELO'}\n🛒 *Product:* ${record.network} ${record.service_category}\n💰 *Naira:* ₦${record.amount_naira}\n🪙 *Asset:* ${record.amount_usdt} ${record.token_used || 'USD₮'}\n👤 *User:* ${record.account_number}\n🧾 *Ref:* ${alertTokenRef}\n🔍 *Explorer:* ${explorerUrl}`);
+                    // ⚡ UPDATED: Display Foreign Amount for Intl
+                    await sendTelegramAlert(`✅ *SALE SUCCESSFUL (WEBHOOK)*\n⛓️ *Chain:* ${record.blockchain || 'CELO'}\n🛒 *Product:* ${record.network} ${record.service_category}\n💰 *Amount Paid:* ${record.display_amount || record.displayAmount || `₦${record.amount_naira}`}\n🪙 *Asset:* ${record.amount_usdt} ${record.token_used || 'USD₮'}\n👤 *User:* ${record.account_number}\n🧾 *Ref:* ${alertTokenRef}\n🔍 *Explorer:* ${explorerUrl}`);
                 } catch (tgError) {
                     console.error("Telegram Success Alert Error in Webhook:", tgError);
                 }
@@ -285,7 +286,7 @@ export async function POST(req: Request) {
                         to: record.customer_email,
                         replyTo: 'support@abapays.com', 
                         subject: `AbaPay Receipt - ${record.network} ${record.service_category}`,
-                        html: `<div style="font-family: sans-serif; background-color: #f4f4f5; padding: 40px 0;"><div style="max-width: 600px; margin: 0 auto; background-color: #ffffff; border-radius: 12px; overflow: hidden;"><div style="background: #18181b; padding: 40px 30px; text-align: center;"><h1 style="color:white">AbaPay</h1></div><div style="padding: 40px 30px;"><h2 style="color: #18181b; font-size: 32px;">₦${record.amount_naira.toLocaleString()}</h2><p>Account: ${record.account_number}</p><p>Tx Hash: ${txHash}</p>${dbPurchasedCode ? `<p style="color:#10b981; font-weight:bold;">Token / PIN: ${dbPurchasedCode}</p>` : ``}</div></div></div>`
+                        html: `<div style="font-family: sans-serif; background-color: #f4f4f5; padding: 40px 0;"><div style="max-width: 600px; margin: 0 auto; background-color: #ffffff; border-radius: 12px; overflow: hidden;"><div style="background: #18181b; padding: 40px 30px; text-align: center;"><h1 style="color:white">AbaPay</h1></div><div style="padding: 40px 30px;"><h2 style="color: #18181b; font-size: 32px;">${record.display_amount || record.displayAmount || `₦${record.amount_naira.toLocaleString()}`}</h2><p>Account: ${record.account_number}</p><p>Tx Hash: ${txHash}</p>${dbPurchasedCode ? `<p style="color:#10b981; font-weight:bold;">Token / PIN: ${dbPurchasedCode}</p>` : ``}</div></div></div>`
                     }));
                 }
 
