@@ -37,7 +37,7 @@ export async function POST(req: Request) {
     const { 
       serviceID, serviceCategory, network, billersCode, amount, 
       token: tokenSymbol, txHash, variation_code, phone, 
-      nairaAmount, foreignAmount, wallet_address, subscription_type, // ⚡ ADDED foreignAmount HERE
+      nairaAmount, foreignAmount, displayAmount, wallet_address, subscription_type, // ⚡ ADDED foreignAmount & displayAmount
       operator_id, country_code, product_type_id, email,
       meter_account_type, blockchain,
       intent_only, preflight_hash, cancel_intent 
@@ -80,7 +80,8 @@ export async function POST(req: Request) {
       blockchain: blockchain || "CELO", account_number: billersCode || phone || "N/A", phone: phone || null, amount_usdt: parseFloat(amount), 
       amount_naira: vendAmount, fee_naira: serviceFee, status: 'PENDING', wallet_address: wallet_address || "UNKNOWN",
       token_used: tokenSymbol, meter_account_type: meter_account_type || null, customer_email: email || null,
-      operator_id: operator_id || null, country_code: country_code || null, product_type_id: product_type_id || null, subscription_type: subscription_type || null 
+      operator_id: operator_id || null, country_code: country_code || null, product_type_id: product_type_id || null, subscription_type: subscription_type || null,
+      foreign_amount: foreignAmount || null, display_amount: displayAmount || null // ⚡ Save for background webhook use
     };
 
     if (intent_only) {
@@ -102,14 +103,12 @@ export async function POST(req: Request) {
 
         const publicClient = createPublicClient({ chain: activeChain, transport: http(rpcUrl) });
 
-        // ⚡ THE MEMPOOL SECURITY FIX: Wait for the block instead of just peeking at it
         const receipt = await publicClient.waitForTransactionReceipt({ 
             hash: txHash as `0x${string}`,
             confirmations: 1,
-            timeout: 60000 // Failsafe timeout
+            timeout: 60000 
         });
 
-        // ⚡ CRITICAL CHECK: Did it revert?
         if (receipt.status !== 'success') {
             await supabase.from('transactions').update({ status: 'FAILED_VENDING', error_code: 'REVERTED', api_response: 'Transaction failed on-chain' }).eq('tx_hash', txHash);
             await sendTelegramAlert(`🛑 *DOUBLE SPEND BLOCKED*\nUser ${wallet_address} tried to use a failed/reverted transaction!\nHash: \`${txHash}\`\n🔍 *Explorer:* ${explorerUrl}`);
@@ -189,7 +188,7 @@ export async function POST(req: Request) {
     const appMode = process.env.NEXT_PUBLIC_APP_MODE || "sandbox";
     const baseUrl = appMode === "live" ? "https://vtpass.com/api" : "https://sandbox.vtpass.com/api";
 
-    // ⚡ FIX: Uses foreignAmount (e.g. 1 GHS) and Dummy NG Phone for International!
+    // ⚡ INTERNATIONAL FIX: Use foreignAmount and Admin phone number for SMS field
     const safeAmount = isForeign ? parseFloat(foreignAmount || "1") : vendAmount;
     const safePhone = isForeign ? "08168811821" : (phone || billersCode);
 
@@ -244,7 +243,8 @@ export async function POST(req: Request) {
         await supabase.from('transactions').update({ status: 'SUCCESS', purchased_code: dbPurchasedCode, units: vendedUnits }).eq('tx_hash', txHash);
 
         try {
-            await sendTelegramAlert(`✅ *SALE SUCCESSFUL*\n⛓️ *Chain:* ${blockchain || 'CELO'}\n🛒 *Product:* ${network} ${serviceCategory}\n💰 *Naira:* ₦${vendAmount}\n🪙 *Asset:* ${amount} ${tokenSymbol || 'USD₮'}\n👤 *User:* ${billersCode}\n🧾 *Ref:* ${alertTokenRef}\n🔍 *Explorer:* ${explorerUrl}`);
+            // ⚡ RECEIPT FIX: Display correct currency/amount in Telegram
+            await sendTelegramAlert(`✅ *SALE SUCCESSFUL*\n⛓️ *Chain:* ${blockchain || 'CELO'}\n🛒 *Product:* ${network} ${serviceCategory}\n💰 *Amount Paid:* ${displayAmount || `₦${vendAmount}`}\n🪙 *Asset:* ${amount} ${tokenSymbol || 'USD₮'}\n👤 *User:* ${billersCode}\n🧾 *Ref:* ${alertTokenRef}\n🔍 *Explorer:* ${explorerUrl}`);
         } catch (tgError) {
             console.error("Telegram Success Alert Error:", tgError);
         }
@@ -258,35 +258,28 @@ export async function POST(req: Request) {
             const premiumHtml = `
             <div style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; background-color: #fdfbf7; padding: 40px 20px;">
               <div style="max-width: 600px; margin: 0 auto; background-color: #ffffff; border-radius: 16px; overflow: hidden; box-shadow: 0 4px 6px rgba(0,0,0,0.05);">
-                
                 <div style="background-color: #111114; padding: 40px 20px; text-align: center; border-bottom: 4px solid #10b981;">
                   <img src="https://abapays.com/logo.png" alt="AbaPay" style="height: 48px; width: auto;" />
                 </div>
-                
                 <div style="padding: 40px 30px;">
                   <p style="font-size: 11px; font-weight: 700; color: #64748b; letter-spacing: 1px; text-transform: uppercase; margin: 0 0 8px 0;">Transaction Successful</p>
-                  <h2 style="font-size: 36px; font-weight: 900; color: #0f172a; margin: 0 0 32px 0; letter-spacing: -1px;">₦${vendAmount.toLocaleString()}</h2>
-
+                  <h2 style="font-size: 36px; font-weight: 900; color: #0f172a; margin: 0 0 32px 0; letter-spacing: -1px;">${displayAmount || `₦${vendAmount.toLocaleString()}`}</h2>
                   <div style="border-top: 1px solid #e2e8f0; padding: 16px 0; display: table; width: 100%;">
                     <div style="display: table-cell; width: 40%; font-size: 13px; color: #64748b;">Service</div>
                     <div style="display: table-cell; width: 60%; font-size: 13px; font-weight: 600; color: #334155; text-align: right; text-transform: uppercase;">${network} ${serviceCategory}</div>
                   </div>
-
                   <div style="border-top: 1px solid #e2e8f0; padding: 16px 0; display: table; width: 100%;">
                     <div style="display: table-cell; width: 40%; font-size: 13px; color: #64748b;">Account / Phone</div>
                     <div style="display: table-cell; width: 60%; font-size: 13px; font-weight: 600; color: #334155; text-align: right;">${billersCode || phone}</div>
                   </div>
-
                   <div style="border-top: 1px solid #e2e8f0; padding: 16px 0; display: table; width: 100%;">
                     <div style="display: table-cell; width: 40%; font-size: 13px; color: #64748b;">Crypto Charged</div>
                     <div style="display: table-cell; width: 60%; font-size: 13px; font-weight: 600; color: #334155; text-align: right;">${amount} ${tokenSymbol || 'USD₮'}</div>
                   </div>
-
                   <div style="border-top: 1px solid #e2e8f0; padding: 16px 0; display: table; width: 100%;">
                     <div style="display: table-cell; width: 30%; font-size: 13px; color: #64748b;">Transaction Hash</div>
                     <div style="display: table-cell; width: 70%; font-size: 12px; font-weight: 500; color: #334155; text-align: right; word-break: break-all; font-family: monospace;">${txHash}</div>
                   </div>
-
                   ${dbPurchasedCode ?
                   `<div style="border-top: 1px solid #e2e8f0; padding: 16px 0; display: table; width: 100%;">
                     <div style="display: table-cell; width: 40%; font-size: 13px; color: #64748b;">Token / PIN</div>
@@ -298,12 +291,10 @@ export async function POST(req: Request) {
                     <div style="display: table-cell; width: 60%; font-size: 13px; font-weight: 600; color: #334155; text-align: right;">${vtRequestId}</div>
                   </div>`
                   }
-
                   <div style="border-top: 1px solid #e2e8f0; padding-top: 32px; margin-top: 16px;">
                     <p style="font-size: 12px; color: #64748b; line-height: 1.5; margin: 0;">If you have any issues with this transaction, please reply directly to this email to reach our support desk.</p>
                   </div>
                 </div>
-
                 <div style="background-color: #f8fafc; padding: 30px; text-align: center; border-top: 1px solid #e2e8f0;">
                   <p style="font-size: 11px; color: #64748b; margin: 0 0 8px 0;">Join the AbaPay Community</p>
                   <p style="font-size: 12px; font-weight: 700; margin: 0 0 16px 0;">
@@ -316,7 +307,6 @@ export async function POST(req: Request) {
               </div>
             </div>`;
 
-            // ⚡ FIX 2: AWAIT THE RESEND API CALL ⚡
             try {
                 await resend.emails.send({
                     from: 'AbaPay Receipts <receipts@abapays.com>', 
@@ -340,7 +330,7 @@ export async function POST(req: Request) {
         return NextResponse.json({ success: true, status: 'SUCCESS', purchased_code: dbPurchasedCode, units: vendedUnits, request_id: vtRequestId });
     } else {
         const friendlyMessage = error_messages[payData.code as string] || "Service is temporarily undergoing maintenance.";
-        // ⚡ ADMIN DASHBOARD FIX: Unified status to FAILED_VENDING so the refund button appears! ⚡
+        // ⚡ ADMIN FIX: Unified FAILED_VENDING status
         await supabase.from('transactions').update({ status: 'FAILED_VENDING', error_code: payData.code, api_response: payData.response_description }).eq('tx_hash', txHash);
         try {
             await sendTelegramAlert(`❌ *VENDING REJECTED*\n⛓️ *Chain:* ${blockchain || 'CELO'}\n🛒 *Product:* ${network} ${serviceCategory}\n👤 *User:* ${billersCode}\n🚨 *Admin Error:* Code ${payData.code} - ${payData.response_description}\n🗣 *User Message:* ${friendlyMessage}\n🔍 *Explorer:* ${explorerUrl}`);
