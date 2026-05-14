@@ -340,7 +340,8 @@ export async function POST(req: Request) {
         return NextResponse.json({ success: true, status: 'SUCCESS', purchased_code: dbPurchasedCode, units: vendedUnits, request_id: vtRequestId });
     } else {
         const friendlyMessage = error_messages[payData.code as string] || "Service is temporarily undergoing maintenance.";
-        await supabase.from('transactions').update({ status: 'VENDING_FAILED', error_code: payData.code, api_response: payData.response_description }).eq('tx_hash', txHash);
+        // ⚡ ADMIN DASHBOARD FIX: Unified status to FAILED_VENDING so the refund button appears! ⚡
+        await supabase.from('transactions').update({ status: 'FAILED_VENDING', error_code: payData.code, api_response: payData.response_description }).eq('tx_hash', txHash);
         try {
             await sendTelegramAlert(`❌ *VENDING REJECTED*\n⛓️ *Chain:* ${blockchain || 'CELO'}\n🛒 *Product:* ${network} ${serviceCategory}\n👤 *User:* ${billersCode}\n🚨 *Admin Error:* Code ${payData.code} - ${payData.response_description}\n🗣 *User Message:* ${friendlyMessage}\n🔍 *Explorer:* ${explorerUrl}`);
         } catch (tgError) {
