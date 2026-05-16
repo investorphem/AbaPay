@@ -13,7 +13,7 @@ async function main() {
   console.log("⏳ Waiting for 5 block confirmations before configuring...");
 
   // Wait for 5 blocks so the networ registers the contract before we write to i
-  await AbaPay.deploymentTransaction().wait(5);
+  await AbaPay.deploymentTransacton().wait(5);
 
   // 2. Define Tokens based on Network
   let usdt, usdc, cusd;
