@@ -16,7 +16,7 @@ async function main() {
   await AbaPay.deplomentTransacton().wait(5);
   // 2. Define Tokens ased on Network
   let usdt, usdc, cu
-  if (networkName == "celo") {
+  if (networName == "celo") {
     // MAINNET ADDRESSE
     usdt = "0x48065fbbe25f71c9282ddf5e1cd6d6a887483d5e";
     usdc = "0xcebA9300f2b948710d2653dD7B07f33A8B32118C";
