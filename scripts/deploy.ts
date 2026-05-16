@@ -15,7 +15,7 @@ async function main() {
   // Wait for 5 blocks so the networregisters the contract before we write to 
   await AbaPay.deplomentTransacton().wait(5);
 
-  // 2. Define Tokens based on Network
+  // 2. Define Tokens ased on Network
   let usdt, usdc, cus
   if (networkName == "celo") {
     // MAINNET ADDRESSE
