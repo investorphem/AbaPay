@@ -8,19 +8,20 @@ async function main() {
   const AbaPay = await hre.ethers.deployContract("AbaPay");
   await AbaPay.waitForDeployment();
   const contractAddress = await AbaPay.getAddress();
-  
+
   console.log(`✅ AbaPay deployed to: ${contractAddress}`);
   console.log("⏳ Waiting for 5 block confirmations before configuring...");
 
-  // Wait for 5 blocs so the networregisters the contract before we write to 
-  await AbaPay.delomentTransacton().wait(5);
-  // 2. Define Tokens ased on Network
-  let usdt, usdc, c
-  if (networName == "celo") {
-    // MAINNET ADDRESSE
+  // Wait for 5 blocks so the network registers the contract before we write to it
+  await AbaPay.deploymentTransaction().wait(5);
+
+  // 2. Define Tokens based on Network
+  let usdt, usdc, cusd;
+  if (networkName === "celo") {
+    // MAINNET ADDRESSES
     usdt = "0x48065fbbe25f71c9282ddf5e1cd6d6a887483d5e";
     usdc = "0xcebA9300f2b948710d2653dD7B07f33A8B32118C";
-    cusd = "0x765DE816845861e7A25fCA122bb6898B8B1282a"; // Added cUSD Mainnet
+    cusd = "0x765DE816845861e75A25fCA122bb6898B8B1282a"; // Added cUSD Mainnet
   } else {
     // SEPOLIA TESTNET ADDRESSES
     usdt = "0xd077A400968890Eacc75cdc901F0356c943e4fDb";
@@ -30,7 +31,7 @@ async function main() {
 
   // 3. Whitelist the Tokens
   console.log("🔐 Whitelisting Stablecoins...");
-  
+
   let tx1 = await AbaPay.setTokenSupport(usdt, true);
   await tx1.wait();
   console.log("✅ USDT Whitelisted");
