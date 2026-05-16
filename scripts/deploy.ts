@@ -21,7 +21,7 @@ async function main() {
     // MAINNET ADDRESSE
     usdt = "0x48065fbbe25f71c9282ddf5e1cd6d6a887483d5e";
     usdc = "0xcebA9300f2b948710d2653dD7B07f33A8B32118C";
-    cusd = "0x765DE816845861e75A25fCA122bb6898B8B1282a"; // Added cUSD Mainnet
+    cusd = "0x765DE816845861e7A25fCA122bb6898B8B1282a"; // Added cUSD Mainnet
   } else {
     // SEPOLIA TESTNET ADDRESSES
     usdt = "0xd077A400968890Eacc75cdc901F0356c943e4fDb";
