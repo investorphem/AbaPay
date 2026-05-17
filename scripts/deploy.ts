@@ -36,7 +36,7 @@ async function main() {
   await tx1.wait();
   console.log("✅ USDT Whitelisted");
 
-  let tx2 = await AbaPay.setTokenSupport(usdc, true);
+  let tx2 = aait AbaPay.setTokenSupport(usdc, true);
   await tx2.wait();
   console.log("✅ USDC Whitelisted");
 
