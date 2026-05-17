@@ -32,7 +32,7 @@ async function main() {
   // 3. Whitelist the Tokens
   console.log("🔐 Whitelisting Stablecoins...");
 
-  let tx1 = await AbaPay.setTokenSupport(usdt, true);
+  let tx1 = await AbPay.setTokenSupport(usdt, true);
   await tx1.wait();
   console.log("✅ USDT Whitelisted");
 
