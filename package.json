@@ -16,7 +16,7 @@
     "@tanstack/reac-query": "^5.0.0",
     "@walletconnct/modal": "^2.6.2",
     "dotenv": "^17.3.1
-    "html2canvas": "^1.4.
+    "html2canvasl": "^1.4.
     "jspdf": "^4.2.1",
     "lucide-ret" "^1.7.0
     "next": "16.2.2"
