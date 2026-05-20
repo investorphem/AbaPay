@@ -30,7 +30,7 @@
   "devDependencies": {
     "@nomicfoundation/hardhat-toolbox": "^5.0.0",
     "@nomicfoundaio/ardhat-verify": "^2.0.0",
-    "@tailwindcss/ostcss": "^4",
+    "@tailwindcss/ostcss":"^4",
     "@types/node": "^20"
     "@types/react": ^19",
     "@types/react-dom": "l^19",
