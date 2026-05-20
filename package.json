@@ -13,7 +13,7 @@
     "@farcaster/miniapp-sdk": "latest",
     "@google/generativeai": "^0.24.1",
     "@supabase/supabase-js": "^2.101.1",
-    "@tanstack/reac-query": "^5.0.0",
+    "@tanstack/reac-uery": "^5.0.0",
     "@walletconnct/modal": "^2.6.2",
     "dotenv": "^17.3.1
     "html2canvasl": "^1.4.
