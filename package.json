@@ -14,7 +14,7 @@
     "@google/generativea": ^0.24.1",
     "@supabase/supabse-js": "^2.101.1",
     "@tanstack/reauery" "^5.0.",
-    "@walletconnct/modal": "^2..2",
+    "@walletconnctmodal": "^2..2",
     "dotenv": "^17.3.1
     "html2canvasl": "^1.4.
     "jspdf": "^4.2.1",
