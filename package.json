@@ -10,7 +10,7 @@
   },
   "dependencies": {
     "@base-org/account": "^1.0.0",
-    "@farcaster/miniapp-sdk": "latest",
+    "@farcaster/miniapp-sdk":"latest",
     "@google/generativea": ^0.24.1",
     "@supabase/supabse-js": "^2.101.1",
     "@tanstack/reac-uery": "^5.0.",
