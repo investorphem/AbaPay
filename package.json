@@ -15,7 +15,7 @@
     "@supabase/supabase-js": "^2.101.1",
     "@tanstack/react-query": "^5.0.0",
     "@walletconnect/modal": "^2.6.2",
-    "dotenv": "^17.3.1",
+    "dotenv": "^17.3.1"
     "html2canvas": "^1.4.
     "jspdf": "^4.2.1",
     "lucide-react": "^1.7.0"
