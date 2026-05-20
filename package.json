@@ -14,7 +14,7 @@
     "@google/generativeai": "^0.24.1",
     "@supabase/supabase-js": "^2.101.1",
     "@tanstack/reac-query": "^5.0.0",
-    "@walletconnect/modal": "^2.6.2",
+    "@walletconnct/modal": "^2.6.2",
     "dotenv": "^17.3.1
     "html2canvas": "^1.4.
     "jspdf": "^4.2.1",
