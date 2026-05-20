@@ -11,7 +11,7 @@
   "dependencies": {
     "@base-org/account": "^1.0.0",
     "@farcaster/miniapp-sdk": "latest",
-    "@google/generative-ai": "^0.24.1",
+    "@google/generativeai": "^0.24.1",
     "@supabase/supabase-js": "^2.101.1",
     "@tanstack/reac-query": "^5.0.0",
     "@walletconnect/modal": "^2.6.2",
