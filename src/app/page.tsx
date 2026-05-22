@@ -1352,8 +1352,16 @@ export default function Home() {
                   {isProcessing ? "Wait" : "Connect"}
                 </button>
             ) : (
-                <PointsBadge walletAddress={address || undefined} onDisconnect={handleWalletDisconnect} />
-            )}
+    <div className="flex items-center gap-2">
+      <PointsBadge walletAddress={address || undefined} />
+      <button 
+        onClick={handleWalletDisconnect}
+        className="bg-slate-100 dark:bg-slate-800/80 hover:bg-red-50 dark:hover:bg-red-900/20 border border-slate-200 dark:border-slate-800 text-slate-500 dark:text-slate-400 hover:text-red-600 dark:hover:text-red-400 text-[9px] font-black uppercase tracking-widest px-2.5 py-1.5 rounded-xl transition-all"
+      >
+        Exit
+      </button>
+    </div>
+)}
 
             <button 
               onClick={() => openSelectionModal('country', "Select Region", intlCountries.length ? intlCountries : SUPPORTED_COUNTRIES, handleCountryChange)}
