@@ -780,7 +780,7 @@ export default function Home() {
     return () => { if (intervalId) clearInterval(intervalId); };
   }, []);
 
-  // ⚡ FARCASTER SPLASH SCREEN DROPPER ⚡
+    // ⚡ FARCASTER SPLASH SCREEN DROPPER ⚡
   useEffect(() => {
     const notifyFarcaster = async () => {
       try {
@@ -791,6 +791,31 @@ export default function Home() {
     };
     notifyFarcaster();
   }, []);
+
+
+  // =======================================================================
+  // 👇 PASTE THE NEW CODE RIGHT HERE, EXACTLY ABOVE THE WAGMI BRIDGE 👇
+  // =======================================================================
+
+  // ⚡ NATIVE INJECTED AUTOCONNECT INTERCEPTOR ⚡
+  useEffect(() => {
+    // Abort if already connected, explicitly logged out, or not in web mode
+    if (address || environment !== 'WEB' || localStorage.getItem('abapay_explicit_logout') === 'true') return;
+
+    const isWeb3Browser = typeof window !== 'undefined' && Boolean((window as any).ethereum);
+    if (!isWeb3Browser || connectors.length === 0) return; // Wait for connectors to load
+
+    // Find ANY injected provider (MetaMask, Trust, Coinbase, generic EIP-6963)
+    const injectedConnector = connectors.find(c => c.type === 'injected' || c.id === 'injected' || c.id === 'metaMask');
+    
+    if (injectedConnector) {
+      connect({ connector: injectedConnector });
+      localStorage.setItem('abapay_connected', 'true');
+    }
+  }, [address, environment, connectors, connect]);
+
+  // =======================================================================
+
 
   // ⚡ WAGMI TO ABAPAY BRIDGE ⚡
   useEffect(() => {
@@ -1351,13 +1376,28 @@ export default function Home() {
                 </div>
             )}
 
-                        {/* ⚡ NEW: Dynamic Connect Button / AbaPoints Swap ⚡ */}
+                                    {/* ⚡ NEW: Dynamic Connect Button / Smart Environment Routing ⚡ */}
             {!address && environment === 'WEB' ? (
                 <button 
                   onClick={() => {
-                    // ⚡ Look for WalletConnect first, fallback to injected if missing
-                    const wcConnector = connectors.find(c => c.id === 'walletConnect');
-                    connect({ connector: wcConnector || connectors[0] });
+                    // 1. Wipe explicit logouts so manual clicks work again
+                    localStorage.removeItem('abapay_explicit_logout'); 
+                    
+                    // 2. Detect environment and available connectors
+                    const isWeb3Browser = typeof window !== "undefined" && Boolean((window as any).ethereum);
+                    const injectedConnector = connectors.find(c => c.type === 'injected' || c.id === 'injected' || c.id === 'metaMask');
+                    const wcConnector = connectors.find(c => c.id === 'walletConnect' || c.type === 'walletConnect');
+                    
+                    // 3. Smart Routing: Native Injected first, WalletConnect second
+                    if (isWeb3Browser && injectedConnector) {
+                      connect({ connector: injectedConnector });
+                    } else if (wcConnector) {
+                      connect({ connector: wcConnector });
+                    } else if (connectors.length > 0) {
+                      connect({ connector: connectors[0] });
+                    }
+                    
+                    localStorage.setItem('abapay_connected', 'true');
                   }}
                   disabled={isProcessing}
                   className="bg-emerald-50 dark:bg-emerald-900/20 hover:bg-emerald-100 dark:hover:bg-emerald-900/40 border border-emerald-200 dark:border-emerald-800/50 text-emerald-700 dark:text-emerald-400 font-black text-[10px] px-3 py-1.5 rounded-xl transition-all shadow-sm active:scale-95 disabled:opacity-50 flex items-center gap-1.5 uppercase tracking-widest"
