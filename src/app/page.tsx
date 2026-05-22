@@ -13,7 +13,7 @@ import {
 } from "lucide-react";
 import { supabase } from "@/utils/supabase";
 import { ELECTRICITY_DISCOS } from "./discos"; 
-import { useAccount, useConnect } from 'wagmi';
+import { useAccount, useConnect, useDisconnect } from 'wagmi';
 
 import { ReceiptModal, SelectionModal } from "@/components/Modals";
 import { TermsModal, PrivacyModal } from "@/components/Modals";
@@ -31,6 +31,7 @@ import { HistoryTab } from "@/components/HistoryTab";
 export default function Home() {
   const { address: wagmiAddress, isConnected: isWagmiConnected, chain: wagmiChain } = useAccount();
   const { connectors, connect } = useConnect();
+  const { disconnect } = useDisconnect();
   const [environment, setEnvironment] = useState<'MINIPAY' | 'FARCASTER' | 'WEB' | 'LOADING' | 'BASE'>('LOADING');
   const [killSwitches, setKillSwitches] = useState<Record<string, boolean>>({});
   const [address, setAddress] = useState<string | null>(null);
@@ -110,8 +111,8 @@ export default function Home() {
   const [isSupportOpen, setIsSupportOpen] = useState(false);
   const [supportMessage, setSupportMessage] = useState("");
   const [supportEmail, setSupportEmail] = useState("");
-    const [supportTxHash, setSupportTxHash] = useState<string | null>(null);
-  const [supportChain, setSupportChain] = useState<string | null>(null); // ⚡ ADD THIS LINE
+  const [supportTxHash, setSupportTxHash] = useState<string | null>(null);
+  const [supportChain, setSupportChain] = useState<string | null>(null); 
   const [supportFile, setSupportFile] = useState<File | null>(null);
   const [isSendingSupport, setIsSendingSupport] = useState(false);
 
@@ -227,6 +228,13 @@ export default function Home() {
     return { cryptoToCharge: crypto.toFixed(4), currentFee: fee };
   }, [calculatedNairaAmount, exchangeRate, activeService, activeTab]);
 
+  // ⚡ DYNAMIC FORMATTED CHECKOUT STRING ⚡
+  const displayAmountString = useMemo(() => {
+    return isInternational 
+       ? `${intlCurrency || activeCountry.currency || activeCountry.code} ${displayForeignAmount}` 
+       : `₦${(parseFloat(calculatedNairaAmount || "0") + currentFee).toLocaleString()}`;
+  }, [isInternational, intlCurrency, activeCountry, displayForeignAmount, calculatedNairaAmount, currentFee]);
+
   const walletFiatDisplay = useMemo(() => {
     const bal = parseFloat(walletBalance);
     if (isNaN(bal)) return "0.00";
@@ -313,11 +321,10 @@ export default function Home() {
     if (isInternational) {
         if (!selectedIntlProduct || !selectedIntlOperator || accountNumber.length < 6) return false;
         if (!selectedIntlVariation) return false;
-                if (selectedIntlVariation.fixedPrice !== "Yes") {
+        if (selectedIntlVariation.fixedPrice !== "Yes") {
             const flexInput = parseFloat(intlFlexibleAmount || "0");
             if (flexInput <= 0) return false;
 
-            // ⚡ MINIMUM 1 USD (1 STABLECOIN) CHECK ⚡
             const flexNairaEquivalent = flexInput * parseFloat(selectedIntlVariation.variation_rate || "1");
             const flexCryptoEquivalent = flexNairaEquivalent / exchangeRate;
             if (flexCryptoEquivalent < 1) return false;
@@ -345,8 +352,8 @@ export default function Home() {
         else if (internetProvider === 'spectranet') return accountNumber.length >= 5 && selectedInternetPlan !== null;
         else return accountNumber.length === 11 && accountNumber.startsWith("0") && selectedInternetPlan !== null;
       }
-            if (activeService.id === "ELECTRICITY") {
-          if (electricityDailyDuplicate) return false; // ⚡ Block identical daily payments
+      if (activeService.id === "ELECTRICITY") {
+          if (electricityDailyDuplicate) return false; 
           return accountNumber.length >= 10 && customerName !== null && customerPhone.length >= 10;
       }
       if (activeService.id === "CABLE") {
@@ -358,7 +365,7 @@ export default function Home() {
       }
     }
     return false;
-  }, [isInternational, selectedIntlProduct, selectedIntlOperator, selectedIntlVariation, intlFlexibleAmount, customerEmail, accountNumber, nairaAmount, activeService, customerName, dynamicMinAmount, dynamicMaxAmount, dynamicElecMin, cableSubscriptionType, selectedCablePlan, selectedBank, selectedInternetPlan, internetAccountId, customerPhone, internetProvider, activeTab, cableProvider, selectedEducationPlan, educationProvider, isFixedPlan, isCurrentServiceDisabled]);
+  }, [isInternational, selectedIntlProduct, selectedIntlOperator, selectedIntlVariation, intlFlexibleAmount, customerEmail, accountNumber, nairaAmount, activeService, customerName, dynamicMinAmount, dynamicMaxAmount, dynamicElecMin, cableSubscriptionType, selectedCablePlan, selectedBank, selectedInternetPlan, internetAccountId, customerPhone, internetProvider, activeTab, cableProvider, selectedEducationPlan, educationProvider, isFixedPlan, isCurrentServiceDisabled, electricityDailyDuplicate]);
 
   const showToast = (title: string, message: string, type: 'success' | 'error' = 'success') => {
     setToast({ title, message, type }); setTimeout(() => setToast(null), 5000);
@@ -449,8 +456,7 @@ export default function Home() {
     else { try { await navigator.clipboard.writeText(receiptText); showToast("Copied!", "Receipt details copied to clipboard.", "success"); } catch (err) {} }
   };
 
-    const handleSendSupport = async () => {
-    // ⚡ 1. VALIDATE EMAIL ⚡
+  const handleSendSupport = async () => {
     if (!supportEmail.trim() || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(supportEmail)) {
         return showToast("Error", "Please enter a valid email address.", "error");
     }
@@ -458,15 +464,12 @@ export default function Home() {
     
     setIsSendingSupport(true);
     try {
-            const formData = new FormData();
+      const formData = new FormData();
       formData.append("email", supportEmail); 
       formData.append("message", supportMessage);
       if (address) formData.append("userAddress", address);
       if (supportTxHash) formData.append("txHash", supportTxHash);
-      
-      // ⚡ ADD THIS: Sends the saved chain, or falls back to the current active network
       formData.append("chain", supportChain || activeChain?.name || "Unknown"); 
-      
       if (supportFile) formData.append("file", supportFile);
 
       const res = await fetch('/api/support', { method: 'POST', body: formData });
@@ -538,14 +541,12 @@ export default function Home() {
     setIsProcessing(true); 
     setStatus("Initiating Blockchain Escrow...");
 
-            // ⚡ FIX: Add a safety flag to track if crypto left the wallet!
     let preflightHash = "";
     let realTxHash = "";
     let txHasBeenSigned = false; 
-    let backendPayload: any = null; // ⚡ ADD THIS LINE HERE
+    let backendPayload: any = null; 
 
     try {
-      // 1. Network Sync
       try {
         const currentChainId = await client.getChainId();
         if (currentChainId !== activeChain.id) {
@@ -592,9 +593,6 @@ export default function Home() {
 
       setStatus("Please approve the transaction in your wallet...");
 
-            // ==========================================
-      // ⚡ STRICT FIREWALL: ISOLATED APPROVAL BLOCK
-      // ==========================================
       if (currentAllowance < valueInWei) {
           setStatus("Awaiting token approval...");
           try {
@@ -608,39 +606,36 @@ export default function Home() {
               });
               setStatus("Confirming approval on-chain...");
               await publicClient.waitForTransactionReceipt({ hash: appHash, confirmations: 1 });
-              
-              // Give the RPC nodes 1 second to update the allowance state globally
               await new Promise(resolve => setTimeout(resolve, 1000));
-              
           } catch (appError: any) {
-              // User rejected approval OR wallet glitched. 
-              // Stop everything. Do NOT touch the database.
               setStatus(`Approval Cancelled: ${appError.shortMessage?.slice(0, 40) || "User rejected."}`);
               setIsProcessing(false);
-              return; // 🛑 EXIT FUNCTION IMMEDIATELY
+              return; 
           }
       }
 
-      // ==========================================
-      // ⚡ PREFLIGHT INTENT (Only runs if approval is successful or wasn't needed)
-      // ==========================================
-      const realNonce = await publicClient.getTransactionCount({ address: address as `0x${string}`, blockTag: 'latest' });
-
-      // 3. TRUE PRE-FLIGHT INTENT
       preflightHash = `preflight_${address}_${Date.now()}`;
       
-                  backendPayload = {
-        serviceID: vtpassServiceID, serviceCategory: uiCategory, network: displayNetwork.toUpperCase(), billersCode: payloadBillersCode, amount: cryptoToCharge, 
+      backendPayload = {
+        serviceID: vtpassServiceID, 
+        serviceCategory: uiCategory, 
+        network: displayNetwork.toUpperCase(), 
+        billersCode: payloadBillersCode, 
+        amount: cryptoToCharge, 
         nairaAmount: calculatedNairaAmount, 
         foreignAmount: isInternational ? (selectedIntlVariation?.fixedPrice === "Yes" ? selectedIntlVariation.variation_amount : intlFlexibleAmount) : undefined,
-        // ⚡ ADD THIS: Sends the clean format (e.g. "GHS 2.5") to the backend for the receipt!
-        displayAmount: isInternational ? `${intlCurrency || activeCountry.currency || activeCountry.code} ${displayForeignAmount}` : undefined,
+        displayAmount: displayAmountString,
         token: selectedToken.symbol, 
         txHash: preflightHash, 
-        variation_code: finalVariationCode, phone: customerPhone || accountNumber, email: customerEmail, wallet_address: address, 
-        // ... rest of the fields stay the same
+        variation_code: finalVariationCode, 
+        phone: customerPhone || accountNumber, 
+        email: customerEmail, 
+        wallet_address: address, 
         subscription_type: activeTab === "pay" && activeService.id === "CABLE" && ['dstv', 'gotv'].includes(cableProvider) ? cableSubscriptionType : undefined,
-        meter_account_type: meterAccountType, operator_id: isInternational ? selectedIntlOperator?.operator_id : undefined, country_code: isInternational ? activeCountry.code : undefined, product_type_id: isInternational ? selectedIntlProduct?.product_type_id : undefined,
+        meter_account_type: meterAccountType, 
+        operator_id: isInternational ? selectedIntlOperator?.operator_id : undefined, 
+        country_code: isInternational ? activeCountry.code : undefined, 
+        product_type_id: isInternational ? selectedIntlProduct?.product_type_id : undefined,
         blockchain: currentBlockchainName 
       };
 
@@ -649,7 +644,7 @@ export default function Home() {
 
       setStatus("Please sign the final payment...");
 
-            let rawHash;
+      let rawHash;
       if (activeChain.id === base.id || activeChain.id === baseSepolia.id) {
           const callData = encodeFunctionData({ 
               abi: ABAPAY_ABI, 
@@ -657,7 +652,6 @@ export default function Home() {
               args: [tokenAddress, vtpassServiceID, payloadBillersCode, valueInWei] 
           });
           
-          // ⚡ FIX 1: Restored your original, perfect builder code formatting
           const builderCodeSuffix = "0x62635f6a63757a316632330b0080218021802180218021802180218021";
           const attributedData = `${callData}${builderCodeSuffix.replace('0x', '')}` as `0x${string}`;
 
@@ -665,7 +659,7 @@ export default function Home() {
               to: ABAPAY_CONTRACT,
               data: attributedData,
               account: address as `0x${string}`,
-              ...txConfig // ⚡ FIX 2: Removed forced nonce so wallets don't block the transaction
+              ...txConfig
           });
       } else {
           rawHash = await client.writeContract({ 
@@ -673,21 +667,17 @@ export default function Home() {
               abi: ABAPAY_ABI, 
               functionName: 'payBill', 
               args: [tokenAddress, vtpassServiceID, payloadBillersCode, valueInWei], 
-              ...txConfig // ⚡ FIX 2: Removed forced nonce
+              ...txConfig 
           });
       }
 
-            // ⚡ CRITICAL FIX: The transaction is on the blockchain! Lock the safety flag! ⚡
       txHasBeenSigned = true;
       realTxHash = rawHash.toLowerCase();  
       backendPayload.txHash = realTxHash;
 
-      // 5. WAIT FOR BLOCKCHAIN
       setStatus("Confirming on blockchain... Please hold.");
-      // ⚡ CHANGED txHashString TO realTxHash BELOW ⚡
       const receipt = await publicClient.waitForTransactionReceipt({ hash: realTxHash as `0x${string}`, confirmations: 1 });
 
-      // ⚡ CRITICAL FRONTEND FIX: Verify it didn't revert before calling the backend ⚡
       if (receipt.status !== 'success') {
           throw new Error("Transaction failed on the blockchain. Your funds were not deducted.");
       }
@@ -718,10 +708,19 @@ export default function Home() {
       }
 
       const updatedHistory = [{ 
-          id: realTxHash.slice(0,8), date: new Date().toLocaleString(), status: finalStatus.status === 'TIMEOUT' ? "PENDING" : finalStatus.status, 
-          amountNaira: isInternational ? `${intlCurrency || activeCountry.code} ${displayForeignAmount}` : calculatedNairaAmount, 
-          amountCrypto: cryptoToCharge, tokenUsed: selectedToken.symbol, service: uiCategory, network: displayNetwork.toUpperCase(), txHash: realTxHash, account: payloadBillersCode,
-          blockchain: currentBlockchainName, purchased_code: finalStatus.purchased_code, units: finalStatus.units
+          id: realTxHash.slice(0,8), 
+          date: new Date().toLocaleString(), 
+          status: finalStatus.status === 'TIMEOUT' ? "PENDING" : finalStatus.status, 
+          amountNaira: displayAmountString, 
+          amountCrypto: cryptoToCharge, 
+          tokenUsed: selectedToken.symbol, 
+          service: uiCategory, 
+          network: displayNetwork.toUpperCase(), 
+          txHash: realTxHash, 
+          account: payloadBillersCode,
+          blockchain: currentBlockchainName, 
+          purchased_code: finalStatus.purchased_code, 
+          units: finalStatus.units
       }, ...transactions];
       setTransactions(updatedHistory); 
       localStorage.setItem(`abapay_history_${address}`, JSON.stringify(updatedHistory));
@@ -731,9 +730,7 @@ export default function Home() {
       setWalletBalance(parseFloat(formatUnits(balanceWei as bigint, selectedToken.decimals)).toFixed(4));
 
     } catch (e: any) { 
-        // ⚡ THE FATAL FLAW FIX: Did the user reject, or did the network timeout? ⚡
         if (!txHasBeenSigned) {
-            // SAFE: User rejected the wallet popup BEFORE signing. Wipe the database.
             setStatus(`Cancelled: ${e.shortMessage?.slice(0, 40) || "User rejected."}`); 
             if (preflightHash) {
                  fetch('/api/pay', { 
@@ -743,27 +740,24 @@ export default function Home() {
                  }).catch(()=>{});
             }
         } else {
-            // CRISIS AVERTED: Crypto left the wallet, but the app crashed/timed out!
-            // Force the real hash into the database so your Admin panel can see it!
             setStatus("Network slow. Securing receipt to database..."); 
-                        if (preflightHash && realTxHash && backendPayload) {
+            if (preflightHash && realTxHash && backendPayload) {
                  fetch('/api/pay', {  
                      method: 'POST', 
                      headers: { 'Content-Type': 'application/json' }, 
-                     // We pass the payload again to force the database to overwrite the fake hash with the real one
                      body: JSON.stringify({ ...backendPayload, intent_only: false, preflight_hash: preflightHash }) 
                  }).catch(()=>{});
             }
             showToast("Transaction Processing", "Your payment was sent but the network is slow. Check your History tab in a minute.", "success");
         }
-        } finally { 
+    } finally { 
         setIsProcessing(false); 
     }
-}; // <--- THIS IS THE MISSING BRACKET!
+  };
 
   useEffect(() => { if (status && !isProcessing) { const timer = setTimeout(() => setStatus(""), 5000); return () => clearTimeout(timer); } }, [status, isProcessing]);
 
-  // ⚡ 1. THE SETTINGS INTERVAL ⚡
+  // ⚡ THE SETTINGS INTERVAL ⚡
   useEffect(() => {
     let intervalId: NodeJS.Timeout;
     async function fetchSettings() {
@@ -792,16 +786,34 @@ export default function Home() {
     notifyFarcaster();
   }, []);
 
+  // ⚡ AUTOMATIC WEB3 BROWSER POPUP INTERCEPTOR ⚡
+  useEffect(() => {
+    if (address || environment !== 'WEB' || localStorage.getItem('abapay_explicit_logout') === 'true') return;
+
+    const isWeb3Browser = typeof window !== "undefined" && (window as any).ethereum;
+
+    if (isWeb3Browser) {
+      const injectedConnector = connectors.find(c => c.id === 'injected' || c.type === 'injected');
+      if (injectedConnector) {
+        const autoconnectTimeout = setTimeout(() => {
+          connect({ connector: injectedConnector });
+          localStorage.setItem('abapay_connected', 'true');
+        }, 500);
+        return () => clearTimeout(autoconnectTimeout);
+      }
+    }
+  }, [connectors, address, environment, connect]);
+
   // ⚡ WAGMI TO ABAPAY BRIDGE ⚡
   useEffect(() => {
     if (environment === 'WEB' && isWagmiConnected && wagmiAddress) {
       setAddress(wagmiAddress);
+      localStorage.removeItem('abapay_explicit_logout');
 
       const targetChain = wagmiChain || (isMainnet ? base : baseSepolia);
       setActiveChain(targetChain);
 
       if (!client && typeof window !== "undefined" && (window as any).ethereum) {
-          // ⚡ UPGRADED WITH eip5792Actions FOR PAYMASTER SUPPORT
           const webClient = createWalletClient({ 
               chain: targetChain as any, 
               transport: custom((window as any).ethereum) 
@@ -831,10 +843,7 @@ export default function Home() {
           }).extend(eip5792Actions());
 
           try {
-             // ⚡ THE FIX: We use getAddresses() for a SILENT check. 
-             // This absolutely prevents the automatic popup on load!
              const addresses = await farcasterClient.getAddresses();
-
              if (addresses && addresses.length > 0) {
                  const currentChainId = await farcasterClient.getChainId();
                  if (currentChainId !== targetChain.id) {
@@ -876,7 +885,6 @@ export default function Home() {
     }, 2000);
 
     detectAndConnect();
-
     return () => clearTimeout(timeoutId);
   }, [isMainnet, environment]);
 
@@ -887,34 +895,12 @@ export default function Home() {
       .catch(() => {});
   }, []);
 
-  const connectWebWallet = async () => {
-    if (typeof window !== "undefined" && (window as any).ethereum) {
-      try {
-        setIsProcessing(true);
-        const ethWeb = (window as any).ethereum;
-        let webTargetChain: any = isMainnet ? base : baseSepolia; 
-        const webClient = createWalletClient({ chain: webTargetChain, transport: custom(ethWeb) });
-
-        const [acc] = await webClient.requestAddresses();
-        localStorage.setItem('abapay_connected', 'true'); 
-
-        const currentChainId = await webClient.getChainId();
-        if (currentChainId === celo.id || currentChainId === celoSepolia.id) {
-           webTargetChain = currentChainId === celo.id ? celo : celoSepolia;
-        } else if (currentChainId !== webTargetChain.id) {
-           await webClient.switchChain({ id: webTargetChain.id }).catch(() => {});
-        }
-        setActiveChain(webTargetChain);
-        setAddress(acc); 
-        setClient(webClient);
-      } catch (error) {
-        setStatus("Wallet connection cancelled.");
-      } finally {
-        setIsProcessing(false);
-      }
-    } else {
-      setStatus("No Web3 wallet detected.");
-    }
+  const handleWalletDisconnect = () => {
+    disconnect();
+    setAddress(null);
+    setClient(null);
+    localStorage.removeItem('abapay_connected');
+    localStorage.setItem('abapay_explicit_logout', 'true');
   };
 
   useEffect(() => {
@@ -928,7 +914,8 @@ export default function Home() {
         if (data && data.length > 0) {
           const cloudHistory = data.map((tx: any) => ({ 
              id: tx.tx_hash.slice(0, 8), date: new Date(tx.created_at).toLocaleString(), status: tx.status, 
-             amountNaira: tx.amount_naira.toString(), amountCrypto: tx.amount_usdt.toString(), 
+             // ⚡ FIX: Use display_amount if present, fallback safely to standard formatting
+             amountNaira: tx.display_amount || `₦${tx.amount_naira.toLocaleString()}`, amountCrypto: tx.amount_usdt.toString(), 
              tokenUsed: tx.token_used || "USD₮", service: tx.service_category, network: tx.network, 
              blockchain: tx.blockchain || 'CELO',
              txHash: tx.tx_hash, account: tx.account_number, refund_hash: tx.refund_hash, 
@@ -952,15 +939,12 @@ export default function Home() {
       setIsFetchingBalance(true);
 
       try {
-        // ⚡ THE MINIPAY FIX: Force Wagmi to use rock-solid public RPCs for reading balances!
         let rpcUrl = activeChain.rpcUrls.default.http[0];
         if (activeChain.id === celo.id) rpcUrl = "https://forno.celo.org";
         if (activeChain.id === base.id) rpcUrl = "https://mainnet.base.org";
 
-        // We use http(rpcUrl) instead of MiniPay's custom injected provider for reads
         const publicClient = createPublicClient({ chain: activeChain, transport: http(rpcUrl) });
 
-        // ⚡ DYNAMIC TOKEN SELECTION
         let tokenAddress;
         if (activeChain.id === base.id) {
             tokenAddress = (selectedToken as any).baseMainnet || selectedToken.mainnet;
@@ -1130,14 +1114,14 @@ export default function Home() {
           else { setCustomerName(null); setMeterAddress(null); setDynamicElecMin(1000); setMeterAccountType(null); } 
       } 
       else if (activeTab === "education" && educationProvider === "jamb") {
-         if (accountNumber.length >= 10 && selectedEducationPlan) verifyMerchant(); 
-         else { setCustomerName(null); setMeterAddress(null); setDynamicElecMin(1000); setMeterAccountType(null); }
+          if (accountNumber.length >= 10 && selectedEducationPlan) verifyMerchant(); 
+          else { setCustomerName(null); setMeterAddress(null); setDynamicElecMin(1000); setMeterAccountType(null); }
       }
       else if (activeTab === "pay" && !isInternational) {
-         if (activeService.id === "ELECTRICITY" && accountNumber.length >= 10) verifyMerchant();
-         else if (activeService.id === "CABLE" && cableProvider !== "showmax" && accountNumber.length >= 10) verifyMerchant();
-         else if (activeService.id === "INTERNET" && internetProvider === "smile-direct" && accountNumber.includes('@') && accountNumber.includes('.')) verifyMerchant(); 
-         else { setCustomerName(null); setMeterAddress(null); setDynamicElecMin(1000); setMeterAccountType(null); }
+          if (activeService.id === "ELECTRICITY" && accountNumber.length >= 10) verifyMerchant();
+          else if (activeService.id === "CABLE" && cableProvider !== "showmax" && accountNumber.length >= 10) verifyMerchant();
+          else if (activeService.id === "INTERNET" && internetProvider === "smile-direct" && accountNumber.includes('@') && accountNumber.includes('.')) verifyMerchant(); 
+          else { setCustomerName(null); setMeterAddress(null); setDynamicElecMin(1000); setMeterAccountType(null); }
       }
     }, 800); 
     return () => clearTimeout(timeoutId);
@@ -1158,11 +1142,9 @@ export default function Home() {
   };
 
   return (
-    // ⚡ 1. UPDATED MAIN TAG: Centers vertically on PC and adds padding + Dark Mode Base
     <main className="min-h-screen bg-slate-50 dark:bg-black text-slate-900 dark:text-slate-100 font-sans p-4 md:p-8 lg:p-12 flex flex-col items-center justify-start md:justify-center pb-20 md:pb-12 relative overflow-hidden transition-colors">
       <style>{`@keyframes logoScale { 0%, 100% { transform: scale(1); opacity: 0.9; } 50% { transform: scale(1.1); opacity: 1; } } .animate-logo-scale { animation: logoScale 1.5s ease-in-out infinite; } .no-scrollbar::-webkit-scrollbar { display: none; } .no-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }`}</style>
 
-      {/* ⚡ 2. NEW: Premium Ambient Web3 Glows (Only visible on PC) ⚡ */}
       <div className="hidden md:block absolute top-[-10%] left-[-5%] w-[40%] h-[40%] rounded-full bg-emerald-500/10 dark:bg-emerald-500/5 blur-[120px] pointer-events-none"></div>
       <div className="hidden md:block absolute bottom-[-10%] right-[-5%] w-[40%] h-[40%] rounded-full bg-blue-500/10 dark:bg-blue-500/5 blur-[120px] pointer-events-none"></div>
 
@@ -1202,7 +1184,7 @@ export default function Home() {
                  <p className="text-[10px] font-black text-slate-400 dark:text-slate-500 uppercase tracking-widest mb-2">Total Payable</p>
 
                  <h2 className="text-4xl font-black text-slate-900 dark:text-white mb-2">
-                    {isInternational ? `${intlCurrency || activeCountry.currency || activeCountry.code} ${displayForeignAmount}` : `₦${(parseFloat(calculatedNairaAmount || "0") + currentFee).toLocaleString()}`}
+                    {displayAmountString}
                  </h2>
 
                  <div className="flex items-center justify-center gap-1.5 text-emerald-600 dark:text-emerald-400 font-bold bg-emerald-50 dark:bg-emerald-900/20 w-max mx-auto px-4 py-1.5 rounded-full text-sm shadow-inner transition-colors">
@@ -1245,14 +1227,13 @@ export default function Home() {
         </div>
       )}
 
-            {isSupportOpen && (
+      {isSupportOpen && (
         <div className="fixed inset-0 z-[200] flex items-center justify-center p-4 bg-slate-900/50 dark:bg-black/80 backdrop-blur-sm animate-in fade-in transition-colors">
            <div className="bg-white dark:bg-[#111114] w-full max-w-md rounded-[2rem] p-6 shadow-2xl dark:shadow-black/50 relative animate-in zoom-in-95 transition-colors">
               <button onClick={() => { setIsSupportOpen(false); setSupportFile(null); setSupportMessage(""); setSupportEmail(""); }} className="absolute top-4 right-4 bg-slate-100 dark:bg-slate-800 p-2 rounded-full text-slate-500 dark:text-slate-400 hover:bg-slate-200 dark:hover:bg-slate-700 transition-colors"><XCircle size={20}/></button>
               <h3 className="text-xl font-black text-slate-900 dark:text-white mb-2">Need Help?</h3>
               {supportTxHash && <p className="text-xs text-slate-500 dark:text-slate-400 mb-4">Transaction Ref: <span className="font-mono bg-slate-100 dark:bg-slate-800 px-1.5 py-0.5 rounded text-slate-700 dark:text-slate-300">{supportTxHash.slice(0, 15)}...</span></p>}
 
-              {/* ⚡ NEW COMPULSORY EMAIL FIELD ⚡ */}
               <input 
                   type="email"
                   placeholder="Your Email Address"
@@ -1289,14 +1270,14 @@ export default function Home() {
         </div>
       )}
 
-                  <ReceiptModal 
+      <ReceiptModal 
           receipt={selectedReceipt} 
           isMainnet={isMainnet} 
           onClose={() => setSelectedReceipt(null)} 
           onShare={handleShareReceipt} 
           onSupport={() => { 
               setSupportTxHash(selectedReceipt.txHash); 
-              setSupportChain(selectedReceipt.blockchain); // ⚡ ADD THIS TO GRAB THE CHAIN
+              setSupportChain(selectedReceipt.blockchain); 
               setSupportMessage(""); 
               setSupportEmail(customerEmail || ""); 
               setSelectedReceipt(null); 
@@ -1304,15 +1285,15 @@ export default function Home() {
           }} 
       />
       <SelectionModal 
-        isOpen={isSelectionModalOpen} 
-        onClose={() => setIsSelectionModalOpen(false)} 
-        title={modalTitle} 
-        type={modalType} 
-        options={modalOptions} 
-        onSelect={modalCallback} 
-        isFetchingBanks={isFetchingBanks} 
-        selectedValue={getCurrentModalValue()} 
-        onRetryBanks={fetchBanksManual} 
+          isOpen={isSelectionModalOpen} 
+          onClose={() => setIsSelectionModalOpen(false)} 
+          title={modalTitle} 
+          type={modalType} 
+          options={modalOptions} 
+          onSelect={modalCallback} 
+          isFetchingBanks={isFetchingBanks} 
+          selectedValue={getCurrentModalValue()} 
+          onRetryBanks={fetchBanksManual} 
       />
 
       {toast && (
@@ -1330,15 +1311,13 @@ export default function Home() {
         </div>
       )}
 
-      {/* ⚡ 3. UPDATED WRAPPER: Intelligently expands to max-w-lg and max-w-xl on PC ⚡ */}
       <div className="w-full max-w-md md:max-w-lg lg:max-w-xl transition-all duration-500 relative z-10">
 
-        {/* ⚡ HEADER: Increased padding and border radius on PC ⚡ */}
         <div className="flex justify-between items-center bg-white dark:bg-[#111114] p-4 md:p-5 rounded-3xl md:rounded-[2rem] shadow-sm border border-slate-100 dark:border-slate-800/60 mb-6 md:mb-8 transition-colors">
           <div className="flex items-center gap-3">
             <img src="/logo.png" alt="AbaPay" className="h-10 md:h-12 w-auto object-contain transition-all" />
             <div className="flex flex-col">
-              <span className="text-xl md:text-2xl font-black text-slate-900 dark:text-white leading-none tracking-tight transition-colors">AbaPay<span className="text-emerald-500">.</span></span>
+              <span className="textxl md:text-2xl font-black text-slate-900 dark:text-white leading-none tracking-tight transition-colors">AbaPay<span className="text-emerald-500">.</span></span>
               <span className="text-[8px] md:text-[9px] font-black uppercase text-slate-400 dark:text-slate-500 tracking-widest mt-1">Seamless Payments.</span>
             </div>
           </div>
@@ -1351,13 +1330,20 @@ export default function Home() {
                 </div>
             )}
 
-                        {/* ⚡ NEW: Dynamic Connect Button / AbaPoints Swap ⚡ */}
             {!address && environment === 'WEB' ? (
                 <button 
                   onClick={() => {
-                    // ⚡ Look for WalletConnect first, fallback to injected if missing
+                    const injectedConnector = connectors.find(c => c.id === 'injected' || c.type === 'injected');
                     const wcConnector = connectors.find(c => c.id === 'walletConnect');
-                    connect({ connector: wcConnector || connectors[0] });
+                    
+                    if (typeof window !== "undefined" && (window as any).ethereum && injectedConnector) {
+                      connect({ connector: injectedConnector });
+                    } else if (wcConnector) {
+                      connect({ connector: wcConnector });
+                    } else {
+                      connect({ connector: connectors[0] });
+                    }
+                    localStorage.setItem('abapay_connected', 'true');
                   }}
                   disabled={isProcessing}
                   className="bg-emerald-50 dark:bg-emerald-900/20 hover:bg-emerald-100 dark:hover:bg-emerald-900/40 border border-emerald-200 dark:border-emerald-800/50 text-emerald-700 dark:text-emerald-400 font-black text-[10px] px-3 py-1.5 rounded-xl transition-all shadow-sm active:scale-95 disabled:opacity-50 flex items-center gap-1.5 uppercase tracking-widest"
@@ -1366,7 +1352,7 @@ export default function Home() {
                   {isProcessing ? "Wait" : "Connect"}
                 </button>
             ) : (
-                <PointsBadge walletAddress={address || undefined} />
+                <PointsBadge walletAddress={address || undefined} onDisconnect={handleWalletDisconnect} />
             )}
 
             <button 
@@ -1385,7 +1371,6 @@ export default function Home() {
           </div>
         </div>
 
-        {/* THE TABS */}
         <div className="flex gap-2 bg-slate-200/50 dark:bg-[#1a1a1f] p-1.5 rounded-2xl md:rounded-[1.25rem] mb-6 shadow-inner overflow-x-auto no-scrollbar transition-colors">
             <button onClick={() => handleTabSwitch("pay")} className={`flex-1 min-w-[75px] py-3 rounded-xl text-[10px] sm:text-xs font-black transition-all ${activeTab === 'pay' ? 'bg-white dark:bg-[#111114] text-emerald-600 dark:text-emerald-400 shadow-xl' : 'text-slate-500 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-200'}`}>BILLS</button>
             <button onClick={() => handleTabSwitch("bank")} disabled={isInternational} className={`flex-1 min-w-[75px] py-3 rounded-xl text-[10px] sm:text-xs font-black transition-all ${isInternational ? 'opacity-30 cursor-not-allowed' : activeTab === 'bank' ? 'bg-white dark:bg-[#111114] text-emerald-600 dark:text-emerald-400 shadow-xl' : 'text-slate-500 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-200'}`}>TRANSFER</button>
@@ -1393,9 +1378,6 @@ export default function Home() {
             <button onClick={() => handleTabSwitch("history")} className={`flex-1 min-w-[75px] py-3 rounded-xl text-[10px] sm:text-xs font-black transition-all ${activeTab === 'history' ? 'bg-white dark:bg-[#111114] text-emerald-600 dark:text-emerald-400 shadow-xl' : 'text-slate-500 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-200'}`}>HISTORY</button>
         </div>
 
-        {/* ======================================= */}
-        {/* BANK BLOCK */}
-        {/* ======================================= */}
         {activeTab === 'bank' && (
           <div className="bg-white dark:bg-[#111114] border border-slate-100 dark:border-slate-800/60 rounded-[2.5rem] md:rounded-[3rem] p-8 md:p-10 shadow-2xl shadow-emerald-900/10 dark:shadow-black/50 animate-in fade-in zoom-in-95 transition-colors">
             <div className="space-y-5">
@@ -1597,9 +1579,6 @@ export default function Home() {
           </div>
         )}
 
-        {/* ======================================= */}
-        {/* EDUCATION BLOCK */}
-        {/* ======================================= */}
         {activeTab === 'education' && (
           <div className="bg-white dark:bg-[#111114] border border-slate-100 dark:border-slate-800/60 rounded-[2.5rem] md:rounded-[3rem] p-8 md:p-10 shadow-2xl shadow-emerald-900/10 dark:shadow-black/50 animate-in fade-in zoom-in-95 transition-colors">
             <div className="space-y-5">
@@ -1717,7 +1696,7 @@ export default function Home() {
                             <div className="pt-2 border-t border-emerald-200/50 dark:border-emerald-800/50 flex justify-between items-end">
                                 <div>
                                    <p className="font-black text-emerald-600 dark:text-emerald-400 text-xl">₦{parseFloat(selectedEducationPlan.variation_amount || "0").toLocaleString()}</p>
-                                   {currentFee > 0 && <p className="text-[9px] font-black text-orange-500 dark:text-orange-400">+₦{currentFee} FEE INCLUDED</p>}
+                                   {currentFee > 0 && <p className="text-[9px] font-black text-orange-500 dark:text-orange-400 mt-1">+₦{currentFee} FEE INCLUDED</p>}
                                 </div>
                                 <p className="text-[10px] text-slate-500 dark:text-slate-400 font-bold">{cryptoToCharge} {selectedToken.symbol}</p>
                             </div>
@@ -2076,7 +2055,6 @@ export default function Home() {
                         );
                     })()}
 
-                    {/* ⚡ VERIFIED BLOCK WITH ADDRESS ⚡ */}
                     {customerName && (activeService.id === "ELECTRICITY" || (activeService.id === "INTERNET" && internetProvider === 'smile-direct')) && (
                         <div className="mt-2 bg-emerald-500/10 dark:bg-emerald-900/20 p-4 rounded-xl border border-emerald-500/20 dark:border-emerald-800/50 flex items-center gap-3 animate-in fade-in transition-colors">
                             <CheckCircle2 size={18} className="text-emerald-600 dark:text-emerald-500 shrink-0" />
@@ -2103,11 +2081,8 @@ export default function Home() {
                                   <div className="p-4 rounded-2xl border-2 border-emerald-500 dark:border-emerald-700 bg-emerald-50 dark:bg-emerald-900/10 shadow-sm text-left transition-colors">
                                      <p className="font-black text-slate-900 dark:text-white text-lg">{selectedIntlVariation.name}</p>
                                      {selectedIntlVariation.fixedPrice !== "Yes" && (() => {
-                                         // ⚡ MATH: Platform Exchange Rate (NGN/USD) divided by Foreign API Rate (NGN/Local)
                                          const rate = parseFloat(selectedIntlVariation.variation_rate || "1");
                                          const minLocalAmount = exchangeRate / rate;
-
-                                         // Format to 2 decimal places (e.g., 13.64)
                                          const minFormatted = minLocalAmount.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
                                          const localSymbol = intlCurrency || activeCountry.currency || activeCountry.code;
 
@@ -2124,7 +2099,6 @@ export default function Home() {
                                                     value={intlFlexibleAmount}
                                                     onChange={(e) => setIntlFlexibleAmount(e.target.value)}
                                                 />
-                                                {/* ⚡ DYNAMIC LOCAL CURRENCY MINIMUM WARNING ⚡ */}
                                                 {intlFlexibleAmount && (parseFloat(intlFlexibleAmount) * rate / exchangeRate) < 1 && (
                                                     <div className="bg-red-50 dark:bg-red-900/20 p-2 rounded-lg mt-2 flex items-center gap-1.5 border border-red-100 dark:border-red-800/50 animate-in fade-in transition-colors">
                                                         <AlertTriangle size={12} className="text-red-500 dark:text-red-400 shrink-0" />
@@ -2137,7 +2111,6 @@ export default function Home() {
                                          );
                                      })()}
                                      <div className="pt-3 mt-2 border-t border-emerald-200/50 dark:border-emerald-800/50 flex justify-between items-end transition-colors">
-                                         {/* ⚡ HIDING NGN, SHOWING LOCAL CURRENCY ⚡ */}
                                          <p className="font-black text-emerald-600 dark:text-emerald-400 text-xl">{intlCurrency || activeCountry.currency || activeCountry.code} {displayForeignAmount}</p>
                                          <p className="text-[10px] text-slate-500 dark:text-slate-400 font-bold">{cryptoToCharge} {selectedToken.symbol}</p>
                                       </div>
@@ -2167,7 +2140,6 @@ export default function Home() {
                                                 {isFixed ? `Cost: ${cryptoCostEstimate} ${selectedToken.symbol}` : `Rate: ~${cryptoRateEstimate} ${selectedToken.symbol} per ${intlCurrency || activeCountry.currency || activeCountry.code}`}
                                             </p>
                                           </div>
-                                          {/* ⚡ HIDING NGN, SHOWING LOCAL CURRENCY ⚡ */}
                                           <p className="font-black text-emerald-600 dark:text-emerald-400 text-sm group-hover:scale-110 transition-transform">
                                             {isFixed ? `${intlCurrency || activeCountry.currency || activeCountry.code} ${foreignAmt.toLocaleString()}` : "Flexible"}
                                           </p>
@@ -2180,7 +2152,6 @@ export default function Home() {
                     </div>
                 )}
 
-                {/* ⚡ LOCAL VARIATIONS UI ⚡ */}
                 {!isInternational && activeService.id === "INTERNET" && (
                   <div className="bg-slate-50 dark:bg-[#1a1a1f] border border-slate-200 dark:border-slate-800/80 rounded-2xl p-4 shadow-sm animate-in fade-in slide-in-from-top-4 transition-colors">
                      {selectedInternetPlan ? (
@@ -2214,7 +2185,6 @@ export default function Home() {
                   </div>
                 )}
 
-                {/* CABLE TV SPECIFIC LOGIC */}
                 {!isInternational && activeService.id === "CABLE" && (cableProvider === "showmax" || customerName) && (
                   <div className="bg-slate-50 dark:bg-[#1a1a1f] border border-slate-200 dark:border-slate-800/80 rounded-2xl p-4 shadow-sm animate-in fade-in slide-in-from-top-4 transition-colors">
                      {cableProvider !== "showmax" && (
@@ -2342,7 +2312,6 @@ export default function Home() {
                   </div>
                 )}
 
-                {/* LOCAL AIRTIME OR ELECTRICITY INPUT */}
                 {!isInternational && (activeService.id === "AIRTIME" || activeService.id === "ELECTRICITY") && (
                     <div>
                         <label className="text-[10px] font-black text-slate-400 dark:text-slate-500 uppercase mb-2 flex justify-between items-center">
@@ -2371,7 +2340,6 @@ export default function Home() {
                                 </p>
                             </div>
                         )}
-                        {/* ⚡ ELECTRICITY DAILY DUPLICATE WARNING ⚡ */}
                         {electricityDailyDuplicate && (
                             <div className="bg-orange-50 dark:bg-orange-900/20 border border-orange-200 dark:border-orange-800/50 p-4 rounded-xl mt-2 flex items-start gap-3 animate-in fade-in transition-colors">
                                 <AlertTriangle size={18} className="text-orange-500 dark:text-orange-400 shrink-0 mt-0.5" />
@@ -2394,21 +2362,20 @@ export default function Home() {
 
                             return (
                               <button 
-                                 key={amountStr} 
-                                 onClick={() => !isDisabled && setNairaAmount(amountStr)} 
-                                 disabled={isDisabled}
-                                 className={`flex-1 min-w-[70px] py-4 rounded-xl font-black transition-all whitespace-nowrap ${isDisabled ? 'bg-slate-200 dark:bg-slate-800 text-slate-400 dark:text-slate-600 opacity-50 cursor-not-allowed' : nairaAmount === amountStr ? 'bg-white dark:bg-[#111114] shadow-lg text-emerald-700 dark:text-emerald-400 scale-105' : 'bg-slate-50 dark:bg-slate-800/50 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-300'}`}
+                                   key={amountStr} 
+                                   onClick={() => !isDisabled && setNairaAmount(amountStr)} 
+                                   disabled={isDisabled}
+                                   className={`flex-1 min-w-[70px] py-4 rounded-xl font-black transition-all whitespace-nowrap ${isDisabled ? 'bg-slate-200 dark:bg-slate-800 text-slate-400 dark:text-slate-600 opacity-50 cursor-not-allowed' : nairaAmount === amountStr ? 'bg-white dark:bg-[#111114] shadow-lg text-emerald-700 dark:text-emerald-400 scale-105' : 'bg-slate-50 dark:bg-slate-800/50 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-300'}`}
                               >
-                                 ₦{amountVal.toLocaleString()}
-                                 <p className={`text-[8px] mt-0.5 font-bold ${isDisabled ? 'text-slate-400 dark:text-slate-600' : 'text-slate-400 dark:text-slate-500'}`}>{cryptoAmtCost} {selectedToken.symbol}</p>
+                                  ₦{amountVal.toLocaleString()}
+                                  <p className={`text-[8px] mt-0.5 font-bold ${isDisabled ? 'text-slate-400 dark:text-slate-600' : 'text-slate-400 dark:text-slate-500'}`}>{cryptoAmtCost} {selectedToken.symbol}</p>
                               </button>
                             );
                           })}
-                       </div>
+                        </div>
                     </div>
                 )}
 
-                {/* ⚡ RESTORED ELECTRICITY SMS FIELD ⚡ */}
                 {(!isInternational && (activeService.id === "ELECTRICITY" || (activeService.id === "INTERNET" && internetProvider === 'smile-direct'))) && (
                     <div className="animate-in fade-in mt-3">
                         <label className="text-[10px] font-black text-slate-400 dark:text-slate-500 uppercase mb-2 flex justify-between">
@@ -2427,7 +2394,6 @@ export default function Home() {
                     </div>
                 )}
 
-                {/* ⚡ EMAIL / OPTIONAL INFO ⚡ */}
                 <div className="animate-in fade-in mt-3">
                      <input 
                         type="email" 
@@ -2462,9 +2428,6 @@ export default function Home() {
           </div>
         )}
 
-        {/* ======================================= */}
-        {/* HISTORY BLOCK */}
-        {/* ======================================= */}
         {activeTab === 'history' && (
           <HistoryTab 
             transactions={transactions} 
