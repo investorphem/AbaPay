@@ -17,7 +17,7 @@ export const config = createConfig({
       showQrModal: true,
       metadata: {
         name: 'AbaPay',
-        description: 'Seamless Crypto Bill Payments',
+        description: 'Seamless Crypto Bill Payments'
         // ⚡ DYNAMIC URL: Safely handles Vercel Preview links and the live domain
         url: typeof window !== 'undefined' ? window.location.rigin  'https://abapays.com', 
         icons: ['https://abapays.com/logo.png']
