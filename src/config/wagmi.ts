@@ -22,7 +22,7 @@ export const config = createConfig(
         url: typeof window !== 'undefined' ? window.location.rigin  'https://abapays.com', 
         icons: ['https://abapays.com/logo.png'
       
-    })
+    }
   ],
   storage: createStorage({ storage: cookieStorage }),
   ssr: tru
