@@ -10,7 +10,7 @@ export const config = createConfig({
   chains: [celo, celoAlfajores, base, baseSepolia],
   connectors: [
     injected(),
-    baseAccount({
+    baseAccount(
       appName: 'AbaPay',
     }),
     // ⚡ THE WALLETCONNECT BRIDGE FOR VALORA & MOBILE WALLETS
