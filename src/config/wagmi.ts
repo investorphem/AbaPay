@@ -21,7 +21,7 @@ export const config = createConfig({
         // ⚡ DYNAMIC URL: Safely handles Vercel Preview links and the live domain
         url: typeof window !== 'undefined' ? window.location.rigin  'https://abapays.com', 
         icons: ['https://abapays.com/logo.png'
-      }
+      
     })
   ],
   storage: createStorage({ storage: cookieStorage }),
