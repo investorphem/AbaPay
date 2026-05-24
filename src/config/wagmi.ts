@@ -1,5 +1,5 @@
 import { http, createConfig, createStorage, cookieStorage } from 'wagmi';
-import { base, baseSepolia, celo, celoAlfajores } from 'wagmi/chains';
+import { base, baseSepolia, celo, celoAlfajores } from 'wagmi/chains'
 import { baseAccount, injected, walletConnect } from 'wagmi/connectors';
 
 // ⚡ PULL IN YOUR WALLETCONNECT I
