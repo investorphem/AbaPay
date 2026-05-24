@@ -15,7 +15,7 @@ export const config = createConfig({
     walletConnect({ 
       projectId,
       showQrModal: true,
-      metadata: {
+      metadata: 
         name: 'AbaPay',
         description: 'Seamless Crypto Bill Payments'
         // ⚡ DYNAMIC URL: Safely handles Vercel Preview links and the live domain
