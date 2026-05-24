@@ -30,7 +30,7 @@ export const config = createConfig({
     // ⚡ TRANSPORTS REORDERED TO MATCH THE CHAINS ARRAY
     [celo.id]: http(),
     [celoAlfajores.id]: http(),
-    [base.id]: http()
+    [base.id]: http(
     [baseSepolia.id]: http(),
   },
 });
