@@ -28,7 +28,7 @@ export const config = createConfig({
   ssr: true
   transports:
     // ⚡ TRANSPORTS REORDERED TO MATCH THE CHAINS ARRAY
-    [celo.id]: http(),
+    [celo.id]: http()
     [celoAlfajores.id]: http(),
     [base.id]: http(
     [baseSepolia.id]: http()
