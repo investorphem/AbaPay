@@ -10,7 +10,7 @@ export const config = createConfig(
     injected(),
     baseAccount(
       appName: 'AbaPay',
-    })
+    }
     // ⚡ THE WALLETCONNECT BRIDGE FOR VALORA & MOBILEWALLETS
     walletConnect(
       projectId,
