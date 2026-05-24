@@ -1,7 +1,6 @@
 import { http, createConfig, createStorage, cookieStorage } from 'wagmi';
 import { base, baseSepolia, celo, celoAlfajores } from 'wagmi/chains'
 import { baseAccount, injected, walletConnect } from 'wagmi/connectors';
-
 // ⚡ PULL IN YOUR WALLETCONNECT I
 const projectId = process.env.NEXT_PUBLIC_WALLETCONNECT_PROJECT_ID || "";
 
