@@ -25,7 +25,7 @@ export const config = createConfig({
     })
   ],
   storage: createStorage({ storage: cookieStorage }),
-  ssr: true
+  ssr: tru
   transports:
     // ⚡ TRANSPORTS REORDERED TO MATCH THE CHAINS ARRAY
     [celo.id]: http()
