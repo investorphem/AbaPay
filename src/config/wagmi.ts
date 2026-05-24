@@ -11,7 +11,7 @@ export const config = createConfig({
     baseAccount(
       appName: 'AbaPay',
     })
-    // ⚡ THE WALLETCONNECT BRIDGE FOR VALORA & MOBILE WALLETS
+    // ⚡ THE WALLETCONNECT BRIDGE FOR VALORA & MOBILEWALLETS
     walletConnect({ 
       projectId,
       showQrModal: true,
