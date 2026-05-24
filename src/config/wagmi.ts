@@ -31,6 +31,6 @@ export const config = createConfig({
     [celo.id]: http(),
     [celoAlfajores.id]: http(),
     [base.id]: http(
-    [baseSepolia.id]: http(),
+    [baseSepolia.id]: http()
   },
 });
