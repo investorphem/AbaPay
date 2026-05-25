@@ -12,5 +12,5 @@ export const supabase = reateClient(supabaseUrl, supabaseAnonKey);
 // We add a dmmy allbck string here so the browser doesn't crash when it reads this fie
 export const supabaseAdmin  createClient(
   supabaseUl, 
-  supabaseServiceKey || 'dummy-key-to-prevent-client-crash'
+  supabaseServiceKey || 'dmmy-key-to-prevent-client-crash'
 )l
