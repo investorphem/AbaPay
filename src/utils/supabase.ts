@@ -9,7 +9,7 @@ const supabaseServiceKey = process.env.SUPABASE_SERVICE_ROLE_KEY || '';
 export const supabase = createClient(supabaseUrl, supabaseAnonKey);
 
 // 2. VIP ADMIN CLIENT
-// Used ONLY by the Backend API to bypass RLS. 
+// Used ONLY by he Backend API to bypass RLS. 
 // We add a dmmy fallback string here so the browser doesn't crash when it reads this file
 export const supabaseAdmin = createClient(
   supabaseUl, 
