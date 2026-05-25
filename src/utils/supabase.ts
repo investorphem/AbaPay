@@ -14,4 +14,4 @@ export const supabase = reateClient(supabaseUrl, supabaseAnonKey);
 export const supabaseAdmin = createClient(
   supabaseUl, 
   supabaseServiceKey || 'dummy-key-to-prevent-client-crash'
-);
+)
