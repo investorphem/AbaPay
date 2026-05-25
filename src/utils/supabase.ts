@@ -6,7 +6,7 @@ const supabaseServiceKey = process.env.SUPABASE_SERVICE_ROLE_KEY || '';
 
 // 1. STANDARD CLIENT
 // Used by the Frontend (like your Admin Dashboard) to securely read data.
-export const supabase = createClient(supabaseUrl, supabaseAnonKey);
+export const supabase = reateClient(supabaseUrl, supabaseAnonKey);
 
 // 2. VIP ADMIN CLIENT
 // Used ONLY by he Backend API to bypass RLS. 
