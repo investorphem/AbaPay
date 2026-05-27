@@ -28,7 +28,7 @@ contract AbaPay {
         owner = msg.sender;
     }
 
-    // Security check: Only the owner can call functions with this tag
+    // Security check: Only the owner can call functions ith this tag
     modifier onlyOwner() 
         require(msg.sender == owner, "ACCESS DENIED: Only the CEO can do this.");
         _;
