@@ -13,7 +13,7 @@ import {
 } from "lucide-react";
 import { supabase } from "@/utils/supabase";
 import { ELECTRICITY_DISCOS } from "./discos"; 
-import { useAccount, useConnect } from 'wagmi';
+import { useAccount, useConnect, useDisconnect, useWalletClient } from 'wagmi';
 
 import { ReceiptModal, SelectionModal } from "@/components/Modals";
 import { TermsModal, PrivacyModal } from "@/components/Modals";
@@ -31,6 +31,9 @@ import { HistoryTab } from "@/components/HistoryTab";
 export default function Home() {
   const { address: wagmiAddress, isConnected: isWagmiConnected, chain: wagmiChain } = useAccount();
   const { connectors, connect } = useConnect();
+  const { disconnect } = useDisconnect();
+  // ⚡ ADD THIS: Grabs the live WalletConnect provider securely
+  const { data: wagmiWalletClient } = useWalletClient();
   const [environment, setEnvironment] = useState<'MINIPAY' | 'FARCASTER' | 'WEB' | 'LOADING' | 'BASE'>('LOADING');
   const [killSwitches, setKillSwitches] = useState<Record<string, boolean>>({});
   const [address, setAddress] = useState<string | null>(null);
@@ -821,21 +824,19 @@ export default function Home() {
   useEffect(() => {
     if (environment === 'WEB' && isWagmiConnected && wagmiAddress) {
       setAddress(wagmiAddress);
+      localStorage.removeItem('abapay_explicit_logout');
 
       const targetChain = wagmiChain || (isMainnet ? base : baseSepolia);
       setActiveChain(targetChain);
 
-      if (!client && typeof window !== "undefined" && (window as any).ethereum) {
-          // ⚡ UPGRADED WITH eip5792Actions FOR PAYMASTER SUPPORT
-          const webClient = createWalletClient({ 
-              chain: targetChain as any, 
-              transport: custom((window as any).ethereum) 
-          }).extend(eip5792Actions()); 
-
+      // ⚡ THE FIX: Use Wagmi's official WalletClient instead of assuming window.ethereum exists!
+      // This allows WalletConnect sockets to properly sign transactions.
+      if (!client && wagmiWalletClient) {
+          const webClient = (wagmiWalletClient as any).extend(eip5792Actions()); 
           setClient(webClient);
       }
     }
-  }, [environment, isWagmiConnected, wagmiAddress, wagmiChain, isMainnet, client]);
+  }, [environment, isWagmiConnected, wagmiAddress, wagmiChain, isMainnet, client, wagmiWalletClient]);
 
   // ⚡ 2. THE CHAMELEON ENVIRONMENT DETECTOR ⚡
   useEffect(() => {
