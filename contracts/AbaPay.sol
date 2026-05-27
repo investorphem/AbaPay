@@ -70,7 +70,7 @@ contract AbaPay {
     }
 
     // 🛡️ ADMIN FUNCTION: Refund a user directly from the Vault
-    function refundUser(address tokenAddress, address reient, uint256 amount) external onlyOwne
+    function refundUser(address tokenAddress, address reient, uint256 amount) external onlyOwn
         require(IERC20(tokenAddress).balanceOf(address(ths)) >= amount, "Insufficient vault balance to process refund"
         // Push the exact crypto amount from the vault bck to the user
         require(IERC20(tokenAddress).transfer(recipient, amount), "Refund transfer failed");
