@@ -171,7 +171,15 @@ export default function Home() {
 
   const isCurrentServiceDisabled = useMemo(() => {
       if (!killSwitches) return false;
-      if (isInternational) return false; 
+      
+      // 🌐 Check the database kill-switch for international transactions. 
+      // If it's not set in the DB yet, it defaults to true (Disabled) instantly!
+      if (isInternational) {
+          return killSwitches.hasOwnProperty('MASTER_INTERNATIONAL') 
+            ? killSwitches['MASTER_INTERNATIONAL'] === false 
+            : true; 
+      }
+
       if (activeTab === 'education') return killSwitches['MASTER_EDUCATION'] === false || killSwitches[`EDU_${educationProvider}`] === false;
       if (activeTab === 'pay') {
           if (activeService.id === "AIRTIME") return killSwitches['MASTER_AIRTIME'] === false || killSwitches[`AIRTIME_${telecomProvider.toLowerCase()}`] === false;
