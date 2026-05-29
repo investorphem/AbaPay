@@ -1379,10 +1379,47 @@ export default function Home() {
           <div className="flex items-center gap-2">
 
             {address && (
-                <div className={`hidden sm:flex px-2.5 py-1.5 rounded-xl border items-center gap-1.5 shadow-sm transition-colors ${activeChain?.name?.toLowerCase().includes('base') ? 'bg-blue-50 dark:bg-blue-900/20 border-blue-200 dark:border-blue-800/50 text-blue-700 dark:text-blue-400' : 'bg-emerald-50 dark:bg-emerald-900/20 border-emerald-200 dark:border-emerald-800/50 text-emerald-700 dark:text-emerald-400'}`}>
-                    <div className={`w-1.5 h-1.5 rounded-full animate-pulse ${activeChain?.name?.toLowerCase().includes('base') ? 'bg-blue-500' : 'bg-emerald-500'}`}></div>
+                <button 
+                  onClick={async () => {
+                      // Only allow network switching in WEB/WalletConnect environments
+                      if (environment !== 'WEB' || !client) return;
+                      
+                      const targetNetwork = activeChain.id === celo.id || activeChain.id === celoSepolia.id 
+                          ? (isMainnet ? base : baseSepolia) 
+                          : (isMainnet ? celo : celoSepolia);
+                      
+                      try {
+                          setIsProcessing(true);
+                          await client.switchChain({ id: targetNetwork.id });
+                          setActiveChain(targetNetwork);
+                      } catch (error: any) {
+                          // If the user's wallet doesn't have the network saved, try adding it automatically
+                          try {
+                              await client.addChain({ chain: targetNetwork });
+                              setActiveChain(targetNetwork);
+                          } catch (addError) {
+                              showToast("Switch Failed", "Please manually switch the network inside your wallet app.", "error");
+                          }
+                      } finally {
+                          setIsProcessing(false);
+                      }
+                  }}
+                  disabled={environment !== 'WEB' || isProcessing}
+                  title={environment === 'WEB' ? "Click to switch network" : `Locked to ${activeChain?.name}`}
+                  className={`flex px-2.5 py-1.5 rounded-xl border items-center gap-1.5 shadow-sm transition-all ${
+                     activeChain?.name?.toLowerCase().includes('base') 
+                        ? 'bg-blue-50 dark:bg-blue-900/20 border-blue-200 dark:border-blue-800/50 text-blue-700 dark:text-blue-400' 
+                        : 'bg-emerald-50 dark:bg-emerald-900/20 border-emerald-200 dark:border-emerald-800/50 text-emerald-700 dark:text-emerald-400'
+                  } ${environment === 'WEB' ? 'cursor-pointer hover:scale-105 active:scale-95' : 'cursor-default opacity-80'}`}
+                >
+                    {isProcessing ? (
+                        <Loader2 size={10} className="animate-spin" />
+                    ) : (
+                        <div className={`w-1.5 h-1.5 rounded-full animate-pulse ${activeChain?.name?.toLowerCase().includes('base') ? 'bg-blue-500' : 'bg-emerald-500'}`}></div>
+                    )}
                     <span className="text-[9px] font-black uppercase tracking-widest">{activeNetworkDisplay}</span>
-                </div>
+                    {environment === 'WEB' && !isProcessing && <RefreshCw size={10} className="opacity-60 ml-0.5" />}
+                </button>
             )}
 
                                     {/* ⚡ NEW: Dynamic Connect Button / Smart Environment Routing ⚡ */}
