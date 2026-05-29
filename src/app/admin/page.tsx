@@ -632,6 +632,23 @@ export default function AdminDashboard() {
                     </div>
                  </div>
 
+                 {/* ⚡ NEW: INTERNATIONAL MASTER SWITCH ⚡ */}
+                 <div className="bg-slate-900 border border-slate-800 rounded-2xl overflow-hidden mb-6">
+                     <div className="bg-slate-800/50 p-5 flex items-center justify-between border-b border-slate-800">
+                         <div>
+                             <h3 className="font-black text-white text-lg flex items-center gap-2"><Globe size={18} className="text-blue-400"/> International Top-ups</h3>
+                             <p className="text-[10px] font-bold text-slate-500 uppercase tracking-widest mt-0.5">Toggle all foreign airtime/data services globally</p>
+                         </div>
+                         <button 
+                             onClick={() => toggleKillSwitch('MASTER_INTERNATIONAL', killSwitches['MASTER_INTERNATIONAL'] === false)}
+                             disabled={isUpdatingSwitches}
+                             className={`relative inline-flex h-7 w-12 items-center rounded-full transition-colors disabled:opacity-50 ${killSwitches['MASTER_INTERNATIONAL'] !== false ? 'bg-emerald-500' : 'bg-slate-700'}`}
+                         >
+                             <span className={`inline-block h-5 w-5 transform rounded-full bg-white transition-transform ${killSwitches['MASTER_INTERNATIONAL'] !== false ? 'translate-x-6' : 'translate-x-1'}`} />
+                         </button>
+                     </div>
+                 </div>
+
                  <div className="space-y-6">
                     {switchGroups.map((group) => {
                         const isMasterOn = killSwitches[group.master] !== false;
