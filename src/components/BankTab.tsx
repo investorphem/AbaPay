@@ -9,7 +9,7 @@ export default function BankTab({
   nairaAmount, setNairaAmount, cryptoToCharge, currentFee, customerPhone, setCustomerPhone,
   customerEmail, setCustomerEmail, status, setIsConfirmModalOpen, isFormValid, isProcessing,
   openSelectionModal, pressTimer, isLongPress
-}: any) {
+}: {
 
   return (
     <div className="bg-white border border-slate-100 rounded-[2.5rem] p-8 shadow-2xl shadow-emerald-900/10 animate-in fade-in zoom-in-95">
