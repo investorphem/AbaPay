@@ -9,9 +9,21 @@ interface AppFooterProps {
   network?: string;
 }
 
+// ⚡ THE NEW PREMIUM SPRING-ACTION THEME TOGGLE ⚡
+function ThemeToggle() {
+  const { theme, setTheme } = useTheme();
+  const [mounted, setMounted] = useState(false);
+  const [isOpen, setIsOpen] = useState(false);
+  const timeoutRef = useRef<NodeJS.Timeout | null>(null);
 
+  useEffect(() => setMounted(true), []);
 
-  
+  const openToggle = () => {
+    setIsOpen(true);
+    if (timeoutRef.current) clearTimeout(timeoutRef.current);
+    // Automatically close after 4 seconds
+    timeoutRef.current = setTimeout(() => setIsOpen(false), 4000);
+  };
 
   const handleMainClick = () => {
     if (isOpen) {
@@ -34,7 +46,7 @@ interface AppFooterProps {
 
   return (
     <div className="relative flex items-center justify-center">
-      
+
       {/* Option 1: Light Mode (Springs out to the far left) */}
       <button 
         onClick={() => selectTheme('light')} 
@@ -42,7 +54,7 @@ interface AppFooterProps {
       >
         <Sun size={12} />
       </button>
-      
+
       {/* Option 2: System Mode (Springs out to the top-left diagonal) */}
       <button 
         onClick={() => selectTheme('system')} 
@@ -73,7 +85,7 @@ interface AppFooterProps {
 export default function AppFooter({ network = "Base & Celo" }: AppFooterProps) {
   return (
     <footer className="mt-12 w-full border-t border-slate-200 dark:border-slate-800/60 pt-8 pb-4 flex flex-col items-center gap-5 animate-in fade-in transition-colors">
-      
+
       <div className="flex items-center gap-4">
         <a href="https://x.com/AbaPays" target="_blank" rel="noopener noreferrer" className="w-12 h-12 rounded-full border-2 border-slate-200 dark:border-slate-800 bg-white dark:bg-[#111114] flex items-center justify-center text-slate-500 dark:text-slate-400 hover:text-emerald-600 dark:hover:text-emerald-400 hover:border-emerald-200 dark:hover:border-emerald-900 hover:bg-emerald-50 dark:hover:bg-emerald-900/20 transition-all shadow-sm group">
           <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="group-hover:scale-110 transition-transform">
@@ -94,7 +106,7 @@ export default function AppFooter({ network = "Base & Celo" }: AppFooterProps) {
       <div className="flex items-center gap-5">
         <Link href="/docs" className="text-[10px] font-black text-slate-400 dark:text-slate-500 hover:text-emerald-600 dark:hover:text-emerald-400 uppercase transition-colors">Docs & FAQ</Link>
         <Link href="/terms" className="text-[10px] font-black text-slate-400 dark:text-slate-500 hover:text-emerald-600 dark:hover:text-emerald-400 uppercase transition-colors">Terms</Link>
-        
+
         {/* ⚡ PRIVACY LINK & NEW INLINE THEME TOGGLE ⚡ */}
         <div className="flex items-center gap-3">
            <Link href="/privacy" className="text-[10px] font-black text-slate-400 dark:text-slate-500 hover:text-emerald-600 dark:hover:text-emerald-400 uppercase transition-colors">Privacy</Link>
