@@ -9,14 +9,7 @@ interface AppFooterProps {
   network?: string;
 }
 
-// ⚡ THE NEW PREMIUM SPRING-ACTION THEME TOGGLE ⚡
-function ThemeToggle() {
-  const { theme, setTheme } = useTheme();
-  const [mounted, setMounted] = useState(false);
-  const [isOpen, setIsOpen] = useState(false);
-  const timeoutRef = useRef<NodeJS.Timeout | null>(null);
 
-  useEffect(() => setMounted(true), []);
 
   
 
