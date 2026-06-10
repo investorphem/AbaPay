@@ -18,12 +18,7 @@ function ThemeToggle() {
 
   useEffect(() => setMounted(true), []);
 
-  const openToggle = () => {
-    setIsOpen(true);
-    if (timeoutRef.current) clearTimeout(timeoutRef.current);
-    // Automatically close after 4 seconds
-    timeoutRef.current = setTimeout(() => setIsOpen(false), 4000);
-  };
+  
 
   const handleMainClick = () => {
     if (isOpen) {
