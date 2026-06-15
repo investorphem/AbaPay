@@ -5,9 +5,7 @@ import { baseAccount, injected, walletConnect } from 'wagmi/connectors';
 // ⚡ PULL IN YOUR WALLETCONNECT ID
 const projectId = process.env.NEXT_PUBLIC_WALLETCONNECT_PROJECT_ID || "";
 
-export const config = createConfig({
-  // ⚡ CELO IS NOW FIRST: Valora and other wallets will default to Celo!
-  chains: [celo, celoAlfajores, base, baseSepolia],
+export const config = createConfig(
   connectors: [
     injected(),
     baseAccount({
