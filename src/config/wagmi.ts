@@ -5,15 +5,21 @@ import { baseAccount, injected, walletConnect } from 'wagmi/connectors';
 // ⚡ PULL IN YOUR WALLETCONNECT ID
 const projectId = process.env.NEXT_PUBLIC_WALLETCONNECT_PROJECT_ID || "";
 
-export const config = createConfig(
+export const config = createConfig({
+  // ⚡ CELO IS NOW FIRST: Valora and other wallets will default to Celo!
+  chains: [celo, celoAlfajores, base, baseSepolia],
   connectors: [
     injected(),
     baseAccount({
       appName: 'AbaPay',
     }),
+    // ⚡ THE WALLETCONNECT BRIDGE FOR VALORA & MOBILE WALLETS
     walletConnect({ 
       projectId, 
       showQrModal: true,
+      // ⚡ VALORA INTEGRATION: Forces Valora to the top of the recommended list
+      qrModalOptions: {
+        explorerRecommendedWalletIds: [
           'd01c7758d741b363e637a817a09bcf579feae4db9f5bb16f599fdd1f66e2f974' // Official Valora Wallet ID
         ]
       },
