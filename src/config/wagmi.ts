@@ -13,10 +13,6 @@ export const config = createConfig({
     baseAccount({
       appName: 'AbaPay',
     }),
-    // ⚡ THE WALLETCONNECT BRIDGE FOR VALORA & MOBILE WALLETS
-    walletConnect({ 
-      projectId, 
-      showQrModal: true,
       // ⚡ VALORA INTEGRATION: Forces Valora to the top of the recommended list
       qrModalOptions: {
         explorerRecommendedWalletIds: [
