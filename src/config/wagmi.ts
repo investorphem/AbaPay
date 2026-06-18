@@ -1,5 +1,6 @@
 import { http, createConfig, createStorage, cookieStorage } from 'wagmi';
 import { base, baseSepolia, celo, celoAlfajores } from 'wagmi/chains';
+import { baseAccount, injected, walletConnect } from 'wagmi/connectors';
 
 // ⚡ PULL IN YOUR WALLETCONNECT ID
 const projectId = process.env.NEXT_PUBLIC_WALLETCONNECT_PROJECT_ID || "";
@@ -12,6 +13,10 @@ export const config = createConfig({
     baseAccount({
       appName: 'AbaPay',
     }),
+    // ⚡ THE WALLETCONNECT BRIDGE FOR VALORA & MOBILE WALLETS
+    walletConnect({ 
+      projectId, 
+      showQrModal: true,
       // ⚡ VALORA INTEGRATION: Forces Valora to the top of the recommended list
       qrModalOptions: {
         explorerRecommendedWalletIds: [
@@ -21,6 +26,7 @@ export const config = createConfig({
       metadata: {
         name: 'AbaPay',
         description: 'Seamless Crypto Bill Payments',
+        // ⚡ DYNAMIC URL: Safely handles Vercel Preview links and the live domain
         url: typeof window !== 'undefined' ? window.location.origin : 'https://abapays.com', 
         icons: ['https://abapays.com/logo.png'] 
       }
