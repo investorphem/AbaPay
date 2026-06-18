@@ -22,7 +22,6 @@ export const config = createConfig({
       metadata: {
         name: 'AbaPay',
         description: 'Seamless Crypto Bill Payments',
-        // ⚡ DYNAMIC URL: Safely handles Vercel Preview links and the live domain
         url: typeof window !== 'undefined' ? window.location.origin : 'https://abapays.com', 
         icons: ['https://abapays.com/logo.png'] 
       }
