@@ -2,8 +2,6 @@
 
 import React, { useEffect, useState, useRef } from 'react';
 import Link from 'next/link';
-import { ShieldCheck, Send, Moon, Sun, Monitor } from 'lucide-react';
-import { useTheme } from "next-themes";
 
 interface AppFooterProps {
   network?: string;
