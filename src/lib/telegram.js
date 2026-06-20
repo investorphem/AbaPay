@@ -14,10 +14,6 @@ export const sendTelegramAlert = async (message) => {
     return null;
   }
 
-  // ⚡ SMART LABELING: Instantly know if an alert is real or just a test ⚡
-  const appMode = process.env.NEXT_PUBLIC_APP_MODE || "sandbox";
-  const finalMessage = appMode === "live" ? message : `🛠️ *[SANDBOX TEST]*\n${message}`;
-
   const url = `https://api.telegram.org/bot${token}/sendMessage`;
 
   try {
