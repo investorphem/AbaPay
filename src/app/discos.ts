@@ -3,7 +3,6 @@
 export const ELECTRICITY_DISCOS = [
     { serviceID: "ibadan-electric", displayName: "Ibadan Electricity", logo: "/ibadan.png" },
     { serviceID: "jos-electric", displayName: "Jos Electricity", logo: "/jos.png" },
-    { serviceID: "portharcourt-electric", displayName: "Port Harcourt Electricity", logo: "/phed.png" },
     { serviceID: "kaduna-electric", displayName: "Kaduna Electricity", logo: "/kaduna.png" }
     { serviceID: "abuja-electric", displayName: "Abuja Electricity", logo: "/abuja.png" },
     { serviceID: "eko-electric", displayName: "Eko Electricity", logo: "/eko.png" },
