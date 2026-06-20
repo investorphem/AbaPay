@@ -10,7 +10,9 @@ export const categorizeDataPlan = (name: string, code: string = ""): string => {
       lowerName.includes("mifi") || lowerName.includes("router") || 
       lowerName.includes("jumbo") || lowerName.includes("mega") || 
       lowerName.includes("hynetflex") || lowerName.includes("broadband") ||
-      lowerName.includes("60 days") || lowerName.includes("90 days") ||
+      lowerName.includes("60 days") || lowerName.includes("90 days") || 
+      lowerName.includes("120 days") || lowerName.includes("180 days") ||
+      lowerCode.includes("hynet")
   ) {
       return "Broadband";
   }
