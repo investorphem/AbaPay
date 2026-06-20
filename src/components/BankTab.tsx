@@ -1,4 +1,6 @@
 import React from 'react';
+import { ChevronDown, Coins, Loader2, Landmark, CheckCircle2, XCircle, AlertTriangle, ShieldCheck } from 'lucide-react';
+import { SUPPORTED_TOKENS } from "@/constants";
 
 export default function BankTab({
   selectedToken, setSelectedToken, walletBalance, walletBalanceNaira, isFetchingBalance,
