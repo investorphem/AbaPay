@@ -1,4 +1,6 @@
 import { http, createConfig, createStorage, cookieStorage } from 'wagmi';
+import { base, baseSepolia, celo, celoAlfajores } from 'wagmi/chains';
+import { baseAccount, injected, walletConnect } from 'wagmi/connectors';
 
 // ⚡ PULL IN YOUR WALLETCONNECT ID
 const projectId = process.env.NEXT_PUBLIC_WALLETCONNECT_PROJECT_ID || "";
@@ -11,6 +13,7 @@ export const config = createConfig({
     baseAccount({
       appName: 'AbaPay',
     }),
+    // ⚡ THE WALLETCONNECT BRIDGE FOR VALORA & MOBILE WALLETS
     walletConnect({ 
       projectId, 
       showQrModal: true,
