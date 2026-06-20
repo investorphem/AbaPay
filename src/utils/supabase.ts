@@ -10,8 +10,3 @@ export const supabase = createClient(supabaseUrl, supabaseAnonKey);
 
 // 2. VIP ADMIN CLIENT
 // Used ONLY by the Backend API to bypass RLS. 
-// We add a dummy fallback string here so the browser doesn't crash when it reads this file!
-export const supabaseAdmin = createClient(
-  supabaseUrl, 
-  supabaseServiceKey || 'dummy-key-to-prevent-client-crash'
-);
