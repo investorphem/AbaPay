@@ -1,8 +1,7 @@
 export async function sendWhatsAppOTP(phone: string, otpCode: string): Promise<boolean> {
     try {
         // 🚨 PLACEHOLDER FOR FUTURE META/TWILIO API 🚨
-        console.log(`\n========================================`);
-        // Simulate network delay
+        console.log(`\n========================================`)
         await new Promise(resolve => setTimeout(resolve, 800));
         return true; 
     } catch (error) {
