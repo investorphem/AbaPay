@@ -13,8 +13,6 @@ export const sendAbaPaySms = async (recipient, message) => {
     sender: 'AbaPay',
     recipient: recipient,
     message: message,
-    responsetype: 'json'
-  });
 
   try {
     const res = await fetch(url, {
