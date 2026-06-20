@@ -14,8 +14,7 @@ export const generateRequestId = () => {
     String(now.getMinutes()).padStart(2, '0');
 
   // Total 20 characters: 12 numeric + 8 alphanumeric
-  const randomSuffix = Math.random().toString(36).substring(2, 10);
-  return `${dateStr}${randomSuffix}`;
+  const randomSuffix = Math.random().toString(36).substring(2, 10
 };
 
 /**
