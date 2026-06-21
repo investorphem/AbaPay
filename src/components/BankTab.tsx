@@ -1,18 +1,29 @@
 import React from 'react';
 import { ChevronDown, Coins, Loader2, Landmark, CheckCircle2, XCircle, AlertTriangle, ShieldCheck } from 'lucide-react';
+import { SUPPORTED_TOKENS } from "@/constants";
+
+export default function BankTab({
+  selectedToken, setSelectedToken, walletBalance, walletBalanceNaira, isFetchingBalance,
   bankVariations, selectedBank, handleProviderChange, accountNumber, setAccountNumber,
+  isVerifying, beneficiaries, getCurrentProviderKey, activeDeleteAccount, setActiveDeleteAccount,
   removeBeneficiary, setCustomerName, customerName, dynamicMinAmount, dynamicMaxAmount,
   nairaAmount, setNairaAmount, cryptoToCharge, currentFee, customerPhone, setCustomerPhone,
   customerEmail, setCustomerEmail, status, setIsConfirmModalOpen, isFormValid, isProcessing,
+  openSelectionModal, pressTimer, isLongPress
+}: any) {
+
   return (
     <div className="bg-white border border-slate-100 rounded-[2.5rem] p-8 shadow-2xl shadow-emerald-900/10 animate-in fade-in zoom-in-95">
         <div className="space-y-5">
             <div className="bg-slate-50 border border-slate-100 p-4 rounded-2xl flex justify-between items-center animate-in fade-in">
               <div 
                 className="flex items-center gap-2 cursor-pointer hover:bg-slate-100 p-2 -ml-2 rounded-xl transition-colors" 
+                onClick={() => openSelectionModal('token', "Select Token", SUPPORTED_TOKENS, (symbol: string) => setSelectedToken(SUPPORTED_TOKENS.find(t => t.symbol === symbol)!))}
               >
                  <img src={selectedToken.logo} alt={selectedToken.symbol} className="w-7 h-7 object-contain rounded-full shadow-sm bg-white" />
-                 <span className="font-black text-slate-800 uppercase text-sm tracking-tight">{selectedToken.symbol}</span
+                 <span className="font-black text-slate-800 uppercase text-sm tracking-tight">{selectedToken.symbol}</span>
+                 <ChevronDown size={14} className="text-slate-400"/>
+              </div>
               <div className="text-right">
                 <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-0.5">Balance</p>
                 <div className="flex items-center justify-end gap-1.5">
