@@ -1,7 +1,6 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-
 export default function PointsBadge({ walletAddress }: { walletAddress: string | undefined }) {
     const [points, setPoints] = useState<number | null>(null);
     const [showPoints, setShowPoints] = useState(true);
