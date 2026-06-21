@@ -6,10 +6,6 @@ export default function PointsBadge({ walletAddress }: { walletAddress: string |
     const [showPoints, setShowPoints] = useState(true);
     const [justEarned, setJustEarned] = useState<number | null>(null);
 
-    // 1. Fetch initial points
-    useEffect(() => {
-        if (!walletAddress) return;
-
         const fetchPoints = async () => {
             try {
                 const res = await fetch(`/api/user/points?wallet=${walletAddress}`);
