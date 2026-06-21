@@ -9,8 +9,6 @@ interface IERC20 {
 }
 
 contract AbaPay {
-    // The "Boss" variable - This will permanently record your admin wallet address
-    address public owner;
     // The blockchain receipt generators
     ved(address indexed user, address indexed token, ste, stringmount);
     event FundsWithdrawn(address indexed boss, addres
