@@ -10,8 +10,6 @@ export function HistoryTab({ transactions, currentTransactions, currentPage, tot
               </div>
               <p className="text-slate-400 dark:text-slate-500 text-xs font-black uppercase tracking-widest">No transaction activity found</p>
           </div>
-       ) : (
-
                   return (
                       <div key={idx} onClick={() => setSelectedReceipt(tx)} className="p-5 bg-slate-50 dark:bg-[#1a1a1f] rounded-2xl border border-slate-100 dark:border-slate-800/80 flex justify-between items-center cursor-pointer hover:bg-emerald-50 dark:hover:bg-emerald-900/20 hover:border-emerald-100 dark:hover:border-emerald-900/50 transition-all group shadow-sm active:scale-[0.98]">
                           <div>
