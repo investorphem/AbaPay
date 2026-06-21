@@ -12,10 +12,6 @@ export default function DataVariationsUI({ variations, onSelectPlan }: DataVaria
   const groupedVariations = useMemo(() => {
     const groups: Record<string, any[]> = {};
 
-    // 1. Group them into tabs
-    variations.forEach((plan) => {
-    });
-
     // ⚡ 2. SORT EACH TAB FROM LOWEST TO HIGHEST PRICE ⚡
     Object.keys(groups).forEach(key => {
       groups[key].sort((a, b) => parseFloat(a.variation_amount || "0") -
