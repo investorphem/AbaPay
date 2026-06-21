@@ -5,7 +5,6 @@ interface DataVariationsUIProps {
   variations: any[];
   onSelectPlan: (plan: any) => void;
 }
-
   const groupedVariations = useMemo(() => {
     const groups: Record<string, any[]> = {}
 
