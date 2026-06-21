@@ -14,11 +14,7 @@ contract AbaPay {
     event FundsWithdrawn(address indexed boss, addres
     event TokenSupportUpdated(address i
     // NEW: Refund receipt generator
-    event UserRefunded(address indexed user, address indexed token, utor() {
-        // Whoever deploys this contract becomes the permanent owner
-        owner = msg.sender;
-    }
-
+    event UserRefunded(address indexed user, address indexed token, utor(
     // Security check: Only the owner can call functions with this tag
     modifier onlyOwner() {
         require(msg.sender == owner, "ACCESS DENIED: Only the CEO can do this.");
