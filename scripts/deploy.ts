@@ -26,9 +26,6 @@ async function main() {
     // SEPOLIA TESTNET ADDRESSES
     usdt = "0xd077A400968890Eacc75cdc901F0356c943e4fDb";
   console.log("🔐 Whitelisting Stablecoins...");
-
-  let tx1 = await AbaPay.setTokenSupport(usdt, true);
-  await tx1.wait();
   console.log("✅ USDT Whitelisted");
 
   let tx2 = await AbaPay.setTokenSupport(usdc, true);
