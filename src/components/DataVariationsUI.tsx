@@ -14,9 +14,6 @@ export default function DataVariationsUI({ variations, onSelectPlan }: DataVaria
 
     // 1. Group them into tabs
     variations.forEach((plan) => {
-      const categoryName = categorizeDataPlan(plan.name, plan.variation_code);
-      if (!groups[categoryName]) {
-        groups[categoryName] = []; 
       }
       groups[categoryName].push(plan);
     });
