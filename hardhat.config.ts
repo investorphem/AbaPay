@@ -25,10 +25,6 @@ const config: HardhatUserConfig = {
     // Now using the unified ETHERSCAN_API_KEY for all networks
     apiKey: {
       sepolia: process.env.ETHERSCAN_API_KEY || "",
-      celo: process.env.ETHERSCAN_API_KEY || "",
-    },
-    customChains: [
-      {
         network: "sepolia",
         chainId: 11142220,
         urls: {
