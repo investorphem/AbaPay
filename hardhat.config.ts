@@ -14,8 +14,6 @@ const config: HardhatUserConfig = {
       chainId: 11142220,
     },
     celo: {
-      url: "https://forno.celo.org",
-  },
   // Configuration to verify contracts on Etherscan V2
   etherscan: {
       sepolia: process.env.ETHERSCAN_API_KEY || "",
