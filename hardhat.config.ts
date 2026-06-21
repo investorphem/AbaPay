@@ -17,8 +17,6 @@ const config: HardhatUserConfig = {
     celo: {
       url: "https://forno.celo.org",
       accounts: process.env.CELO_PRIVATE_KEY ? [process.env.CELO_PRIVATE_KEY] : [],
-      chainId: 42220,
-    },
   },
   // Configuration to verify contracts on Etherscan V2
   etherscan: {
