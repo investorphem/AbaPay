@@ -30,14 +30,6 @@ export default function PointsBadge({ walletAddress }: { walletAddress: string |
         }, 3000);
         return () => clearInterval(interval);
     }, []);
-
-    // 3. Listen for new points from the Payment page
-    useEffect(() => {
-        const handlePointsEarned = (e: any) => {
-            const addedAmount = e.detail;
-            setJustEarned(addedAmount);
-            setPoints(prev => (prev || 0) + addedAmount);
-            
             // Force it to show the points number immediately so they see it jump
             setShowPoints(true); 
             
