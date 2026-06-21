@@ -6,7 +6,7 @@ export function TermsModal({ isOpen, onClose }: any) {
   if (!isOpen) return null;
   return (
     <div className="fixed inset-0 z-50 bg-slate-900/60 dark:bg-black/80 backdrop-blur-sm flex justify-center items-center p-4 animate-in fade-in transition-colors" onClick={onClose}>
-       <div className="bg-white dark:bg-[#111114] w-full max-w-md rounded-[2rem] shadow-2xl dark:shadow-black/50 p-6 flex flex-col max-h-[80vh] animate-in zoom-in-95 duration-200 transition-colors" onClick={(e) => e.stopPropagation()}>
+       <div className="bg-white dark:bg-[#111114] w-full max-w-md rounded-[2rem] shadow-2xl dark:shadow-black/50 p-6 flex flex-col max-h-[80vh
           <div className="flex justify-between items-center mb-4 shrink-0 border-b border-slate-100 dark:border-slate-800/60 pb-4">
             <h2 className="text-xl font-black tracking-tight text-slate-900 dark:text-white">Terms of Service</h2>
             <button onClick={onClose} className="p-2 bg-slate-100 dark:bg-slate-800 rounded-full hover:bg-slate-200 dark:hover:bg-slate-700 transition-colors"><XCircle size={20} className="text-slate-500 dark:text-slate-400" /></button>
