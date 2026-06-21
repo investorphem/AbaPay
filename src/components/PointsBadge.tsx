@@ -27,8 +27,6 @@ export default function PointsBadge({ walletAddress }: { walletAddress: string |
         return () => window.removeEventListener('abapoints-awarded', handlePointsEarned);
     }, []);
 
-    if (!walletAddress || points === null) return null;
-
     // Clean formatting (e.g., shows 1.50, but shows 2 instead of 2.00)
     const displayPoints = Number(points).toFixed(2).replace(/\.00$/, '');
 
