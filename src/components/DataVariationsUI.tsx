@@ -7,15 +7,7 @@ interface DataVariationsUIProps {
 }
 
   const groupedVariations = useMemo(() => {
-    const groups: Record<string, any[]> = {};
-
-    // 1. Group them into tabs
-    variations.forEach((plan) => {
-      const categoryName = categorizeDataPlan(plan.name, plan.variation_code);
-        groups[categoryName] = []; 
-      }
-      groups[categoryName].push(plan);
-    });
+    const groups: Record<string, any[]> = {}
 
     // ⚡ 2. SORT EACH TAB FROM LOWEST TO HIGHEST PRICE ⚡
     Object.keys(groups).forEach(key => {
