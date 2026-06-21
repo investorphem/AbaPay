@@ -18,8 +18,7 @@ contract AbaPay {
     // The blockchain receipt generators
     event PaymentReceived(address indexed user, address indexed token, string serviceType, string accountNumber, uint256 amount);
     event FundsWithdrawn(address indexed boss, addres
-    event TokenSupportUpdated(address indexed token, bool isSupported);
-
+    event TokenSupportUpdated(address i
     // NEW: Refund receipt generator
     event UserRefunded(address indexed user, address indexed token, utor() {
         // Whoever deploys this contract becomes the permanent owner
