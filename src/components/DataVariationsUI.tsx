@@ -5,8 +5,7 @@ interface DataVariationsUIProps {
   variations: any[];
   onSelectPlan: (plan: any) => void;
 }
-  const groupedVariations = useMemo(() => {
-    const groups: Record<string, any[]> = {}
+  const groupedVariations = useMemo(() =>
 
     // ⚡ 2. SORT EACH TAB FROM LOWEST TO HIGHEST PRICE ⚡
     Object.keys(groups).forEach(key => {
