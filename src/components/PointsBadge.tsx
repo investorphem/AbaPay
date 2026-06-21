@@ -1,13 +1,27 @@
 'use client';
 
 import { useEffect, useState } from 'react';
+
 export default function PointsBadge({ walletAddress }: { walletAddress: string | undefined }) {
     const [points, setPoints] = useState<number | null>(null);
     const [showPoints, setShowPoints] = useState(true);
+    const [justEarned, setJustEarned] = useState<number | null>(null);
+
+    // 1. Fetch initial points
+    useEffect(() => {
+        if (!walletAddress) return;
 
         const fetchPoints = async () => {
             try {
                 const res = await fetch(`/api/user/points?wallet=${walletAddress}`);
+                const data = await res.json();
+                if (data.points !== undefined) setPoints(data.points);
+            } catch (error) {
+                console.error("Failed to fetch AbaPoints:", error);
+            }
+        };
+        fetchPoints();
+    }, [walletAddress]);
 
     // 2. The Toggle Interval
     useEffect(() => {
@@ -16,9 +30,17 @@ export default function PointsBadge({ walletAddress }: { walletAddress: string |
         }, 3000);
         return () => clearInterval(interval);
     }, []);
+
+    // 3. Listen for new points from the Payment page
+    useEffect(() => {
+        const handlePointsEarned = (e: any) => {
+            const addedAmount = e.detail;
+            setJustEarned(addedAmount);
+            setPoints(prev => (prev || 0) + addedAmount);
+
             // Force it to show the points number immediately so they see it jump
             setShowPoints(true); 
-            
+
             // Remove the glow after 3 seconds
             setTimeout(() => setJustEarned(null), 3000);
         };
@@ -26,6 +48,8 @@ export default function PointsBadge({ walletAddress }: { walletAddress: string |
         window.addEventListener('abapoints-awarded', handlePointsEarned);
         return () => window.removeEventListener('abapoints-awarded', handlePointsEarned);
     }, []);
+
+    if (!walletAddress || points === null) return null;
 
     // Clean formatting (e.g., shows 1.50, but shows 2 instead of 2.00)
     const displayPoints = Number(points).toFixed(2).replace(/\.00$/, '');
