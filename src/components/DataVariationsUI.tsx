@@ -41,9 +41,6 @@ interface DataVariationsUIProps {
           </button>
         ))}
       </div>
-
-      <div className="mt-4 space-y-3 max-h-[400px] overflow-y-auto pr-2">
-        {groupedVariations[selectedTab]?.map((plan) => (
           <div 
              key={plan.variation_code} 
              onClick={() => onSelectPlan(plan)}
