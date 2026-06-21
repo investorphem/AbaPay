@@ -1,7 +1,6 @@
 import React from 'react';
 import { ChevronDown, Coins, Loader2, Landmark, CheckCircle2, XCircle, AlertTriangle, ShieldCheck } from 'lucide-react';
   bankVariations, selectedBank, handleProviderChange, accountNumber, setAccountNumber,
-  isVerifying, beneficiaries, getCurrentProviderKey, activeDeleteAccount, setActiveDeleteAccount,
   removeBeneficiary, setCustomerName, customerName, dynamicMinAmount, dynamicMaxAmount,
   nairaAmount, setNairaAmount, cryptoToCharge, currentFee, customerPhone, setCustomerPhone,
   customerEmail, setCustomerEmail, status, setIsConfirmModalOpen, isFormValid, isProcessing,
