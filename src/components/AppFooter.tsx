@@ -15,7 +15,6 @@ function ThemeToggle() {
 
   const openToggle = () => {
     setIsOpen(true);
-    if (timeoutRef.current) clearTimeout(timeoutRef.current);
 
   const handleMainClick = () => {
     if (isOpen) {
