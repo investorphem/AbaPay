@@ -31,10 +31,6 @@ export default function DataVariationsUI({ variations, onSelectPlan }: DataVaria
 
   const availableTabs = Object.keys(groupedVariations);
 
-  if (availableTabs.length > 0 && !availableTabs.includes(selectedTab)) {
-      setSelectedTab(availableTabs[0]); 
-  }
-
   return (
     <div className="w-full">
       <div className="flex overflow-x-auto space-x-2 pb-2 scrollbar-hide">
