@@ -5,7 +5,26 @@ interface DataVariationsUIProps {
   variations: any[];
   onSelectPlan: (plan: any) => void;
 }
-  const groupedVariations = useMemo(() =>
+
+export default function DataVariationsUI({ variations, onSelectPlan }: DataVariationsUIProps) {
+  const [selectedTab, setSelectedTab] = useState("Daily");
+
+  const groupedVariations = useMemo(() => {
+    const groups: Record<string, any[]> = {};
+
+    // 1. Group them into tabs
+    variations.forEach((plan) => {
+      const categoryName = categorizeDataPlan(plan.name, plan.variation_code);
+      if (!groups[categoryName]) {
+        groups[categoryName] = []; 
+      }
+      groups[categoryName].push(plan);
+    });
+
+    // ⚡ 2. SORT EACH TAB FROM LOWEST TO HIGHEST PRICE ⚡
+    Object.keys(groups).forEach(key => {
+      groups[key].sort((a, b) => parseFloat(a.variation_amount || "0") - parseFloat(b.variation_amount || "0"));
+    });
 
     return groups;
   }, [variations]);
@@ -34,6 +53,9 @@ interface DataVariationsUIProps {
           </button>
         ))}
       </div>
+
+      <div className="mt-4 space-y-3 max-h-[400px] overflow-y-auto pr-2">
+        {groupedVariations[selectedTab]?.map((plan) => (
           <div 
              key={plan.variation_code} 
              onClick={() => onSelectPlan(plan)}
