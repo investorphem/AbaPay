@@ -14,8 +14,6 @@ export default function DataVariationsUI({ variations, onSelectPlan }: DataVaria
 
     // 1. Group them into tabs
     variations.forEach((plan) => {
-      }
-      groups[categoryName].push(plan);
     });
 
     // ⚡ 2. SORT EACH TAB FROM LOWEST TO HIGHEST PRICE ⚡
