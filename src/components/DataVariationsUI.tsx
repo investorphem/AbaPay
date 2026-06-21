@@ -6,9 +6,6 @@ interface DataVariationsUIProps {
   onSelectPlan: (plan: any) => void;
 }
 
-export default function DataVariationsUI({ variations, onSelectPlan }: DataVariationsUIProps) {
-  const [selectedTab, setSelectedTab] = useState("Daily");
-
   const groupedVariations = useMemo(() => {
     const groups: Record<string, any[]> = {};
 
