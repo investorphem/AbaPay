@@ -12,9 +12,6 @@ export default function PointsBadge({ walletAddress }: { walletAddress: string |
                 const data = await res.json();
                 if (data.points !== undefined) setPoints(data.points);
             } catch (error) {
-                console.error("Failed to fetch AbaPoints:", error);
-            }
-        };
         fetchPoints();
     }, [walletAddress]);
 
