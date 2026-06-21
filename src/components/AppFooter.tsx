@@ -13,8 +13,6 @@ function ThemeToggle() {
   const [isOpen, setIsOpen] = useState(false);
   const timeoutRef = useRef<NodeJS.Timeout | null>(null);
 
-  useEffect(() => setMounted(true), []);
-
   const openToggle = () => {
     setIsOpen(true);
     if (timeoutRef.current) clearTimeout(timeoutRef.current);
