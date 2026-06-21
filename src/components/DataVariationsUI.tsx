@@ -15,8 +15,6 @@ export default function DataVariationsUI({ variations, onSelectPlan }: DataVaria
     // ⚡ 2. SORT EACH TAB FROM LOWEST TO HIGHEST PRICE ⚡
     Object.keys(groups).forEach(key => {
       groups[key].sort((a, b) => parseFloat(a.variation_amount || "0") -
-
-    return groups;
   }, [variations]);
 
   const availableTabs = Object.keys(groupedVariations);
