@@ -26,9 +26,6 @@ async function main() {
     // SEPOLIA TESTNET ADDRESSES
     usdt = "0xd077A400968890Eacc75cdc901F0356c943e4fDb";
     usdc = "0x01C5C0122039549AD1493B8220cABEdD739BC44E";
-    cusd = "0xdE9e4C3ce781b4bA68120d6261cbad65ce0aB00b"; // Added cUSD Sepolia
-  }
-
   // 3. Whitelist the Tokens
   console.log("🔐 Whitelisting Stablecoins...");
 
