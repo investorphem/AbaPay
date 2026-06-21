@@ -9,11 +9,6 @@ export default function PointsBadge({ walletAddress }: { walletAddress: string |
         const fetchPoints = async () => {
             try {
                 const res = await fetch(`/api/user/points?wallet=${walletAddress}`);
-                const data = await res.json();
-                if (data.points !== undefined) setPoints(data.points);
-            } catch (error) {
-        fetchPoints();
-    }, [walletAddress]);
 
     // 2. The Toggle Interval
     useEffect(() => {
