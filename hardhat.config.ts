@@ -13,7 +13,6 @@ const config: HardhatUserConfig = {
       accounts: process.env.CELO_PRIVATE_KEY ? [process.env.CELO_PRIVATE_KEY] : [],
       chainId: 11142220,
     },
-    // MAINNET
     celo: {
       url: "https://forno.celo.org",
       accounts: process.env.CELO_PRIVATE_KEY ? [process.env.CELO_PRIVATE_KEY] : [],
