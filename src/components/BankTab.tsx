@@ -21,9 +21,7 @@ export default function BankTab({
                 onClick={() => openSelectionModal('token', "Select Token", SUPPORTED_TOKENS, (symbol: string) => setSelectedToken(SUPPORTED_TOKENS.find(t => t.symbol === symbol)!))}
               >
                  <img src={selectedToken.logo} alt={selectedToken.symbol} className="w-7 h-7 object-contain rounded-full shadow-sm bg-white" />
-                 <span className="font-black text-slate-800 uppercase text-sm tracking-tight">{selectedToken.symbol}</span>
-                 <ChevronDown size={14} className="text-slate-400"/>
-              </div>
+                 <span className="font-black text-slate-800 uppercase text-sm tracking-tight">{selectedToken.symbol}</span
               <div className="text-right">
                 <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-0.5">Balance</p>
                 <div className="flex items-center justify-end gap-1.5">
