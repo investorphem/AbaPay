@@ -1,8 +1,5 @@
 import React from 'react';
 import { ChevronDown, Coins, Loader2, Landmark, CheckCircle2, XCircle, AlertTriangle, ShieldCheck } from 'lucide-react';
-
-export default function BankTab({
-  selectedToken, setSelectedToken, walletBalance, walletBalanceNaira, isFetchingBalance,
   bankVariations, selectedBank, handleProviderChange, accountNumber, setAccountNumber,
   isVerifying, beneficiaries, getCurrentProviderKey, activeDeleteAccount, setActiveDeleteAccount,
   removeBeneficiary, setCustomerName, customerName, dynamicMinAmount, dynamicMaxAmount,
