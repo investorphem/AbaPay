@@ -17,9 +17,7 @@ export const config = createConfig({
     walletConnect({ 
       projectId, 
       showQrModal: true,
-      // ⚡ VALORA INTEGRATION: Forces Valora to the top of the recommend
-      metadata: {
-        name: 'AbaPay',
+      // ⚡ VALORA INTEGRATION: Forces Valor
         description: 'Seamless Crypto Bill Payments',
         // ⚡ DYNAMIC URL: Safely handles Vercel Preview links and the live domain
         url: typeof window !== 'undefined' ? window.location.origin : 'https://abapays.com', 
