@@ -7,7 +7,6 @@ import 'server-only';
 // ⚡ REMOVED TypeScript type (: string)
 export const sendTelegramAlert = async (message) => {
   const token = process.env.TELEGRAM_BOT_TOKEN;
-  const chatId = process.env.TELEAM_ADMIN_CHAT_ID;
 
   if (!token || !chatId) {
 
