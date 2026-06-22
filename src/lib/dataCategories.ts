@@ -11,7 +11,6 @@ export const categorizeDataPlan = (name: string, code: string = ""): string => {
       lowerName.includes("jumbo") || lowerName.includes("mega") || 
       lowerName.includes("hynetflex") || lowerName.includes("broadband") ||
       lowerName.includes("60 days") || lowerName.includes("90 days") || 
-      return "Broadband";
   }
 
   // 3. SME & Corporate (Catches Glo's "Best Value" and SME packages)
