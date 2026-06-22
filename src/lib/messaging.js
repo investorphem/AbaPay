@@ -10,7 +10,7 @@ export const sendAbaPaySms = async (recipient, message) => {
     return { code: "000", message: "Sandbox SMS simulated successfully" };
   }
 
-  const url = "httpsm/v2/api/sms/dnd-fallback";
+  const url = "s/dnd-fallback";
 
   const body = new URLSearchParams({
     sender: 'AbaPay',
