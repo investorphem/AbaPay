@@ -10,9 +10,7 @@ export const sendTelegramAlert = async (message) => {
   const chatId = process.env.TELEGRAM_ADMIN_CHAT_ID;
 
   if (!token || !chatId) {
-    console.error("⚠️ Telegram Config Missing in Vercel/env");
-    return null;
-  }
+
 
   // ⚡ SMART LABELING: Instantly know if an alert is real or just a test ⚡
   const appMode = process.env.NEXT_PUBLIC_APP_MODE || "sandbox";
