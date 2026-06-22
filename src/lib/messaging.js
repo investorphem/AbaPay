@@ -15,9 +15,6 @@ export const sendAbaPaySms = async (recipient, message) => {
   const body = new URLSearchParams({
     sender: 'AbaPay',
     recipient: recipient,
-    message: message,
-    responsetype: 'json'
-  });
 
   try {
     const res = await fetch(url, {
