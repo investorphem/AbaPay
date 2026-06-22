@@ -5,7 +5,7 @@ const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || '';
 const supabaseServiceKey = process.env.SUPABASE_SERVICE_ROLE_KEY || '';
 
 // 1. STANDARD CLIENT
-// Used by the Frontend (like your Admin Dashboard) to securely read data.
+// Used by the Fyour Admin Dashboard) to securely read data.
 export const supabase = createClient(supabaseUrl, 
 
 // 2. VIP ADMIN CLIENT
