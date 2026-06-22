@@ -17,7 +17,14 @@ export const config = createConfig({
     walletConnect({ 
       projectId, 
       showQrModal: true,
-      // ⚡ VALORA INTEGRATION: Forces Valor
+      // ⚡ VALORA INTEGRATION: Forces Valora to the top of the recommended list
+      qrModalOptions: {
+        explorerRecommendedWalletIds: [
+          'd01c7758d741b363e637a817a09bcf579feae4db9f5bb16f599fdd1f66e2f974' // Official Valora Wallet ID
+        ]
+      },
+      metadata: {
+        name: 'AbaPay',
         description: 'Seamless Crypto Bill Payments',
         // ⚡ DYNAMIC URL: Safely handles Vercel Preview links and the live domain
         url: typeof window !== 'undefined' ? window.location.origin : 'https://abapays.com', 
