@@ -1,12 +1,12 @@
 import { createClient } from '@supabase/supabase-js';
 
 const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || '';
-const supabaseAnonKey = prEXT_PUBLIC_SUPABASE_ANON_KEY || '';
-const supabaseServiceKey = process.e'';
+const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || '';
+const supabaseServiceKey = process.env.SUPABASE_SERVICE_ROLE_KEY || '';
 
 // 1. STANDARD CLIENT
-// Used by the Fyour Admin Dashboard) to securely read data.
-export const supabase = createClient(supabaseUrl, 
+// Used by the Frontend (like your Admin Dashboard) to securely read data.
+export const supabase = createClient(supabaseUrl, supabaseAnonKey);
 
 // 2. VIP ADMIN CLIENT
 // Used ONLY by the Backend API to bypass RLS. 
