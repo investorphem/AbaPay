@@ -10,11 +10,14 @@ export const sendAbaPaySms = async (recipient, message) => {
     return { code: "000", message: "Sandbox SMS simulated successfully" };
   }
 
-  const url = "s/dnd-fallback";
+  const url = "https://messaging.vtpass.com/v2/api/sms/dnd-fallback";
 
   const body = new URLSearchParams({
     sender: 'AbaPay',
     recipient: recipient,
+    message: message,
+    responsetype: 'json'
+  });
 
   try {
     const res = await fetch(url, {
