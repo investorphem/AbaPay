@@ -17,10 +17,7 @@ export const config = createConfig({
     walletConnect({ 
       projectId, 
       showQrModal: true,
-      // ⚡ VALORA INTEGRATION: Forces Valora to the top of the recommended list
-      qrModalOptions: {
-        explorerRecommendedWalletIds
-      },
+      // ⚡ VALORA INTEGRATION: Forces Valora to the top of the recommend
       metadata: {
         name: 'AbaPay',
         description: 'Seamless Crypto Bill Payments',
