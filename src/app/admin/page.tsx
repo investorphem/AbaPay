@@ -98,11 +98,11 @@ export default function AdminDashboard() {
           setClient(walletClient);
 
           const publicClient = createPublicClient({ chain: tempChain, transport: http() });
-          
+
           // Fallback bypass if CELO_CONTRACT is not set yet, but BASE_CONTRACT is
           const targetCheckContract = (CELO_CONTRACT && CELO_CONTRACT.length === 42) ? CELO_CONTRACT : BASE_CONTRACT;
           const targetCheckChain = (CELO_CONTRACT && CELO_CONTRACT.length === 42) ? tempChain : (isMainnet ? base : baseSepolia);
-          
+
           const contractChecker = createPublicClient({ chain: targetCheckChain, transport: http() });
 
           const contractOwner = await contractChecker.readContract({
@@ -200,11 +200,11 @@ export default function AdminDashboard() {
 
     const toggleKillSwitch = async (serviceKey: string, newValue: boolean) => {
       setIsUpdatingSwitches(true);
-      
+
       // 1. Save the old state just in case we need to revert
       const previousSwitches = { ...killSwitches };
       const newSwitches = { ...killSwitches, [serviceKey]: newValue };
-      
+
       // 2. Optimistic UI update (makes the button feel instant)
       setKillSwitches(newSwitches); 
 
@@ -214,9 +214,9 @@ export default function AdminDashboard() {
               headers: { 'Content-Type': 'application/json', ...adminHeaders },
               body: JSON.stringify({ action: 'UPDATE_KILL_SWITCHES', payload: { switches: newSwitches } })
           });
-          
+
           const data = await res.json();
-          
+
           // 3. ⚡ THE FIX: Actually check if the database saved it!
           if (!data.success) {
               alert(`Database Save Failed: ${data.message || 'Unknown error'}`);
@@ -302,7 +302,7 @@ export default function AdminDashboard() {
           args: [tokenAddr], 
           account: address 
       });
-      
+
       setStatus(`Success! Hash: ${hash.slice(0, 10)}`);
       setTimeout(() => refreshAllData(), 5000);
     } catch (error) { setStatus("Rejected or Insufficient Gas."); }
@@ -516,7 +516,7 @@ export default function AdminDashboard() {
                     </button>
                   ))}
               </div>
-              <button onClick={refreshAllData} className="hidden md:flex items-center justify-center p-2 rounded-xl bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-500 transition-colors shrink-0" title="Force Refresh All Data">
+              <button onClick={() => refreshAllData()} className="hidden md:flex items-center justify-center p-2 rounded-xl bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-500 transition-colors shrink-0" title="Force Refresh All Data">
                  <RefreshCcw size={16} className={isFetching ? 'animate-spin' : ''} />
               </button>
             </div>
