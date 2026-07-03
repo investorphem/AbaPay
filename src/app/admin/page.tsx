@@ -74,6 +74,9 @@ export default function AdminDashboard() {
   const [killSwitches, setKillSwitches] = useState<Record<string, boolean>>({});
   const [isUpdatingSwitches, setIsUpdatingSwitches] = useState(false);
 
+  // 🔐 Signed session headers proving to the backend that we are the contract owner
+  const [adminHeaders, setAdminHeaders] = useState<Record<string, string>>({});
+
   // ⚡ SMART MAINNET & DUAL CONTRACT ROUTING ⚡
   const isMainnet = process.env.NEXT_PUBLIC_NETWORK === "mainnet" || process.env.NEXT_PUBLIC_NETWORK === "celo" || process.env.NEXT_PUBLIC_NETWORK === "base";
   const isLive = process.env.NEXT_PUBLIC_APP_MODE === "live";
@@ -110,7 +113,12 @@ export default function AdminDashboard() {
 
           if (account.toLowerCase() === contractOwner.toLowerCase()) {
             setIsOwner(true);
-            refreshAllData();
+            // 🔐 Sign a one-time session message so backend admin APIs can verify us server-side
+            const timestamp = Date.now().toString();
+            const signature = await walletClient.signMessage({ account, message: `AbaPay Admin Login: ${timestamp}` });
+            const headers = { 'x-admin-address': account, 'x-admin-signature': signature, 'x-admin-timestamp': timestamp };
+            setAdminHeaders(headers);
+            refreshAllData(headers);
           } else {
             setIsOwner(false);
             setAuthError("The connected wallet is not the owner of this contract.");
@@ -130,13 +138,14 @@ export default function AdminDashboard() {
     initAdmin();
   }, [CELO_CONTRACT, BASE_CONTRACT, isMainnet]);
 
-  const refreshAllData = async () => {
+  const refreshAllData = async (headersOverride?: Record<string, string>) => {
+    const authHeaders = headersOverride || adminHeaders;
     setIsFetching(true);
     await fetchOnChainBalances();
-    await fetchVtPassHealth();
+    await fetchVtPassHealth(authHeaders);
 
     try {
-        const res = await fetch('/api/admin/data');
+        const res = await fetch('/api/admin/data', { headers: authHeaders });
         const data = await res.json();
         if (data.success) {
             setDbTransactions(data.transactions);
@@ -159,7 +168,7 @@ export default function AdminDashboard() {
     if (!newExchangeRate || isNaN(Number(newExchangeRate))) return alert("Invalid rate");
     setIsUpdatingRate(true);
     try {
-      const res = await fetch('/api/admin/rate', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ newRate: newExchangeRate }) });
+      const res = await fetch('/api/admin/rate', { method: 'POST', headers: { 'Content-Type': 'application/json', ...adminHeaders }, body: JSON.stringify({ newRate: newExchangeRate }) });
       const data = await res.json();
       if (data.success) {
         alert("Rate successfully updated globally!");
@@ -178,7 +187,7 @@ export default function AdminDashboard() {
       try {
           const res = await fetch('/api/admin/action', {
               method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
+              headers: { 'Content-Type': 'application/json', ...adminHeaders },
               body: JSON.stringify({ action: 'ADJUST_POINTS', payload: { isUser, id, newPoints } })
           });
           const data = await res.json();
@@ -202,7 +211,7 @@ export default function AdminDashboard() {
       try {
           const res = await fetch('/api/admin/action', {
               method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
+              headers: { 'Content-Type': 'application/json', ...adminHeaders },
               body: JSON.stringify({ action: 'UPDATE_KILL_SWITCHES', payload: { switches: newSwitches } })
           });
           
@@ -252,9 +261,9 @@ export default function AdminDashboard() {
     } catch (error) { console.error("Failed to fetch multi-chain vault balances", error); }
   };
 
-  const fetchVtPassHealth = async () => {
+  const fetchVtPassHealth = async (headersOverride?: Record<string, string>) => {
     try {
-      const res = await fetch('/api/admin/health');
+      const res = await fetch('/api/admin/health', { headers: headersOverride || adminHeaders });
       const data = await res.json();
       setVtBalance(data.naira);
       setSmsBalance(data.sms);
@@ -348,7 +357,7 @@ export default function AdminDashboard() {
       const receipt = await publicClient.waitForTransactionReceipt({ hash: refundHash });
       if (receipt.status !== 'success') throw new Error("Transaction reverted. Vault does not have enough balance.");
 
-      const dbRes = await fetch('/api/admin/refund', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id: tx.id, refundHash }) });
+      const dbRes = await fetch('/api/admin/refund', { method: 'POST', headers: { 'Content-Type': 'application/json', ...adminHeaders }, body: JSON.stringify({ id: tx.id, refundHash }) });
       if (dbRes.ok) { alert(`Refund confirmed on-chain! Hash: ${refundHash}`); refreshAllData(); } 
       else alert("Crypto refunded successfully, but backend failed to update the database status.");
     } catch (error: any) { alert(`Refund Failed: ${error.message || "Execution Reverted."}`); } 

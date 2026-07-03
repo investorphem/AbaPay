@@ -1,7 +1,14 @@
 import { NextResponse } from 'next/server';
 import { supabaseAdmin } from '@/utils/supabase'; // ⚡ Imported your centralized master client
+import { verifyAdminRequest } from '@/utils/adminAuth';
 
 export async function POST(req: Request) {
+  // 🔐 SECURITY: only the contract owner may mark transactions as refunded
+  const auth = await verifyAdminRequest(req);
+  if (!auth.authorized) {
+    return NextResponse.json({ success: false, message: auth.message }, { status: 401 });
+  }
+
   try {
     const { id, refundHash } = await req.json();
 
