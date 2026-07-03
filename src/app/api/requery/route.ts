@@ -64,12 +64,17 @@ export async function POST(req: Request) {
           return NextResponse.json({ success: true, status: 'PENDING', message: 'Provider is still generating the Token/PIN. Please check back again.' });
       }
 
-      // Update Database to SUCCESS
-      await supabase.from('transactions').update({ 
+      // 🔐 ATOMIC CLAIM: only the first successful requery transitions the record.
+      // Prevents replaying /api/requery to farm points or spam SMS/email receipts.
+      const { data: claimed } = await supabase.from('transactions').update({ 
         status: 'SUCCESS',
         purchased_code: dbPurchasedCode,
         units: vendedUnits?.toString()
-      }).eq('request_id', request_id);
+      }).eq('request_id', request_id).neq('status', 'SUCCESS').select();
+
+      if (!claimed || claimed.length === 0) {
+        return NextResponse.json({ success: true, status: 'SUCCESS', purchased_code: dbPurchasedCode, units: vendedUnits, message: 'Transaction already completed.' });
+      }
 
       // ⚡ 3. FIRE DELAYED NOTIFICATIONS & POINTS ⚡
       const alertTokenRef = dbPurchasedCode || requeryData.content?.transactions?.transactionId || "Success";

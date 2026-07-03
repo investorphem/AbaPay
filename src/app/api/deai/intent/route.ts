@@ -9,8 +9,13 @@ export async function POST(req: Request) {
   try {
     const { message } = await req.json();
 
-    if (!message) {
+    if (!message || typeof message !== 'string') {
       return NextResponse.json({ success: false, message: "Message is required" }, { status: 400 });
+    }
+
+    // 🔐 ABUSE CONTROL: cap input size to limit AI cost abuse and prompt injection surface
+    if (message.length > 500) {
+      return NextResponse.json({ success: false, message: "Message too long (max 500 characters)" }, { status: 400 });
     }
 
     // We use Gemini 1.5 Flash because it is insanely fast and cost-effective for routing
