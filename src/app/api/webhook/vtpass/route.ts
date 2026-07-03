@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server';
 import { supabaseAdmin as supabase } from '@/utils/supabase';
 import { sendTelegramAlert } from '@/lib/telegram';
 import { sendAbaPaySms } from '@/lib/messaging';
+import { getHeaders } from '@/lib/vtpass';
 import { Resend } from 'resend'; 
 
 const resend = new Resend(process.env.RESEND_API_KEY || "re_dummy_key_for_build");
@@ -12,8 +13,7 @@ export async function POST(req: Request) {
 
     // VTpass sometimes wraps the payload in "data", and sometimes sends it raw. We handle both.
     const payload = body.data || body;
-    const { code, content, requestId, response_description, amount } = payload;
-    const innerStatus = content?.transactions?.status;
+    const { requestId } = payload;
 
     if (!requestId) {
         return NextResponse.json({ received: true, message: 'No Request ID found in payload.' });
@@ -31,36 +31,65 @@ export async function POST(req: Request) {
        return NextResponse.json({ received: true, message: 'Transaction not found in DB.' });
     }
 
-    // --- SCENARIO 1: DELAYED SUCCESS ---
-    if (code === '000' || innerStatus === 'delivered' || innerStatus === 'successful') {
+    // 🔐 ANTI-FORGERY CHECK: This webhook is unauthenticated, so we NEVER trust the
+    // pushed payload. We confirm the real status server-to-server with VTpass
+    // (authenticated with our API keys) before updating anything.
+    const appMode = process.env.NEXT_PUBLIC_APP_MODE || "sandbox";
+    const baseUrl = appMode === "live" ? "https://vtpass.com/api" : "https://sandbox.vtpass.com/api";
+
+    let confirmedPayload: any = null;
+    let confirmedStatus: string | null = null;
+    try {
+        const confirmRes = await fetch(`${baseUrl}/requery`, {
+            method: 'POST',
+            headers: getHeaders(),
+            body: JSON.stringify({ request_id: requestId })
+        });
+        confirmedPayload = await confirmRes.json();
+        confirmedStatus = confirmedPayload.content?.transactions?.status || null;
+    } catch (e) {
+        // If we cannot confirm with the provider, do not act on an unauthenticated push.
+        return NextResponse.json({ received: true, message: 'Could not confirm status with provider. Push ignored.' });
+    }
+
+    const trustedTx = confirmedPayload?.content?.transactions || {};
+
+    // --- SCENARIO 1: DELAYED SUCCESS (CONFIRMED BY VTPASS) ---
+    if (confirmedStatus === 'delivered' || confirmedStatus === 'successful') {
 
       // If it's already marked success, avoid duplicate notifications
       if (txData.status === 'SUCCESS') {
           return NextResponse.json({ received: true, status: 'already_processed' });
       }
 
-      // Extract the delayed Token, PIN, or Units
-      let dbPurchasedCode = payload.purchased_code || payload.token || payload.tokens || payload.Pin || content?.transactions?.token || content?.transactions?.purchased_code || null;
-      let vendedUnits = payload.units || content?.transactions?.units || content?.transactions?.unit || null;
+      // Extract the delayed Token, PIN, or Units from the CONFIRMED payload only
+      let dbPurchasedCode = confirmedPayload.purchased_code || confirmedPayload.token || confirmedPayload.tokens || confirmedPayload.Pin || trustedTx.token || trustedTx.purchased_code || null;
+      let vendedUnits = confirmedPayload.units || trustedTx.units || trustedTx.unit || null;
 
       // Aggressive Token Regex fallback for Electricity
       if (!dbPurchasedCode && txData.service_category === 'ELECTRICITY') {
-          const rawPayloadString = JSON.stringify(payload);
+          const rawPayloadString = JSON.stringify(confirmedPayload);
           const tokenMatch = rawPayloadString.match(/(?:\b|Token:?\s*)(\d{4}[-\s]?\d{4}[-\s]?\d{4}[-\s]?\d{4}[-\s]?\d{4})\b/i);
           if (tokenMatch) dbPurchasedCode = tokenMatch[1].replace(/[-\s]/g, '');
       }
 
-      const alertTokenRef = dbPurchasedCode || content?.transactions?.transactionId || requestId || "Success";
+      const alertTokenRef = dbPurchasedCode || trustedTx.transactionId || requestId || "Success";
 
-      // Update the database
-      await supabase
+      // 🔐 ATOMIC CLAIM: only one execution transitions the record and sends notifications
+      const { data: claimed } = await supabase
         .from('transactions')
         .update({ 
             status: 'SUCCESS', 
             purchased_code: dbPurchasedCode, 
             units: vendedUnits 
         })
-        .eq('request_id', requestId); 
+        .eq('request_id', requestId)
+        .neq('status', 'SUCCESS')
+        .select();
+
+      if (!claimed || claimed.length === 0) {
+          return NextResponse.json({ received: true, status: 'already_processed' });
+      }
 
       // ⚡ TRIGGER ALL DELAYED NOTIFICATIONS ⚡
       const notifications = [];
@@ -124,8 +153,8 @@ export async function POST(req: Request) {
       return NextResponse.json({ received: true, status: 'acknowledged_success' });
     }
 
-    // --- SCENARIO 2: TRANSACTION REVERSAL (BOUNCED) ---
-    if (code === '040' || innerStatus === 'reversed' || innerStatus === 'failed') {
+    // --- SCENARIO 2: TRANSACTION REVERSAL (CONFIRMED BY VTPASS) ---
+    if (confirmedStatus === 'reversed' || confirmedStatus === 'failed') {
 
        if (txData.status === 'REVERSED_NEEDS_REFUND' || txData.status === 'REFUNDED') {
            return NextResponse.json({ received: true, status: 'already_refunded' });
@@ -141,7 +170,7 @@ export async function POST(req: Request) {
        const userWallet = txData.wallet_address || "Unknown";
        const cryptoAmount = txData.amount_usdt || "Unknown";
 
-       const alertMessage = `⚠️ *VTPASS REVERSAL ALERT*\n\nVTpass bounced a delayed transaction and refunded your Naira wallet.\n\n🛒 *Req ID:* ${requestId}\n💰 *Naira Refunded:* ₦${amount || txData.amount_naira}\n🛑 *Reason:* ${response_description || 'Provider Reversal'}\n\n🚨 *ACTION REQUIRED:* You need to manually refund the user's crypto from the Vault.\n👤 *User Wallet:* \`${userWallet}\`\n🪙 *Crypto Owed:* $${cryptoAmount}`;
+       const alertMessage = `⚠️ *VTPASS REVERSAL ALERT*\n\nVTpass bounced a delayed transaction and refunded your Naira wallet.\n\n🛒 *Req ID:* ${requestId}\n💰 *Naira Refunded:* ₦${txData.amount_naira}\n🛑 *Reason:* ${confirmedPayload.response_description || 'Provider Reversal'}\n\n🚨 *ACTION REQUIRED:* You need to manually refund the user's crypto from the Vault.\n👤 *User Wallet:* \`${userWallet}\`\n🪙 *Crypto Owed:* $${cryptoAmount}`;
 
        await sendTelegramAlert(alertMessage);
 

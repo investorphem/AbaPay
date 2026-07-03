@@ -12,6 +12,21 @@ export async function POST(req: Request) {
     // UPGRADED: Catch the hidden transaction hash!
     const txHash = formData.get('txHash') as string; 
 
+    // 🔐 ABUSE CONTROLS: validate message and attachment before forwarding to Telegram
+    if (!message || message.trim().length === 0) {
+      return NextResponse.json({ success: false, message: "Message is required." }, { status: 400 });
+    }
+    if (message.length > 2000) {
+      return NextResponse.json({ success: false, message: "Message too long (max 2000 characters)." }, { status: 400 });
+    }
+    if (file && file.size > 5 * 1024 * 1024) {
+      return NextResponse.json({ success: false, message: "Attachment too large (max 5MB)." }, { status: 400 });
+    }
+    const allowedTypes = ['image/png', 'image/jpeg', 'image/webp', 'image/gif', 'application/pdf'];
+    if (file && file.size > 0 && !allowedTypes.includes(file.type)) {
+      return NextResponse.json({ success: false, message: "Unsupported attachment type. Please use an image or PDF." }, { status: 400 });
+    }
+
     // ⚡ CHANGED: Now uses the dedicated Support Bot Token
     const botToken = process.env.SUPPORT_TELEGRAM_BOT_TOKEN;
 

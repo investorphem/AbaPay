@@ -6,6 +6,16 @@ const DEAI_BOT_TOKEN = process.env.DEAI_TELEGRAM_BOT_TOKEN as string;
 
 export async function POST(req: Request) {
   try {
+    // 🔐 WEBHOOK AUTH: verify Telegram's secret token. Register it once with:
+    // setWebhook?url=...&secret_token=<TELEGRAM_WEBHOOK_SECRET>. Enforced when configured.
+    const webhookSecret = process.env.TELEGRAM_WEBHOOK_SECRET;
+    if (webhookSecret) {
+      const providedSecret = req.headers.get('x-telegram-bot-api-secret-token');
+      if (providedSecret !== webhookSecret) {
+        return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+      }
+    }
+
     // Dynamically grab your live domain (works on localhost AND Vercel automatically)
     const host = req.headers.get('host');
     const protocol = host?.includes('localhost') ? 'http' : 'https';
