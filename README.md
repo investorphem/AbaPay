@@ -79,7 +79,7 @@ AbaPay is highly optimized for mobile Web3 experiences. To test the dApp within 
 ## 🛡️ Security Architecture
 
 * **No-Log Keys:** VTpass secret keys and Telegram tokens are strictly contained within server-side API routes using the `server-only` directive.
-* **Replay Protection:** In-memory tracking prevents duplicate blockchain transaction hashes from triggering multiple utility vends.
+* **Replay Protection:** Every blockchain transaction hash must be recorded and checked against a **persistent ledger** (e.g., a Supabase table with a unique constraint on the tx hash) before a utility vend is triggered. ⚠️ In-memory tracking alone is **not safe** in serverless environments: state is reset on cold starts and is not shared across concurrent instances, allowing the same transaction hash to be replayed for multiple vends.
 * **Smart Contract Vault:** User USDT goes directly to the immutable smart contract, requiring the Admin's cryptographically signed transaction to withdraw profits.
 
 ---
