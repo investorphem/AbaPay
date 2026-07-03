@@ -1,7 +1,14 @@
 import { NextResponse } from 'next/server';
 import { supabaseAdmin } from '@/utils/supabase';
+import { verifyAdminRequest } from '@/utils/adminAuth';
 
 export async function POST(req: Request) {
+  // 🔐 SECURITY: the exchange rate prices all crypto payments (/api/pay trusts it)
+  const auth = await verifyAdminRequest(req);
+  if (!auth.authorized) {
+    return NextResponse.json({ success: false, message: auth.message }, { status: 401 });
+  }
+
   try {
     const { newRate } = await req.json();
     

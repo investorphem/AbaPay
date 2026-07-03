@@ -1,9 +1,16 @@
 import { NextResponse } from 'next/server';
 import { supabaseAdmin as supabase } from '@/utils/supabase';
+import { verifyAdminRequest } from '@/utils/adminAuth';
 
 export const dynamic = 'force-dynamic';
 
-export async function GET() {
+export async function GET(req: Request) {
+    // 🔐 SECURITY: this endpoint exposes all user PII and transactions
+    const auth = await verifyAdminRequest(req);
+    if (!auth.authorized) {
+        return NextResponse.json({ success: false, message: auth.message }, { status: 401 });
+    }
+
     try {
         const [txRes, usersRes, unlinkedWalletsRes, allWalletsRes, settingsRes] = await Promise.all([
             supabase.from('transactions').select('*').order('created_at', { ascending: false }),

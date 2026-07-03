@@ -1,7 +1,14 @@
 import { NextResponse } from 'next/server';
 import { getHeaders } from '@/lib/vtpass'; 
+import { verifyAdminRequest } from '@/utils/adminAuth';
 
-export async function GET() {
+export async function GET(req) {
+  // 🔐 SECURITY: wallet balances are for the admin's eyes only
+  const auth = await verifyAdminRequest(req);
+  if (!auth.authorized) {
+    return NextResponse.json({ success: false, message: auth.message }, { status: 401 });
+  }
+
   try {
     // ⚡ DYNAMIC ENVIRONMENT SWITCHING VIA APP MODE ⚡
     const appMode = process.env.NEXT_PUBLIC_APP_MODE || "sandbox";

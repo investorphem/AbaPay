@@ -1,7 +1,14 @@
 import { NextResponse } from 'next/server';
 import { supabaseAdmin as supabase } from '@/utils/supabase';
+import { verifyAdminRequest } from '@/utils/adminAuth';
 
 export async function POST(req: Request) {
+    // 🔐 SECURITY: block anyone who is not the contract owner
+    const auth = await verifyAdminRequest(req);
+    if (!auth.authorized) {
+        return NextResponse.json({ success: false, message: auth.message }, { status: 401 });
+    }
+
     try {
         const body = await req.json();
         const { action, payload } = body;
