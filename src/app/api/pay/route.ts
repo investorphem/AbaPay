@@ -302,7 +302,7 @@ export async function POST(req: Request) {
                     <a href="https://t.me/abapays" style="color: #334155; text-decoration: none;">Telegram</a> &nbsp;&nbsp; 
                     <a href="https://wa.me/2347075418792" style="color: #334155; text-decoration: none;">WhatsApp</a>
                   </p>
-                  <p style="font-size: 10px; color: #94a3b8; margin: 0;">&copy; 2026 Masonode Technologies Limited. All rights reserved.</p>
+                  <p style="font-size: 10px; color: #94a3b8; margin: 0;">&copy; 2026 Masonode Technologies Limited (RC 9524980). All rights reserved.</p>
                 </div>
               </div>
             </div>`;
