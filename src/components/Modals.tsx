@@ -318,7 +318,7 @@ export function SelectionModal({
 
              {/* ⚡ TOKEN SELECTOR ⚡ */}
              {type === 'token' && filteredOptions.map((token: any) => (
-               <button key={token.symbol} onClick={() => { onSelect(token.symbol); onClose(); }} className="w-full text-left p-4 rounded-xl font-bold text-slate-700 dark:text-slate-300 bg-slate-50 dark:bg-[#1a1a1f] border border-slate-100 dark:border-slate-800/80 uppercase text-xs hover:border-emerald-300 dark:hover:border-emerald-700 hover:bg-emerald-50/50 dark:hover:bg-emerald-900/20 transition-all flex justify-between items-center">
+               <button key={token.symbol} onClick={() => { onSelect(token.symbol); onClose(); }} className="w-full text-left p-4 rounded-xl font-bold text-slate-700 dark:text-slate-300 bg-slate-50 dark:bg-[#1a1a1f] border border-slate-100 dark:border-slate-800/80 normal-case text-xs hover:border-emerald-300 dark:hover:border-emerald-700 hover:bg-emerald-50/50 dark:hover:bg-emerald-900/20 transition-all flex justify-between items-center">
                  <div className="flex items-center gap-3"><img src={token.logo} alt={token.symbol} className="w-6 h-6 object-contain rounded-full shadow-sm bg-white dark:bg-slate-800 p-0.5" /><span className="text-sm font-black text-slate-800 dark:text-slate-200 tracking-tight">{token.symbol}</span></div>
                  {selectedValue === token.symbol && <CheckCircle2 size={18} className="text-emerald-500"/>}
                </button>
