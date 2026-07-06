@@ -55,7 +55,7 @@ export default function PointsBadge({ walletAddress }: { walletAddress: string |
     const displayPoints = Number(points).toFixed(2).replace(/\.00$/, '');
 
     return (
-        <div className="relative">
+        <div className="relative shrink-0">
             <div className={`flex items-center justify-center min-w-[90px] h-8 bg-green-900/10 border border-green-500/50 rounded-full px-3 text-xs font-bold text-green-600 transition-all duration-500 ${justEarned ? 'shadow-[0_0_20px_rgba(34,197,94,0.8)] scale-110 bg-green-100' : 'shadow-[0_0_10px_rgba(34,197,94,0.4)]'}`}>
                 <span className={`transition-opacity duration-500 ${showPoints ? 'opacity-100' : 'opacity-0 hidden'}`}>
                     ⚡ {displayPoints} 
