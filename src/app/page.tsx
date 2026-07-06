@@ -601,7 +601,7 @@ export default function Home() {
 
       if (isBaseChain && paymasterProxyUrl && typeof client.getCapabilities === 'function') {
           try {
-              const capabilities = await client.getCapabilities({ account: address as `0x${string}` });
+              const capabilities: any = await client.getCapabilities({ account: address as `0x${string}` });
               const chainCaps = capabilities?.[activeChain.id] || capabilities?.[`0x${activeChain.id.toString(16)}`];
               usingBasePaymaster = !!chainCaps?.paymasterService?.supported;
           } catch (capError) {
