@@ -30,7 +30,7 @@ export default function PrivacyPolicy() {
               <Globe size={18} className="text-emerald-500"/> 1. Introduction & Global Data Controller
             </h2>
             <p className="mb-3">
-              <strong>MASONODE TECHNOLOGIES LIMITED</strong> ("we", "us", or "our"), the operator of the AbaPay decentralized application, is committed to protecting your personal data across all jurisdictions we serve. 
+              <strong>MASONODE TECHNOLOGIES LIMITED</strong> (RC 9524980) ("we", "us", or "our"), the operator of the AbaPay decentralized application, is committed to protecting your personal data across all jurisdictions we serve. 
             </p>
             <p>
               This Privacy Policy explains how we collect, use, disclose, and safeguard your information when you use AbaPay to bridge digital assets with domestic and international utility services. As a company headquartered in Nigeria, we operate in strict compliance with the <strong>Nigeria Data Protection Act (NDPA) 2023</strong>, while extending globally recognized privacy principles (such as GDPR) to protect our international users.
