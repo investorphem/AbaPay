@@ -30,7 +30,7 @@ export default function TermsOfService() {
               <Globe size={18} className="text-emerald-500"/> 1. Introduction & Global Acceptance
             </h2>
             <p className="mb-3">
-              Welcome to AbaPay. These Terms of Service ("Terms") constitute a legally binding agreement between you ("User", "you", or "your") and <strong>MASONODE TECHNOLOGIES LIMITED</strong> ("Company", "we", "us", or "our"), a company duly registered under the Corporate Affairs Commission (CAC) of the Federal Republic of Nigeria, operating globally.
+              Welcome to AbaPay. These Terms of Service ("Terms") constitute a legally binding agreement between you ("User", "you", or "your") and <strong>MASONODE TECHNOLOGIES LIMITED</strong> ("Company", "we", "us", or "our"), a company duly registered under the Corporate Affairs Commission (CAC) of the Federal Republic of Nigeria (RC 9524980), operating globally.
             </p>
             <p>
               By accessing or using the AbaPay decentralized application (the "App") to process local or cross-border crypto-to-utility payments, you explicitly agree to be bound by these Terms, our Privacy Policy, and all applicable domestic and international laws governing your jurisdiction.
