@@ -1,5 +1,12 @@
 import { Receipt, ExternalLink, ChevronLeft, ChevronRight } from "lucide-react";
 
+// ⚡ International transactions store a pre-formatted currency string (e.g. "GHS 2.50").
+// Domestic transactions store a plain NGN number. Render each correctly instead of forcing ₦ on everything.
+function formatTxAmount(amountNaira: any) {
+  const num = Number(amountNaira);
+  return isNaN(num) ? amountNaira : `₦${num.toLocaleString()}`;
+}
+
 export function HistoryTab({ transactions, currentTransactions, currentPage, totalPages, setCurrentPage, setSelectedReceipt }: any) {
   return (
     <div className="bg-white dark:bg-[#111114] border border-slate-100 dark:border-slate-800/60 rounded-[2.5rem] p-6 shadow-2xl dark:shadow-black/50 animate-in slide-in-from-bottom-4 transition-colors">
@@ -33,7 +40,7 @@ export function HistoryTab({ transactions, currentTransactions, currentPage, tot
                               </p>
                           </div>
                           <div className="text-right flex flex-col items-end gap-1.5 shrink-0 ml-2">
-                              <p className="text-sm font-black text-emerald-600 dark:text-emerald-400">₦{Number(tx.amountNaira).toLocaleString()}</p>
+                              <p className="text-sm font-black text-emerald-600 dark:text-emerald-400">{formatTxAmount(tx.amountNaira)}</p>
                               <span className="text-[9px] font-black uppercase tracking-widest bg-slate-200 dark:bg-slate-800 text-slate-500 dark:text-slate-400 px-3 py-1 rounded-full group-hover:bg-emerald-200 dark:group-hover:bg-emerald-900/40 group-hover:text-emerald-800 dark:group-hover:text-emerald-300 transition-all flex items-center gap-1">
                                 Receipt <ExternalLink size={10}/>
                               </span>

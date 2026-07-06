@@ -2,6 +2,13 @@ import React, { useRef, useState, useEffect } from "react";
 import { CheckCircle2, ExternalLink, Share2, HelpCircle, XCircle, Loader2, Search } from "lucide-react";
 import { SUPPORTED_COUNTRIES, SUPPORTED_TOKENS } from "@/constants";
 
+// ⚡ International transactions store a pre-formatted currency string (e.g. "GHS 2.50").
+// Domestic transactions store a plain NGN number. Render each correctly instead of forcing ₦ on everything.
+function formatTxAmount(amountNaira: any) {
+  const num = Number(amountNaira);
+  return isNaN(num) ? amountNaira : `₦${num.toLocaleString()}`;
+}
+
 export function TermsModal({ isOpen, onClose }: any) {
   if (!isOpen) return null;
   return (
@@ -55,7 +62,7 @@ export function ReceiptModal({ receipt, isMainnet, onClose, onSupport }: any) {
     const receiptElement = document.getElementById('printable-receipt');
     if (!receiptElement) return;
 
-    const fallbackText = `🧾 AbaPay Receipt\n\nService: ${receipt.network} ${receipt.service}\nAmount: ₦${receipt.amountNaira}\nStatus: ${receipt.status}\nAccount: ${receipt.account}\nRef: ${receipt.id}\n${hasPin ? `\nPIN/TOKEN: ${receipt.purchased_code}` : ''}\n\nSecured by ${receipt.blockchain || 'Celo'} ⚡`;
+    const fallbackText = `🧾 AbaPay Receipt\n\nService: ${receipt.network} ${receipt.service}\nAmount: ${formatTxAmount(receipt.amountNaira)}\nStatus: ${receipt.status}\nAccount: ${receipt.account}\nRef: ${receipt.id}\n${hasPin ? `\nPIN/TOKEN: ${receipt.purchased_code}` : ''}\n\nSecured by ${receipt.blockchain || 'Celo'} ⚡`;
     const isMiniPay = typeof window !== "undefined" && !!(window as any).ethereum?.isMiniPay;
 
     if (isMiniPay) {
@@ -152,7 +159,7 @@ export function ReceiptModal({ receipt, isMainnet, onClose, onSupport }: any) {
                <div className="flex justify-between border-b border-slate-100 dark:border-slate-800/60 pb-3 transition-colors">
                   <span className="text-slate-400 dark:text-slate-500 text-[10px] font-bold uppercase tracking-wider">Amount Paid</span>
                   <div className="text-right">
-                     <p className="text-slate-800 dark:text-slate-100 font-black text-sm">₦{Number(receipt.amountNaira).toLocaleString()}</p>
+                     <p className="text-slate-800 dark:text-slate-100 font-black text-sm">{formatTxAmount(receipt.amountNaira)}</p>
                      <p className="text-slate-400 dark:text-slate-500 text-[9px] font-bold">{receipt.amountCrypto} {receipt.tokenUsed || 'USD₮'}</p>
                   </div>
                </div>
