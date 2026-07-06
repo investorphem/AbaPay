@@ -5,8 +5,9 @@ import { sendTelegramAlert } from '@/lib/telegram';
 import { sendAbaPaySms } from '@/lib/messaging';
 import { getHeaders } from '@/lib/vtpass'; 
 import { Resend } from 'resend';
-import { createPublicClient, http } from 'viem';
+import { createPublicClient, http, decodeEventLog } from 'viem';
 import { base, baseSepolia, celo, celoSepolia } from 'viem/chains';
+import { ABAPAY_CONTRACT_ABI_EVENTS } from '@/constants';
 
 const resend = new Resend(process.env.RESEND_API_KEY || "re_dummy_key_for_build");
 
@@ -166,6 +167,34 @@ export async function POST(req: Request) {
                 await supabaseAdmin.from('transactions').update({ status: 'FAILED_VENDING', error_code: 'REVERTED', api_response: 'Transaction failed on-chain' }).eq('tx_hash', txHash);
                 try { await sendTelegramAlert(`🛑 *WEBHOOK BLOCKED: REVERTED TX*\nUser ${record.wallet_address || record.account_number} tried to use a failed/reverted transaction!\nHash: \`${txHash}\`\n🔍 *Explorer:* ${explorerUrl}`); } catch (err) {}
                 return NextResponse.json({ status: "Transaction Reverted On-Chain. Blocked." }, { status: 200 });
+            }
+
+            // ⚡ PAYMASTER / ERC-4337 SAFE CHECK ⚡
+            // When Base transactions are sponsored via a paymaster (Coinbase Smart Wallet / Base
+            // Account), the top-level transaction's `to` is the bundler/EntryPoint contract, NOT
+            // the AbaPay contract directly — our contract is only called internally. So instead of
+            // trusting "the tx succeeded", we explicitly decode the receipt's logs and require that
+            // OUR contract actually emitted `PaymentReceived`. This works identically whether the
+            // call arrived directly from the user's EOA or was nested inside a sponsored UserOperation.
+            const abapayContractAddress = (record.blockchain === 'BASE'
+                ? (process.env.NEXT_PUBLIC_ABAPAY_BASE_ADDRESS || process.env.NEXT_PUBLIC_ABAPAY_ADDRESS)
+                : (process.env.NEXT_PUBLIC_ABAPAY_CELO_ADDRESS || process.env.NEXT_PUBLIC_ABAPAY_ADDRESS)
+            )?.toLowerCase();
+
+            const emittedPaymentReceived = receipt.logs.some((log) => {
+                if (log.address?.toLowerCase() !== abapayContractAddress) return false;
+                try {
+                    const decoded = decodeEventLog({ abi: ABAPAY_CONTRACT_ABI_EVENTS, data: log.data, topics: log.topics });
+                    return decoded.eventName === 'PaymentReceived';
+                } catch {
+                    return false; // Log wasn't a PaymentReceived event (e.g. an unrelated log from our contract, or decode mismatch)
+                }
+            });
+
+            if (!emittedPaymentReceived) {
+                await supabaseAdmin.from('transactions').update({ status: 'FAILED_VENDING', error_code: 'NO_CONTRACT_EVENT', api_response: 'Transaction succeeded but AbaPay contract did not emit PaymentReceived' }).eq('tx_hash', txHash);
+                try { await sendTelegramAlert(`🛑 *WEBHOOK BLOCKED: NO CONTRACT EVENT*\nTx succeeded but the AbaPay contract never emitted PaymentReceived — refusing to vend.\nHash: \`${txHash}\`\n🔍 *Explorer:* ${explorerUrl}`); } catch (err) {}
+                return NextResponse.json({ status: "No AbaPay PaymentReceived event found. Blocked." }, { status: 200 });
             }
         } catch (error) {
             console.error("Webhook Viem Fetch Error:", error);
