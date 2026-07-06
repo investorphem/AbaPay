@@ -1,15 +1,26 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useMemo } from "react";
 import Link from "next/link";
+import { useAccount } from "wagmi";
+import AppFooter from "@/components/AppFooter";
 import { 
   ArrowLeft, ShieldCheck, Zap, Globe, 
   Lock, Wallet, ChevronDown, BookOpen,
-  Star, Gift, Smartphone, Share2, HelpCircle,
-  Send 
+  Star, Gift, Smartphone, Share2, HelpCircle
 } from "lucide-react";
 
 export default function DocsPage() {
+  const { address, chain: activeChain } = useAccount();
+
+  // ⚡ DYNAMIC NETWORK TEXT — mirrors the main page footer logic
+  const activeNetworkDisplay = useMemo(() => {
+    if (!address) return "Base & Celo";
+    if (activeChain?.name?.toLowerCase().includes("base")) return "Base";
+    if (activeChain?.name?.toLowerCase().includes("celo")) return "Celo";
+    return activeChain?.name || "Base & Celo";
+  }, [address, activeChain]);
+
   return (
     <main className="min-h-screen bg-slate-50 dark:bg-black text-slate-900 dark:text-slate-100 font-sans p-4 flex flex-col items-center pb-20 transition-colors">
       <div className="w-full max-w-2xl">
@@ -187,35 +198,7 @@ export default function DocsPage() {
         </div>
 
         {/* ⚡ FOOTER ⚡ */}
-        <footer className="mt-12 w-full pt-8 pb-4 flex flex-col items-center gap-4 transition-colors">
-
-          <div className="flex items-center gap-4 mb-2">
-            <a 
-              href="https://x.com/AbaPays" 
-              target="_blank" 
-              rel="noopener noreferrer" 
-              className="w-12 h-12 rounded-full border-2 border-slate-200 dark:border-slate-800 bg-white dark:bg-[#111114] flex items-center justify-center text-slate-500 dark:text-slate-400 hover:text-emerald-600 dark:hover:text-emerald-400 hover:border-emerald-200 dark:hover:border-emerald-900 hover:bg-emerald-50 dark:hover:bg-emerald-900/20 transition-all shadow-sm group"
-            >
-              <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="group-hover:scale-110 transition-transform">
-                <path d="M22 4s-.7 2.1-2 3.4c1.6 10-9.4 17.3-18 11.6 2.2.1 4.4-.6 6-2C3 15.5.5 9.6 3 5c2.2 2.6 5.6 4.1 9 4-.9-4.2 4-6.6 7-3.8 1.1 0 3-1.2 3-1.2z"></path>
-              </svg>
-            </a>
-            <a 
-              href="https://t.me/AbaPays" 
-              target="_blank" 
-              rel="noopener noreferrer" 
-              className="w-12 h-12 rounded-full border-2 border-slate-200 dark:border-slate-800 bg-white dark:bg-[#111114] flex items-center justify-center text-slate-500 dark:text-slate-400 hover:text-emerald-600 dark:hover:text-emerald-400 hover:border-emerald-200 dark:hover:border-emerald-900 hover:bg-emerald-50 dark:hover:bg-emerald-900/20 transition-all shadow-sm group"
-            >
-              <Send size={20} className="ml-[-2px] mt-[2px] group-hover:scale-110 transition-transform" /> 
-            </a>
-          </div>
-
-          <div className="flex items-center gap-2.5 bg-white dark:bg-[#111114] px-4 py-1.5 rounded-full shadow-sm border border-slate-200 dark:border-slate-800 transition-colors">
-             <ShieldCheck size={16} className="text-emerald-600" />
-             <span className="text-[11px] font-bold text-slate-500 dark:text-slate-400 uppercase tracking-widest">Secured by Base & Celo Networks</span>
-          </div>
-          <p className="text-[9px] font-medium text-slate-400 dark:text-slate-600 uppercase tracking-[0.2em] mt-2">© 2026 MASONODE ORGANISATION</p>
-        </footer>
+        <AppFooter network={activeNetworkDisplay} />
 
       </div>
     </main>
