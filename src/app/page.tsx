@@ -119,7 +119,7 @@ export default function Home() {
   const [isSendingSupport, setIsSendingSupport] = useState(false);
 
   const [currentPage, setCurrentPage] = useState(1);
-  const [selectedToken, setSelectedToken] = useState(SUPPORTED_TOKENS[0]);
+  const [selectedToken, setSelectedToken] = useState(SUPPORTED_TOKENS.find(t => t.symbol === "USD₮") || SUPPORTED_TOKENS[0]);
   const [walletBalance, setWalletBalance] = useState("0.00");
   const [isFetchingBalance, setIsFetchingBalance] = useState(false);
   const [exchangeRate, setExchangeRate] = useState<number>(1550); 
@@ -157,10 +157,15 @@ export default function Home() {
 
   // ⚡ MULTI-CHAIN TOKEN FILTER & AUTO-SWITCHER ⚡
   const availableTokens = useMemo(() => {
-     return SUPPORTED_TOKENS.filter((t: any) => 
+     const filtered = SUPPORTED_TOKENS.filter((t: any) => 
         !t.supportedNetworks || 
         t.supportedNetworks.some((n: string) => activeChain?.name?.toLowerCase().includes(n))
      );
+     // ⚡ On Celo, default the initial stablecoin to USDT (USD₮) instead of USDm
+     if (activeChain?.name?.toLowerCase().includes("celo")) {
+        return [...filtered].sort((a, b) => (a.symbol === "USD₮" ? -1 : b.symbol === "USD₮" ? 1 : 0));
+     }
+     return filtered;
   }, [activeChain]);
 
   useEffect(() => {
@@ -1491,7 +1496,7 @@ export default function Home() {
                     onClick={() => openSelectionModal('token', "Select Token", availableTokens, (symbol) => setSelectedToken(SUPPORTED_TOKENS.find(t => t.symbol === symbol)!))}
                   >
                      <img src={selectedToken.logo} alt={selectedToken.symbol} className="w-7 h-7 object-contain rounded-full shadow-sm bg-white dark:bg-slate-800 p-0.5" />
-                     <span className="font-black text-slate-800 dark:text-slate-200 uppercase text-sm tracking-tight">{selectedToken.symbol}</span>
+                     <span className="font-black text-slate-800 dark:text-slate-200 text-sm tracking-tight">{selectedToken.symbol}</span>
                      <ChevronDown size={14} className="text-slate-400 dark:text-slate-500"/>
                   </div>
                   <div className="text-right">
@@ -1695,7 +1700,7 @@ export default function Home() {
                     onClick={() => openSelectionModal('token', "Select Token", availableTokens, (symbol) => setSelectedToken(SUPPORTED_TOKENS.find(t => t.symbol === symbol)!))}
                   >
                      <img src={selectedToken.logo} alt={selectedToken.symbol} className="w-7 h-7 object-contain rounded-full shadow-sm bg-white dark:bg-slate-800 p-0.5" />
-                     <span className="font-black text-slate-800 dark:text-slate-200 uppercase text-sm tracking-tight">{selectedToken.symbol}</span>
+                     <span className="font-black text-slate-800 dark:text-slate-200 text-sm tracking-tight">{selectedToken.symbol}</span>
                      <ChevronDown size={14} className="text-slate-400 dark:text-slate-500"/>
                   </div>
                   <div className="text-right">
@@ -1906,7 +1911,7 @@ export default function Home() {
                     onClick={() => openSelectionModal('token', "Select Token", availableTokens, (symbol) => setSelectedToken(SUPPORTED_TOKENS.find(t => t.symbol === symbol)!))}
                   >
                      <img src={selectedToken.logo} alt={selectedToken.symbol} className="w-7 h-7 object-contain rounded-full shadow-sm bg-white dark:bg-slate-800 p-0.5" />
-                     <span className="font-black text-slate-800 dark:text-slate-200 uppercase text-sm tracking-tight">{selectedToken.symbol}</span>
+                     <span className="font-black text-slate-800 dark:text-slate-200 text-sm tracking-tight">{selectedToken.symbol}</span>
                      <ChevronDown size={14} className="text-slate-400 dark:text-slate-500"/>
                   </div>
                   <div className="text-right">
