@@ -460,7 +460,7 @@ export default function Home() {
   };
 
   const handleShareReceipt = async () => {
-    const receiptText = `🧾 AbaPay Receipt\n\nDate: ${selectedReceipt?.date}\nStatus: ${selectedReceipt?.status}\nProduct: ${selectedReceipt?.network} ${selectedReceipt?.service}\nRecipient: ${selectedReceipt?.account}\nAmount Paid: ${selectedReceipt?.amountNaira}\nCrypto Used: ${selectedReceipt?.amountCrypto} ${selectedReceipt?.tokenUsed}\nTx Hash: ${selectedReceipt?.txHash}\n\nSecured by ${selectedReceipt?.blockchain || activeChain.name} Network`;
+    const receiptText = `🧾 AbaPay Receipt\n\nDate: ${selectedReceipt?.date}\nStatus: ${selectedReceipt?.status}\nProduct: ${selectedReceipt?.network} ${selectedReceipt?.service}\nRecipient: ${selectedReceipt?.account}\nAmount Paid: ${isNaN(Number(selectedReceipt?.amountNaira)) ? selectedReceipt?.amountNaira : `₦${Number(selectedReceipt?.amountNaira).toLocaleString()}`}\nCrypto Used: ${selectedReceipt?.amountCrypto} ${selectedReceipt?.tokenUsed}\nTx Hash: ${selectedReceipt?.txHash}\n\nSecured by ${selectedReceipt?.blockchain || activeChain.name} Network`;
     if (navigator.share) { try { await navigator.share({ title: 'Receipt', text: receiptText }); } catch (err) {} } 
     else { try { await navigator.clipboard.writeText(receiptText); showToast("Copied!", "Receipt details copied to clipboard.", "success"); } catch (err) {} }
   };
@@ -737,7 +737,7 @@ export default function Home() {
           id: realTxHash.slice(0,8), date: new Date().toLocaleString(), status: finalStatus.status === 'TIMEOUT' ? "PENDING" : finalStatus.status, 
           amountNaira: isInternational ? `${intlCurrency || activeCountry.code} ${displayForeignAmount}` : calculatedNairaAmount, 
           amountCrypto: cryptoToCharge, tokenUsed: selectedToken.symbol, service: uiCategory, network: displayNetwork.toUpperCase(), txHash: realTxHash, account: payloadBillersCode,
-          blockchain: currentBlockchainName, purchased_code: finalStatus.purchased_code, units: finalStatus.units
+          blockchain: currentBlockchainName, purchased_code: finalStatus.purchased_code, units: finalStatus.units, country_code: isInternational ? activeCountry.code : null
       }, ...transactions];
       setTransactions(updatedHistory); 
       localStorage.setItem(`abapay_history_${address}`, JSON.stringify(updatedHistory));
@@ -967,9 +967,10 @@ export default function Home() {
         if (data && data.length > 0) {
           const cloudHistory = data.map((tx: any) => ({ 
              id: tx.tx_hash.slice(0, 8), date: new Date(tx.created_at).toLocaleString(), status: tx.status, 
-             amountNaira: tx.amount_naira.toString(), amountCrypto: tx.amount_usdt.toString(), 
+             // ⚡ International transactions were saved with a formatted display_amount (e.g. "GHS 2.50") — use it instead of the NGN equivalent
+             amountNaira: (tx.country_code && tx.display_amount) ? tx.display_amount : tx.amount_naira.toString(), amountCrypto: tx.amount_usdt.toString(), 
              tokenUsed: tx.token_used || "USD₮", service: tx.service_category, network: tx.network, 
-             blockchain: tx.blockchain || 'CELO',
+             blockchain: tx.blockchain || 'CELO', country_code: tx.country_code || null,
              txHash: tx.tx_hash, account: tx.account_number, refund_hash: tx.refund_hash, 
              purchased_code: tx.purchased_code, request_id: tx.request_id, units: tx.units 
           }));
