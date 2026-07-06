@@ -3,6 +3,15 @@ import { ELECTRICITY_DISCOS } from "@/app/discos";
 
 export const ABAPAY_ABI = [{"inputs":[{"internalType":"address","name":"tokenAddress","type":"address"},{"internalType":"string","name":"serviceType","type":"string"},{"internalType":"string","name":"accountNumber","type":"string"},{"internalType":"uint256","name":"amount","type":"uint256"}],"name":"payBill","outputs":[],"stateMutability":"nonpayable","type":"function"}];
 
+// ⚡ Event-only ABI fragment used server-side (webhook) to verify the AbaPay contract
+// genuinely emitted PaymentReceived inside a transaction's logs — this works whether the
+// transaction was submitted directly by the user's EOA, OR wrapped inside an ERC-4337
+// UserOperation routed through a bundler/paymaster (Base gas sponsorship), since the log
+// is emitted by our contract regardless of how deeply nested the call was.
+export const ABAPAY_CONTRACT_ABI_EVENTS = [
+  {"anonymous":false,"inputs":[{"indexed":true,"internalType":"address","name":"user","type":"address"},{"indexed":true,"internalType":"address","name":"token","type":"address"},{"indexed":false,"internalType":"string","name":"serviceType","type":"string"},{"indexed":false,"internalType":"string","name":"accountNumber","type":"string"},{"indexed":false,"internalType":"uint256","name":"amount","type":"uint256"}],"name":"PaymentReceived","type":"event"}
+];
+
 // ⚡ UPDATED: Added the 'allowance' function so Viem can check permissions
 export const ERC20_ABI = [
   {"inputs":[{"internalType":"address","name":"spender","type":"address"},{"internalType":"uint256","name":"amount","type":"uint256"}],"name":"approve","outputs":[{"internalType":"bool","name":"","type":"bool"}],"stateMutability":"nonpayable","type":"function"},
