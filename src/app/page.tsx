@@ -588,6 +588,27 @@ export default function Home() {
       setStatus("Verifying permissions...");
       const currentAllowance = await publicClient.readContract({ address: tokenAddress as `0x${string}`, abi: ERC20_ABI, functionName: 'allowance', args: [address, ABAPAY_CONTRACT], blockTag: 'latest' }) as bigint;
 
+      // ==========================================
+      // ⚡ BASE GAS SPONSORSHIP (PAYMASTER) CAPABILITY CHECK ⚡
+      // Only smart-account connections (e.g. Coinbase Smart Wallet / Base Account) advertise
+      // EIP-5792 `paymasterService` support. Regular EOA wallets (MetaMask, WalletConnect,
+      // Valora) simply won't have this capability, and we transparently fall back to the
+      // normal self-paid flow further down — no behavior change for those wallets.
+      // ==========================================
+      const isBaseChain = activeChain.id === base.id || activeChain.id === baseSepolia.id;
+      const paymasterProxyUrl = typeof window !== 'undefined' ? `${window.location.origin}/api/paymaster` : undefined;
+      let usingBasePaymaster = false;
+
+      if (isBaseChain && paymasterProxyUrl && typeof client.getCapabilities === 'function') {
+          try {
+              const capabilities = await client.getCapabilities({ account: address as `0x${string}` });
+              const chainCaps = capabilities?.[activeChain.id] || capabilities?.[`0x${activeChain.id.toString(16)}`];
+              usingBasePaymaster = !!chainCaps?.paymasterService?.supported;
+          } catch (capError) {
+              usingBasePaymaster = false; // Wallet doesn't support capability discovery — fall back safely
+          }
+      }
+
       let vtpassServiceID = ""; let displayNetwork = ""; let finalVariationCode = 'none'; let payloadBillersCode = accountNumber; let uiCategory = "";
 
       if (isInternational) {
@@ -610,8 +631,10 @@ export default function Home() {
 
             // ==========================================
       // ⚡ STRICT FIREWALL: ISOLATED APPROVAL BLOCK
+      // Skipped entirely when we're routing through the sponsored paymaster batch below —
+      // in that case the approve call (if needed) travels inside the same sponsored sendCalls.
       // ==========================================
-      if (currentAllowance < valueInWei) {
+      if (!usingBasePaymaster && currentAllowance < valueInWei) {
           setStatus("Awaiting token approval...");
           try {
               const appHash = await client.writeContract({ 
@@ -665,33 +688,119 @@ export default function Home() {
 
       setStatus("Please sign the final payment...");
 
-            let rawHash;
-      if (activeChain.id === base.id || activeChain.id === baseSepolia.id) {
-          const callData = encodeFunctionData({ 
-              abi: ABAPAY_ABI, 
-              functionName: 'payBill', 
-              args: [tokenAddress, vtpassServiceID, payloadBillersCode, valueInWei] 
-          });
-          
-          // ⚡ FIX 1: Restored your original, perfect builder code formatting
-          const builderCodeSuffix = "0x62635f6a63757a316632330b0080218021802180218021802180218021";
-          const attributedData = `${callData}${builderCodeSuffix.replace('0x', '')}` as `0x${string}`;
+      const callData = encodeFunctionData({ 
+          abi: ABAPAY_ABI, 
+          functionName: 'payBill', 
+          args: [tokenAddress, vtpassServiceID, payloadBillersCode, valueInWei] 
+      });
 
-          rawHash = await client.sendTransaction({
-              to: ABAPAY_CONTRACT,
-              data: attributedData,
-              account: address as `0x${string}`,
-              ...txConfig // ⚡ FIX 2: Removed forced nonce so wallets don't block the transaction
-          });
-      } else {
-          rawHash = await client.writeContract({ 
-              address: ABAPAY_CONTRACT, 
-              abi: ABAPAY_ABI, 
-              functionName: 'payBill', 
-              args: [tokenAddress, vtpassServiceID, payloadBillersCode, valueInWei], 
-              ...txConfig // ⚡ FIX 2: Removed forced nonce
-          });
+      // ⚡ FIX 1: Restored your original, perfect builder code formatting
+      const builderCodeSuffix = "0x62635f6a63757a316632330b0080218021802180218021802180218021";
+      const attributedData = `${callData}${builderCodeSuffix.replace('0x', '')}` as `0x${string}`;
+
+            let rawHash;
+
+      // ==========================================
+      // ⚡ SPONSORED PATH: Base + paymaster-capable wallet
+      // Batches (approve if needed) + payBill into a single sponsored EIP-5792 call.
+      // ==========================================
+      if (usingBasePaymaster) {
+          let callsId: string | undefined;
+
+          try {
+              const calls: any[] = [];
+              if (currentAllowance < valueInWei) {
+                  calls.push({
+                      to: tokenAddress as `0x${string}`,
+                      data: encodeFunctionData({ abi: ERC20_ABI, functionName: 'approve', args: [ABAPAY_CONTRACT, parseUnits("100000", selectedToken.decimals)] }),
+                  });
+              }
+              calls.push({ to: ABAPAY_CONTRACT as `0x${string}`, data: attributedData });
+
+              setStatus("Please sign the sponsored transaction...");
+              const sendCallsResult: any = await client.sendCalls({
+                  account: address as `0x${string}`,
+                  chain: activeChain,
+                  calls,
+                  capabilities: { paymasterService: { url: paymasterProxyUrl } },
+              });
+              callsId = typeof sendCallsResult === 'string' ? sendCallsResult : sendCallsResult?.id;
+              if (!callsId) throw new Error("Wallet did not return a calls identifier.");
+          } catch (sendCallsError: any) {
+              // ⚡ NOTHING WAS BROADCAST — the wallet/paymaster rejected this before it ever left
+              // the device (e.g. user declined, capability check was stale, paymaster policy
+              // rejected the batch). It is genuinely safe to fall back to the normal self-paid flow.
+              console.log("Sponsored payment could not be submitted, falling back to self-paid gas:", sendCallsError);
+              usingBasePaymaster = false;
+          }
+
+          if (callsId) {
+              // ⚡ THE WALLET ACCEPTED THE CALLS — TREAT THIS AS "SIGNED" FROM HERE ON. ⚡
+              // Whatever happens next (lost network, RPC hiccup, slow bundler), we must NEVER
+              // resubmit a second transaction and must NEVER wipe the pending intent: the
+              // sponsored payment is very likely already broadcast/in-flight on-chain. Setting
+              // txHasBeenSigned here means the outer catch block will preserve the pending
+              // record instead of cancelling it, and the webhook's existing abandoned-intent
+              // rescue (matches by wallet address) will complete the vend once Alchemy detects
+              // the transaction — exactly the same safety net already used for a normal
+              // "signed but the app crashed before confirming" scenario.
+              txHasBeenSigned = true;
+
+              setStatus("Confirming sponsored transaction on-chain...");
+              let callsStatus: any = null;
+              let pollingError: any = null;
+
+              try {
+                  for (let i = 0; i < 30; i++) {
+                      callsStatus = await client.getCallsStatus({ id: callsId });
+                      const statusValue = callsStatus?.status;
+                      const isConfirmed = statusValue === 'CONFIRMED' || statusValue === 'success' || statusValue === 200;
+                      if (isConfirmed && callsStatus?.receipts?.length) break;
+                      await new Promise(resolve => setTimeout(resolve, 2000));
+                  }
+              } catch (pollError: any) {
+                  pollingError = pollError; // e.g. network dropped mid-confirmation
+              }
+
+              const receiptHash = callsStatus?.receipts?.[callsStatus.receipts.length - 1]?.transactionHash;
+
+              if (!receiptHash) {
+                  // Either the poll loop errored (network/RPC dropped) or genuinely timed out
+                  // without confirming. Either way: do NOT resubmit. The payment was already
+                  // sent to the wallet/bundler — surface this honestly and stop here.
+                  console.log("Could not confirm sponsored transaction from this device:", pollingError);
+                  setStatus("Payment sent! Confirming in the background — check History shortly.");
+                  showToast("Processing", "Your sponsored payment was sent. If your connection drops now, don't retry — check History in a minute; we'll finish confirming it in the background.", "success");
+                  setIsProcessing(false);
+                  return; // 🛑 EXIT: nothing more to do from this device right now
+              }
+
+              rawHash = receiptHash;
+          }
       }
+
+      // ==========================================
+      // ⚡ NORMAL SELF-PAID PATH (all Celo wallets, and any Base wallet without paymaster support)
+      // ==========================================
+      if (!rawHash) {
+          if (isBaseChain) {
+              rawHash = await client.sendTransaction({
+                  to: ABAPAY_CONTRACT,
+                  data: attributedData,
+                  account: address as `0x${string}`,
+                  ...txConfig // ⚡ FIX 2: Removed forced nonce so wallets don't block the transaction
+              });
+          } else {
+              rawHash = await client.writeContract({ 
+                  address: ABAPAY_CONTRACT, 
+                  abi: ABAPAY_ABI, 
+                  functionName: 'payBill', 
+                  args: [tokenAddress, vtpassServiceID, payloadBillersCode, valueInWei], 
+                  ...txConfig // ⚡ FIX 2: Removed forced nonce
+              });
+          }
+      }
+
 
             // ⚡ CRITICAL FIX: The transaction is on the blockchain! Lock the safety flag! ⚡
       txHasBeenSigned = true;
@@ -1373,16 +1482,18 @@ export default function Home() {
       {/* ⚡ 3. UPDATED WRAPPER: Intelligently expands to max-w-lg and max-w-xl on PC ⚡ */}
       <div className="w-full max-w-md md:max-w-lg lg:max-w-xl transition-all duration-500 relative z-10">
 
-        {/* ⚡ HEADER: Increased padding and border radius on PC ⚡ */}
-        <div className="flex justify-between items-center bg-white dark:bg-[#111114] p-4 md:p-5 rounded-3xl md:rounded-[2rem] shadow-sm border border-slate-100 dark:border-slate-800/60 mb-6 md:mb-8 transition-colors">
-          <div className="flex items-center gap-3">
-            <img src="/logo.png" alt="AbaPay" className="h-10 md:h-12 w-auto object-contain transition-all" />
-            <div className="flex flex-col">
-              <span className="text-xl md:text-2xl font-black text-slate-900 dark:text-white leading-none tracking-tight transition-colors">AbaPay<span className="text-emerald-500">.</span></span>
-              <span className="text-[8px] md:text-[9px] font-black uppercase text-slate-400 dark:text-slate-500 tracking-widest mt-1">Seamless Payments.</span>
+        {/* ⚡ HEADER: Increased padding and border radius on PC. flex-wrap + gap-y lets the
+             right-side pill cluster drop to its own line instead of overlapping the title
+             on narrow screens or larger system display-scale settings. ⚡ */}
+        <div className="flex flex-wrap justify-between items-center gap-y-3 bg-white dark:bg-[#111114] p-4 md:p-5 rounded-3xl md:rounded-[2rem] shadow-sm border border-slate-100 dark:border-slate-800/60 mb-6 md:mb-8 transition-colors">
+          <div className="flex items-center gap-3 min-w-0">
+            <img src="/logo.png" alt="AbaPay" className="h-10 md:h-12 w-auto object-contain transition-all shrink-0" />
+            <div className="flex flex-col min-w-0">
+              <span className="text-xl md:text-2xl font-black text-slate-900 dark:text-white leading-none tracking-tight transition-colors truncate">AbaPay<span className="text-emerald-500">.</span></span>
+              <span className="text-[8px] md:text-[9px] font-black uppercase text-slate-400 dark:text-slate-500 tracking-widest mt-1 truncate">Seamless Payments.</span>
             </div>
           </div>
-          <div className="flex items-center gap-2">
+          <div className="flex items-center flex-wrap justify-end gap-2">
 
             {address && (
                 <button 
@@ -1412,7 +1523,7 @@ export default function Home() {
                   }}
                   disabled={environment !== 'WEB' || isProcessing}
                   title={environment === 'WEB' ? "Click to switch network" : `Locked to ${activeChain?.name}`}
-                  className={`flex px-2.5 py-1.5 rounded-xl border items-center gap-1.5 shadow-sm transition-all ${
+                  className={`flex shrink-0 px-2.5 py-1.5 rounded-xl border items-center gap-1.5 shadow-sm transition-all ${
                      activeChain?.name?.toLowerCase().includes('base') 
                         ? 'bg-blue-50 dark:bg-blue-900/20 border-blue-200 dark:border-blue-800/50 text-blue-700 dark:text-blue-400' 
                         : 'bg-emerald-50 dark:bg-emerald-900/20 border-emerald-200 dark:border-emerald-800/50 text-emerald-700 dark:text-emerald-400'
@@ -1452,7 +1563,7 @@ export default function Home() {
                     localStorage.setItem('abapay_connected', 'true');
                   }}
                   disabled={isProcessing}
-                  className="bg-emerald-50 dark:bg-emerald-900/20 hover:bg-emerald-100 dark:hover:bg-emerald-900/40 border border-emerald-200 dark:border-emerald-800/50 text-emerald-700 dark:text-emerald-400 font-black text-[10px] px-3 py-1.5 rounded-xl transition-all shadow-sm active:scale-95 disabled:opacity-50 flex items-center gap-1.5 uppercase tracking-widest"
+                  className="bg-emerald-50 dark:bg-emerald-900/20 hover:bg-emerald-100 dark:hover:bg-emerald-900/40 border border-emerald-200 dark:border-emerald-800/50 text-emerald-700 dark:text-emerald-400 font-black text-[10px] px-3 py-1.5 rounded-xl transition-all shadow-sm active:scale-95 disabled:opacity-50 flex shrink-0 items-center gap-1.5 uppercase tracking-widest"
                 >
                   {isProcessing ? <Loader2 size={12} className="animate-spin"/> : <Zap size={12}/>}
                   {isProcessing ? "Wait" : "Connect"}
@@ -1463,7 +1574,7 @@ export default function Home() {
 
             <button 
               onClick={() => openSelectionModal('country', "Select Region", intlCountries.length ? intlCountries : SUPPORTED_COUNTRIES, handleCountryChange)}
-              className="bg-slate-50 dark:bg-[#1a1a1f] border border-slate-100 dark:border-slate-800/80 hover:border-emerald-200 dark:hover:border-emerald-700 px-3 py-1.5 rounded-xl flex items-center gap-2 transition-all shadow-sm active:scale-95"
+              className="bg-slate-50 dark:bg-[#1a1a1f] border border-slate-100 dark:border-slate-800/80 hover:border-emerald-200 dark:hover:border-emerald-700 px-3 py-1.5 rounded-xl flex shrink-0 items-center gap-2 transition-all shadow-sm active:scale-95"
             >
               <img 
                 src={`https://flagcdn.com/w40/${activeCountry.code.toLowerCase()}.png`} 
