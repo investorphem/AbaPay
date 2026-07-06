@@ -722,7 +722,7 @@ export default function Home() {
                   account: address as `0x${string}`,
                   chain: activeChain,
                   calls,
-                  capabilities: { paymasterService: { url: paymasterProxyUrl } },
+                  capabilities: { paymasterService: { url: paymasterProxyUrl! } },
               });
               callsId = typeof sendCallsResult === 'string' ? sendCallsResult : sendCallsResult?.id;
               if (!callsId) throw new Error("Wallet did not return a calls identifier.");
