@@ -92,6 +92,11 @@ ADMIN_WALLET_ADDRESS=0xYourAdminWalletAddress
 CELO_PRIVATE_KEY=your_deployer_private_key         # Used only by Hardhat for deployment — never expose client-side
 ```
 
+### Paymaster (Base Gas Sponsorship)
+```
+PAYMASTER_URL=https://api.developer.coinbase.com/rpc/v1/base/your_cdp_api_key   # Server-only — never NEXT_PUBLIC. The app proxies wallet paymaster requests through /api/paymaster so this key never reaches the browser.
+```
+
 ### VTpass (Bill Payment Provider)
 ```
 VTPASS_API_KEY=your_api_key
@@ -225,6 +230,6 @@ AbaPay is operated by **Masonode Technologies Limited**, a company registered wi
 
 ## 👨‍💻 Maintainer
 
-Built and maintained by **Oluwafemi Olagoke** ([@investorphem](https://x.com/investorphem)).
+Built and maintained by **Oluwafemi Olagoke** ([@investorphem](https://github.com/investorphem)).
 
 *Focusing on Web3, Decentralized AI, and scalable blockchain applications.*
