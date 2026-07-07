@@ -160,11 +160,32 @@ export async function POST(req: Request) {
             }
         } else {
             const paddedExpectedContract = "0x000000000000000000000000" + expectedLower.substring(2);
-            const foundTransfer = receipt.logs.some((log: any) => log.topics && log.topics.length >= 3 && log.topics[2]?.toLowerCase() === paddedExpectedContract);
+            // Find the ERC-20 Transfer log whose recipient (topic[2]) is the AbaPay contract.
+            const transferLog = receipt.logs.find((log: any) => log.topics && log.topics.length >= 3 && log.topics[2]?.toLowerCase() === paddedExpectedContract);
 
-            if (!foundTransfer) {
+            if (!transferLog) {
                  await sendTelegramAlert(`🚨 *SMART WALLET FRAUD DETECTED*\nFunds did not reach AbaPay contract.\nHash: \`${txHash}\`\n🔍 *Explorer:* ${explorerUrl}`);
                  return NextResponse.json({ success: false, status: 'FAILED_VENDING', message: "Funds not received." }, { status: 400 });
+            }
+
+            // 🔐 AMOUNT ENFORCEMENT FOR SPONSORED/SMART-WALLET PATH
+            // The transfer amount is the non-indexed `value` in the log data. Previously this
+            // path confirmed only that *a* transfer happened — not how much — which let a
+            // sponsored/smart-wallet user pay a trivial amount and request a large vend.
+            try {
+                const tokenDecimals = (tokenSymbol === 'cUSD' || tokenSymbol === 'USDm') ? 18 : 6;
+                const paidWei = BigInt(transferLog.data as string);
+                const requiredWei = parseUnits(requiredCrypto.toFixed(tokenDecimals), tokenDecimals);
+                // Allow a tiny rounding tolerance (matches the EOA path's philosophy).
+                const shortfall = requiredWei > paidWei ? requiredWei - paidWei : BigInt(0);
+                const tolerance = parseUnits("0.01", tokenDecimals); // 1 cent grace for rounding
+                if (shortfall > tolerance) {
+                    await sendTelegramAlert(`🚨 *SPONSORED UNDERPAYMENT BLOCKED*\nUser ${wallet_address} paid less than required via smart wallet.\nHash: \`${txHash}\`\n🔍 *Explorer:* ${explorerUrl}`);
+                    return NextResponse.json({ success: false, status: 'FAILED_VENDING', message: "Amount mismatch detected." }, { status: 400 });
+                }
+            } catch (amountErr) {
+                await sendTelegramAlert(`🚨 *SPONSORED AMOUNT UNVERIFIABLE*\nCould not decode transfer amount — refusing to vend.\nHash: \`${txHash}\`\n🔍 *Explorer:* ${explorerUrl}`);
+                return NextResponse.json({ success: false, status: 'FAILED_VENDING', message: "Could not verify payment amount." }, { status: 400 });
             }
         }
     } catch (error) {

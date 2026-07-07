@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server';
 import { GoogleGenerativeAI } from '@google/generative-ai';
+import { verifyInternalRequest } from '@/utils/internalAuth';
 
 // Initialize the Gemini Client
 // Make sure to add GEMINI_API_KEY to your .env.local file
@@ -7,6 +8,12 @@ const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY as string);
 
 export async function POST(req: Request) {
   try {
+    // 🔐 INTERNAL ONLY: prevents the public internet from burning our Gemini
+    // API quota/budget through this endpoint.
+    if (!verifyInternalRequest(req)) {
+      return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
+    }
+
     const { message } = await req.json();
 
     if (!message || typeof message !== 'string') {

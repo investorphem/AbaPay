@@ -128,6 +128,7 @@ RESEND_API_KEY=re_your_resend_key
 ### AI Agent (DeAI)
 ```
 GEMINI_API_KEY=your_gemini_api_key
+DEAI_INTERNAL_SECRET=any_long_random_string   # Optional. Signs internal calls to the DeAI brain so /api/deai/* can't be hit directly from the internet. Falls back to SUPABASE_SERVICE_ROLE_KEY if unset.
 ```
 
 ### Telegram
@@ -145,6 +146,7 @@ DEAI_TELEGRAM_BOT_TOKEN=your_deai_bot_token
 WHATSAPP_ACCESS_TOKEN=your_whatsapp_access_token
 WHATSAPP_PHONE_NUMBER_ID=your_phone_number_id
 WHATSAPP_VERIFY_TOKEN=your_verify_token
+WHATSAPP_APP_SECRET=your_meta_app_secret   # Optional but strongly recommended: verifies the X-Hub-Signature-256 on inbound webhooks so senders can't be spoofed.
 ```
 
 ### X (Twitter)
@@ -226,7 +228,11 @@ The app ships with Farcaster frame metadata (`public/.well-known/farcaster.json`
 * **Rate Verification:** The crypto amount paid is checked server-side against the platform's live exchange rate before vending, preventing underpayment exploits even if the client is tampered with.
 * **Smart Contract Vault:** User stablecoins go directly into the immutable `AbaPay.sol` smart contract vault. Only the contract owner's cryptographically signed transaction can withdraw funds — no backend service ever holds custody of user funds directly.
 * **Automatic Refunds:** If a verified on-chain payment fails to vend (provider outage, invalid details, etc.), the transaction is flagged and refunded back to the user's wallet, with the refund transaction hash recorded on the ledger.
-* **Admin Auth:** Admin-only API routes and the `/admin` dashboard are gated behind dedicated authentication (`src/utils/adminAuth.ts`), separate from the public storefront.
+* **Admin Auth:** Admin-only API routes and the `/admin` dashboard are gated behind dedicated authentication (`src/utils/adminAuth.ts`), separate from the public storefront. Auth is a wallet-signature challenge verified against the contract owner, with a 12-hour session expiry and timestamp replay protection.
+* **Internal-Only AI Routes:** The DeAI "brain" (`/api/deai/*`) is reachable only by the app's own bot webhooks via a signed internal-service token (`src/utils/internalAuth.ts`). This prevents the public internet from impersonating any user by their chat ID / phone number / X ID, or burning the Gemini API budget.
+* **Bot Webhook Signatures:** The WhatsApp and X webhooks verify Meta's `X-Hub-Signature-256` / X's `x-twitter-webhooks-signature` HMAC on every inbound payload (when the corresponding secret is configured), and Telegram verifies its secret token — so message events can't be forged.
+* **Hashed Transaction PINs:** DeAI PINs are stored as salted scrypt hashes (`src/utils/pinSecurity.ts`), never plaintext, with legacy plaintext values transparently upgraded on next use and a 4-attempt lockout.
+* **Scoped Paymaster Proxy:** The gas-sponsorship proxy (`/api/paymaster`) allowlists only ERC-7677 paymaster JSON-RPC methods, so it can't be abused as a general-purpose RPC relay running on your CDP key.
 
 ---
 

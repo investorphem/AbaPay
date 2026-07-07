@@ -74,7 +74,7 @@ export function ReceiptModal({ receipt, isMainnet, onClose, onSupport }: any) {
       const receiptElement = document.getElementById('printable-receipt');
       if (!receiptElement) return;
 
-      const html2canvas = (await import('html2canvas')).default;
+      const html2canvas = (await import('html2canvas-pro')).default;
       const canvas = await html2canvas(receiptElement, {
           scale: 2,
           backgroundColor: null // Captures dark mode perfectly

@@ -1,6 +1,7 @@
 // src/app/api/x/webhook/route.ts
 import { NextResponse } from 'next/server';
 import crypto from 'crypto';
+import { internalAuthHeaders } from '@/utils/internalAuth';
 
 const X_BEARER_TOKEN = process.env.X_BEARER_TOKEN as string;
 
@@ -25,7 +26,24 @@ export async function POST(req: Request) {
     const protocol = host?.includes('localhost') ? 'http' : 'https';
     const CORE_ENGINE_URL = `${protocol}://${host}/api/deai/core`;
 
-    const body = await req.json();
+    // 🔐 PAYLOAD SIGNATURE VERIFICATION (enforced when X_CONSUMER_SECRET is configured)
+    // X signs webhook deliveries with HMAC-SHA256 of the raw body using the consumer
+    // secret, sent as `x-twitter-webhooks-signature: sha256=<base64>`. Without this,
+    // anyone can POST fake DM events impersonating ANY X user id.
+    const rawBody = await req.text();
+    const consumerSecret = process.env.X_CONSUMER_SECRET;
+    if (consumerSecret) {
+      const providedSig = req.headers.get('x-twitter-webhooks-signature') || '';
+      const expectedSig = 'sha256=' + crypto.createHmac('sha256', consumerSecret).update(rawBody).digest('base64');
+      const a = Buffer.from(providedSig);
+      const b = Buffer.from(expectedSig);
+      if (a.length !== b.length || !crypto.timingSafeEqual(a, b)) {
+        console.error('[SECURITY] X webhook: invalid x-twitter-webhooks-signature — rejecting.');
+        return NextResponse.json({ error: 'Invalid signature' }, { status: 401 });
+      }
+    }
+
+    const body = JSON.parse(rawBody);
 
     if (body.direct_message_events) {
       const event = body.direct_message_events[0];
@@ -41,7 +59,7 @@ export async function POST(req: Request) {
 
       const response = await fetch(CORE_ENGINE_URL, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 'Content-Type': 'application/json', ...internalAuthHeaders() },
         body: JSON.stringify({
           platform: 'X',
           platform_id: senderId,

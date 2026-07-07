@@ -25,6 +25,33 @@ export async function POST(req: Request) {
 
     const body = await req.text();
 
+    // 🔐 METHOD ALLOWLIST: this proxy exists solely so wallets can request gas
+    // sponsorship — it must not double as a free, unauthenticated general-purpose
+    // RPC relay running on our CDP key. Only ERC-7677 paymaster methods pass.
+    const ALLOWED_METHODS = new Set([
+      'pm_getPaymasterStubData',
+      'pm_getPaymasterData',
+      'pm_sponsorUserOperation',
+      'pm_getAcceptedPaymentTokens',
+    ]);
+    try {
+      const parsed = JSON.parse(body);
+      const requests = Array.isArray(parsed) ? parsed : [parsed];
+      for (const r of requests) {
+        if (!r || typeof r.method !== 'string' || !ALLOWED_METHODS.has(r.method)) {
+          return NextResponse.json(
+            { jsonrpc: '2.0', id: r?.id ?? null, error: { code: -32601, message: 'Method not allowed through this proxy' } },
+            { status: 403 }
+          );
+        }
+      }
+    } catch {
+      return NextResponse.json(
+        { jsonrpc: '2.0', id: null, error: { code: -32700, message: 'Parse error' } },
+        { status: 400 }
+      );
+    }
+
     const upstreamRes = await fetch(paymasterUrl, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },

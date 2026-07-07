@@ -2,6 +2,8 @@
 import { NextResponse } from 'next/server';
 import { GoogleGenerativeAI } from '@google/generative-ai';
 import { createClient } from '@supabase/supabase-js';
+import { verifyInternalRequest } from '@/utils/internalAuth';
+import { verifyPin, isHashedPin, hashPin } from '@/utils/pinSecurity';
 
 const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY as string);
 const supabase = createClient(
@@ -97,7 +99,22 @@ async function fetchDataVariations(provider: string) {
 
 export async function POST(req: Request) {
   try {
+    // 🔐 INTERNAL ONLY: this route is the DeAI "brain" and must only be reachable
+    // via our own bot webhook routes. Without this check, anyone who knows a
+    // victim's chat ID / phone number / X ID could impersonate them directly:
+    // read their fiat & crypto balances, read their transaction history, and
+    // brute-force their 4-digit PIN in unlimited batches.
+    if (!verifyInternalRequest(req)) {
+      return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
+    }
+
     let { platform, platform_id, text } = await req.json();
+
+    // 🔐 INPUT VALIDATION: reject malformed payloads before they touch any logic
+    if (typeof text !== 'string' || typeof platform_id !== 'string' || !platform_id || text.length > 1000) {
+      return NextResponse.json({ error: 'Invalid payload' }, { status: 400 });
+    }
+
     let columnToSearch = platform === 'TELEGRAM' ? 'telegram_chat_id' : platform === 'WHATSAPP' ? 'whatsapp_number' : 'x_twitter_id';
     
     const { data: identity } = await supabase
@@ -144,7 +161,12 @@ export async function POST(req: Request) {
 
     // STATE: PIN CONFIRMATION
     if (session?.status === 'AWAITING_PIN') {
-      if (text.trim() === identity.deai_pin) {
+      if (verifyPin(text.trim(), identity.deai_pin)) {
+        // 🔐 TRANSPARENT MIGRATION: if this PIN was still stored as legacy
+        // plaintext, upgrade it to a salted scrypt hash on this successful login.
+        if (!isHashedPin(identity.deai_pin)) {
+          await supabase.from('deai_identities').update({ deai_pin: hashPin(text.trim()) }).eq(columnToSearch, platform_id);
+        }
         await supabase.from('deai_sessions').delete().eq('chat_id', platform_id);
         return NextResponse.json({ action: 'REPLY', message: `✅ **PIN Verified!**\n\n⏳ *Processing your ${session.intent_data.selected_token} transaction...*\n\nYour transaction has been submitted. Type **Status** to check your history shortly.` });
       } else {

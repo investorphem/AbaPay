@@ -1,5 +1,6 @@
 // src/app/api/telegram/webhook/route.ts
 import { NextResponse } from 'next/server';
+import { internalAuthHeaders } from '@/utils/internalAuth';
 
 // ⚡ CHANGED: Now explicitly uses the DEAI token, completely ignoring the Admin token
 const DEAI_BOT_TOKEN = process.env.DEAI_TELEGRAM_BOT_TOKEN as string;
@@ -40,7 +41,7 @@ export async function POST(req: Request) {
     // Forward to the Universal Core Engine
     const response = await fetch(CORE_ENGINE_URL, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: { 'Content-Type': 'application/json', ...internalAuthHeaders() },
       body: JSON.stringify({
         platform: 'TELEGRAM',
         platform_id: chatId,

@@ -17,7 +17,7 @@ export default function TermsOfService() {
           </div>
           <div className="text-right">
             <p className="text-xs font-bold text-slate-500 dark:text-slate-400 bg-slate-100 dark:bg-[#1a1a1f] px-3 py-1.5 rounded-lg inline-block transition-colors">
-              Effective Date: 1 April 2026
+              Effective Date: April 2026
             </p>
           </div>
         </div>
@@ -42,7 +42,7 @@ export default function TermsOfService() {
             <p className="mb-3">
               AbaPay operates strictly as a <strong>Technology Interface and Borderless Digital Intermediary</strong>. We provide a non-custodial software protocol that allows users to interact with smart contracts on 
               {/* ⚡ MULTI-CHAIN UPDATE HERE ⚡ */}
-              <strong> Base, Celo, and other supported EVM Blockchains</strong> to exchange digital assets (such as USDm, USDC, or USDT) for fiat-denominated utility services (Airtime, Data, Education, Electricity, and Bank Transfers) across Nigeria and supported international countries.
+              <strong> Base, Celo, and other supported EVM Blockchains</strong> to exchange digital assets (such as cUSD, USDC, or USDT) for fiat-denominated utility services (Airtime, Data, Electricity, and Bank Transfers) across Nigeria and supported international countries.
             </p>
             <p>
               <strong>We are not a bank.</strong> We do not hold fiat currency deposits. All fiat utility vending is processed through licensed domestic and international Third-Party Aggregators (e.g., VTpass) and regulated Payment Solution Service Providers across our active geographic regions.

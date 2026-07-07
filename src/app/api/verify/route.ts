@@ -1,37 +1,61 @@
 import { NextResponse } from 'next/server';
-import { getHeaders } from '@/lib/vtpass';
+import crypto from 'crypto';
+import { supabaseAdmin as supabase } from '@/utils/supabase'; // ⚡ FIXED IMPORT
+
 
 export async function POST(req: Request) {
-  try {
-    const { billersCode, serviceID, type } = await req.json();
+    try {
+        const { phone, code, walletAddress } = await req.json();
+        if (!phone || !code || !walletAddress) {
+            return NextResponse.json({ error: "Missing required fields" }, { status: 400 });
+        }
 
-    // ⚡ DYNAMIC ENVIRONMENT SWITCHING VIA APP MODE ⚡
-    const appMode = process.env.NEXT_PUBLIC_APP_MODE || "sandbox";
-    const baseUrl = appMode === "live" ? "https://vtpass.com/api" : "https://sandbox.vtpass.com/api";
+        // 🔐 INPUT VALIDATION: wallet must be a valid EVM address
+        if (!/^0x[a-fA-F0-9]{40}$/.test(String(walletAddress))) {
+            return NextResponse.json({ error: "Invalid wallet address" }, { status: 400 });
+        }
 
-    let url = `${baseUrl}/merchant-verify`;
-    let bodyPayload: any = { billersCode, serviceID };
+        // 1. Verify OTP
+        const { data: otpRecord } = await supabase
+            .from('otp_requests')
+            .select('*')
+            .eq('phone', phone)
+            .single();
 
-    // Ensures we pass the variation code for JAMB, Bank Transfers, and Electricity
-    if (type) bodyPayload.type = type;
+        if (!otpRecord) {
+            return NextResponse.json({ error: "Invalid OTP code" }, { status: 400 });
+        }
 
-    // ⚡ VTPASS SMILE NETWORK OVERRIDE ⚡
-    if (serviceID === 'smile-direct') {
-       url = `${baseUrl}/merchant-verify/smile/email`;
-       bodyPayload = { billersCode, serviceID }; // billersCode here acts as the email
+        if (new Date(otpRecord.expires_at) < new Date()) {
+            return NextResponse.json({ error: "OTP has expired" }, { status: 400 });
+        }
+
+        // 🔐 CONSTANT-TIME COMPARE + SINGLE ATTEMPT: a wrong guess burns the code,
+        // so a 4-digit OTP cannot be brute forced (each guess requires a fresh OTP).
+        const expected = Buffer.from(String(otpRecord.code));
+        const provided = Buffer.from(String(code));
+        const matches = expected.length === provided.length && crypto.timingSafeEqual(expected, provided);
+
+        if (!matches) {
+            await supabase.from('otp_requests').delete().eq('phone', phone);
+            return NextResponse.json({ error: "Invalid OTP code. Please request a new code." }, { status: 400 });
+        }
+
+        // 2. Call the Supabase function to Link and Merge Points
+        const { error: linkError } = await supabase.rpc('link_wallet_to_phone', { 
+            target_wallet: walletAddress.toLowerCase(), 
+            target_phone: phone 
+        });
+
+        if (linkError) {
+            return NextResponse.json({ error: linkError.message }, { status: 400 });
+        }
+
+        // 3. Cleanup used OTP
+        await supabase.from('otp_requests').delete().eq('phone', phone);
+
+        return NextResponse.json({ success: true, message: "Wallet successfully linked!" });
+    } catch (error: any) {
+        return NextResponse.json({ error: error.message }, { status: 500 });
     }
-
-    const res = await fetch(url, {
-      method: 'POST',
-      headers: getHeaders(), // ⚡ FIXED: Removed 'POST' argument
-      body: JSON.stringify(bodyPayload)
-    });
-
-    const data = await res.json();
-    return NextResponse.json(data);
-
-  } catch (error: any) {
-    console.error("Verification Engine Failure:", error.message);
-    return NextResponse.json({ code: "500", message: "Verification Failed" }, { status: 500 });
-  }
 }
