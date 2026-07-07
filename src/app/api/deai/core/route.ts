@@ -267,7 +267,7 @@ export async function POST(req: Request) {
     if (intentData.intent === 'TRANSACTION_HISTORY') {
         await supabase.from('deai_sessions').delete().eq('chat_id', platform_id);
         const { data: recentTxs } = await supabase.from('transactions').select('service_category, network, amount_naira, status, created_at, token_used')
-            .eq('wallet_address', globalUser.wallet_address).order('created_at', { ascending: false }).limit(3);
+            .ilike('wallet_address', globalUser.wallet_address).order('created_at', { ascending: false }).limit(3);
 
         if (!recentTxs || recentTxs.length === 0) return NextResponse.json({ action: 'REPLY', message: "📜 You don't have any recent transactions yet." });
 
