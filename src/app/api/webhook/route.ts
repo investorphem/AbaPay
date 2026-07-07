@@ -99,7 +99,7 @@ export async function POST(req: Request) {
                 const { data: abandonedIntent } = await supabaseAdmin
                     .from('transactions')
                     .select('*')
-                    .eq('wallet_address', fromAddress)
+                    .ilike('wallet_address', fromAddress) // ⚡ case-insensitive: Alchemy normalizes addresses to lowercase, but stored records may be checksummed mixed-case
                     .eq('status', 'PENDING')
                     .like('tx_hash', 'preflight_%')
                     .order('created_at', { ascending: false })
@@ -140,7 +140,14 @@ export async function POST(req: Request) {
         }
 
         if (!record) {
-            return NextResponse.json({ error: "Record not found or not PENDING" }, { status: 404 });
+            // ⚡ CRITICAL: Always acknowledge receipt with 2xx here — Alchemy treats any
+            // non-2xx response as a DELIVERY failure and will auto-disable the webhook after
+            // enough of them within a rolling window. "No matching record" is a normal,
+            // expected outcome (test pings, unrelated activity picked up by the address
+            // filter, or a real payment whose intent just hasn't synced to the DB yet) — it
+            // is NOT a transport/delivery failure, and must never be reported as one.
+            console.log(`Webhook: no matching PENDING record for tx ${txHash} (fromAddress: ${fromAddress || 'n/a'}). Acknowledging anyway.`);
+            return NextResponse.json({ message: "No matching record found — acknowledged." }, { status: 200 });
         }
 
         // ⚡ 2.5 THE WEBHOOK SECURITY FIX: VERIFY ON-CHAIN RECEIPT ⚡
