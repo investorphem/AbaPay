@@ -1072,7 +1072,7 @@ export default function Home() {
     async function fetchCloudHistory() {
       try {
         const sixMonthsAgo = new Date(); sixMonthsAgo.setMonth(sixMonthsAgo.getMonth() - 6);
-        const { data } = await supabase.from('transactions').select('*').eq('wallet_address', address).gte('created_at', sixMonthsAgo.toISOString()).order('created_at', { ascending: false });
+        const { data } = await supabase.from('transactions').select('*').ilike('wallet_address', address).gte('created_at', sixMonthsAgo.toISOString()).order('created_at', { ascending: false });
         if (data && data.length > 0) {
           const cloudHistory = data.map((tx: any) => ({ 
              id: tx.tx_hash.slice(0, 8), date: new Date(tx.created_at).toLocaleString(), status: tx.status, 
