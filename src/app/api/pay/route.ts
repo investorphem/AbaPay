@@ -78,7 +78,7 @@ export async function POST(req: Request) {
     const dbPayload = {
       tx_hash: txHash, request_id: vtRequestId, service_category: serviceCategory, service_id: serviceID, variation_code: variation_code, network: network, 
       blockchain: blockchain || "CELO", account_number: billersCode || phone || "N/A", phone: phone || null, amount_usdt: parseFloat(amount), 
-      amount_naira: vendAmount, fee_naira: serviceFee, status: 'PENDING', wallet_address: wallet_address || "UNKNOWN",
+      amount_naira: vendAmount, fee_naira: serviceFee, status: 'PENDING', wallet_address: (wallet_address || "UNKNOWN").toLowerCase(),
       token_used: tokenSymbol, meter_account_type: meter_account_type || null, customer_email: email || null,
       operator_id: operator_id || null, country_code: country_code || null, product_type_id: product_type_id || null, subscription_type: subscription_type || null,
       foreign_amount: foreignAmount || null, display_amount: displayAmount || null // ⚡ Save for background webhook use
