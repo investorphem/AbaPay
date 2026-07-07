@@ -54,31 +54,30 @@ export function PrivacyModal({ isOpen, onClose }: any) {
 export function ReceiptModal({ receipt, isMainnet, onClose, onSupport }: any) {
   if (!receipt) return null;
 
+  const [isProcessingShare, setIsProcessingShare] = useState(false);
+  const [saveOptions, setSaveOptions] = useState<{ dataUrl: string; canvas: HTMLCanvasElement } | null>(null);
+
   const hasPin = receipt.status === 'SUCCESS' && receipt.purchased_code && receipt.purchased_code !== "Vended Successfully";
   const isElectricity = receipt.service?.toUpperCase() === 'ELECTRICITY' || receipt.service === 'Electricity';
   const isEducation = receipt.service === 'Education PIN' || receipt.service?.toUpperCase().includes('WAEC') || receipt.service?.toUpperCase().includes('JAMB');
 
+  const buildFallbackText = () => `🧾 AbaPay Receipt\n\nService: ${receipt.network} ${receipt.service}\nAmount: ${formatTxAmount(receipt.amountNaira)}\nStatus: ${receipt.status}\nAccount: ${receipt.account}\nRef: ${receipt.id}\n${hasPin ? `\nPIN/TOKEN: ${receipt.purchased_code}` : ''}\n\nSecured by ${receipt.blockchain || 'Celo'} ⚡`;
+
+  // ⚡ SHARE: Always render the receipt to an image first, then hand it to the
+  // device's native share sheet so the user can send it via WhatsApp, Telegram,
+  // Photos, Files, etc. — the same way any other app shares an image.
   const handleShareImage = async () => {
-    const receiptElement = document.getElementById('printable-receipt');
-    if (!receiptElement) return;
-
-    const fallbackText = `🧾 AbaPay Receipt\n\nService: ${receipt.network} ${receipt.service}\nAmount: ${formatTxAmount(receipt.amountNaira)}\nStatus: ${receipt.status}\nAccount: ${receipt.account}\nRef: ${receipt.id}\n${hasPin ? `\nPIN/TOKEN: ${receipt.purchased_code}` : ''}\n\nSecured by ${receipt.blockchain || 'Celo'} ⚡`;
-    const isMiniPay = typeof window !== "undefined" && !!(window as any).ethereum?.isMiniPay;
-
-    if (isMiniPay) {
-      try {
-        if (navigator.share) await navigator.share({ title: 'AbaPay Receipt', text: fallbackText });
-        else { await navigator.clipboard.writeText(fallbackText); alert("Receipt details copied to clipboard!"); }
-      } catch (e) { console.log("Share canceled in MiniPay"); }
-      return; 
-    }
+    setIsProcessingShare(true);
+    setSaveOptions(null);
 
     try {
-      const html2canvas = (await import('html2canvas')).default;
+      const receiptElement = document.getElementById('printable-receipt');
+      if (!receiptElement) return;
 
-      const canvas = await html2canvas(receiptElement, { 
-          scale: 2, 
-          backgroundColor: null // Changed to null so it captures dark mode perfectly
+      const html2canvas = (await import('html2canvas')).default;
+      const canvas = await html2canvas(receiptElement, {
+          scale: 2,
+          backgroundColor: null // Captures dark mode perfectly
       });
 
       const dataUrl = canvas.toDataURL('image/png');
@@ -86,30 +85,61 @@ export function ReceiptModal({ receipt, isMainnet, onClose, onSupport }: any) {
       const file = new File([blob], `AbaPay_Receipt_${receipt.id}.png`, { type: 'image/png' });
 
       if (navigator.share && navigator.canShare && navigator.canShare({ files: [file] })) {
-        await navigator.share({
-          files: [file],
-          title: 'AbaPay Receipt',
-          text: 'Here is my AbaPay transaction receipt!',
-        });
-      } else {
-        const link = document.createElement('a');
-        link.download = `AbaPay_Receipt_${receipt.id}.png`;
-        link.href = dataUrl;
-        link.click();
-        alert('Receipt downloaded successfully!');
-      }
-    } catch (error) {
-      console.error('Error generating image:', error);
-      try {
-        if (navigator.share) {
-            await navigator.share({ title: 'AbaPay Receipt', text: fallbackText });
-        } else {
-            await navigator.clipboard.writeText(fallbackText);
-            alert("Receipt details copied to clipboard!");
+        try {
+          await navigator.share({
+            files: [file],
+            title: 'AbaPay Receipt',
+            text: 'Here is my AbaPay transaction receipt!',
+          });
+          return; // Shared successfully via the system sheet
+        } catch (shareErr: any) {
+          if (shareErr?.name === 'AbortError') return; // User closed the share sheet — don't force a download on them
+          // Any other share failure falls through to the manual save options below
         }
-      } catch (fallbackErr) {
-         console.log("Fallback failed.");
       }
+
+      // No native "share files" support on this browser/wallet webview (e.g. desktop, some in-app browsers)
+      // — let the user explicitly choose how to save the receipt instead of silently copying text.
+      setSaveOptions({ dataUrl, canvas });
+    } catch (error) {
+      console.error('Error generating receipt image:', error);
+      // Last-resort fallback only if image generation itself fails entirely
+      try {
+        const fallbackText = buildFallbackText();
+        if (navigator.share) await navigator.share({ title: 'AbaPay Receipt', text: fallbackText });
+        else { await navigator.clipboard.writeText(fallbackText); alert("Couldn't generate a receipt image, so the details were copied to your clipboard instead."); }
+      } catch (fallbackErr) {
+        console.log("Fallback share failed.");
+      }
+    } finally {
+      setIsProcessingShare(false);
+    }
+  };
+
+  const handleSaveAsImage = () => {
+    if (!saveOptions) return;
+    const link = document.createElement('a');
+    link.download = `AbaPay_Receipt_${receipt.id}.png`;
+    link.href = saveOptions.dataUrl;
+    link.click();
+    setSaveOptions(null);
+  };
+
+  const handleSaveAsPDF = async () => {
+    if (!saveOptions) return;
+    try {
+      const { jsPDF } = await import('jspdf');
+      const { canvas, dataUrl } = saveOptions;
+      const widthMm = 100; // Receipt-sized page, scaled to the captured canvas's aspect ratio
+      const heightMm = (canvas.height * widthMm) / canvas.width;
+      const pdf = new jsPDF({ orientation: heightMm >= widthMm ? 'portrait' : 'landscape', unit: 'mm', format: [widthMm, heightMm] });
+      pdf.addImage(dataUrl, 'PNG', 0, 0, widthMm, heightMm);
+      pdf.save(`AbaPay_Receipt_${receipt.id}.pdf`);
+    } catch (error) {
+      console.error('Error generating receipt PDF:', error);
+      alert("Couldn't generate the PDF. Please try saving as an image instead.");
+    } finally {
+      setSaveOptions(null);
     }
   };
 
