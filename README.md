@@ -21,6 +21,8 @@ Designed for low fees, cross-border utility vending (Nigeria + supported interna
 * **Conversational AI Agent ("DeAI"):** A natural-language assistant (`/api/deai`) that lets users check balances and pay bills via chat-style commands, backed by Google Gemini.
 * **Dynamic Exchange Engine:** Live market rate conversions with admin-configurable exchange rate and automated profit spread calculation, verified server-side to prevent underpayment exploits.
 * **Executive Admin Dashboard:** Real-time monitoring of VTpass fiat balance, on-chain vault balances per token/chain, transaction analytics, manual refund tools, and CSV export — protected behind admin auth.
+* **Sponsored Gas on Base:** Coinbase Smart Wallet / Base Account users can pay with zero gas fees — the app detects paymaster support via EIP-5792 and batches approval + payment into a single sponsored transaction. Wallets without this capability (MetaMask, WalletConnect, Valora, etc.) transparently fall back to the normal self-paid flow.
+* **Shareable & Downloadable Receipts:** Every receipt can be shared as an image straight to WhatsApp/Telegram/etc. via the device's native share sheet, or saved directly as a PNG or PDF.
 * **Farcaster Mini App Ready:** Ships with Farcaster frame metadata so AbaPay can be launched directly inside Farcaster clients.
 
 ---
@@ -28,8 +30,9 @@ Designed for low fees, cross-border utility vending (Nigeria + supported interna
 ## 🛠️ Tech Stack
 
 * **Frontend:** Next.js 16 (App Router, React 19), Tailwind CSS 4, Lucide Icons, next-themes (dark mode)
-* **Web3 / Wallets:** Wagmi, Viem, WalletConnect Modal, Base Account SDK, Solidity smart contract (Hardhat)
+* **Web3 / Wallets:** Wagmi, Viem (incl. EIP-5792 `sendCalls` for sponsored transactions), WalletConnect Modal, Base Account SDK, Solidity smart contract (Hardhat)
 * **Backend:** Next.js Route Handlers (serverless functions)
+* **Receipts:** html2canvas (image capture), jsPDF (PDF export)
 * **AI:** Google Generative AI (Gemini) for the DeAI conversational agent
 * **Utility Provider:** VTpass API (bills, airtime, data, education, international airtime)
 * **Database / Ledger:** Supabase (PostgreSQL) — transactions, platform settings, points, refunds
@@ -49,6 +52,7 @@ src/
 │   ├── terms/, privacy/       # Legal pages
 │   └── api/
 │       ├── pay/                # Core payment + vending endpoint
+│       ├── paymaster/           # Server-side proxy for Base gas-sponsorship (keeps the CDP paymaster key off the client)
 │       ├── requery/             # Delayed/timeout transaction requery
 │       ├── rate/, admin/rate/   # Exchange rate endpoints
 │       ├── variations/          # VTpass service variation lookups
@@ -96,6 +100,9 @@ CELO_PRIVATE_KEY=your_deployer_private_key         # Used only by Hardhat for de
 ```
 PAYMASTER_URL=https://api.developer.coinbase.com/rpc/v1/base/your_cdp_api_key   # Server-only — never NEXT_PUBLIC. The app proxies wallet paymaster requests through /api/paymaster so this key never reaches the browser.
 ```
+⚠️ Two things this env var alone won't cover, both configured in external dashboards:
+- **Coinbase Developer Platform:** create a Paymaster Policy allowlisting your `NEXT_PUBLIC_ABAPAY_BASE_ADDRESS` contract (and ideally the specific `payBill`/`approve` selectors), with a funded/budgeted balance to sponsor from.
+- **Alchemy webhook config:** make sure the **"Token"** activity category is enabled on your Base webhook (not just "External"). Under gas sponsorship, the top-level transaction's `to` is the bundler/EntryPoint contract, not your AbaPay contract directly — only Token-category (ERC-20 Transfer log) monitoring reliably fires regardless of call depth.
 
 ### VTpass (Bill Payment Provider)
 ```
@@ -214,7 +221,8 @@ The app ships with Farcaster frame metadata (`public/.well-known/farcaster.json`
 
 * **No-Log Keys:** VTpass secret keys, Supabase service role key, Telegram tokens, and all other secrets are strictly contained within server-side API routes — never exposed to the client bundle.
 * **Replay Protection:** Every blockchain transaction hash is recorded and checked against a **persistent ledger** (a Supabase table with a unique constraint on the tx hash) before a utility vend is triggered. ⚠️ In-memory tracking alone is **not safe** in serverless environments: state resets on cold starts and isn't shared across concurrent instances, which would allow the same transaction hash to be replayed for multiple vends.
-* **On-Chain Verification:** Every payment is independently verified against the blockchain (transaction receipt, contract address, and amount) server-side before any bill is vended — the client-submitted payload is never trusted blindly.
+* **On-Chain Verification:** Every payment is independently verified against the blockchain (transaction receipt, contract address, and amount) server-side before any bill is vended — the client-submitted payload is never trusted blindly. Under Base gas sponsorship, the top-level transaction's `to` can be a bundler/EntryPoint contract rather than the AbaPay contract itself, so the webhook additionally decodes the transaction's logs and requires that the AbaPay contract genuinely emitted `PaymentReceived` — this holds regardless of how deeply nested the call was.
+* **Webhook Acknowledgment:** The webhook always returns 2xx once a request passes signature verification, even when no matching transaction record is found (test pings, unrelated activity, or a payment intent that hasn't synced yet are normal, expected outcomes — not delivery failures). Returning a non-2xx here would cause Alchemy to eventually auto-disable the webhook after repeated "failures" that were never really failures.
 * **Rate Verification:** The crypto amount paid is checked server-side against the platform's live exchange rate before vending, preventing underpayment exploits even if the client is tampered with.
 * **Smart Contract Vault:** User stablecoins go directly into the immutable `AbaPay.sol` smart contract vault. Only the contract owner's cryptographically signed transaction can withdraw funds — no backend service ever holds custody of user funds directly.
 * **Automatic Refunds:** If a verified on-chain payment fails to vend (provider outage, invalid details, etc.), the transaction is flagged and refunded back to the user's wallet, with the refund transaction hash recorded on the ledger.
