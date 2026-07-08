@@ -8,6 +8,7 @@ import { Resend } from 'resend';
 import { createPublicClient, http, decodeEventLog, parseUnits } from 'viem';
 import { base, baseSepolia, celo, celoSepolia } from 'viem/chains';
 import { ABAPAY_CONTRACT_ABI_EVENTS, resolveTokenOnChain } from '@/constants';
+import { cleanupStalePreflights } from '@/lib/cleanupPreflights';
 
 const resend = new Resend(process.env.RESEND_API_KEY || "re_dummy_key_for_build");
 
@@ -75,6 +76,12 @@ export async function POST(req: Request) {
             console.log("✅ Alchemy Test Successful for abapays.com");
             return NextResponse.json({ message: "Test Successful" });
         }
+
+        // ⚡ OPPORTUNISTIC STALE-PREFLIGHT SWEEP (no paid cron required) ⚡
+        // Fire-and-forget: internally throttled to at most once every 5 min per warm
+        // instance, and never blocks or delays this webhook's response. This keeps
+        // abandoned pre-flight intents from lingering as PENDING on the free plan.
+        cleanupStalePreflights().catch(() => {});
 
         // ⚡ 1. THE 15-SECOND SLEEP ⚡
         // We wait to give the frontend time to process the transaction synchronously first.

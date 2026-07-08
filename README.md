@@ -1,4 +1,4 @@
-# ⚡ AbaPay Protocol 
+# ⚡ AbaPay Protocol
 
 AbaPay is a decentralized, Web3-native utility payment platform built on **Celo** and **Base**. It lets users pay for real-world bills — Airtime, Mobile Data, Electricity, Cable TV, Bank Transfers, Education PINs, and International Airtime/Data — using on-chain stablecoins (**USDT**, **USDC**, **cUSD**), with instant fiat settlement handled server-side via the VTpass API.
 
@@ -169,8 +169,9 @@ ETHERSCAN_API_KEY=your_etherscan_or_celoscan_api_key
 
 ### Cron / Maintenance
 ```
-CRON_SECRET=any_long_random_string   # Optional. If set, the /api/cleanup stale-preflight sweep requires it (Vercel Cron passes it automatically). The cleanup is scheduled every 15 min in vercel.json.
+CRON_SECRET=any_long_random_string   # Optional. Protects the manual /api/cleanup endpoint.
 ```
+Stale abandoned pre-flight intents are swept automatically and opportunistically from inside the webhook (throttled, non-blocking) — this needs **no Vercel cron and works on the free/Hobby plan**. `/api/cleanup` remains available for manual runs or an external free scheduler (cron-job.org, GitHub Actions) if you want a guaranteed cadence during quiet periods.
 
 ---
 
