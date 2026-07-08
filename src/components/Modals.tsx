@@ -247,15 +247,34 @@ export function ReceiptModal({ receipt, isMainnet, onClose, onSupport }: any) {
                  );
              })()}
 
+             {/* ⚡ SAVE FALLBACK: shown when the webview can't open a native file share
+                  sheet (MiniPay / Farcaster / desktop). Without this, Share appeared to do
+                  nothing after generating the image. */}
+             {saveOptions && (
+                <div data-html2canvas-ignore="true" className="mb-3 p-3 rounded-2xl bg-slate-50 dark:bg-[#1a1a1f] border border-slate-100 dark:border-slate-800/80">
+                   <p className="text-[10px] font-black uppercase tracking-widest text-slate-500 dark:text-slate-400 text-center mb-2">Save your receipt</p>
+                   <div className="flex gap-2">
+                      <button onClick={handleSaveAsImage} className="flex-1 py-3 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-black uppercase tracking-widest flex items-center justify-center gap-2 transition-colors active:scale-95">
+                         <Share2 size={14}/> Image
+                      </button>
+                      <button onClick={handleSaveAsPDF} className="flex-1 py-3 bg-slate-800 dark:bg-white hover:bg-slate-700 dark:hover:bg-slate-200 text-white dark:text-slate-900 rounded-xl text-xs font-black uppercase tracking-widest flex items-center justify-center gap-2 transition-colors active:scale-95">
+                         <Share2 size={14}/> PDF
+                      </button>
+                   </div>
+                </div>
+             )}
+
              <div className="flex gap-2">
                 <button 
+                  data-html2canvas-ignore="true"
                   onClick={handleShareImage} 
-                  className="flex-1 py-4 bg-slate-900 dark:bg-white hover:bg-slate-800 dark:hover:bg-slate-200 text-white dark:text-slate-900 rounded-2xl text-xs font-black uppercase tracking-widest flex items-center justify-center gap-2 transition-colors active:scale-95 shadow-xl shadow-slate-900/20 dark:shadow-white/10"
+                  disabled={isProcessingShare}
+                  className="flex-1 py-4 bg-slate-900 dark:bg-white hover:bg-slate-800 dark:hover:bg-slate-200 text-white dark:text-slate-900 rounded-2xl text-xs font-black uppercase tracking-widest flex items-center justify-center gap-2 transition-colors active:scale-95 shadow-xl shadow-slate-900/20 dark:shadow-white/10 disabled:opacity-60"
                 >
-                  <Share2 size={16}/> SHARE
+                  {isProcessingShare ? (<><Loader2 size={16} className="animate-spin"/> PREPARING…</>) : (<><Share2 size={16}/> SHARE</>)}
                 </button>
                 {receipt.status !== 'SUCCESS' && receipt.status !== 'REFUNDED' && (
-                   <button onClick={onSupport} className="flex-1 py-4 bg-orange-100 dark:bg-orange-900/20 hover:bg-orange-200 dark:hover:bg-orange-900/40 text-orange-700 dark:text-orange-400 rounded-2xl text-xs font-black uppercase tracking-widest flex items-center justify-center gap-2 transition-colors active:scale-95"><HelpCircle size={16}/> Support</button>
+                   <button data-html2canvas-ignore="true" onClick={onSupport} className="flex-1 py-4 bg-orange-100 dark:bg-orange-900/20 hover:bg-orange-200 dark:hover:bg-orange-900/40 text-orange-700 dark:text-orange-400 rounded-2xl text-xs font-black uppercase tracking-widest flex items-center justify-center gap-2 transition-colors active:scale-95"><HelpCircle size={16}/> Support</button>
                 )}
              </div>
           </div>
