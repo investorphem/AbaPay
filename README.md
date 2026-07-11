@@ -203,12 +203,38 @@ Stale abandoned pre-flight intents are swept automatically and opportunistically
 ### Smart Contract Development (Hardhat)
 
 ```
-npx hardhat compile        # Compile contracts/AbaPay.sol
-npx hardhat test           # Run contract tests (if present)
-npx hardhat run scripts/deploy.ts --network <network>   # Deploy
+npx hardhat compile          # Compile contracts
+npm run test:contracts       # Run the Solidity test suite
+npx hardhat run scripts/deployV2.ts --network <network>   # Deploy the hardened V2
 ```
 
-Configure your target networks and private key in `hardhat.config.ts` / `.env.local` before deploying.
+#### `AbaPayV2.sol` — hardened contract (⚠️ NOT YET AUDITED)
+
+`contracts/AbaPayV2.sol` is a security-hardened successor to the original `AbaPay.sol`,
+addressing the findings in `AUDIT_REPORT.md`. **`payBill`'s signature and the
+`PaymentReceived` event are byte-for-byte identical to V1**, so the frontend, the `/api/pay`
+calldata decoder, and the webhook's event cross-validation all work with no backend changes.
+
+| Hardening | Why |
+|---|---|
+| `SafeERC20` | Non-compliant tokens (e.g. some USDT deployments) don't return a bool; raw `require(transfer(...))` breaks on them. |
+| `ReentrancyGuard` | `setTokenSupport` can whitelist *any* token; a hook-bearing token would otherwise make `payBill` reentrant. |
+| `Pausable` | V1 had no kill switch — a post-deploy vulnerability could not be stopped. Refunds stay live while paused so users can be made whole. |
+| `Ownable2Step` | Prevents permanently bricking the contract by transferring ownership to a typo'd address. |
+| **Timelocked withdrawals** | **The biggest V1 risk:** a single compromised owner key could drain the entire pooled vault instantly. Withdrawals must now be queued, then executed after a 24h delay — alert on `WithdrawalQueued` and cancel if it wasn't you. |
+| **Capped refunds** | V1's `refundUser` was an unrestricted "send any amount anywhere" path that bypassed any withdrawal control. Now bounded per-token (and fails closed until a cap is set). |
+| Balance-delta accounting | Emits the amount *actually received*, so fee-on-transfer tokens can't cause the backend to over-vend. |
+
+**Before mainnet:**
+1. **Get a professional audit.** This contract holds pooled customer funds; a static review is not sufficient.
+2. **Set `ABAPAY_OWNER` to a multisig (Safe), not an EOA.** The timelock buys detection time — it only *stops* an attacker if a stolen key can't unilaterally cancel and re-queue.
+3. Deploy to testnet and run the full payment flow end-to-end first.
+4. Call `setMaxRefund` for each token — **refunds revert until a cap is configured.**
+
+> `payBill` still uses `transferFrom(msg.sender, …)`, so the payer must be the signer. Delegated
+> spending (the DeAI "pay from social media" feature) needs an additional on-chain allowance
+> mechanism and is deliberately **out of scope** for this hardening pass — it should be designed
+> and audited as its own change.
 
 ---
 
