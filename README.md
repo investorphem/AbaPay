@@ -167,6 +167,12 @@ ALCHEMY_CELO_WEBHOOK_SECRET=your_alchemy_celo_webhook_secret
 ETHERSCAN_API_KEY=your_etherscan_or_celoscan_api_key
 ```
 
+### Cron / Maintenance
+```
+CRON_SECRET=any_long_random_string   # Optional. Protects the manual /api/cleanup endpoint.
+```
+Stale abandoned pre-flight intents are swept automatically and opportunistically from inside the webhook (throttled, non-blocking) — this needs **no Vercel cron and works on the free/Hobby plan**. `/api/cleanup` remains available for manual runs or an external free scheduler (cron-job.org, GitHub Actions) if you want a guaranteed cadence during quiet periods.
+
 ---
 
 ## 🚀 Installation & Setup
@@ -206,6 +212,35 @@ Configure your target networks and private key in `hardhat.config.ts` / `.env.lo
 
 ---
 
+## 🧪 Testing & CI
+
+```
+npm test              # Run the unit test suite (Vitest)
+npm run test:watch    # Watch mode
+npm run test:coverage # Coverage report
+npm run typecheck     # tsc --noEmit — catches type errors before they hit a deploy
+```
+
+Tests currently cover the security-critical pure logic: PIN hashing/verification, internal
+service auth, and the payment amount/token verification invariants (the checks that stand
+between a user and an unpaid bill).
+
+**CI** runs on every push/PR via `.github/workflows/ci.yml`: typecheck → lint → build → tests →
+dependency audit. The typecheck step exists specifically to catch TypeScript errors *before*
+they reach a production deploy.
+
+---
+
+## 🗄️ Database Setup
+
+Beyond the core tables, run the migrations in `supabase/migrations/` in the Supabase SQL editor:
+
+* `001_rate_limits.sql` — creates the `rate_limits` table required by `src/lib/rateLimit.ts`.
+  **Rate limiting silently fails open without this table**, so apply it before relying on the
+  throttles protecting your billable VTpass / WhatsApp / Gemini endpoints.
+
+---
+
 ## 📱 Testing with MiniPay
 
 AbaPay is highly optimized for mobile Web3 experiences. To test the dApp within the Celo MiniPay environment:
@@ -224,6 +259,8 @@ The app ships with Farcaster frame metadata (`public/.well-known/farcaster.json`
 * **No-Log Keys:** VTpass secret keys, Supabase service role key, Telegram tokens, and all other secrets are strictly contained within server-side API routes — never exposed to the client bundle.
 * **Replay Protection:** Every blockchain transaction hash is recorded and checked against a **persistent ledger** (a Supabase table with a unique constraint on the tx hash) before a utility vend is triggered. ⚠️ In-memory tracking alone is **not safe** in serverless environments: state resets on cold starts and isn't shared across concurrent instances, which would allow the same transaction hash to be replayed for multiple vends.
 * **On-Chain Verification:** Every payment is independently verified against the blockchain (transaction receipt, contract address, and amount) server-side before any bill is vended — the client-submitted payload is never trusted blindly. Under Base gas sponsorship, the top-level transaction's `to` can be a bundler/EntryPoint contract rather than the AbaPay contract itself, so the webhook additionally decodes the transaction's logs and requires that the AbaPay contract genuinely emitted `PaymentReceived` — this holds regardless of how deeply nested the call was.
+* **Event Cross-Validation:** The webhook decodes the `PaymentReceived` event and requires that its **payer, token, amount, and account number all match the pending record** before vending. This blocks the class of attack where a user has a small pending intent and then manually sends a different (or larger/smaller) transfer to the contract hoping it gets attached to the wrong record.
+* **Stale Intent Expiry:** Pre-flight intents (records created before signing) that never result in an on-chain transaction are automatically expired by a scheduled cleanup (`/api/cleanup`, every 15 min) so they don't linger as `PENDING` forever. This only ever touches `preflight_`-prefixed rows, so a real broadcast transaction can never be expired.
 * **Webhook Acknowledgment:** The webhook always returns 2xx once a request passes signature verification, even when no matching transaction record is found (test pings, unrelated activity, or a payment intent that hasn't synced yet are normal, expected outcomes — not delivery failures). Returning a non-2xx here would cause Alchemy to eventually auto-disable the webhook after repeated "failures" that were never really failures.
 * **Rate Verification:** The crypto amount paid is checked server-side against the platform's live exchange rate before vending, preventing underpayment exploits even if the client is tampered with.
 * **Smart Contract Vault:** User stablecoins go directly into the immutable `AbaPay.sol` smart contract vault. Only the contract owner's cryptographically signed transaction can withdraw funds — no backend service ever holds custody of user funds directly.
