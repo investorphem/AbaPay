@@ -83,6 +83,26 @@ export const SUPPORTED_TOKENS = [
   }
 ];
 
+// ⚡ Server-side helper: resolve a stored token symbol to its on-chain address + decimals
+// for a given blockchain ('CELO' | 'BASE') and network mode (mainnet vs testnet).
+// Used by the webhook to cross-check the PaymentReceived event's token & amount against
+// the pending record, so a manually-sent transfer of a DIFFERENT token/amount can't be
+// matched to an unrelated pending intent.
+export function resolveTokenOnChain(symbol: string, blockchain: string, isMainnet: boolean): { address: string; decimals: number } | null {
+  const token = SUPPORTED_TOKENS.find(t => t.symbol === symbol) as any;
+  if (!token) return null;
+  const isBase = (blockchain || '').toUpperCase() === 'BASE';
+  let address: string | undefined;
+  if (isBase) {
+    address = isMainnet ? token.mainnet : token.sepolia;
+  } else {
+    // Celo: prefer explicit celo-keyed addresses, fall back to mainnet/sepolia for cUSD/USDm
+    address = isMainnet ? (token.celoMainnet || token.mainnet) : (token.celoSepolia || token.sepolia);
+  }
+  if (!address) return null;
+  return { address: address.toLowerCase(), decimals: token.decimals };
+}
+
 export const SUPPORTED_COUNTRIES = [
   { code: "NG", name: "Nigeria", flag: "🇳🇬", disabled: false },
   { code: "SOON", name: "Other countries coming soon", flag: "🌍", disabled: true }

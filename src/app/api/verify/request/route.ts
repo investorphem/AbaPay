@@ -2,9 +2,16 @@ import { NextResponse } from 'next/server';
 import crypto from 'crypto';
 import { supabaseAdmin as supabase } from '@/utils/supabase'; // ⚡ FIXED IMPORT
 import { sendWhatsAppOTP } from '@/lib/whatsapp';
+import { enforceRateLimit } from '@/lib/rateLimit';
 
 
 export async function POST(req: Request) {
+    // 🛡️ Each call sends a real (billable) WhatsApp message. The existing per-phone
+    // cooldown stops repeat-sends to ONE number; this per-IP cap stops an attacker
+    // from cycling through MANY numbers to bomb messages / burn credit.
+    const limited = await enforceRateLimit(req, 'otp-request', 5, 600);
+    if (limited) return limited;
+
     try {
         const { phone } = await req.json();
         if (!phone) return NextResponse.json({ error: "Phone number required" }, { status: 400 });

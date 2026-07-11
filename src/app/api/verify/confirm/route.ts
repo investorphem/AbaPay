@@ -1,9 +1,16 @@
 import { NextResponse } from 'next/server';
 import crypto from 'crypto';
 import { supabaseAdmin as supabase } from '@/utils/supabase'; // ⚡ FIXED IMPORT
+import { enforceRateLimit } from '@/lib/rateLimit';
 
 
 export async function POST(req: Request) {
+    // 🛡️ Throttle confirm attempts per IP. Note the code itself is already burn-on-failure
+    // (a single wrong guess deletes the OTP), so brute force is not viable; this limit
+    // mainly protects the DB from being hammered.
+    const limited = await enforceRateLimit(req, 'otp-confirm', 15, 60);
+    if (limited) return limited;
+
     try {
         const { phone, code, walletAddress } = await req.json();
         if (!phone || !code || !walletAddress) {
@@ -56,6 +63,8 @@ export async function POST(req: Request) {
 
         return NextResponse.json({ success: true, message: "Wallet successfully linked!" });
     } catch (error: any) {
-        return NextResponse.json({ error: error.message }, { status: 500 });
+        // Don't leak internals to the client; log server-side instead.
+        console.error('[verify/confirm] error:', error?.message);
+        return NextResponse.json({ error: "Could not verify code. Please try again." }, { status: 500 });
     }
 }

@@ -1,7 +1,12 @@
 import { NextResponse } from 'next/server';
 import { getHeaders } from '@/lib/vtpass';
+import { enforceRateLimit } from '@/lib/rateLimit';
 
 export async function POST(req: Request) {
+  // 🛡️ Each call hits VTpass and costs money — throttle abuse (20 per minute per IP).
+  const limited = await enforceRateLimit(req, 'verify', 20, 60);
+  if (limited) return limited;
+
   try {
     const { billersCode, serviceID, type } = await req.json();
 

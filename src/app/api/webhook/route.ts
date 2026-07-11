@@ -5,9 +5,10 @@ import { sendTelegramAlert } from '@/lib/telegram';
 import { sendAbaPaySms } from '@/lib/messaging';
 import { getHeaders } from '@/lib/vtpass'; 
 import { Resend } from 'resend';
-import { createPublicClient, http, decodeEventLog } from 'viem';
+import { createPublicClient, http, decodeEventLog, parseUnits } from 'viem';
 import { base, baseSepolia, celo, celoSepolia } from 'viem/chains';
-import { ABAPAY_CONTRACT_ABI_EVENTS } from '@/constants';
+import { ABAPAY_CONTRACT_ABI_EVENTS, resolveTokenOnChain } from '@/constants';
+import { cleanupStalePreflights } from '@/lib/cleanupPreflights';
 
 const resend = new Resend(process.env.RESEND_API_KEY || "re_dummy_key_for_build");
 
@@ -75,6 +76,12 @@ export async function POST(req: Request) {
             console.log("✅ Alchemy Test Successful for abapays.com");
             return NextResponse.json({ message: "Test Successful" });
         }
+
+        // ⚡ OPPORTUNISTIC STALE-PREFLIGHT SWEEP (no paid cron required) ⚡
+        // Fire-and-forget: internally throttled to at most once every 5 min per warm
+        // instance, and never blocks or delays this webhook's response. This keeps
+        // abandoned pre-flight intents from lingering as PENDING on the free plan.
+        cleanupStalePreflights().catch(() => {});
 
         // ⚡ 1. THE 15-SECOND SLEEP ⚡
         // We wait to give the frontend time to process the transaction synchronously first.
@@ -176,32 +183,73 @@ export async function POST(req: Request) {
                 return NextResponse.json({ status: "Transaction Reverted On-Chain. Blocked." }, { status: 200 });
             }
 
-            // ⚡ PAYMASTER / ERC-4337 SAFE CHECK ⚡
-            // When Base transactions are sponsored via a paymaster (Coinbase Smart Wallet / Base
-            // Account), the top-level transaction's `to` is the bundler/EntryPoint contract, NOT
-            // the AbaPay contract directly — our contract is only called internally. So instead of
-            // trusting "the tx succeeded", we explicitly decode the receipt's logs and require that
-            // OUR contract actually emitted `PaymentReceived`. This works identically whether the
-            // call arrived directly from the user's EOA or was nested inside a sponsored UserOperation.
+            // ⚡ PAYMASTER / ERC-4337 SAFE CHECK + FULL EVENT CROSS-VALIDATION ⚡
+            // We don't just confirm the tx succeeded — we decode OUR contract's PaymentReceived
+            // event and require that its user / token / amount / accountNumber MATCH the pending
+            // record. Without this, a user could have a small pending intent, then manually send
+            // a DIFFERENT amount (or different token) to the contract, and the webhook would
+            // wrongly attach that transfer to the pending intent and vend it. This works whether
+            // the call was a direct EOA tx or nested inside a sponsored UserOperation.
             const abapayContractAddress = (record.blockchain === 'BASE'
                 ? (process.env.NEXT_PUBLIC_ABAPAY_BASE_ADDRESS || process.env.NEXT_PUBLIC_ABAPAY_ADDRESS)
                 : (process.env.NEXT_PUBLIC_ABAPAY_CELO_ADDRESS || process.env.NEXT_PUBLIC_ABAPAY_ADDRESS)
             )?.toLowerCase();
 
-            const emittedPaymentReceived = receipt.logs.some((log) => {
-                if (log.address?.toLowerCase() !== abapayContractAddress) return false;
+            let matchedEvent: any = null;
+            for (const log of receipt.logs) {
+                if (log.address?.toLowerCase() !== abapayContractAddress) continue;
                 try {
-                    const decoded = decodeEventLog({ abi: ABAPAY_CONTRACT_ABI_EVENTS, data: log.data, topics: log.topics });
-                    return decoded.eventName === 'PaymentReceived';
-                } catch {
-                    return false; // Log wasn't a PaymentReceived event (e.g. an unrelated log from our contract, or decode mismatch)
-                }
-            });
+                    const decoded: any = decodeEventLog({ abi: ABAPAY_CONTRACT_ABI_EVENTS, data: log.data, topics: log.topics });
+                    if (decoded.eventName === 'PaymentReceived') { matchedEvent = decoded.args; break; }
+                } catch { /* not a PaymentReceived log */ }
+            }
 
-            if (!emittedPaymentReceived) {
+            if (!matchedEvent) {
                 await supabaseAdmin.from('transactions').update({ status: 'FAILED_VENDING', error_code: 'NO_CONTRACT_EVENT', api_response: 'Transaction succeeded but AbaPay contract did not emit PaymentReceived' }).eq('tx_hash', txHash);
                 try { await sendTelegramAlert(`🛑 *WEBHOOK BLOCKED: NO CONTRACT EVENT*\nTx succeeded but the AbaPay contract never emitted PaymentReceived — refusing to vend.\nHash: \`${txHash}\`\n🔍 *Explorer:* ${explorerUrl}`); } catch (err) {}
                 return NextResponse.json({ status: "No AbaPay PaymentReceived event found. Blocked." }, { status: 200 });
+            }
+
+            // 🔐 CROSS-CHECK 1: SENDER — the on-chain payer must be the wallet on the record.
+            if (record.wallet_address && matchedEvent.user && record.wallet_address.toLowerCase() !== String(matchedEvent.user).toLowerCase()) {
+                await supabaseAdmin.from('transactions').update({ status: 'FAILED_VENDING', error_code: 'SENDER_MISMATCH', api_response: `Event payer ${matchedEvent.user} != record wallet ${record.wallet_address}` }).eq('tx_hash', txHash);
+                try { await sendTelegramAlert(`🛑 *WEBHOOK BLOCKED: SENDER MISMATCH*\nOn-chain payer doesn't match the pending record's wallet.\nHash: \`${txHash}\`\n🔍 *Explorer:* ${explorerUrl}`); } catch (err) {}
+                return NextResponse.json({ status: "Sender mismatch. Blocked." }, { status: 200 });
+            }
+
+            // 🔐 CROSS-CHECK 2: TOKEN — the token transferred must be the token on the record.
+            const expectedToken = resolveTokenOnChain(record.token_used || 'USD₮', record.blockchain || 'CELO', isMainnet);
+            if (expectedToken && matchedEvent.token && String(matchedEvent.token).toLowerCase() !== expectedToken.address) {
+                await supabaseAdmin.from('transactions').update({ status: 'FAILED_VENDING', error_code: 'TOKEN_MISMATCH', api_response: `Event token ${matchedEvent.token} != expected ${expectedToken.address} (${record.token_used})` }).eq('tx_hash', txHash);
+                try { await sendTelegramAlert(`🛑 *WEBHOOK BLOCKED: TOKEN MISMATCH*\nToken paid doesn't match the pending record's token (${record.token_used}).\nHash: \`${txHash}\`\n🔍 *Explorer:* ${explorerUrl}`); } catch (err) {}
+                return NextResponse.json({ status: "Token mismatch. Blocked." }, { status: 200 });
+            }
+
+            // 🔐 CROSS-CHECK 3: AMOUNT — the amount paid must cover the recorded amount_usdt.
+            if (expectedToken && matchedEvent.amount !== undefined && matchedEvent.amount !== null) {
+                try {
+                    const paidWei = BigInt(matchedEvent.amount);
+                    const requiredWei = parseUnits(Number(record.amount_usdt).toFixed(expectedToken.decimals), expectedToken.decimals);
+                    const tolerance = parseUnits("0.01", expectedToken.decimals); // 1-cent rounding grace
+                    const shortfall = requiredWei > paidWei ? requiredWei - paidWei : BigInt(0);
+                    if (shortfall > tolerance) {
+                        await supabaseAdmin.from('transactions').update({ status: 'FAILED_VENDING', error_code: 'AMOUNT_MISMATCH', api_response: `Paid ${paidWei} < required ${requiredWei} (${record.amount_usdt} ${record.token_used})` }).eq('tx_hash', txHash);
+                        try { await sendTelegramAlert(`🛑 *WEBHOOK BLOCKED: AMOUNT MISMATCH*\nUser ${record.wallet_address} paid less than the pending record requires.\nRecord: ${record.amount_usdt} ${record.token_used}\nHash: \`${txHash}\`\n🔍 *Explorer:* ${explorerUrl}`); } catch (err) {}
+                        return NextResponse.json({ status: "Amount mismatch. Blocked." }, { status: 200 });
+                    }
+                } catch (amtErr) {
+                    await supabaseAdmin.from('transactions').update({ status: 'FAILED_VENDING', error_code: 'AMOUNT_UNVERIFIABLE', api_response: 'Could not decode/compare event amount' }).eq('tx_hash', txHash);
+                    return NextResponse.json({ status: "Amount unverifiable. Blocked." }, { status: 200 });
+                }
+            }
+
+            // 🔐 CROSS-CHECK 4: ACCOUNT — the accountNumber in the event must match the record.
+            // (Only enforced when the contract actually recorded a non-empty accountNumber.)
+            if (matchedEvent.accountNumber && record.account_number && String(matchedEvent.accountNumber).trim() !== '' &&
+                String(matchedEvent.accountNumber).toLowerCase() !== String(record.account_number).toLowerCase()) {
+                await supabaseAdmin.from('transactions').update({ status: 'FAILED_VENDING', error_code: 'ACCOUNT_MISMATCH', api_response: `Event account ${matchedEvent.accountNumber} != record ${record.account_number}` }).eq('tx_hash', txHash);
+                try { await sendTelegramAlert(`🛑 *WEBHOOK BLOCKED: ACCOUNT MISMATCH*\nAccount/meter in the on-chain event doesn't match the pending record.\nHash: \`${txHash}\`\n🔍 *Explorer:* ${explorerUrl}`); } catch (err) {}
+                return NextResponse.json({ status: "Account mismatch. Blocked." }, { status: 200 });
             }
         } catch (error) {
             console.error("Webhook Viem Fetch Error:", error);
