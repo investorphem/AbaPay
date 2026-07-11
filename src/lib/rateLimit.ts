@@ -51,11 +51,15 @@ export async function rateLimit(key: string, limit: number, windowSeconds: numbe
   const now = Date.now();
 
   try {
-    const { data: existing } = await supabaseAdmin
+    const { data } = await supabaseAdmin
       .from('rate_limits')
       .select('count, window_start')
       .eq('key', key)
       .maybeSingle();
+
+    // Explicitly shape the row. The project has no generated Supabase types, so we
+    // avoid relying on inference here (which would be an implicit `any` under strict mode).
+    const existing = data as { count: number | null; window_start: string | null } | null;
 
     // No record, or the previous window has fully elapsed → start a fresh window.
     const windowStart = existing?.window_start ? new Date(existing.window_start).getTime() : 0;
@@ -68,7 +72,7 @@ export async function rateLimit(key: string, limit: number, windowSeconds: numbe
       return { allowed: true, remaining: limit - 1, retryAfterSeconds: 0 };
     }
 
-    const count = Number(existing!.count) || 0;
+    const count = Number(existing.count) || 0;
 
     if (count >= limit) {
       const elapsed = now - windowStart;
