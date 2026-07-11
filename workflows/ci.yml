@@ -1,0 +1,102 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+# Cancel superseded runs on the same branch to save CI minutes.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  verify:
+    name: Typecheck · Lint · Build
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci --no-audit --no-fund
+
+      # ⚡ THE KEY STEP.
+      # Every production build failure we've hit was a TypeScript error that only surfaced
+      # during `next build` on Vercel — after the broken commit was already pushed.
+      # Running tsc here catches those on the PR instead of in production.
+      - name: Typecheck
+        run: npx tsc --noEmit
+
+      - name: Lint
+        run: npm run lint
+        continue-on-error: true # Don't block on lint style while the baseline is being cleaned up.
+
+      - name: Build
+        run: npm run build
+        env:
+          # Build-time public vars. These are NOT secrets — they're inlined into the client
+          # bundle anyway. Dummy values are sufficient to prove the build compiles.
+          NEXT_PUBLIC_SUPABASE_URL: https://example.supabase.co
+          NEXT_PUBLIC_SUPABASE_ANON_KEY: dummy-anon-key-for-build
+          NEXT_PUBLIC_WALLETCONNECT_PROJECT_ID: 00000000000000000000000000000000
+          NEXT_PUBLIC_NETWORK: celo-sepolia
+          NEXT_PUBLIC_APP_MODE: sandbox
+          NEXT_PUBLIC_ABAPAY_ADDRESS: "0x0000000000000000000000000000000000000000"
+          NEXT_PUBLIC_ABAPAY_CELO_ADDRESS: "0x0000000000000000000000000000000000000000"
+          NEXT_PUBLIC_ABAPAY_BASE_ADDRESS: "0x0000000000000000000000000000000000000000"
+
+  test:
+    name: Unit Tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci --no-audit --no-fund
+
+      - name: Run tests
+        run: npm test
+
+  security:
+    name: Dependency Audit
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci --no-audit --no-fund
+
+      # Report known vulnerabilities in production dependencies.
+      # Non-blocking for now (the wallet SDK tree carries a lot of transitive noise),
+      # but it surfaces real issues in the PR log so they don't go unnoticed.
+      - name: npm audit (production deps)
+        run: npm audit --omit=dev --audit-level=high
+        continue-on-error: true
