@@ -1,5 +1,3 @@
-const hre = require("hardhat");
-
 /**
  * AbaPayV2 deployment.
  *
@@ -10,8 +8,14 @@ const hre = require("hardhat");
  *      re-queue. With a single-EOA owner, an attacker who steals the key simply waits
  *      out the 24h delay — the timelock buys detection time, nothing more.
  *   3. Deploy to testnet first and run the full flow end-to-end.
+ *
+ * NOTE: `hre` is required INSIDE main() rather than at the top level, so this file does
+ * not declare a top-level `hre` that collides with scripts/deploy.ts under a shared
+ * TypeScript project scope.
  */
 async function main() {
+  const hre = require("hardhat");
+
   const networkName = hre.network.name;
   console.log(`🚀 Deploying AbaPayV2 to ${networkName}...`);
 
