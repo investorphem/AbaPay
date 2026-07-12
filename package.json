@@ -13,6 +13,9 @@
     "test:coverage": "vitest run --coverage",
     "test:contracts": "hardhat test"
   },
+  "engines": {
+    "node": ">=22.0.0"
+  },
   "dependencies": {
     "@base-org/account": "^1.0.0",
     "@farcaster/miniapp-sdk": "latest",
@@ -38,7 +41,7 @@
     "@nomicfoundation/hardhat-verify": "^2.0.0",
     "@openzeppelin/contracts": "^5.1.0",
     "@tailwindcss/postcss": "^4",
-    "@types/node": "^20",
+    "@types/node": "^22",
     "@types/react": "^19",
     "@types/react-dom": "^19",
     "@vitest/coverage-v8": "^2.1.8",
