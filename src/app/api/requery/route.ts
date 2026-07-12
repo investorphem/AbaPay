@@ -3,11 +3,35 @@ import { getHeaders } from '@/lib/vtpass';
 import { supabaseAdmin as supabase } from '@/utils/supabase';
 import { sendTelegramAlert } from '@/lib/telegram';
 import { sendAbaPaySms } from '@/lib/messaging';
+import { verifyAdminRequest } from '@/utils/adminAuth';
+import { enforceRateLimit } from '@/lib/rateLimit';
 import { Resend } from 'resend';
 
 const resend = new Resend(process.env.RESEND_API_KEY || "re_dummy_key_for_build");
 
 export async function POST(req: Request) {
+  // 🔐 SECURITY (H-1): This endpoint returns `purchased_code` — the electricity meter
+  // token or WAEC/JAMB PIN that the customer actually paid for. Those are BEARER SECRETS:
+  // whoever holds the code can redeem the value.
+  //
+  // Previously this route had NO authentication and NO ownership check, so anyone who
+  // presented a valid `request_id` received another customer's token. Request IDs were
+  // additionally generated with a predictable timestamp prefix + Math.random() (not a
+  // CSPRNG), and there was no rate limit — making enumeration realistic.
+  //
+  // The only legitimate caller is the admin dashboard (src/app/admin/page.tsx), which
+  // already holds admin credentials, so we now require the same wallet-signature admin
+  // auth used by every other /api/admin/* route.
+  const auth = await verifyAdminRequest(req);
+  if (!auth.authorized) {
+    return NextResponse.json({ success: false, message: "Unauthorized" }, { status: 401 });
+  }
+
+  // Throttle regardless — limits damage if admin credentials are ever compromised,
+  // and stops the VTpass requery endpoint (a billable call) being hammered.
+  const limited = await enforceRateLimit(req, 'requery', 30, 60);
+  if (limited) return limited;
+
   try {
     const { request_id, tx_hash } = await req.json();
 
@@ -24,6 +48,15 @@ export async function POST(req: Request) {
 
     if (!record) {
         return NextResponse.json({ success: false, message: "Transaction record not found" }, { status: 404 });
+    }
+
+    // 🔐 DEFENSE IN DEPTH: the caller must also present the correct on-chain tx hash for
+    // this record. Knowing a request_id alone is no longer sufficient to pull a token —
+    // the two must belong to the same transaction. (The admin dashboard already sends
+    // both, so this costs nothing legitimate.)
+    if (!tx_hash || String(tx_hash).toLowerCase() !== String(record.tx_hash || '').toLowerCase()) {
+      console.warn(`[SECURITY] Requery rejected: tx_hash mismatch for request_id ${request_id}`);
+      return NextResponse.json({ success: false, message: "Transaction record not found" }, { status: 404 });
     }
 
     const appMode = process.env.NEXT_PUBLIC_APP_MODE || "sandbox";

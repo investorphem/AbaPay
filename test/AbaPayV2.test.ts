@@ -1,6 +1,11 @@
 import { expect } from "chai";
-import { ethers } from "hardhat";
+import hre from "hardhat";
 import { time } from "@nomicfoundation/hardhat-network-helpers";
+
+// `ethers` is NOT a named export of the `hardhat` package. It is attached to the Hardhat
+// Runtime Environment at load time by hardhat-ethers (bundled in hardhat-toolbox), so it
+// must be read off the HRE rather than imported directly.
+const { ethers } = hre as any;
 
 /**
  * AbaPayV2 test suite.

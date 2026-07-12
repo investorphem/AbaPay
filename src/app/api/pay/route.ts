@@ -1,4 +1,5 @@
 import { NextResponse } from 'next/server';
+import crypto from 'crypto';
 import { supabaseAdmin as supabase } from '@/utils/supabase'; 
 import { sendTelegramAlert } from '@/lib/telegram';
 import { sendAbaPaySms } from '@/lib/messaging';
@@ -20,6 +21,20 @@ const error_messages: Record<string, string> = {
 
 const ABAPAY_ABI = [{"inputs":[{"internalType":"address","name":"tokenAddress","type":"address"},{"internalType":"string","name":"serviceType","type":"string"},{"internalType":"string","name":"accountNumber","type":"string"},{"internalType":"uint256","name":"amount","type":"uint256"}],"name":"payBill","outputs":[],"stateMutability":"nonpayable","type":"function"}];
 
+// 🔐 SECURITY: request_id is the lookup key for a transaction's `purchased_code`
+// (electricity token / exam PIN — a bearer secret). It MUST NOT be predictable.
+//
+// This previously used Math.random(), which is not a CSPRNG: V8's generator state is
+// recoverable from a few observed outputs, and the first 12 chars are just a timestamp.
+// That made IDs guessable, and therefore other customers' tokens reachable.
+//
+// crypto.randomInt() is a CSPRNG and unbiased. 12 chars over a 36-char alphabet
+// = 36^12 ≈ 4.7e18 — not brute-forceable.
+//
+// NOTE: this duplicates generateRequestId() in src/lib/vtpass.js. Both are now secure,
+// but the duplication should be removed (see AUDIT_REPORT_V2.md, item M-2 / #7).
+const ID_ALPHABET = 'abcdefghijklmnopqrstuvwxyz0123456789';
+
 function getStrictRequestId() {
   const date = new Date();
   const lagosTime = new Intl.DateTimeFormat('en-GB', { timeZone: 'Africa/Lagos', year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', hour12: false }).format(date);
@@ -27,7 +42,12 @@ function getStrictRequestId() {
   const [day, month, year] = datePart.split('/');
   const [hour, minute] = timePart.split(':');
   const safeHour = hour === '24' ? '00' : hour;
-  const randomString = Math.random().toString(36).substring(2, 10);
+
+  let randomString = '';
+  for (let i = 0; i < 12; i++) {
+    randomString += ID_ALPHABET[crypto.randomInt(0, ID_ALPHABET.length)];
+  }
+
   return `${year}${month}${day}${safeHour}${minute}${randomString}`;
 }
 

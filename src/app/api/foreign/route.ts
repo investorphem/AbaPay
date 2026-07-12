@@ -1,7 +1,12 @@
 import { NextResponse } from 'next/server';
+import { enforceRateLimit } from '@/lib/rateLimit';
 import { getHeaders } from '@/lib/vtpass'; 
 
 export async function GET(req: Request) {
+  // 🛡️ Each call proxies a billable VTpass request — throttle abuse (60/min per IP).
+  const limited = await enforceRateLimit(req, 'foreign', 60, 60);
+  if (limited) return limited;
+
   const { searchParams } = new URL(req.url);
   const action = searchParams.get('action');
 

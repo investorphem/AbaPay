@@ -368,7 +368,7 @@ export default function AdminDashboard() {
     if (!tx.request_id) return alert("This transaction has no Provider Request ID to query.");
     setIsRequeryingId(tx.id);
     try {
-      const res = await fetch('/api/requery', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ request_id: tx.request_id, tx_hash: tx.tx_hash }) });
+      const res = await fetch('/api/requery', { method: 'POST', headers: { 'Content-Type': 'application/json', ...adminHeaders }, body: JSON.stringify({ request_id: tx.request_id, tx_hash: tx.tx_hash }) });
       const data = await res.json();
       if (data.success) {
         if (data.status === 'SUCCESS') alert("✅ Transaction was successfully delivered by the provider!");
