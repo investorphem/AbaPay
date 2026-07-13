@@ -680,6 +680,10 @@ export default function Home() {
         // ... rest of the fields stay the same
         subscription_type: activeTab === "pay" && activeService.id === "CABLE" && ['dstv', 'gotv'].includes(cableProvider) ? cableSubscriptionType : undefined,
         meter_account_type: meterAccountType, operator_id: isInternational ? selectedIntlOperator?.operator_id : undefined, country_code: isInternational ? activeCountry.code : undefined, product_type_id: isInternational ? selectedIntlProduct?.product_type_id : undefined,
+        // ⚡ Customer details returned by VTpass merchant-verify (electricity/bank).
+        // Persisted so they can appear on the receipt email.
+        customer_name: customerName || undefined,
+        customer_address: meterAddress || undefined,
         blockchain: currentBlockchainName 
       };
 

@@ -1,6 +1,11 @@
 import { NextResponse } from 'next/server';
+import { enforceRateLimit } from '@/lib/rateLimit';
 
 export async function POST(req: Request) {
+  // 🛡️ Prevent ticket spam / notification flooding (5 per 5 min per IP).
+  const limited = await enforceRateLimit(req, 'support', 5, 300);
+  if (limited) return limited;
+
   try {
     const formData = await req.formData();
     const message = formData.get('message') as string;

@@ -56,6 +56,7 @@ export function ReceiptModal({ receipt, isMainnet, onClose, onSupport }: any) {
 
   const [isProcessingShare, setIsProcessingShare] = useState(false);
   const [saveOptions, setSaveOptions] = useState<{ dataUrl: string; canvas: HTMLCanvasElement } | null>(null);
+  const [previewUrl, setPreviewUrl] = useState<string | null>(null);
 
   const hasPin = receipt.status === 'SUCCESS' && receipt.purchased_code && receipt.purchased_code !== "Vended Successfully";
   const isElectricity = receipt.service?.toUpperCase() === 'ELECTRICITY' || receipt.service === 'Electricity';
@@ -69,10 +70,16 @@ export function ReceiptModal({ receipt, isMainnet, onClose, onSupport }: any) {
   const handleShareImage = async () => {
     setIsProcessingShare(true);
     setSaveOptions(null);
+    setPreviewUrl(null);
 
     try {
       const receiptElement = document.getElementById('printable-receipt');
-      if (!receiptElement) return;
+      if (!receiptElement) {
+        // Previously this returned silently, so the button appeared to do nothing at all.
+        console.error('Receipt element #printable-receipt not found.');
+        alert("Couldn't prepare the receipt. Please close and reopen it, then try again.");
+        return;
+      }
 
       const html2canvas = (await import('html2canvas-pro')).default;
       const canvas = await html2canvas(receiptElement, {
@@ -116,12 +123,49 @@ export function ReceiptModal({ receipt, isMainnet, onClose, onSupport }: any) {
     }
   };
 
-  const handleSaveAsImage = () => {
+  // ⚡ Triggers a real file download. Mobile webviews (MiniPay, Farcaster, in-app browsers)
+  // are inconsistent here: many block programmatic downloads, and several reject `data:`
+  // URLs outright. We therefore (a) use a Blob URL rather than a data: URL, and (b) attach
+  // the anchor to the DOM before clicking — both are required by some engines. Returns
+  // false if the download could not be initiated, so the caller can fall back.
+  const triggerDownload = (blob: Blob, filename: string): boolean => {
+    try {
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = filename;
+      link.rel = 'noopener';
+      link.style.display = 'none';
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      // Revoke a little later — revoking immediately can cancel the download in some browsers.
+      setTimeout(() => URL.revokeObjectURL(url), 10000);
+      return true;
+    } catch (err) {
+      console.error('Download failed:', err);
+      return false;
+    }
+  };
+
+  const dataUrlToBlob = async (dataUrl: string): Promise<Blob> => (await fetch(dataUrl)).blob();
+
+  const handleSaveAsImage = async () => {
     if (!saveOptions) return;
-    const link = document.createElement('a');
-    link.download = `AbaPay_Receipt_${receipt.id}.png`;
-    link.href = saveOptions.dataUrl;
-    link.click();
+    try {
+      const blob = await dataUrlToBlob(saveOptions.dataUrl);
+      const ok = triggerDownload(blob, `AbaPay_Receipt_${receipt.id}.png`);
+      if (!ok) {
+        // Downloads are blocked in this webview — show the image inline so the user can
+        // long-press to save it. This ALWAYS works, unlike a programmatic download.
+        setPreviewUrl(saveOptions.dataUrl);
+        return;
+      }
+    } catch (err) {
+      console.error('Save as image failed:', err);
+      setPreviewUrl(saveOptions.dataUrl);
+      return;
+    }
     setSaveOptions(null);
   };
 
@@ -134,13 +178,21 @@ export function ReceiptModal({ receipt, isMainnet, onClose, onSupport }: any) {
       const heightMm = (canvas.height * widthMm) / canvas.width;
       const pdf = new jsPDF({ orientation: heightMm >= widthMm ? 'portrait' : 'landscape', unit: 'mm', format: [widthMm, heightMm] });
       pdf.addImage(dataUrl, 'PNG', 0, 0, widthMm, heightMm);
-      pdf.save(`AbaPay_Receipt_${receipt.id}.pdf`);
+
+      // Use a Blob + our download helper rather than pdf.save(), which internally relies on
+      // the same anchor-click trick and fails silently in restrictive webviews.
+      const blob = pdf.output('blob');
+      const ok = triggerDownload(blob, `AbaPay_Receipt_${receipt.id}.pdf`);
+      if (!ok) {
+        alert("This app's browser blocked the PDF download. Save the receipt as an image instead — tap 'Image', then long-press the picture to save it.");
+        return;
+      }
     } catch (error) {
       console.error('Error generating receipt PDF:', error);
       alert("Couldn't generate the PDF. Please try saving as an image instead.");
-    } finally {
-      setSaveOptions(null);
+      return;
     }
+    setSaveOptions(null);
   };
 
   return (
@@ -247,10 +299,24 @@ export function ReceiptModal({ receipt, isMainnet, onClose, onSupport }: any) {
                  );
              })()}
 
+             {/* ⚡ GUARANTEED FALLBACK: some webviews (MiniPay, Farcaster, in-app browsers)
+                  block programmatic downloads outright. When that happens we render the
+                  receipt image inline — long-pressing an <img> to save it always works. */}
+             {previewUrl && (
+                <div data-html2canvas-ignore="true" className="mb-3 p-3 rounded-2xl bg-slate-50 dark:bg-[#1a1a1f] border border-slate-100 dark:border-slate-800/80">
+                   <p className="text-[10px] font-black uppercase tracking-widest text-emerald-600 dark:text-emerald-400 text-center mb-2">Long-press the image to save it</p>
+                   {/* eslint-disable-next-line @next/next/no-img-element */}
+                   <img src={previewUrl} alt="AbaPay receipt" className="w-full rounded-xl border border-slate-200 dark:border-slate-700" />
+                   <button onClick={() => { setPreviewUrl(null); setSaveOptions(null); }} className="mt-2 w-full py-2 text-[10px] font-black uppercase tracking-widest text-slate-500 dark:text-slate-400">
+                      Done
+                   </button>
+                </div>
+             )}
+
              {/* ⚡ SAVE FALLBACK: shown when the webview can't open a native file share
                   sheet (MiniPay / Farcaster / desktop). Without this, Share appeared to do
                   nothing after generating the image. */}
-             {saveOptions && (
+             {saveOptions && !previewUrl && (
                 <div data-html2canvas-ignore="true" className="mb-3 p-3 rounded-2xl bg-slate-50 dark:bg-[#1a1a1f] border border-slate-100 dark:border-slate-800/80">
                    <p className="text-[10px] font-black uppercase tracking-widest text-slate-500 dark:text-slate-400 text-center mb-2">Save your receipt</p>
                    <div className="flex gap-2">

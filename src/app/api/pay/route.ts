@@ -4,6 +4,7 @@ import { supabaseAdmin as supabase } from '@/utils/supabase';
 import { sendTelegramAlert } from '@/lib/telegram';
 import { sendAbaPaySms } from '@/lib/messaging';
 import { getHeaders } from '@/lib/vtpass'; 
+import { buildReceiptEmail } from '@/lib/receiptEmail';
 import { Resend } from 'resend';
 import { createPublicClient, http, decodeFunctionData, parseUnits } from 'viem';
 import { base, baseSepolia, celo, celoSepolia } from 'viem/chains';
@@ -60,6 +61,7 @@ export async function POST(req: Request) {
       nairaAmount, foreignAmount, displayAmount, wallet_address, subscription_type, // ⚡ ADDED foreignAmount & displayAmount
       operator_id, country_code, product_type_id, email,
       meter_account_type, blockchain,
+      customer_name, customer_address, // ⚡ From VTpass merchant-verify (electricity/bank)
       intent_only, preflight_hash, cancel_intent 
     } = body;
 
@@ -99,6 +101,7 @@ export async function POST(req: Request) {
       tx_hash: txHash, request_id: vtRequestId, service_category: serviceCategory, service_id: serviceID, variation_code: variation_code, network: network, 
       blockchain: blockchain || "CELO", account_number: billersCode || phone || "N/A", phone: phone || null, amount_usdt: parseFloat(amount), 
       amount_naira: vendAmount, fee_naira: serviceFee, status: 'PENDING', wallet_address: (wallet_address || "UNKNOWN").toLowerCase(),
+      customer_name: customer_name || null, customer_address: customer_address || null,
       token_used: tokenSymbol, meter_account_type: meter_account_type || null, customer_email: email || null,
       operator_id: operator_id || null, country_code: country_code || null, product_type_id: product_type_id || null, subscription_type: subscription_type || null,
       foreign_amount: foreignAmount || null, display_amount: displayAmount || null // ⚡ Save for background webhook use
@@ -296,57 +299,18 @@ export async function POST(req: Request) {
         }
 
         if (email) {
-            const premiumHtml = `
-            <div style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; background-color: #fdfbf7; padding: 40px 20px;">
-              <div style="max-width: 600px; margin: 0 auto; background-color: #ffffff; border-radius: 16px; overflow: hidden; box-shadow: 0 4px 6px rgba(0,0,0,0.05);">
-                <div style="background-color: #111114; padding: 40px 20px; text-align: center; border-bottom: 4px solid #10b981;">
-                  <img src="https://abapays.com/logo.png" alt="AbaPay" style="height: 48px; width: auto;" />
-                </div>
-                <div style="padding: 40px 30px;">
-                  <p style="font-size: 11px; font-weight: 700; color: #64748b; letter-spacing: 1px; text-transform: uppercase; margin: 0 0 8px 0;">Transaction Successful</p>
-                  <h2 style="font-size: 36px; font-weight: 900; color: #0f172a; margin: 0 0 32px 0; letter-spacing: -1px;">${displayAmount || `₦${vendAmount.toLocaleString()}`}</h2>
-                  <div style="border-top: 1px solid #e2e8f0; padding: 16px 0; display: table; width: 100%;">
-                    <div style="display: table-cell; width: 40%; font-size: 13px; color: #64748b;">Service</div>
-                    <div style="display: table-cell; width: 60%; font-size: 13px; font-weight: 600; color: #334155; text-align: right; text-transform: uppercase;">${network} ${serviceCategory}</div>
-                  </div>
-                  <div style="border-top: 1px solid #e2e8f0; padding: 16px 0; display: table; width: 100%;">
-                    <div style="display: table-cell; width: 40%; font-size: 13px; color: #64748b;">Account / Phone</div>
-                    <div style="display: table-cell; width: 60%; font-size: 13px; font-weight: 600; color: #334155; text-align: right;">${billersCode || phone}</div>
-                  </div>
-                  <div style="border-top: 1px solid #e2e8f0; padding: 16px 0; display: table; width: 100%;">
-                    <div style="display: table-cell; width: 40%; font-size: 13px; color: #64748b;">Crypto Charged</div>
-                    <div style="display: table-cell; width: 60%; font-size: 13px; font-weight: 600; color: #334155; text-align: right;">${amount} ${tokenSymbol || 'USD₮'}</div>
-                  </div>
-                  <div style="border-top: 1px solid #e2e8f0; padding: 16px 0; display: table; width: 100%;">
-                    <div style="display: table-cell; width: 30%; font-size: 13px; color: #64748b;">Transaction Hash</div>
-                    <div style="display: table-cell; width: 70%; font-size: 12px; font-weight: 500; color: #334155; text-align: right; word-break: break-all; font-family: monospace;">${txHash}</div>
-                  </div>
-                  ${dbPurchasedCode ?
-                  `<div style="border-top: 1px solid #e2e8f0; padding: 16px 0; display: table; width: 100%;">
-                    <div style="display: table-cell; width: 40%; font-size: 13px; color: #64748b;">Token / PIN</div>
-                    <div style="display: table-cell; width: 60%; font-size: 14px; font-weight: 800; color: #10b981; text-align: right; letter-spacing: 1px;">Token : ${dbPurchasedCode}</div>
-                  </div>`
-                  :
-                  `<div style="border-top: 1px solid #e2e8f0; padding: 16px 0; display: table; width: 100%;">
-                    <div style="display: table-cell; width: 40%; font-size: 13px; color: #64748b;">Reference ID</div>
-                    <div style="display: table-cell; width: 60%; font-size: 13px; font-weight: 600; color: #334155; text-align: right;">${vtRequestId}</div>
-                  </div>`
-                  }
-                  <div style="border-top: 1px solid #e2e8f0; padding-top: 32px; margin-top: 16px;">
-                    <p style="font-size: 12px; color: #64748b; line-height: 1.5; margin: 0;">If you have any issues with this transaction, please reply directly to this email to reach our support desk.</p>
-                  </div>
-                </div>
-                <div style="background-color: #f8fafc; padding: 30px; text-align: center; border-top: 1px solid #e2e8f0;">
-                  <p style="font-size: 11px; color: #64748b; margin: 0 0 8px 0;">Join the AbaPay Community</p>
-                  <p style="font-size: 12px; font-weight: 700; margin: 0 0 16px 0;">
-                    <a href="https://x.com/abapays" style="color: #334155; text-decoration: none;">X (Twitter)</a> &nbsp;&nbsp; 
-                    <a href="https://t.me/abapays" style="color: #334155; text-decoration: none;">Telegram</a> &nbsp;&nbsp; 
-                    <a href="https://wa.me/2347075418792" style="color: #334155; text-decoration: none;">WhatsApp</a>
-                  </p>
-                  <p style="font-size: 10px; color: #94a3b8; margin: 0;">&copy; 2026 Masonode Technologies Limited (RC 9524980). All rights reserved.</p>
-                </div>
-              </div>
-            </div>`;
+            const premiumHtml = buildReceiptEmail({
+                displayAmount: displayAmount || `₦${vendAmount.toLocaleString()}`,
+                serviceLabel: `${network} ${serviceCategory}`,
+                accountNumber: billersCode || phone,
+                cryptoCharged: `${amount} ${tokenSymbol || 'USD₮'}`,
+                txHash: txHash,
+                purchasedCode: dbPurchasedCode,
+                units: vendedUnits ? String(vendedUnits) : null,
+                referenceId: vtRequestId,
+                customerName: customer_name || null,
+                customerAddress: customer_address || null,
+            });
 
             try {
                 await resend.emails.send({

@@ -5,6 +5,7 @@ import { sendTelegramAlert } from '@/lib/telegram';
 import { sendAbaPaySms } from '@/lib/messaging';
 import { verifyAdminRequest } from '@/utils/adminAuth';
 import { enforceRateLimit } from '@/lib/rateLimit';
+import { buildReceiptEmail } from '@/lib/receiptEmail';
 import { Resend } from 'resend';
 
 const resend = new Resend(process.env.RESEND_API_KEY || "re_dummy_key_for_build");
@@ -130,26 +131,19 @@ export async function POST(req: Request) {
               to: record.customer_email,
               replyTo: 'support@abapays.com', 
               subject: `AbaPay Receipt - ${record.network} ${record.service_category} (Delayed)`,
-              html: `
-                <div style="font-family: -apple-system, sans-serif; background-color: #f4f4f5; padding: 40px 0;">
-                  <div style="max-width: 600px; margin: 0 auto; background-color: #ffffff; border-radius: 12px; overflow: hidden;">
-                    <div style="background: linear-gradient(135deg, #18181b 0%, #000000 100%); padding: 40px 30px; text-align: center; border-bottom: 3px solid #10b981;">
-                      <h1 style="color: white; margin: 0;">AbaPay.</h1>
-                    </div>
-                    <div style="padding: 40px 30px;">
-                      <p style="margin: 0 0 10px; color: #52525b; font-size: 14px; text-transform: uppercase; font-weight: 600;">Delayed Transaction Successful</p>
-                      <h2 style="margin: 0 0 30px; color: #18181b; font-size: 32px;">₦${record.amount_naira.toLocaleString()}</h2>
-                      <p style="color: #71717a;">Your pending transaction has been successfully processed.</p>
-                      ${dbPurchasedCode ? `
-                      <div style="margin-top: 20px; padding: 15px; border: 2px dashed #10b981; text-align: center; border-radius: 8px;">
-                          <p style="color: #71717a; margin: 0 0 5px;">Your Token / PIN:</p>
-                          <h3 style="color: #10b981; font-size: 24px; margin: 0; letter-spacing: 2px;">${dbPurchasedCode}</h3>
-                      </div>
-                      ` : ''}
-                    </div>
-                  </div>
-                </div>
-              `
+              html: buildReceiptEmail({
+                  displayAmount: record.display_amount || `₦${Number(record.amount_naira).toLocaleString()}`,
+                  serviceLabel: `${record.network || ''} ${record.service_category || ''}`.trim(),
+                  accountNumber: record.account_number,
+                  cryptoCharged: `${record.amount_usdt} ${record.token_used || 'USD₮'}`,
+                  txHash: record.tx_hash,
+                  purchasedCode: dbPurchasedCode,
+                  units: vendedUnits ? String(vendedUnits) : null,
+                  referenceId: record.request_id,
+                  customerName: record.customer_name,
+                  customerAddress: record.customer_address,
+                  isDelayed: true,
+              })
           }));
       }
 

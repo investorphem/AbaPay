@@ -5,10 +5,11 @@ import { sendTelegramAlert } from '@/lib/telegram';
 import { sendAbaPaySms } from '@/lib/messaging';
 import { getHeaders } from '@/lib/vtpass'; 
 import { Resend } from 'resend';
-import { createPublicClient, http, decodeEventLog, parseUnits } from 'viem';
-import { base, baseSepolia, celo, celoSepolia } from 'viem/chains';
+import { decodeEventLog, parseUnits } from 'viem';
 import { ABAPAY_CONTRACT_ABI_EVENTS, resolveTokenOnChain } from '@/constants';
 import { cleanupStalePreflights } from '@/lib/cleanupPreflights';
+import { resolveChain, getPublicClient, explorerBaseFor } from '@/lib/chain';
+import { buildReceiptEmail } from '@/lib/receiptEmail';
 
 const resend = new Resend(process.env.RESEND_API_KEY || "re_dummy_key_for_build");
 
@@ -83,16 +84,65 @@ export async function POST(req: Request) {
         // abandoned pre-flight intents from lingering as PENDING on the free plan.
         cleanupStalePreflights().catch(() => {});
 
+        // Extract the user's wallet address from Alchemy payload to find abandoned preflights
+        const fromAddress = activity.fromAddress || null;
+
+        // ⚡ FAST PRE-CHECK — SKIP THE EXPENSIVE PATH FOR IRRELEVANT EVENTS ⚡
+        //
+        // Alchemy fires on EVERY matching on-chain event for the watched address, not just our
+        // app's payments. In production ~98% of all traffic hits this route, and most of those
+        // events can never match a record — yet each one was paying the full cost below:
+        // a 15s sleep + 5 retries x 2s + ~10 DB queries (~25s of serverless compute).
+        //
+        // WHY THIS IS SAFE: the pre-flight intent row is written BEFORE the user signs (see the
+        // `intent_only` call in /api/pay). So by the time a transaction exists on-chain and
+        // Alchemy tells us about it, a matching row MUST already exist — either keyed by the
+        // real tx_hash, or still sitting as a `preflight_` row for that wallet. If neither is
+        // present, this event has nothing to do with us and no amount of waiting will change
+        // that. Genuine in-flight payments still get the full sleep + retry treatment below.
+        {
+            const { data: preExisting } = await supabaseAdmin
+                .from('transactions')
+                .select('status')
+                .eq('tx_hash', txHash)
+                .maybeSingle();
+
+            // Already finished (SUCCESS / FAILED_VENDING / REFUNDED / PROCESSING) — nothing to do.
+            if (preExisting && preExisting.status !== 'PENDING') {
+                return NextResponse.json({ message: "Already processed" });
+            }
+
+            if (!preExisting) {
+                // No row for this hash. Is there a pending pre-flight intent for this wallet
+                // that we'd rescue? If not, this event isn't ours.
+                let hasRescuable = false;
+                if (fromAddress) {
+                    const { data: pendingPreflight } = await supabaseAdmin
+                        .from('transactions')
+                        .select('id')
+                        .ilike('wallet_address', fromAddress)
+                        .eq('status', 'PENDING')
+                        .like('tx_hash', 'preflight_%')
+                        .limit(1)
+                        .maybeSingle();
+                    hasRescuable = !!pendingPreflight;
+                }
+
+                if (!hasRescuable) {
+                    console.log(`Webhook: fast-exit, no pending record for tx ${txHash} (from: ${fromAddress || 'n/a'}).`);
+                    return NextResponse.json({ message: "No matching record — acknowledged." }, { status: 200 });
+                }
+            }
+        }
+
         // ⚡ 1. THE 15-SECOND SLEEP ⚡
-        // We wait to give the frontend time to process the transaction synchronously first.
+        // Only reached when a genuine payment of ours is in flight. We wait to give the
+        // frontend a chance to process the transaction synchronously first.
         await new Promise(resolve => setTimeout(resolve, 15000));
 
         // ⚡ 2. THE RETRY LOOP & CRASH RESCUE MISSION ⚡
         let record = null;
         let retries = 5;
-
-        // Extract the user's wallet address from Alchemy payload to find abandoned preflights
-        const fromAddress = activity.fromAddress || null;
 
         while (retries > 0) { 
             let { data: exactMatch } = await supabaseAdmin
@@ -158,22 +208,13 @@ export async function POST(req: Request) {
         }
 
         // ⚡ 2.5 THE WEBHOOK SECURITY FIX: VERIFY ON-CHAIN RECEIPT ⚡
-        const isMainnet = process.env.NEXT_PUBLIC_NETWORK === "mainnet" || process.env.NEXT_PUBLIC_NETWORK === "celo" || process.env.NEXT_PUBLIC_NETWORK === "base";
-        const activeChain = record.blockchain === 'BASE' ? (isMainnet ? base : baseSepolia) : (isMainnet ? celo : celoSepolia);
-
-        let rpcUrl = activeChain.rpcUrls.default.http[0];
-        if (activeChain.id === celo.id) rpcUrl = "https://forno.celo.org";
-        if (activeChain.id === base.id) rpcUrl = "https://mainnet.base.org";
-
-        // SMART EXPLORER URL GENERATOR
-        let explorerBase = isMainnet ? "https://celoscan.io" : "https://alfajores.celoscan.io";
-        if (record.blockchain === 'BASE') {
-            explorerBase = isMainnet ? "https://basescan.org" : "https://sepolia.basescan.org";
-        }
-        const explorerUrl = `${explorerBase}/tx/${txHash}`;
+        // Chain/RPC resolution now comes from the shared helper (src/lib/chain.ts) so this
+        // path and /api/admin/refund can't drift apart, and both get RPC failover.
+        const { isMainnet } = resolveChain(record.blockchain);
+        const explorerUrl = `${explorerBaseFor(record.blockchain)}/tx/${txHash}`;
 
         try {
-            const publicClient = createPublicClient({ chain: activeChain, transport: http(rpcUrl) });
+            const publicClient = getPublicClient(record.blockchain);
             const receipt = await publicClient.getTransactionReceipt({ hash: txHash as `0x${string}` });
 
             // CRITICAL CHECK: Did the transaction fail on the blockchain?
@@ -370,7 +411,21 @@ export async function POST(req: Request) {
                         to: record.customer_email,
                         replyTo: 'support@abapays.com', 
                         subject: `AbaPay Receipt - ${record.network} ${record.service_category}`,
-                        html: `<div style="font-family: sans-serif; background-color: #f4f4f5; padding: 40px 0;"><div style="max-width: 600px; margin: 0 auto; background-color: #ffffff; border-radius: 12px; overflow: hidden;"><div style="background: #18181b; padding: 40px 30px; text-align: center;"><h1 style="color:white">AbaPay</h1></div><div style="padding: 40px 30px;"><h2 style="color: #18181b; font-size: 32px;">${record.display_amount || record.displayAmount || `₦${record.amount_naira.toLocaleString()}`}</h2><p>Account: ${record.account_number}</p><p>Tx Hash: ${txHash}</p>${dbPurchasedCode ? `<p style="color:#10b981; font-weight:bold;">Token / PIN: ${dbPurchasedCode}</p>` : ``}</div></div></div>`
+                        // ⚡ Uses the SHARED premium template. Previously this path sent a
+                        // stripped-down email, so whenever the webhook (rather than the
+                        // frontend) completed the vend, the user got a plain receipt.
+                        html: buildReceiptEmail({
+                            displayAmount: record.display_amount || `₦${Number(record.amount_naira).toLocaleString()}`,
+                            serviceLabel: `${record.network || ''} ${record.service_category || ''}`.trim(),
+                            accountNumber: record.account_number,
+                            cryptoCharged: `${record.amount_usdt} ${record.token_used || 'USD₮'}`,
+                            txHash: txHash,
+                            purchasedCode: dbPurchasedCode,
+                            units: vendedUnits ? String(vendedUnits) : null,
+                            referenceId: record.request_id,
+                            customerName: record.customer_name,
+                            customerAddress: record.customer_address,
+                        })
                     }));
                 }
 
