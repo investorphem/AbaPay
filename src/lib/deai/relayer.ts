@@ -4,6 +4,7 @@ import { privateKeyToAccount } from 'viem/accounts';
 import { resolveChain, getPublicClient, isMainnetEnv } from '@/lib/chain';
 import { resolveTokenOnChain } from '@/constants';
 import { sendTelegramAlert } from '@/lib/telegram';
+import { celoAttributionSuffix } from '@/lib/attribution';
 
 // ⚡ AGENT RELAYER
 //
@@ -166,6 +167,8 @@ export async function relayPayBillFor(params: {
       ],
       chain,
       account,
+      // Celo Builders attribution — appended only on Celo, undefined (no-op) on Base.
+      dataSuffix: celoAttributionSuffix(chain),
     });
 
     // ⚡ OPERATOR ALERT — an agent just spent real user funds. The operator must be able

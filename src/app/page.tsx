@@ -12,7 +12,8 @@ import {
   RefreshCw, Tv, GraduationCap, Send, Globe
 } from "lucide-react";
 import { supabase } from "@/utils/supabase";
-import { ELECTRICITY_DISCOS } from "./discos"; 
+import { celoAttributionSuffix } from "@/lib/attribution";
+import { ELECTRICITY_DISCOS } from "./discos";
 import { useAccount, useConnect, useDisconnect, useWalletClient, useSwitchChain } from 'wagmi';
 
 import { ReceiptModal, SelectionModal } from "@/components/Modals";
@@ -643,13 +644,14 @@ export default function Home() {
       if (!usingBasePaymaster && currentAllowance < valueInWei) {
           setStatus("Awaiting token approval...");
           try {
-              const appHash = await client.writeContract({ 
+              const appHash = await client.writeContract({
                   chain: activeChain,
-                  address: tokenAddress as `0x${string}`, 
-                  abi: ERC20_ABI, 
-                  functionName: 'approve', 
-                  args: [ABAPAY_CONTRACT, parseUnits("100000", selectedToken.decimals)], 
-                  ...txConfig 
+                  address: tokenAddress as `0x${string}`,
+                  abi: ERC20_ABI,
+                  functionName: 'approve',
+                  args: [ABAPAY_CONTRACT, parseUnits("100000", selectedToken.decimals)],
+                  ...txConfig,
+                  dataSuffix: celoAttributionSuffix(activeChain), // Celo attribution only; no-op on Base
               });
               setStatus("Confirming approval on-chain...");
               await publicClient.waitForTransactionReceipt({ hash: appHash, confirmations: 1 });
@@ -802,12 +804,13 @@ export default function Home() {
                   ...txConfig // ⚡ FIX 2: Removed forced nonce so wallets don't block the transaction
               });
           } else {
-              rawHash = await client.writeContract({ 
-                  address: ABAPAY_CONTRACT, 
-                  abi: ABAPAY_ABI, 
-                  functionName: 'payBill', 
-                  args: [tokenAddress, vtpassServiceID, payloadBillersCode, valueInWei], 
-                  ...txConfig // ⚡ FIX 2: Removed forced nonce
+              rawHash = await client.writeContract({
+                  address: ABAPAY_CONTRACT,
+                  abi: ABAPAY_ABI,
+                  functionName: 'payBill',
+                  args: [tokenAddress, vtpassServiceID, payloadBillersCode, valueInWei],
+                  ...txConfig, // ⚡ FIX 2: Removed forced nonce
+                  dataSuffix: celoAttributionSuffix(activeChain), // Celo Builders attribution (Celo path only)
               });
           }
       }
@@ -1009,6 +1012,7 @@ export default function Home() {
             functionName: 'approve',
             args: [ABAPAY_CONTRACT, amountWei],
             account: address as `0x${string}`,
+            dataSuffix: celoAttributionSuffix(activeChain), // Celo attribution only; no-op on Base
           });
           await pc.waitForTransactionReceipt({ hash: h, confirmations: 1 });
         }
@@ -1023,6 +1027,7 @@ export default function Home() {
         functionName: 'setSpendingAllowance',
         args: [tokenAddress as `0x${string}`, amountWei],
         account: address as `0x${string}`,
+        dataSuffix: celoAttributionSuffix(activeChain), // Celo attribution only; no-op on Base
       });
       await pc.waitForTransactionReceipt({ hash, confirmations: 1 });
 

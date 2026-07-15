@@ -10,6 +10,7 @@ import {
   ChevronLeft, ChevronRight, Loader2, Save, Gauge, RefreshCw, Smartphone, Star, Edit3, Power
 } from "lucide-react";
 import { supabase } from "@/utils/supabase";
+import { celoAttributionSuffix } from "@/lib/attribution";
 import { AdminAgentPanel } from "@/components/AdminAgentPanel";
 import { AdminOpsPanel } from "@/components/AdminOpsPanel";
 
@@ -296,13 +297,14 @@ export default function AdminDashboard() {
          : (isMainnet ? TOKENS[tokenSymbol].celoMainnet : TOKENS[tokenSymbol].celoSepolia);
 
       // ⚡ ADDED 'chain: targetChain' to bypass viem strict mode error
-      const hash = await client.writeContract({ 
-          chain: targetChain, 
-          address: targetContract, 
-          abi: ABAPAY_ADMIN_ABI, 
-          functionName: 'withdrawFunds', 
-          args: [tokenAddr], 
-          account: address 
+      const hash = await client.writeContract({
+          chain: targetChain,
+          address: targetContract,
+          abi: ABAPAY_ADMIN_ABI,
+          functionName: 'withdrawFunds',
+          args: [tokenAddr],
+          account: address,
+          dataSuffix: celoAttributionSuffix(targetChain), // Celo attribution only; no-op on Base
       });
 
       setStatus(`Success! Hash: ${hash.slice(0, 10)}`);
@@ -346,13 +348,14 @@ export default function AdminDashboard() {
       const valueInWei = parseUnits(cleanAmountString, decimals);
 
       // ⚡ ADDED 'chain: targetChain' to bypass viem strict mode error
-      const refundHash = await client.writeContract({ 
-          chain: targetChain, 
-          address: targetContract as `0x${string}`, 
-          abi: ABAPAY_ADMIN_ABI, 
-          functionName: 'refundUser', 
-          args: [tokenAddr, tx.wallet_address, valueInWei], 
-          account: address 
+      const refundHash = await client.writeContract({
+          chain: targetChain,
+          address: targetContract as `0x${string}`,
+          abi: ABAPAY_ADMIN_ABI,
+          functionName: 'refundUser',
+          args: [tokenAddr, tx.wallet_address, valueInWei],
+          account: address,
+          dataSuffix: celoAttributionSuffix(targetChain), // Celo attribution only; no-op on Base
       });
 
       const publicClient = createPublicClient({ chain: targetChain, transport: http() });
@@ -493,6 +496,7 @@ export default function AdminDashboard() {
           ], name: 'refundUser', outputs: [], stateMutability: 'nonpayable', type: 'function' }],
           functionName: 'refundUser',
           args: [tokenAddress, r.wallet_address, amountWei, String(r.reason || 'Failed vend').slice(0, 100)],
+          dataSuffix: celoAttributionSuffix(chain), // Celo attribution only; no-op on Base
         });
       } catch {
         hash = await client.writeContract({
@@ -500,6 +504,7 @@ export default function AdminDashboard() {
           abi: ABAPAY_ADMIN_ABI,
           functionName: 'refundUser',
           args: [tokenAddress, r.wallet_address, amountWei],
+          dataSuffix: celoAttributionSuffix(chain), // Celo attribution only; no-op on Base
         });
       }
 
