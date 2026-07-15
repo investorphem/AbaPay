@@ -29,8 +29,12 @@ export async function POST(req: Request) {
 
     if (!text || !chatId) return NextResponse.json({ success: true });
 
-    // Delete PIN instantly for security (if it looks like a 4 digit number)
-    if (/^\d{4}$/.test(text.trim())) {
+    // 🔒 DELETE THE PIN FROM CHAT HISTORY IMMEDIATELY.
+    //
+    // 🔴 The old check was /^\d{4}$/ — EXACTLY four digits. But PINs are 4-6 digits, so a
+    // 5- or 6-digit PIN was NEVER deleted and sat in the chat forever. Anyone who later got
+    // access to the phone or the Telegram session could read it and transact.
+    if (/^\d{4,6}$/.test(text.trim())) {
       await fetch(`https://api.telegram.org/bot${DEAI_BOT_TOKEN}/deleteMessage`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },

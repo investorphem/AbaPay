@@ -10,6 +10,8 @@ import {
   ChevronLeft, ChevronRight, Loader2, Save, Gauge, RefreshCw, Smartphone, Star, Edit3, Power
 } from "lucide-react";
 import { supabase } from "@/utils/supabase";
+import { AdminAgentPanel } from "@/components/AdminAgentPanel";
+import { AdminOpsPanel } from "@/components/AdminOpsPanel";
 
 import { TELECOM_PROVIDERS, INTERNET_PROVIDERS, CABLE_PROVIDERS_LIST, EDUCATION_PROVIDERS } from "@/constants";
 import { ELECTRICITY_DISCOS } from "../discos"; 
@@ -452,6 +454,63 @@ export default function AdminDashboard() {
       { title: "Education", master: "MASTER_EDUCATION", providers: EDUCATION_PROVIDERS.map(p => ({ id: `EDU_${p.serviceID}`, name: p.displayName })) }
   ];
 
+
+  // ⚡ Executes an on-chain refund from the ADMIN'S OWN wallet.
+  //
+  // refundUser() is onlyOwner by design — we deliberately do NOT give the relayer hot key
+  // the power to send vault funds to arbitrary addresses. Money entering the vault is
+  // capped on-chain and safe to automate; money leaving it keeps a human in the loop.
+  const executeRefundOnChain = async (r: any): Promise<string | null> => {
+    if (!client) { alert('Connect your admin wallet first.'); return null; }
+    try {
+      const isBase = String(r.blockchain).toUpperCase() === 'BASE';
+      const contract = isBase ? BASE_CONTRACT : CELO_CONTRACT;
+      const chain = isBase ? (isMainnet ? base : baseSepolia) : (isMainnet ? celo : celoSepolia);
+
+      const tokenMeta = (TOKENS as any)[r.token_used];
+      if (!tokenMeta) { alert(`Unknown token: ${r.token_used}`); return null; }
+
+      const tokenAddress = isBase
+        ? (isMainnet ? tokenMeta.baseMainnet : tokenMeta.baseSepolia)
+        : (isMainnet ? tokenMeta.celoMainnet : tokenMeta.celoSepolia);
+      if (!tokenAddress) { alert(`${r.token_used} is not available on ${r.blockchain}.`); return null; }
+
+      const amountWei = parseUnits(Number(r.amount_crypto).toFixed(tokenMeta.decimals), tokenMeta.decimals);
+
+      const [acct] = await client.requestAddresses();
+      await client.switchChain({ id: chain.id }).catch(() => {});
+
+      // V3 adds a `reason` argument; V2 does not. Try V3 first, fall back to V2.
+      let hash: string;
+      try {
+        hash = await client.writeContract({
+          chain, account: acct, address: contract,
+          abi: [{ inputs: [
+            { name: 'tokenAddress', type: 'address' },
+            { name: 'recipient', type: 'address' },
+            { name: 'amount', type: 'uint256' },
+            { name: 'reason', type: 'string' },
+          ], name: 'refundUser', outputs: [], stateMutability: 'nonpayable', type: 'function' }],
+          functionName: 'refundUser',
+          args: [tokenAddress, r.wallet_address, amountWei, String(r.reason || 'Failed vend').slice(0, 100)],
+        });
+      } catch {
+        hash = await client.writeContract({
+          chain, account: acct, address: contract,
+          abi: ABAPAY_ADMIN_ABI,
+          functionName: 'refundUser',
+          args: [tokenAddress, r.wallet_address, amountWei],
+        });
+      }
+
+      return hash;
+    } catch (e: any) {
+      console.error('Refund failed:', e);
+      alert(e?.shortMessage || 'Refund transaction failed.');
+      return null;
+    }
+  };
+
   return (
     <main className="min-h-screen bg-[#070709] text-slate-200 p-4 md:p-8">
       <div className="max-w-6xl mx-auto">
@@ -510,7 +569,7 @@ export default function AdminDashboard() {
 
             <div className="bg-[#111114] p-1.5 rounded-2xl border border-slate-800 flex justify-between items-center max-w-full">
               <div className="flex gap-1 overflow-x-auto no-scrollbar pr-4">
-                  {['analytics', 'system', 'ledger', 'vault', 'identity'].map((t) => (
+                  {['analytics', 'system', 'agent', 'ops', 'ledger', 'vault', 'identity'].map((t) => (
                     <button key={t} onClick={() => setActiveTab(t)} className={`px-6 py-2 rounded-xl text-xs font-black uppercase transition-all whitespace-nowrap ${activeTab === t ? 'bg-slate-800 text-emerald-400' : 'text-slate-500 hover:text-slate-300'}`}>
                         {t === 'system' ? 'Controls' : t}
                     </button>
@@ -599,6 +658,20 @@ export default function AdminDashboard() {
                        </div>
                     </div>
                  </div>
+              </div>
+            )}
+
+            {/* REFUNDS & SUPPORT */}
+            {activeTab === 'ops' && (
+              <div className="animate-in fade-in">
+                <AdminOpsPanel adminHeaders={adminHeaders} onExecuteRefund={executeRefundOnChain} />
+              </div>
+            )}
+
+            {/* DeAI AGENT CONTROLS */}
+            {activeTab === 'agent' && (
+              <div className="animate-in fade-in">
+                <AdminAgentPanel adminHeaders={adminHeaders} />
               </div>
             )}
 

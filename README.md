@@ -127,9 +127,11 @@ RESEND_API_KEY=re_your_resend_key
 
 ### AI Agent (DeAI)
 ```
-GEMINI_API_KEY=your_gemini_api_key
-DEAI_INTERNAL_SECRET=any_long_random_string   # Optional. Signs internal calls to the DeAI brain so /api/deai/* can't be hit directly from the internet. Falls back to SUPABASE_SERVICE_ROLE_KEY if unset.
+ANTHROPIC_API_KEY=sk-ant-...                  # Claude powers the DeAI intent engine (replaced Gemini).
+DEAI_INTERNAL_SECRET=any_long_random_string   # Optional. Signs internal calls to the DeAI brain so /api/deai/* can't be hit directly from the internet, AND signs the agent's payment deep links. Falls back to SUPABASE_SERVICE_ROLE_KEY if unset.
 ```
+
+**How DeAI actually pays (non-custodial):** AbaPay's contract uses `transferFrom(msg.sender, …)`, so the payer must be the signer — and there is no server-side key for the user (there must never be one; that would make AbaPay a custodian). So the agent does everything *except* hold keys: it parses the request with Claude, verifies the meter/account against real VTpass, confirms details in chat, then returns a **signed, 15-minute deep link** that opens the app pre-filled. The user taps, their own wallet signs, and the payment runs through the same verified pipeline as the web app.
 
 ### Telegram
 ```
@@ -166,6 +168,13 @@ ALCHEMY_CELO_WEBHOOK_SECRET=your_alchemy_celo_webhook_secret
 ```
 ETHERSCAN_API_KEY=your_etherscan_or_celoscan_api_key
 ```
+
+### Agent Relayer (AbaPayV3 — autonomous bill payments)
+```
+RELAYER_PRIVATE_KEY=0x...        # ⚠️ HOT KEY. Only needed if you deploy AbaPayV3 and enable agent payments.
+NEXT_PUBLIC_APP_URL=https://abapays.com   # Used to build agent payment deep links.
+```
+⚠️ **Understand the blast radius before enabling this.** The relayer key can spend **at most each user's remaining on-chain allowance**, and only via `payBillFor`. It **cannot** drain a user's wallet, raise anyone's allowance, or withdraw the vault — those bounds are enforced by the *contract*, not the backend. If the key leaks, the owner calls `setRelayer(address(0))` and it is instantly dead. Fund it with gas only; it should never hold token balances.
 
 ### Cron / Maintenance
 ```

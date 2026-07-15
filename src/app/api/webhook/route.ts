@@ -10,8 +10,22 @@ import { ABAPAY_CONTRACT_ABI_EVENTS, resolveTokenOnChain } from '@/constants';
 import { cleanupStalePreflights } from '@/lib/cleanupPreflights';
 import { resolveChain, getPublicClient, explorerBaseFor } from '@/lib/chain';
 import { buildReceiptEmail } from '@/lib/receiptEmail';
+import { enqueueRefund } from '@/lib/refunds';
 
 const resend = new Resend(process.env.RESEND_API_KEY || "re_dummy_key_for_build");
+
+// ⚡ Where did this transaction come from? An operator needs to see this at a glance:
+// a web payment, a PIN in a Telegram chat, and an unattended autonomous schedule all carry
+// very different risk profiles.
+function channelBadge(src: string | null | undefined): string {
+    switch (String(src || 'WEB').toUpperCase()) {
+        case 'TELEGRAM': return '💬 Telegram Agent';
+        case 'WHATSAPP': return '💬 WhatsApp Agent';
+        case 'X':        return '💬 X Agent';
+        case 'SCHEDULE': return '🤖 Autonomous Schedule';
+        default:         return '🌐 Web App';
+    }
+}
 
 const error_messages: Record<string, string> = {
     "011": "Invalid details provided. Please check your phone/meter number and try again.",
@@ -395,7 +409,7 @@ export async function POST(req: Request) {
                 // ⚡ AWAIT TELEGRAM SO IT DOESN'T GET KILLED BY VERCEL ⚡
                 try {
                     // ⚡ UPDATED: Display Foreign Amount for Intl
-                    await sendTelegramAlert(`✅ *SALE SUCCESSFUL (WEBHOOK)*\n⛓️ *Chain:* ${record.blockchain || 'CELO'}\n🛒 *Product:* ${record.network} ${record.service_category}\n💰 *Amount Paid:* ${record.display_amount || record.displayAmount || `₦${record.amount_naira}`}\n🪙 *Asset:* ${record.amount_usdt} ${record.token_used || 'USD₮'}\n👤 *User:* ${record.account_number}\n🧾 *Ref:* ${alertTokenRef}\n🔍 *Explorer:* ${explorerUrl}`);
+                    await sendTelegramAlert(`✅ *SALE SUCCESSFUL (WEBHOOK)*\n📲 *Source:* ${channelBadge(record.source_channel)}\n⛓️ *Chain:* ${record.blockchain || 'CELO'}\n🛒 *Product:* ${record.network} ${record.service_category}\n💰 *Amount Paid:* ${record.display_amount || record.displayAmount || `₦${record.amount_naira}`}\n🪙 *Asset:* ${record.amount_usdt} ${record.token_used || 'USD₮'}\n👤 *User:* ${record.account_number}\n🧾 *Ref:* ${alertTokenRef}\n🔍 *Explorer:* ${explorerUrl}`);
                 } catch (tgError) {
                     console.error("Telegram Success Alert Error in Webhook:", tgError);
                 }
@@ -451,9 +465,32 @@ export async function POST(req: Request) {
             // ⚡ DASHBOARD FIX: FAILED_VENDING
             await supabaseAdmin.from('transactions').update({ status: 'FAILED_VENDING', error_code: payData.code, api_response: rawTechnicalError }).eq('tx_hash', txHash);
 
+            // ⚡ AUTO-QUEUE THE REFUND ⚡
+            // We only reach here after the on-chain payment was fully verified above (sender,
+            // token, amount, PaymentReceived event). So the user's crypto IS in the vault and
+            // they received nothing — they are owed money. This is the path agent-initiated
+            // and delayed payments take, so it MUST be automatic; nobody is watching at 3am.
+            try {
+                await enqueueRefund({
+                    transactionId: record.id,
+                    txHash,
+                    walletAddress: record.wallet_address || '',
+                    tokenUsed: record.token_used || 'USD₮',
+                    amountCrypto: Number(record.amount_usdt),
+                    amountNaira: Number(record.amount_naira),
+                    blockchain: record.blockchain || 'CELO',
+                    reason: 'VTpass vend rejected (webhook)',
+                    vtpassError: `${payData.code}: ${rawTechnicalError}`,
+                    serviceCategory: record.service_category,
+                    sourceChannel: record.source_channel || 'WEB',
+                });
+            } catch (refundErr) {
+                console.error('[Webhook] Failed to queue refund:', refundErr);
+            }
+
             // ⚡ WRAP IN TRY/CATCH SO TELEGRAM ERRORS DON'T CRASH THE WEBHOOK ⚡
             try {
-                await sendTelegramAlert(`❌ *VENDING REJECTED (WEBHOOK)*\n⛓️ *Chain:* ${record.blockchain || 'CELO'}\n🛒 *Product:* ${record.network} ${record.service_category}\n👤 *User:* ${record.account_number}\n🚨 *Admin Error:* Code ${payData.code} - ${rawTechnicalError}\n🗣 *User Message:* ${friendlyMessage}\n🔍 *Explorer:* ${explorerUrl}`);
+                await sendTelegramAlert(`❌ *VENDING REJECTED (WEBHOOK)*\n📲 *Source:* ${channelBadge(record.source_channel)}\n⛓️ *Chain:* ${record.blockchain || 'CELO'}\n🛒 *Product:* ${record.network} ${record.service_category}\n👤 *User:* ${record.account_number}\n🚨 *Admin Error:* Code ${payData.code} - ${rawTechnicalError}\n🗣 *User Message:* ${friendlyMessage}\n🔍 *Explorer:* ${explorerUrl}`);
             } catch (tgError) {
                 console.error("Telegram Failure Alert Error in Webhook:", tgError);
             }

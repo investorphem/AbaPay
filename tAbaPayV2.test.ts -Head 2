@@ -1,0 +1,5 @@
+warning: in the working copy of 'contracts/AbaPay.sol', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'contracts/AbaPayV2.sol', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'test/AbaPayV2.test.ts', LF will be replaced by CRLF the next time Git touches it
+ test/AbaPayV2.test.ts | 2 [32m+[m[31m-[m
+ 1 file changed, 1 insertion(+), 1 deletion(-)

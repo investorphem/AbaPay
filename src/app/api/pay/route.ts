@@ -5,6 +5,7 @@ import { sendTelegramAlert } from '@/lib/telegram';
 import { sendAbaPaySms } from '@/lib/messaging';
 import { getHeaders } from '@/lib/vtpass'; 
 import { buildReceiptEmail } from '@/lib/receiptEmail';
+import { enqueueRefund } from '@/lib/refunds';
 import { Resend } from 'resend';
 import { createPublicClient, http, decodeFunctionData, parseUnits } from 'viem';
 import { base, baseSepolia, celo, celoSepolia } from 'viem/chains';
@@ -36,6 +37,18 @@ const ABAPAY_ABI = [{"inputs":[{"internalType":"address","name":"tokenAddress","
 // but the duplication should be removed (see AUDIT_REPORT_V2.md, item M-2 / #7).
 const ID_ALPHABET = 'abcdefghijklmnopqrstuvwxyz0123456789';
 
+// ⚡ Where did this transaction come from? Operators need to distinguish a web payment
+// from an agent payment from an unattended autonomous schedule — very different risk.
+function channelBadge(src: string | null | undefined): string {
+    switch (String(src || 'WEB').toUpperCase()) {
+        case 'TELEGRAM': return '💬 Telegram Agent';
+        case 'WHATSAPP': return '💬 WhatsApp Agent';
+        case 'X':        return '💬 X Agent';
+        case 'SCHEDULE': return '🤖 Autonomous Schedule';
+        default:         return '🌐 Web App';
+    }
+}
+
 function getStrictRequestId() {
   const date = new Date();
   const lagosTime = new Intl.DateTimeFormat('en-GB', { timeZone: 'Africa/Lagos', year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', hour12: false }).format(date);
@@ -62,6 +75,7 @@ export async function POST(req: Request) {
       operator_id, country_code, product_type_id, email,
       meter_account_type, blockchain,
       customer_name, customer_address, // ⚡ From VTpass merchant-verify (electricity/bank)
+      source_channel,                  // ⚡ WEB | TELEGRAM | WHATSAPP | X | SCHEDULE
       intent_only, preflight_hash, cancel_intent 
     } = body;
 
@@ -102,6 +116,7 @@ export async function POST(req: Request) {
       blockchain: blockchain || "CELO", account_number: billersCode || phone || "N/A", phone: phone || null, amount_usdt: parseFloat(amount), 
       amount_naira: vendAmount, fee_naira: serviceFee, status: 'PENDING', wallet_address: (wallet_address || "UNKNOWN").toLowerCase(),
       customer_name: customer_name || null, customer_address: customer_address || null,
+      source_channel: source_channel || 'WEB',
       token_used: tokenSymbol, meter_account_type: meter_account_type || null, customer_email: email || null,
       operator_id: operator_id || null, country_code: country_code || null, product_type_id: product_type_id || null, subscription_type: subscription_type || null,
       foreign_amount: foreignAmount || null, display_amount: displayAmount || null // ⚡ Save for background webhook use
@@ -288,7 +303,7 @@ export async function POST(req: Request) {
 
         try {
             // ⚡ RECEIPT FIX: Display correct currency/amount in Telegram
-            await sendTelegramAlert(`✅ *SALE SUCCESSFUL*\n⛓️ *Chain:* ${blockchain || 'CELO'}\n🛒 *Product:* ${network} ${serviceCategory}\n💰 *Amount Paid:* ${displayAmount || `₦${vendAmount}`}\n🪙 *Asset:* ${amount} ${tokenSymbol || 'USD₮'}\n👤 *User:* ${billersCode}\n🧾 *Ref:* ${alertTokenRef}\n🔍 *Explorer:* ${explorerUrl}`);
+            await sendTelegramAlert(`✅ *SALE SUCCESSFUL*\n📲 *Source:* ${channelBadge(source_channel)}\n⛓️ *Chain:* ${blockchain || 'CELO'}\n🛒 *Product:* ${network} ${serviceCategory}\n💰 *Amount Paid:* ${displayAmount || `₦${vendAmount}`}\n🪙 *Asset:* ${amount} ${tokenSymbol || 'USD₮'}\n👤 *User:* ${billersCode}\n🧾 *Ref:* ${alertTokenRef}\n🔍 *Explorer:* ${explorerUrl}`);
         } catch (tgError) {
             console.error("Telegram Success Alert Error:", tgError);
         }
@@ -338,12 +353,37 @@ export async function POST(req: Request) {
         // ⚡ ADMIN FIX: Unified FAILED_VENDING status
         await supabase.from('transactions').update({ status: 'FAILED_VENDING', error_code: payData.code, api_response: payData.response_description }).eq('tx_hash', txHash);
         try {
-            await sendTelegramAlert(`❌ *VENDING REJECTED*\n⛓️ *Chain:* ${blockchain || 'CELO'}\n🛒 *Product:* ${network} ${serviceCategory}\n👤 *User:* ${billersCode}\n🚨 *Admin Error:* Code ${payData.code} - ${payData.response_description}\n🗣 *User Message:* ${friendlyMessage}\n🔍 *Explorer:* ${explorerUrl}`);
+            await sendTelegramAlert(`❌ *VENDING REJECTED*\n📲 *Source:* ${channelBadge(source_channel)}\n⛓️ *Chain:* ${blockchain || 'CELO'}\n🛒 *Product:* ${network} ${serviceCategory}\n👤 *User:* ${billersCode}\n🚨 *Admin Error:* Code ${payData.code} - ${payData.response_description}\n🗣 *User Message:* ${friendlyMessage}\n🔍 *Explorer:* ${explorerUrl}`);
         } catch (tgError) {
             console.error("Telegram Failure Alert Error:", tgError);
         }
 
-        return NextResponse.json({ success: false, status: 'FAILED_VENDING', message: friendlyMessage });
+        // ⚡ AUTO-QUEUE THE REFUND ⚡
+        //
+        // We are ONLY here because the on-chain payment was already verified above — so the
+        // user's crypto IS in our vault, and they received nothing. They are owed money.
+        //
+        // Previously this just sat as FAILED_VENDING until a human happened to notice. That
+        // is untenable once an agent can transact unattended: a user could be auto-charged
+        // on a 3am schedule for a service that failed, with nobody watching.
+        try {
+            await enqueueRefund({
+                txHash,
+                walletAddress: wallet_address || '',
+                tokenUsed: tokenSymbol || 'USD₮',
+                amountCrypto: Number(amount),
+                amountNaira: vendAmount,
+                blockchain: blockchain || 'CELO',
+                reason: 'VTpass vend rejected',
+                vtpassError: `${payData.code}: ${payData.response_description}`,
+                serviceCategory,
+                sourceChannel: source_channel || 'WEB',
+            });
+        } catch (refundErr) {
+            console.error('[Pay] Failed to queue refund:', refundErr);
+        }
+
+        return NextResponse.json({ success: false, status: 'FAILED_VENDING', message: `${friendlyMessage} Your funds are being refunded — you don't need to do anything.` });
     }
 
   } catch (error: any) {

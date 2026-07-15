@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState, useEffect, useMemo, useRef } from "react";
+import React, { useState, useEffect, useMemo, useRef, useCallback } from "react";
 import sdk from "@farcaster/miniapp-sdk";
 import { createWalletClient, createPublicClient, custom, http, parseUnits, formatUnits, encodeFunctionData, type WalletClient } from "viem";
 import { eip5792Actions } from "viem/experimental";
@@ -13,13 +13,15 @@ import {
 } from "lucide-react";
 import { supabase } from "@/utils/supabase";
 import { ELECTRICITY_DISCOS } from "./discos"; 
-import { useAccount, useConnect, useDisconnect, useWalletClient } from 'wagmi';
+import { useAccount, useConnect, useDisconnect, useWalletClient, useSwitchChain } from 'wagmi';
 
 import { ReceiptModal, SelectionModal } from "@/components/Modals";
 import { TermsModal, PrivacyModal } from "@/components/Modals";
 import PointsBadge from "@/components/PointsBadge"; 
 import DataVariationsUI from "@/components/DataVariationsUI"; 
 import AppFooter from "@/components/AppFooter"; 
+import { AgentHub } from "@/components/AgentHub";
+import { AIChat } from "@/components/AIChat";
 import { 
   ABAPAY_ABI, ERC20_ABI, SERVICES, CABLE_PROVIDERS_LIST, TELECOM_PROVIDERS, 
   INTERNET_PROVIDERS, SUPPORTED_TOKENS, SUPPORTED_COUNTRIES, PRE_SELECT_AMOUNTS, 
@@ -34,6 +36,7 @@ export default function Home() {
   const { disconnect } = useDisconnect();
   // ⚡ ADD THIS: Grabs the live WalletConnect provider securely
   const { data: wagmiWalletClient } = useWalletClient();
+  const { switchChain } = useSwitchChain(); // ⚡ used by the DeAI deep-link handler to land on the right chain
   const [environment, setEnvironment] = useState<'MINIPAY' | 'FARCASTER' | 'WEB' | 'LOADING' | 'BASE'>('LOADING');
   const [killSwitches, setKillSwitches] = useState<Record<string, boolean>>({});
   const [address, setAddress] = useState<string | null>(null);
@@ -54,7 +57,10 @@ export default function Home() {
   const [customerEmail, setCustomerEmail] = useState(""); 
   const [status, setStatus] = useState("");
 
-  const [activeTab, setActiveTab] = useState<"pay" | "bank" | "education" | "history">("pay");
+  const [activeTab, setActiveTab] = useState<"pay" | "bank" | "education" | "history" | "agent">("pay");
+  // ⚡ DeAI agent allowance state
+  const [agentAllowance, setAgentAllowance] = useState<string | null>(null);
+  const [isApprovingAgent, setIsApprovingAgent] = useState(false);
   const [isProcessing, setIsProcessing] = useState(false); 
   const [customerName, setCustomerName] = useState<string | null>(null);
   const [isVerifying, setIsVerifying] = useState(false);
@@ -400,7 +406,7 @@ export default function Home() {
     setSelectedIntlProduct(null); setSelectedIntlOperator(null); setSelectedIntlVariation(null); setIntlFlexibleAmount(""); setIntlOperators([]); setIntlVariations([]); setIntlCurrency("");
   };
 
-  const handleTabSwitch = (tab: "pay" | "bank" | "education" | "history") => {
+  const handleTabSwitch = (tab: "pay" | "bank" | "education" | "history" | "agent") => {
     if (isInternational && tab !== "pay" && tab !== "history") return; 
     setActiveTab(tab); setCustomerPhone(""); setCustomerEmail(""); handleResetService(SERVICES[0]);
   };
@@ -684,6 +690,7 @@ export default function Home() {
         // Persisted so they can appear on the receipt email.
         customer_name: customerName || undefined,
         customer_address: meterAddress || undefined,
+        source_channel: 'WEB',
         blockchain: currentBlockchainName 
       };
 
@@ -891,6 +898,229 @@ export default function Home() {
 }; // <--- THIS IS THE MISSING BRACKET!
 
   useEffect(() => { if (status && !isProcessing) { const timer = setTimeout(() => setStatus(""), 5000); return () => clearTimeout(timer); } }, [status, isProcessing]);
+
+  // ⚡ DeAI AGENT ALLOWANCE (AbaPayV3) ⚡
+  //
+  // Two on-chain transactions, both signed BY THE USER from their own wallet:
+  //   1. ERC-20 approve(AbaPay, amount)      — lets the contract move the tokens at all
+  //   2. setSpendingAllowance(token, amount) — the cap the agent is bound by
+  //
+  // The cap lives ON-CHAIN. Our backend cannot raise it, and a compromised relayer key can
+  // never spend beyond it. Setting it to 0 revokes agent spending instantly.
+  const AGENT_ABI = useMemo(() => ([
+    { inputs: [{ name: 'tokenAddress', type: 'address' }, { name: 'amount', type: 'uint256' }], name: 'setSpendingAllowance', outputs: [], stateMutability: 'nonpayable', type: 'function' },
+    { inputs: [{ name: 'user', type: 'address' }, { name: 'tokenAddress', type: 'address' }], name: 'remainingAllowance', outputs: [{ name: '', type: 'uint256' }], stateMutability: 'view', type: 'function' },
+  ] as const), []);
+
+  // Resolve the selected token's address on the ACTIVE chain (mirrors the payment flow).
+  const getAgentTokenAddress = useCallback((): string | undefined => {
+    if (!activeChain) return undefined;
+    if (activeChain.id === base.id) return (selectedToken as any).baseMainnet || selectedToken.mainnet;
+    if (activeChain.id === baseSepolia.id) return (selectedToken as any).baseSepolia || selectedToken.sepolia;
+    if (activeChain.id === celo.id) return (selectedToken as any).celoMainnet || selectedToken.mainnet;
+    return (selectedToken as any).celoSepolia || selectedToken.sepolia;
+  }, [activeChain, selectedToken]);
+
+  const refreshAgentAllowance = useCallback(async () => {
+    if (!address || !ABAPAY_CONTRACT || !activeChain) return;
+    try {
+      const tokenAddress = getAgentTokenAddress();
+      if (!tokenAddress) return;
+      const pc = createPublicClient({ chain: activeChain, transport: http() });
+      const raw = await pc.readContract({
+        address: ABAPAY_CONTRACT as `0x${string}`,
+        abi: AGENT_ABI,
+        functionName: 'remainingAllowance',
+        args: [address as `0x${string}`, tokenAddress as `0x${string}`],
+      }) as bigint;
+      setAgentAllowance(formatUnits(raw, selectedToken.decimals));
+    } catch {
+      // Contract may still be V1/V2 (no allowances) — treat as "agent payments not enabled".
+      setAgentAllowance(null);
+    }
+  }, [address, ABAPAY_CONTRACT, activeChain, selectedToken, AGENT_ABI, getAgentTokenAddress]);
+
+  useEffect(() => { refreshAgentAllowance(); }, [refreshAgentAllowance]);
+
+
+  // ⚡ IN-APP AI CHAT: fill the form from a parsed request. The chat NEVER pays —
+  // the user reviews and signs, exactly as they always have.
+  const handleAIPrefill = (p: any) => {
+    setActiveTab('pay');
+    if (p.amountNgn) setNairaAmount(String(p.amountNgn));
+    if (p.billersCode) setAccountNumber(p.billersCode);
+
+    const cat = (p.serviceCategory || '').toUpperCase();
+    if (cat === 'ELECTRICITY') {
+      const svc = SERVICES.find(sv => sv.id === 'ELECTRICITY');
+      if (svc) setActiveService(svc);
+      if (p.serviceID) setElecProvider(p.serviceID);
+      if (p.meterType === 'prepaid' || p.meterType === 'postpaid') setMeterType(p.meterType);
+    } else if (cat === 'CABLE') {
+      const svc = SERVICES.find(sv => sv.id === 'CABLE');
+      if (svc) setActiveService(svc);
+      if (p.serviceID) setCableProvider(p.serviceID);
+    } else if (cat === 'DATA') {
+      const svc = SERVICES.find(sv => sv.id === 'INTERNET');
+      if (svc) setActiveService(svc);
+      if (p.provider) setTelecomProvider(String(p.provider).toLowerCase());
+    } else {
+      const svc = SERVICES.find(sv => sv.id === 'AIRTIME');
+      if (svc) setActiveService(svc);
+      if (p.provider) setTelecomProvider(String(p.provider).toLowerCase());
+    }
+    setStatus('✅ Filled in from your request — review and tap Pay.');
+  };
+
+  const handleAINavigate = (tab: string) => {
+    if (['pay', 'bank', 'education', 'history', 'agent'].includes(tab)) {
+      handleTabSwitch(tab as any);
+    }
+  };
+
+  const handleApproveAgentAllowance = async (amount: string) => {
+    if (!address || !wagmiWalletClient) { setStatus("Connect your wallet first."); return; }
+    const amt = Number(amount);
+    if (!Number.isFinite(amt) || amt < 0) { setStatus("Enter a valid amount."); return; }
+
+    setIsApprovingAgent(true);
+    try {
+      const tokenAddress = getAgentTokenAddress();
+      if (!tokenAddress) throw new Error("Unsupported token on this chain.");
+
+      const amountWei = parseUnits(amt.toFixed(selectedToken.decimals), selectedToken.decimals);
+      const pc = createPublicClient({ chain: activeChain, transport: http() });
+
+      // 1) ERC-20 approval (skipped when revoking, or when already sufficient).
+      if (amt > 0) {
+        const current = await pc.readContract({
+          address: tokenAddress as `0x${string}`,
+          abi: ERC20_ABI,
+          functionName: 'allowance',
+          args: [address as `0x${string}`, ABAPAY_CONTRACT as `0x${string}`],
+        }) as bigint;
+
+        if (current < amountWei) {
+          setStatus("Approve the token spend in your wallet...");
+          const h = await wagmiWalletClient.writeContract({
+            chain: activeChain,
+            address: tokenAddress as `0x${string}`,
+            abi: ERC20_ABI,
+            functionName: 'approve',
+            args: [ABAPAY_CONTRACT, amountWei],
+            account: address as `0x${string}`,
+          });
+          await pc.waitForTransactionReceipt({ hash: h, confirmations: 1 });
+        }
+      }
+
+      // 2) The on-chain agent cap — this is the security boundary.
+      setStatus(amt === 0 ? "Revoking agent access..." : "Setting your agent spend limit...");
+      const hash = await wagmiWalletClient.writeContract({
+        chain: activeChain,
+        address: ABAPAY_CONTRACT as `0x${string}`,
+        abi: AGENT_ABI,
+        functionName: 'setSpendingAllowance',
+        args: [tokenAddress as `0x${string}`, amountWei],
+        account: address as `0x${string}`,
+      });
+      await pc.waitForTransactionReceipt({ hash, confirmations: 1 });
+
+      await refreshAgentAllowance();
+      setStatus(amt === 0 ? "Agent access revoked." : `Agent can now spend up to ${amt} ${selectedToken.symbol}.`);
+    } catch (e: any) {
+      console.error('Agent allowance failed:', e);
+      setStatus(e?.shortMessage?.slice(0, 60) || "Could not set the agent limit. Is the contract AbaPayV3?");
+    } finally {
+      setIsApprovingAgent(false);
+    }
+  };
+
+  // ⚡ DeAI DEEP-LINK HAND-OFF ⚡
+  // When a user completes a request with the DeAI agent on Telegram/WhatsApp/X, the agent
+  // sends them a signed link back into this app. We verify it server-side (it's HMAC-signed
+  // and expires in 15 min), then pre-fill the payment form. The user just connects their
+  // wallet and signs — AbaPay never holds their funds, and no contract change was needed.
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const pay = params.get('pay');
+    const sig = params.get('sig');
+    if (!pay || !sig) return;
+
+    (async () => {
+      try {
+        const res = await fetch('/api/deai/resolve', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ payload: pay, sig }),
+        });
+        const data = await res.json();
+
+        if (!data.success) {
+          setStatus(data.message || 'This payment link is no longer valid.');
+          return;
+        }
+
+        const it = data.intent;
+
+        // Pre-fill the form from the agent's verified intent.
+        setActiveTab('pay');
+        if (it.amountNgn) setNairaAmount(String(it.amountNgn));
+        if (it.billersCode) setAccountNumber(it.billersCode);
+
+        const cat = (it.serviceCategory || '').toUpperCase();
+        if (cat === 'ELECTRICITY') {
+          const svc = SERVICES.find(s => s.id === 'ELECTRICITY');
+          if (svc) setActiveService(svc);
+          if (it.serviceID) setElecProvider(it.serviceID);
+          if (it.meterType === 'prepaid' || it.meterType === 'postpaid') setMeterType(it.meterType);
+        } else if (cat === 'CABLE') {
+          const svc = SERVICES.find(s => s.id === 'CABLE');
+          if (svc) setActiveService(svc);
+          if (it.serviceID) setCableProvider(it.serviceID);
+        } else if (cat === 'DATA') {
+          const svc = SERVICES.find(s => s.id === 'INTERNET');
+          if (svc) setActiveService(svc);
+          if (it.provider) setTelecomProvider(it.provider.toLowerCase());
+        } else {
+          const svc = SERVICES.find(s => s.id === 'AIRTIME');
+          if (svc) setActiveService(svc);
+          if (it.provider) setTelecomProvider(it.provider.toLowerCase());
+        }
+
+        setStatus(`✅ Request loaded from DeAI${it.customerName ? ` — ${it.customerName}` : ''}. Connect your wallet to approve.`);
+
+        // ⚡ CHAIN + TOKEN: honor what the agent specified, so an agent-originated payment
+        // can't silently land on the wrong chain (wrong tokens, and no Celo attribution).
+        if (it.token) {
+          const tok = SUPPORTED_TOKENS.find((t: any) => t.symbol === it.token);
+          if (tok) setSelectedToken(tok);
+        }
+        if (it.chain) {
+          const wantBase = String(it.chain).toUpperCase() === 'BASE';
+          const targetId = wantBase
+            ? (isMainnet ? base.id : baseSepolia.id)
+            : (isMainnet ? celo.id : celoSepolia.id);
+
+          if (wagmiChain && wagmiChain.id !== targetId && switchChain) {
+            try {
+              switchChain({ chainId: targetId });
+              setStatus(`Switching to ${it.chain} to complete your DeAI request…`);
+            } catch {
+              setStatus(`Please switch your wallet to ${it.chain} to complete this payment.`);
+            }
+          }
+        }
+
+        // Clean the URL so a refresh doesn't re-trigger (and the link isn't left in history).
+        window.history.replaceState({}, '', window.location.pathname);
+      } catch (err) {
+        console.error('Deep link resolution failed:', err);
+        setStatus('Could not load your DeAI request. Please try again.');
+      }
+    })();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   // ⚡ 1. THE SETTINGS INTERVAL ⚡
   useEffect(() => {
@@ -1598,6 +1828,7 @@ export default function Home() {
             <button onClick={() => handleTabSwitch("bank")} disabled={isInternational} className={`flex-1 min-w-[75px] py-3 rounded-xl text-[10px] sm:text-xs font-black transition-all ${isInternational ? 'opacity-30 cursor-not-allowed' : activeTab === 'bank' ? 'bg-white dark:bg-[#111114] text-emerald-600 dark:text-emerald-400 shadow-xl' : 'text-slate-500 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-200'}`}>TRANSFER</button>
             <button onClick={() => handleTabSwitch("education")} disabled={isInternational} className={`flex-1 min-w-[75px] py-3 rounded-xl text-[10px] sm:text-xs font-black transition-all ${isInternational ? 'opacity-30 cursor-not-allowed' : activeTab === 'education' ? 'bg-white dark:bg-[#111114] text-emerald-600 dark:text-emerald-400 shadow-xl' : 'text-slate-500 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-200'}`}>EDUCATION</button>
             <button onClick={() => handleTabSwitch("history")} className={`flex-1 min-w-[75px] py-3 rounded-xl text-[10px] sm:text-xs font-black transition-all ${activeTab === 'history' ? 'bg-white dark:bg-[#111114] text-emerald-600 dark:text-emerald-400 shadow-xl' : 'text-slate-500 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-200'}`}>HISTORY</button>
+            <button onClick={() => handleTabSwitch("agent")} className={`flex-1 min-w-[75px] py-3 rounded-xl text-[10px] sm:text-xs font-black transition-all ${activeTab === 'agent' ? 'bg-white dark:bg-[#111114] text-emerald-600 dark:text-emerald-400 shadow-xl' : 'text-slate-500 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-200'}`}>AGENT</button>
         </div>
 
         {/* ======================================= */}
@@ -2683,7 +2914,24 @@ export default function Home() {
           />
         )}
 
+        {/* ======================================= */}
+        {/* DeAI AGENT BLOCK */}
+        {/* ======================================= */}
+        {activeTab === 'agent' && (
+          <AgentHub
+            address={address}
+            selectedToken={selectedToken}
+            activeChainName={activeChain?.name?.toUpperCase().includes('BASE') ? 'BASE' : 'CELO'}
+            onApproveAllowance={handleApproveAgentAllowance}
+            currentAllowance={agentAllowance}
+            isApproving={isApprovingAgent}
+          />
+        )}
+
         <AppFooter network={activeNetworkDisplay} />
+
+        {/* ⚡ In-app DeAI assistant — understands requests, fills the form. Never pays. */}
+        <AIChat onPrefill={handleAIPrefill} onNavigate={handleAINavigate} />
       </div>
     </main>
   );
