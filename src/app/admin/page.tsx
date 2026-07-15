@@ -17,11 +17,25 @@ import { AdminOpsPanel } from "@/components/AdminOpsPanel";
 import { TELECOM_PROVIDERS, INTERNET_PROVIDERS, CABLE_PROVIDERS_LIST, EDUCATION_PROVIDERS } from "@/constants";
 import { ELECTRICITY_DISCOS } from "../discos"; 
 
+// ⚡ V2/V3 replaced the old one-shot `withdrawFunds` with a timelocked
+// queue → wait 24h → execute flow (see contracts/AbaPayV3.sol). `withdrawFunds`
+// only exists on the original V1 contract, so it's kept here purely as a
+// fallback for chains that haven't been upgraded yet.
 const ABAPAY_ADMIN_ABI = [
   {"inputs":[],"name":"owner","outputs":[{"internalType":"address","name":"","type":"address"}],"stateMutability":"view","type":"function"},
   {"inputs":[{"internalType":"address","name":"tokenAddress","type":"address"}],"name":"withdrawFunds","outputs":[],"stateMutability":"nonpayable","type":"function"},
-  {"inputs":[{"internalType":"address","name":"tokenAddress","type":"address"},{"internalType":"address","name":"recipient","type":"address"},{"internalType":"uint256","name":"amount","type":"uint256"}],"name":"refundUser","outputs":[],"stateMutability":"nonpayable","type":"function"}
+  {"inputs":[{"internalType":"address","name":"tokenAddress","type":"address"},{"internalType":"address","name":"recipient","type":"address"},{"internalType":"uint256","name":"amount","type":"uint256"}],"name":"refundUser","outputs":[],"stateMutability":"nonpayable","type":"function"},
+  {"inputs":[{"internalType":"address","name":"tokenAddress","type":"address"},{"internalType":"address","name":"destination","type":"address"},{"internalType":"uint256","name":"amount","type":"uint256"}],"name":"queueWithdrawal","outputs":[],"stateMutability":"nonpayable","type":"function"},
+  {"inputs":[{"internalType":"address","name":"tokenAddress","type":"address"}],"name":"cancelWithdrawal","outputs":[],"stateMutability":"nonpayable","type":"function"},
+  {"inputs":[{"internalType":"address","name":"tokenAddress","type":"address"}],"name":"executeWithdrawal","outputs":[],"stateMutability":"nonpayable","type":"function"},
+  {"inputs":[{"internalType":"address","name":"","type":"address"}],"name":"pendingWithdrawals","outputs":[{"internalType":"uint256","name":"amount","type":"uint256"},{"internalType":"uint256","name":"executableAt","type":"uint256"},{"internalType":"address","name":"destination","type":"address"}],"stateMutability":"view","type":"function"}
 ];
+
+// `supported: false` means the contract has no queueWithdrawal/pendingWithdrawals at all
+// (the original V1 ABI) — those chains still use the old one-shot withdrawFunds().
+type QueuedWithdrawal =
+  | { supported: false }
+  | { supported: true; amount: bigint; executableAt: number; destination: string };
 
 const ERC20_ABI = [
   {"inputs":[{"internalType":"address","name":"account","type":"address"}],"name":"balanceOf","outputs":[{"internalType":"uint256","name":"","type":"uint256"}],"stateMutability":"view","type":"function"},
@@ -49,6 +63,10 @@ export default function AdminDashboard() {
   // ⚡ SPLIT VAULT BALANCES ⚡
   const [celoVaults, setCeloVaults] = useState({ usdt: "0.00", usdc: "0.00", usdm: "0.00" });
   const [baseVaults, setBaseVaults] = useState({ usdt: "0.00", usdc: "0.00" });
+
+  // ⚡ TIMELOCKED WITHDRAWALS (V2/V3) — keyed by `${network}-${tokenSymbol}` ⚡
+  const [queuedWithdrawals, setQueuedWithdrawals] = useState<Record<string, QueuedWithdrawal>>({});
+  const [withdrawalBusyKey, setWithdrawalBusyKey] = useState<string | null>(null);
 
   const [vtBalance, setVtBalance] = useState("0.00"); 
   const [smsBalance, setSmsBalance] = useState("0");    
@@ -238,6 +256,8 @@ export default function AdminDashboard() {
     const basePublic = createPublicClient({ chain: isMainnet ? base : baseSepolia, transport: http() });
 
     try {
+      const newQueued: Record<string, QueuedWithdrawal> = {};
+
       // Safe check: Only fetch Celo if the address is a valid 42-character hex string
       if (CELO_CONTRACT && CELO_CONTRACT.length === 42) {
           const cUsdtBal = await celoPublic.readContract({ address: (isMainnet ? TOKENS["USD₮"].celoMainnet : TOKENS["USD₮"].celoSepolia) as `0x${string}`, abi: ERC20_ABI, functionName: 'balanceOf', args: [CELO_CONTRACT] }) as bigint;
@@ -249,6 +269,12 @@ export default function AdminDashboard() {
               usdc: formatUnits(cUsdcBal, TOKENS["USDC"].decimals),
               usdm: formatUnits(cUsdmBal, TOKENS["USDm"].decimals),
           });
+
+          for (const symbol of ['USD₮', 'USDC', 'USDm'] as const) {
+            const tokenAddr = (isMainnet ? (TOKENS[symbol] as any).celoMainnet : (TOKENS[symbol] as any).celoSepolia) as `0x${string}` | undefined;
+            if (!tokenAddr) continue;
+            newQueued[`CELO-${symbol}`] = await readPendingWithdrawal(celoPublic, CELO_CONTRACT, tokenAddr);
+          }
       }
 
       // Safe check: Only fetch Base if the address is a valid 42-character hex string
@@ -260,8 +286,38 @@ export default function AdminDashboard() {
               usdt: formatUnits(bUsdtBal, TOKENS["USD₮"].decimals),
               usdc: formatUnits(bUsdcBal, TOKENS["USDC"].decimals)
           });
+
+          for (const symbol of ['USD₮', 'USDC'] as const) {
+            const tokenAddr = (isMainnet ? (TOKENS[symbol] as any).baseMainnet : (TOKENS[symbol] as any).baseSepolia) as `0x${string}` | undefined;
+            if (!tokenAddr) continue;
+            newQueued[`BASE-${symbol}`] = await readPendingWithdrawal(basePublic, BASE_CONTRACT, tokenAddr);
+          }
       }
+
+      setQueuedWithdrawals(newQueued);
     } catch (error) { console.error("Failed to fetch multi-chain vault balances", error); }
+  };
+
+  // Reads pendingWithdrawals(token). Distinguishes "V1 contract, function doesn't exist"
+  // (call reverts) from "V2/V3 contract, nothing queued yet" (call succeeds, executableAt=0) —
+  // callers need to know which withdrawal flow (old one-shot vs new timelocked) applies.
+  const readPendingWithdrawal = async (
+    publicClient: any,
+    contract: `0x${string}`,
+    tokenAddr: `0x${string}`
+  ): Promise<QueuedWithdrawal> => {
+    try {
+      const [amount, executableAt, destination] = await publicClient.readContract({
+        address: contract,
+        abi: ABAPAY_ADMIN_ABI,
+        functionName: 'pendingWithdrawals',
+        args: [tokenAddr],
+      }) as [bigint, bigint, string];
+
+      return { supported: true, amount, executableAt: Number(executableAt), destination };
+    } catch {
+      return { supported: false };
+    }
   };
 
   const fetchVtPassHealth = async (headersOverride?: Record<string, string>) => {
@@ -274,42 +330,100 @@ export default function AdminDashboard() {
   };
 
   // ⚡ SMART WITHDRAWAL ROUTING ⚡
+  //
+  // V1 contracts expose one-shot withdrawFunds(). V2/V3 replaced that with a timelocked
+  // queueWithdrawal() -> wait 24h -> executeWithdrawal() flow (contracts/AbaPayV3.sol),
+  // so a compromised owner key can't unilaterally drain the vault instantly. This function
+  // detects which flow the target contract supports and drives it through each stage.
   const handleWithdrawal = async (tokenSymbol: 'USD₮' | 'USDC' | 'USDm', network: 'CELO' | 'BASE') => {
     if (!client || !address) return;
+    const key = `${network}-${tokenSymbol}`;
 
-    const balanceToCheck = network === 'CELO' 
-        ? celoVaults[tokenSymbol.toLowerCase() as keyof typeof celoVaults] 
+    const balanceToCheck = network === 'CELO'
+        ? celoVaults[tokenSymbol.toLowerCase() as keyof typeof celoVaults]
         : baseVaults[tokenSymbol.toLowerCase() as keyof typeof baseVaults];
-
-    if (parseFloat(balanceToCheck) <= 0) return setStatus(`The ${network} ${tokenSymbol} Vault is already empty.`);
-    setStatus(`Withdrawing ${tokenSymbol} from ${network}...`);
 
     try {
       const targetChain = network === 'BASE' ? (isMainnet ? base : baseSepolia) : (isMainnet ? celo : celoSepolia);
       const targetContract = network === 'BASE' ? BASE_CONTRACT : CELO_CONTRACT;
+      const tokenAddr = network === 'BASE'
+         ? (isMainnet ? (TOKENS[tokenSymbol] as any).baseMainnet : (TOKENS[tokenSymbol] as any).baseSepolia)
+         : (isMainnet ? TOKENS[tokenSymbol].celoMainnet : TOKENS[tokenSymbol].celoSepolia);
 
       const currentChainId = await client.getChainId();
       if (currentChainId !== targetChain.id) await client.switchChain({ id: targetChain.id });
 
-      // ⚡ TYPE FIX APPLIED ⚡
-      const tokenAddr = network === 'BASE' 
+      setWithdrawalBusyKey(key);
+      const publicClient = createPublicClient({ chain: targetChain, transport: http() });
+      const queued = await readPendingWithdrawal(publicClient, targetContract, tokenAddr);
+
+      let hash: string;
+
+      if (!queued.supported) {
+        // V1 — no timelock, withdrawFunds() sends the whole vault straight to the owner.
+        if (parseFloat(balanceToCheck) <= 0) return setStatus(`The ${network} ${tokenSymbol} Vault is already empty.`);
+        setStatus(`Withdrawing ${tokenSymbol} from ${network}...`);
+        hash = await client.writeContract({
+            chain: targetChain, address: targetContract, abi: ABAPAY_ADMIN_ABI,
+            functionName: 'withdrawFunds', args: [tokenAddr],
+            account: address, dataSuffix: celoAttributionSuffix(targetChain),
+        });
+        setStatus(`Success! Hash: ${hash.slice(0, 10)}`);
+      } else if (queued.executableAt === 0) {
+        // Nothing queued yet — queue the full vault balance out to the admin's own wallet.
+        if (parseFloat(balanceToCheck) <= 0) return setStatus(`The ${network} ${tokenSymbol} Vault is already empty.`);
+        const decimals = TOKENS[tokenSymbol].decimals;
+        const amountWei = parseUnits(parseFloat(balanceToCheck).toFixed(decimals), decimals);
+        setStatus(`Queueing ${tokenSymbol} withdrawal on ${network} (24h timelock)...`);
+        hash = await client.writeContract({
+            chain: targetChain, address: targetContract, abi: ABAPAY_ADMIN_ABI,
+            functionName: 'queueWithdrawal', args: [tokenAddr, address, amountWei],
+            account: address, dataSuffix: celoAttributionSuffix(targetChain),
+        });
+        setStatus(`Queued! Executable in 24h. Hash: ${hash.slice(0, 10)}`);
+      } else if (Date.now() < queued.executableAt * 1000) {
+        const mins = Math.ceil((queued.executableAt * 1000 - Date.now()) / 60000);
+        setStatus(`Withdrawal already queued for ${network} ${tokenSymbol} — executable in ~${mins} min.`);
+        return;
+      } else {
+        setStatus(`Executing queued ${tokenSymbol} withdrawal on ${network}...`);
+        hash = await client.writeContract({
+            chain: targetChain, address: targetContract, abi: ABAPAY_ADMIN_ABI,
+            functionName: 'executeWithdrawal', args: [tokenAddr],
+            account: address, dataSuffix: celoAttributionSuffix(targetChain),
+        });
+        setStatus(`Withdrawn! Hash: ${hash.slice(0, 10)}`);
+      }
+
+      setTimeout(() => refreshAllData(), 5000);
+    } catch (error) { setStatus("Rejected or Insufficient Gas."); }
+    finally { setWithdrawalBusyKey(null); }
+  };
+
+  const handleCancelWithdrawal = async (tokenSymbol: 'USD₮' | 'USDC' | 'USDm', network: 'CELO' | 'BASE') => {
+    if (!client || !address) return;
+    const key = `${network}-${tokenSymbol}`;
+
+    try {
+      const targetChain = network === 'BASE' ? (isMainnet ? base : baseSepolia) : (isMainnet ? celo : celoSepolia);
+      const targetContract = network === 'BASE' ? BASE_CONTRACT : CELO_CONTRACT;
+      const tokenAddr = network === 'BASE'
          ? (isMainnet ? (TOKENS[tokenSymbol] as any).baseMainnet : (TOKENS[tokenSymbol] as any).baseSepolia)
          : (isMainnet ? TOKENS[tokenSymbol].celoMainnet : TOKENS[tokenSymbol].celoSepolia);
 
-      // ⚡ ADDED 'chain: targetChain' to bypass viem strict mode error
-      const hash = await client.writeContract({
-          chain: targetChain,
-          address: targetContract,
-          abi: ABAPAY_ADMIN_ABI,
-          functionName: 'withdrawFunds',
-          args: [tokenAddr],
-          account: address,
-          dataSuffix: celoAttributionSuffix(targetChain), // Celo attribution only; no-op on Base
-      });
+      const currentChainId = await client.getChainId();
+      if (currentChainId !== targetChain.id) await client.switchChain({ id: targetChain.id });
 
-      setStatus(`Success! Hash: ${hash.slice(0, 10)}`);
+      setWithdrawalBusyKey(key);
+      const hash = await client.writeContract({
+          chain: targetChain, address: targetContract, abi: ABAPAY_ADMIN_ABI,
+          functionName: 'cancelWithdrawal', args: [tokenAddr],
+          account: address, dataSuffix: celoAttributionSuffix(targetChain),
+      });
+      setStatus(`Withdrawal cancelled for ${network} ${tokenSymbol}. Hash: ${hash.slice(0, 10)}`);
       setTimeout(() => refreshAllData(), 5000);
     } catch (error) { setStatus("Rejected or Insufficient Gas."); }
+    finally { setWithdrawalBusyKey(null); }
   };
 
   // ⚡ SMART REFUND ROUTING ⚡
@@ -944,17 +1058,17 @@ export default function AdminDashboard() {
                     <div className="bg-slate-900 border border-slate-800 p-6 rounded-3xl text-center">
                         <h2 className="text-4xl font-black mb-1">${Number(parseFloat(celoVaults.usdt).toFixed(4))}</h2>
                         <span className="text-xs text-emerald-500 font-bold uppercase tracking-widest bg-emerald-500/10 px-3 py-1 rounded-full">USD₮ Vault</span>
-                        <button onClick={() => handleWithdrawal('USD₮', 'CELO')} className="mt-8 w-full bg-slate-800 hover:bg-emerald-500 hover:text-slate-950 text-slate-300 font-black py-3 rounded-xl flex items-center justify-center gap-2 transition-all"><ArrowDownToLine size={16} /> Withdraw USD₮</button>
+                        <WithdrawControl tokenSymbol="USD₮" network="CELO" hoverClass="hover:bg-emerald-500" queued={queuedWithdrawals['CELO-USD₮']} busy={withdrawalBusyKey === 'CELO-USD₮'} onWithdraw={handleWithdrawal} onCancel={handleCancelWithdrawal} />
                     </div>
                     <div className="bg-slate-900 border border-slate-800 p-6 rounded-3xl text-center">
                         <h2 className="text-4xl font-black mb-1">${Number(parseFloat(celoVaults.usdc).toFixed(4))}</h2>
                         <span className="text-xs text-blue-400 font-bold uppercase tracking-widest bg-blue-500/10 px-3 py-1 rounded-full">USDC Vault</span>
-                        <button onClick={() => handleWithdrawal('USDC', 'CELO')} className="mt-8 w-full bg-slate-800 hover:bg-blue-500 hover:text-slate-950 text-slate-300 font-black py-3 rounded-xl flex items-center justify-center gap-2 transition-all"><ArrowDownToLine size={16} /> Withdraw USDC</button>
+                        <WithdrawControl tokenSymbol="USDC" network="CELO" hoverClass="hover:bg-blue-500" queued={queuedWithdrawals['CELO-USDC']} busy={withdrawalBusyKey === 'CELO-USDC'} onWithdraw={handleWithdrawal} onCancel={handleCancelWithdrawal} />
                     </div>
                     <div className="bg-slate-900 border border-slate-800 p-6 rounded-3xl text-center">
                         <h2 className="text-4xl font-black mb-1">${Number(parseFloat(celoVaults.usdm).toFixed(4))}</h2>
                         <span className="text-xs text-yellow-500 font-bold uppercase tracking-widest bg-yellow-500/10 px-3 py-1 rounded-full">USDm Vault</span>
-                        <button onClick={() => handleWithdrawal('USDm', 'CELO')} className="mt-8 w-full bg-slate-800 hover:bg-yellow-500 hover:text-slate-950 text-slate-300 font-black py-3 rounded-xl flex items-center justify-center gap-2 transition-all"><ArrowDownToLine size={16} /> Withdraw USDm</button>
+                        <WithdrawControl tokenSymbol="USDm" network="CELO" hoverClass="hover:bg-yellow-500" queued={queuedWithdrawals['CELO-USDm']} busy={withdrawalBusyKey === 'CELO-USDm'} onWithdraw={handleWithdrawal} onCancel={handleCancelWithdrawal} />
                     </div>
                 </div>
 
@@ -964,12 +1078,12 @@ export default function AdminDashboard() {
                     <div className="bg-slate-900 border border-slate-800 p-6 rounded-3xl text-center">
                         <h2 className="text-4xl font-black mb-1">${Number(parseFloat(baseVaults.usdt).toFixed(4))}</h2>
                         <span className="text-xs text-emerald-500 font-bold uppercase tracking-widest bg-emerald-500/10 px-3 py-1 rounded-full">USD₮ Vault</span>
-                        <button onClick={() => handleWithdrawal('USD₮', 'BASE')} className="mt-8 w-full bg-slate-800 hover:bg-emerald-500 hover:text-slate-950 text-slate-300 font-black py-3 rounded-xl flex items-center justify-center gap-2 transition-all"><ArrowDownToLine size={16} /> Withdraw USD₮</button>
+                        <WithdrawControl tokenSymbol="USD₮" network="BASE" hoverClass="hover:bg-emerald-500" queued={queuedWithdrawals['BASE-USD₮']} busy={withdrawalBusyKey === 'BASE-USD₮'} onWithdraw={handleWithdrawal} onCancel={handleCancelWithdrawal} />
                     </div>
                     <div className="bg-slate-900 border border-slate-800 p-6 rounded-3xl text-center">
                         <h2 className="text-4xl font-black mb-1">${Number(parseFloat(baseVaults.usdc).toFixed(4))}</h2>
                         <span className="text-xs text-blue-400 font-bold uppercase tracking-widest bg-blue-500/10 px-3 py-1 rounded-full">USDC Vault</span>
-                        <button onClick={() => handleWithdrawal('USDC', 'BASE')} className="mt-8 w-full bg-slate-800 hover:bg-blue-500 hover:text-slate-950 text-slate-300 font-black py-3 rounded-xl flex items-center justify-center gap-2 transition-all"><ArrowDownToLine size={16} /> Withdraw USDC</button>
+                        <WithdrawControl tokenSymbol="USDC" network="BASE" hoverClass="hover:bg-blue-500" queued={queuedWithdrawals['BASE-USDC']} busy={withdrawalBusyKey === 'BASE-USDC'} onWithdraw={handleWithdrawal} onCancel={handleCancelWithdrawal} />
                     </div>
                 </div>
               </div>
@@ -1028,6 +1142,46 @@ export default function AdminDashboard() {
         )}
       </div>
     </main>
+  );
+}
+
+function WithdrawControl({ tokenSymbol, network, hoverClass, queued, busy, onWithdraw, onCancel }: {
+  tokenSymbol: 'USD₮' | 'USDC' | 'USDm';
+  network: 'CELO' | 'BASE';
+  hoverClass: string;
+  queued?: QueuedWithdrawal;
+  busy: boolean;
+  onWithdraw: (t: 'USD₮' | 'USDC' | 'USDm', n: 'CELO' | 'BASE') => void;
+  onCancel: (t: 'USD₮' | 'USDC' | 'USDm', n: 'CELO' | 'BASE') => void;
+}) {
+  const baseBtn = `mt-8 w-full font-black py-3 rounded-xl flex items-center justify-center gap-2 transition-all disabled:opacity-50`;
+
+  if (queued?.supported && queued.executableAt > 0) {
+    const isReady = Date.now() >= queued.executableAt * 1000;
+    if (!isReady) {
+      const mins = Math.ceil((queued.executableAt * 1000 - Date.now()) / 60000);
+      return (
+        <div className="mt-8 space-y-2">
+          <button disabled className={`${baseBtn} bg-slate-800 text-slate-500`}>
+            <Loader2 size={16} /> Executable in ~{mins} min
+          </button>
+          <button onClick={() => onCancel(tokenSymbol, network)} disabled={busy} className="w-full text-[10px] font-bold uppercase tracking-widest text-red-400 hover:text-red-300 disabled:opacity-50">
+            Cancel Queued Withdrawal
+          </button>
+        </div>
+      );
+    }
+    return (
+      <button onClick={() => onWithdraw(tokenSymbol, network)} disabled={busy} className={`${baseBtn} bg-emerald-600 hover:bg-emerald-500 text-white`}>
+        {busy ? <Loader2 size={16} className="animate-spin" /> : <ArrowDownToLine size={16} />} Execute Withdrawal
+      </button>
+    );
+  }
+
+  return (
+    <button onClick={() => onWithdraw(tokenSymbol, network)} disabled={busy} className={`${baseBtn} bg-slate-800 ${hoverClass} hover:text-slate-950 text-slate-300`}>
+      {busy ? <Loader2 size={16} className="animate-spin" /> : <ArrowDownToLine size={16} />} Withdraw {tokenSymbol}
+    </button>
   );
 }
 

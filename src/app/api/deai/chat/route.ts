@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server';
 import { parseIntent } from '@/lib/deai/intentEngine';
 import { assessFeasibility, describeCapabilities, capabilityForIntent, getCapability } from '@/lib/deai/capabilities';
-import { enforceRateLimit } from '@/lib/rateLimit';
+import { enforceRateLimit, enforceRateLimitByKey } from '@/lib/rateLimit';
 import { resolveServiceId } from '@/lib/deai/services';
 import { getServiceRules } from '@/lib/serviceRules';
 
@@ -18,6 +18,14 @@ import { getServiceRules } from '@/lib/serviceRules';
 export async function POST(req: Request) {
   const limited = await enforceRateLimit(req, 'deai-chat', 20, 60);
   if (limited) return limited;
+
+  // The chat is only reachable once a wallet is connected (gated client-side), so a
+  // connected wallet spamming from rotating IPs/networks still hits its own cap.
+  const walletAddr = req.headers.get('x-wallet-address');
+  if (walletAddr) {
+    const walletLimited = await enforceRateLimitByKey(`deai-chat-wallet:${walletAddr.toLowerCase()}`, 20, 60);
+    if (walletLimited) return walletLimited;
+  }
 
   try {
     // Operator can disable the in-app assistant from the admin dashboard.

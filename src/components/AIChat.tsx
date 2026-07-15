@@ -17,9 +17,15 @@ interface Msg { role: 'user' | 'assistant'; text: string; }
 interface Props {
   onPrefill: (prefill: any, schedule?: any) => void;
   onNavigate: (tab: string) => void;
+  /** The chat pre-fills a payment the user still has to sign — meaningless without a wallet. */
+  walletConnected: boolean;
+  /** Called instead of opening the chat when the wallet isn't connected yet. */
+  onRequireWallet: () => void;
+  /** Sent as a rate-limit key so a connected wallet has its own quota, not just its IP's. */
+  walletAddress?: string;
 }
 
-export function AIChat({ onPrefill, onNavigate }: Props) {
+export function AIChat({ onPrefill, onNavigate, walletConnected, onRequireWallet, walletAddress }: Props) {
   const [open, setOpen] = useState(false);
   const [msgs, setMsgs] = useState<Msg[]>([
     { role: 'assistant', text: "Hi 👋 Tell me what you'd like to pay — e.g. \"Send ₦500 airtime to 08012345678\" or \"Pay ₦2,000 Ikeja electric, meter 04123456789\"." },
@@ -41,7 +47,10 @@ export function AIChat({ onPrefill, onNavigate }: Props) {
     try {
       const res = await fetch('/api/deai/chat', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: {
+          'Content-Type': 'application/json',
+          ...(walletAddress ? { 'X-Wallet-Address': walletAddress } : {}),
+        },
         body: JSON.stringify({ message: text }),
       });
       const data = await res.json();
@@ -66,11 +75,16 @@ export function AIChat({ onPrefill, onNavigate }: Props) {
   if (!open) {
     return (
       <button
-        onClick={() => setOpen(true)}
+        onClick={() => walletConnected ? setOpen(true) : onRequireWallet()}
         aria-label="Open AI assistant"
-        className="fixed bottom-6 right-6 z-40 w-14 h-14 rounded-full bg-emerald-600 hover:bg-emerald-700 text-white shadow-2xl shadow-emerald-600/30 flex items-center justify-center transition-all active:scale-95"
+        className="fixed bottom-24 right-4 sm:bottom-6 sm:right-6 z-40 w-14 h-14 rounded-full bg-emerald-600 hover:bg-emerald-700 text-white shadow-2xl shadow-emerald-600/30 flex items-center justify-center transition-all active:scale-95"
       >
         <Sparkles size={22} />
+        {/* Blinking "new feature" notifier — draws the eye without blocking the icon */}
+        <span className="absolute -top-1 -right-1 flex h-4 w-4">
+          <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-red-500 opacity-75"></span>
+          <span className="relative inline-flex h-4 w-4 rounded-full bg-red-600 border-2 border-white dark:border-[#111114]"></span>
+        </span>
       </button>
     );
   }

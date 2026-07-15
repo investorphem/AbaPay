@@ -22,11 +22,8 @@ const config: HardhatUserConfig = {
   },
   // Configuration to verify contracts on Etherscan V2
   etherscan: {
-    // Now using the unified ETHERSCAN_API_KEY for all networks
-    apiKey: {
-      sepolia: process.env.ETHERSCAN_API_KEY || "",
-      celo: process.env.ETHERSCAN_API_KEY || "",
-    },
+    // Etherscan V2 uses a single unified API key across all chains.
+    apiKey: process.env.ETHERSCAN_API_KEY || "",
     customChains: [
       {
         network: "sepolia",

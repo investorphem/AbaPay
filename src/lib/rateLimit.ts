@@ -94,16 +94,15 @@ export async function rateLimit(key: string, limit: number, windowSeconds: numbe
 }
 
 /**
- * Convenience wrapper: returns a 429 Response if the caller is over the limit,
- * or null if the request may proceed.
+ * Convenience wrapper: returns a 429 Response if the caller (identified by an
+ * already-derived key) is over the limit, or null if the request may proceed.
  */
-export async function enforceRateLimit(
-  req: Request,
-  scope: string,
+export async function enforceRateLimitByKey(
+  key: string,
   limit: number,
   windowSeconds: number
 ): Promise<Response | null> {
-  const result = await rateLimit(getClientKey(req, scope), limit, windowSeconds);
+  const result = await rateLimit(key, limit, windowSeconds);
   if (result.allowed) return null;
 
   return new Response(
@@ -116,4 +115,18 @@ export async function enforceRateLimit(
       },
     }
   );
+}
+
+/**
+ * Convenience wrapper: returns a 429 Response if the caller is over the limit,
+ * or null if the request may proceed. Keys by IP — use enforceRateLimitByKey
+ * directly for a different identity (e.g. wallet address).
+ */
+export async function enforceRateLimit(
+  req: Request,
+  scope: string,
+  limit: number,
+  windowSeconds: number
+): Promise<Response | null> {
+  return enforceRateLimitByKey(getClientKey(req, scope), limit, windowSeconds);
 }

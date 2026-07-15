@@ -6,15 +6,18 @@ import { createWalletClient, createPublicClient, custom, http, parseUnits, forma
 import { eip5792Actions } from "viem/experimental";
 import { celo, celoSepolia, base, baseSepolia } from "viem/chains";
 import Link from "next/link";
-import { 
-  ShieldCheck, Zap, AlertTriangle, CheckCircle2, ChevronDown, 
-  Loader2, Coins, Briefcase, ListPlus, Users, Landmark, XCircle, 
-  RefreshCw, Tv, GraduationCap, Send, Globe
+import {
+  ShieldCheck, Zap, AlertTriangle, CheckCircle2, ChevronDown,
+  Loader2, Coins, Briefcase, ListPlus, Users, Landmark, XCircle,
+  RefreshCw, Tv, GraduationCap, Send, Globe, Sparkles
 } from "lucide-react";
 import { supabase } from "@/utils/supabase";
 import { celoAttributionSuffix } from "@/lib/attribution";
 import { ELECTRICITY_DISCOS } from "./discos";
 import { useAccount, useConnect, useDisconnect, useWalletClient, useSwitchChain } from 'wagmi';
+import { createThirdwebClient } from "thirdweb";
+import { useSetActiveWallet, useFetchWithPayment } from "thirdweb/react";
+import { viemAdapter } from "thirdweb/adapters/viem";
 
 import { ReceiptModal, SelectionModal } from "@/components/Modals";
 import { TermsModal, PrivacyModal } from "@/components/Modals";
@@ -38,6 +41,18 @@ export default function Home() {
   // ⚡ ADD THIS: Grabs the live WalletConnect provider securely
   const { data: wagmiWalletClient } = useWalletClient();
   const { switchChain } = useSwitchChain(); // ⚡ used by the DeAI deep-link handler to land on the right chain
+
+  // ⚡ x402 SETTLEMENT (main app only, Celo + USDC) ⚡
+  // Kept separate from the agent's signature-free relayer flow — see processX402Payment().
+  // clientId falls back to a placeholder when unconfigured; the x402 payment option is only
+  // ever shown (and fetchWithPayment only ever called) when NEXT_PUBLIC_THIRDWEB_CLIENT_ID
+  // is actually set, so the placeholder is never exercised.
+  const thirdwebClient = useMemo(
+    () => createThirdwebClient({ clientId: process.env.NEXT_PUBLIC_THIRDWEB_CLIENT_ID || "unconfigured" }),
+    []
+  );
+  const setActiveThirdwebWallet = useSetActiveWallet();
+  const { fetchWithPayment: fetchWithX402Payment } = useFetchWithPayment(thirdwebClient, { uiEnabled: false });
   const [environment, setEnvironment] = useState<'MINIPAY' | 'FARCASTER' | 'WEB' | 'LOADING' | 'BASE'>('LOADING');
   const [killSwitches, setKillSwitches] = useState<Record<string, boolean>>({});
   const [address, setAddress] = useState<string | null>(null);
@@ -408,7 +423,12 @@ export default function Home() {
   };
 
   const handleTabSwitch = (tab: "pay" | "bank" | "education" | "history" | "agent") => {
-    if (isInternational && tab !== "pay" && tab !== "history") return; 
+    if (isInternational && tab !== "pay" && tab !== "history") return;
+    // The Agent tab sets an on-chain spending allowance — meaningless without a wallet.
+    if (tab === "agent" && !address) {
+      showToast("Connect Your Wallet", "Connect your wallet first to set up agent-initiated payments.", "error");
+      return;
+    }
     setActiveTab(tab); setCustomerPhone(""); setCustomerEmail(""); handleResetService(SERVICES[0]);
   };
 
@@ -554,6 +574,80 @@ export default function Home() {
     setIsVerifying(false);
   };
 
+  // ⚡ SHARED: which service is being paid, and the payload /api/pay (and /api/pay/x402)
+  // both expect. Used by both processBlockchainPayment (contract call) and
+  // processX402Payment (x402 settlement) so the service-resolution branching lives once.
+  const buildBackendPayload = () => {
+    let vtpassServiceID = ""; let displayNetwork = ""; let finalVariationCode = 'none'; let payloadBillersCode = accountNumber; let uiCategory = "";
+
+    if (isInternational) {
+        vtpassServiceID = "foreign-airtime"; displayNetwork = selectedIntlOperator.name; finalVariationCode = selectedIntlVariation.variation_code; uiCategory = `INTL ${selectedIntlProduct.name.toUpperCase()}`;
+    } else if (activeTab === "bank") {
+      vtpassServiceID = "bank-deposit"; displayNetwork = selectedBank.name; finalVariationCode = selectedBank.variation_code; uiCategory = "BANK";
+    } else if (activeTab === "education") {
+      vtpassServiceID = educationProvider; displayNetwork = educationProvider; finalVariationCode = selectedEducationPlan?.variation_code || 'none'; uiCategory = "EDUCATION"; payloadBillersCode = educationProvider === "jamb" ? accountNumber : customerPhone;
+    } else {
+      uiCategory = activeService.id;
+      if (activeService.id === "ELECTRICITY") { vtpassServiceID = elecProvider; displayNetwork = elecProvider; finalVariationCode = meterType; }
+      else if (activeService.id === "CABLE") { vtpassServiceID = cableProvider; displayNetwork = cableProvider; finalVariationCode = (['dstv', 'gotv'].includes(cableProvider) && cableSubscriptionType === 'renew') ? 'none' : selectedCablePlan?.variation_code || 'none'; }
+      else if (activeService.id === "INTERNET") { vtpassServiceID = internetProvider; displayNetwork = internetProvider; finalVariationCode = selectedInternetPlan?.variation_code || 'none'; payloadBillersCode = internetProvider === 'smile-direct' ? (internetAccountId || accountNumber) : accountNumber; }
+      else { vtpassServiceID = telecomProvider; displayNetwork = telecomProvider; }
+    }
+
+    const currentBlockchainName = activeChain?.name?.toUpperCase() || "CELO";
+
+    const backendPayload: any = {
+      serviceID: vtpassServiceID, serviceCategory: uiCategory, network: displayNetwork.toUpperCase(), billersCode: payloadBillersCode, amount: cryptoToCharge,
+      nairaAmount: calculatedNairaAmount,
+      foreignAmount: isInternational ? (selectedIntlVariation?.fixedPrice === "Yes" ? selectedIntlVariation.variation_amount : intlFlexibleAmount) : undefined,
+      displayAmount: isInternational ? `${intlCurrency || activeCountry.currency || activeCountry.code} ${displayForeignAmount}` : undefined,
+      token: selectedToken.symbol,
+      variation_code: finalVariationCode, phone: customerPhone || accountNumber, email: customerEmail, wallet_address: address,
+      subscription_type: activeTab === "pay" && activeService.id === "CABLE" && ['dstv', 'gotv'].includes(cableProvider) ? cableSubscriptionType : undefined,
+      meter_account_type: meterAccountType, operator_id: isInternational ? selectedIntlOperator?.operator_id : undefined, country_code: isInternational ? activeCountry.code : undefined, product_type_id: isInternational ? selectedIntlProduct?.product_type_id : undefined,
+      customer_name: customerName || undefined,
+      customer_address: meterAddress || undefined,
+      source_channel: 'WEB',
+      blockchain: currentBlockchainName
+    };
+
+    return { backendPayload, vtpassServiceID, payloadBillersCode, uiCategory, displayNetwork, finalVariationCode, currentBlockchainName };
+  };
+
+  // ⚡ SHARED: toast/history/balance-refresh tail — identical whether the payment settled
+  // via the contract call or via x402.
+  const handleVendResult = (finalStatus: any, realTxHash: string, backendPayload: any, uiCategory: string, displayNetwork: string, payloadBillersCode: string, currentBlockchainName: string) => {
+      saveBeneficiary(accountNumber, customerName);
+      handleResetService(SERVICES[0]);
+
+      if (finalStatus.status === 'SUCCESS') {
+          setStatus("Success! Token/Ref Dispatched.");
+          const earnedPoints = Number((parseFloat(calculatedNairaAmount) / exchangeRate).toFixed(2));
+          if (earnedPoints > 0) {
+              window.dispatchEvent(new CustomEvent('abapoints-awarded', { detail: earnedPoints }));
+              showToast("Transaction Successful", `Payment confirmed! You earned +${earnedPoints.toFixed(2).replace(/\.00$/, '')} AbaPoints ✨`, "success");
+          } else {
+              showToast("Transaction Successful", "Your transaction has been successfully processed.", "success");
+          }
+      } else if (finalStatus.status === 'TIMEOUT') {
+          setStatus("Payment Sent! We're finishing your vending in the background.");
+          showToast("Processing", "You can safely leave this page. Receipt will be in History.", "success");
+      } else {
+          setStatus("Vending Failed. Admin alerted.");
+          showToast("Vending Error", finalStatus.message || "Payment received, but vending failed.", "error");
+      }
+
+      const updatedHistory = [{
+          id: realTxHash.slice(0,8), date: new Date().toLocaleString(), status: finalStatus.status === 'TIMEOUT' ? "PENDING" : finalStatus.status,
+          amountNaira: isInternational ? `${intlCurrency || activeCountry.code} ${displayForeignAmount}` : calculatedNairaAmount,
+          amountCrypto: backendPayload.amount, tokenUsed: selectedToken.symbol, service: uiCategory, network: displayNetwork.toUpperCase(), txHash: realTxHash, account: payloadBillersCode,
+          blockchain: currentBlockchainName, purchased_code: finalStatus.purchased_code, units: finalStatus.units, country_code: isInternational ? activeCountry.code : null
+      }, ...transactions];
+      setTransactions(updatedHistory);
+      localStorage.setItem(`abapay_history_${address}`, JSON.stringify(updatedHistory));
+      setCurrentPage(1);
+  };
+
   const processBlockchainPayment = async () => {
     if (!address || !client) return setStatus("Connect Wallet First");
     if (parseFloat(cryptoToCharge) > parseFloat(walletBalance)) return setStatus(`Insufficient ${selectedToken.symbol} Balance.`);
@@ -616,23 +710,8 @@ export default function Home() {
           }
       }
 
-      let vtpassServiceID = ""; let displayNetwork = ""; let finalVariationCode = 'none'; let payloadBillersCode = accountNumber; let uiCategory = "";
-
-      if (isInternational) {
-          vtpassServiceID = "foreign-airtime"; displayNetwork = selectedIntlOperator.name; finalVariationCode = selectedIntlVariation.variation_code; uiCategory = `INTL ${selectedIntlProduct.name.toUpperCase()}`;
-      } else if (activeTab === "bank") {
-        vtpassServiceID = "bank-deposit"; displayNetwork = selectedBank.name; finalVariationCode = selectedBank.variation_code; uiCategory = "BANK";
-      } else if (activeTab === "education") {
-        vtpassServiceID = educationProvider; displayNetwork = educationProvider; finalVariationCode = selectedEducationPlan?.variation_code || 'none'; uiCategory = "EDUCATION"; payloadBillersCode = educationProvider === "jamb" ? accountNumber : customerPhone;
-      } else {
-        uiCategory = activeService.id;
-        if (activeService.id === "ELECTRICITY") { vtpassServiceID = elecProvider; displayNetwork = elecProvider; finalVariationCode = meterType; } 
-        else if (activeService.id === "CABLE") { vtpassServiceID = cableProvider; displayNetwork = cableProvider; finalVariationCode = (['dstv', 'gotv'].includes(cableProvider) && cableSubscriptionType === 'renew') ? 'none' : selectedCablePlan?.variation_code || 'none'; } 
-        else if (activeService.id === "INTERNET") { vtpassServiceID = internetProvider; displayNetwork = internetProvider; finalVariationCode = selectedInternetPlan?.variation_code || 'none'; payloadBillersCode = internetProvider === 'smile-direct' ? (internetAccountId || accountNumber) : accountNumber; } 
-        else { vtpassServiceID = telecomProvider; displayNetwork = telecomProvider; }
-      }
-
-      const currentBlockchainName = activeChain?.name?.toUpperCase() || "CELO";
+      const { backendPayload: builtPayload, vtpassServiceID, payloadBillersCode, uiCategory, displayNetwork, currentBlockchainName } = buildBackendPayload();
+      backendPayload = builtPayload;
 
       setStatus("Please approve the transaction in your wallet...");
 
@@ -675,26 +754,7 @@ export default function Home() {
 
       // 3. TRUE PRE-FLIGHT INTENT
       preflightHash = `preflight_${address}_${Date.now()}`;
-      
-                  backendPayload = {
-        serviceID: vtpassServiceID, serviceCategory: uiCategory, network: displayNetwork.toUpperCase(), billersCode: payloadBillersCode, amount: cryptoToCharge, 
-        nairaAmount: calculatedNairaAmount, 
-        foreignAmount: isInternational ? (selectedIntlVariation?.fixedPrice === "Yes" ? selectedIntlVariation.variation_amount : intlFlexibleAmount) : undefined,
-        // ⚡ ADD THIS: Sends the clean format (e.g. "GHS 2.5") to the backend for the receipt!
-        displayAmount: isInternational ? `${intlCurrency || activeCountry.currency || activeCountry.code} ${displayForeignAmount}` : undefined,
-        token: selectedToken.symbol, 
-        txHash: preflightHash, 
-        variation_code: finalVariationCode, phone: customerPhone || accountNumber, email: customerEmail, wallet_address: address, 
-        // ... rest of the fields stay the same
-        subscription_type: activeTab === "pay" && activeService.id === "CABLE" && ['dstv', 'gotv'].includes(cableProvider) ? cableSubscriptionType : undefined,
-        meter_account_type: meterAccountType, operator_id: isInternational ? selectedIntlOperator?.operator_id : undefined, country_code: isInternational ? activeCountry.code : undefined, product_type_id: isInternational ? selectedIntlProduct?.product_type_id : undefined,
-        // ⚡ Customer details returned by VTpass merchant-verify (electricity/bank).
-        // Persisted so they can appear on the receipt email.
-        customer_name: customerName || undefined,
-        customer_address: meterAddress || undefined,
-        source_channel: 'WEB',
-        blockchain: currentBlockchainName 
-      };
+      backendPayload.txHash = preflightHash;
 
       setStatus("Securing transaction intent...");
       await fetch('/api/pay', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ ...backendPayload, intent_only: true }) });
@@ -836,35 +896,7 @@ export default function Home() {
       const res = await fetch('/api/pay', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ ...backendPayload, intent_only: false, preflight_hash: preflightHash }) });
       const finalStatus = await res.json();
 
-      saveBeneficiary(accountNumber, customerName);
-      handleResetService(SERVICES[0]);
-
-      if (finalStatus.status === 'SUCCESS') {
-          setStatus("Success! Token/Ref Dispatched."); 
-          const earnedPoints = Number((parseFloat(calculatedNairaAmount) / exchangeRate).toFixed(2));
-          if (earnedPoints > 0) {
-              window.dispatchEvent(new CustomEvent('abapoints-awarded', { detail: earnedPoints }));
-              showToast("Transaction Successful", `Payment confirmed! You earned +${earnedPoints.toFixed(2).replace(/\.00$/, '')} AbaPoints ✨`, "success");
-          } else {
-              showToast("Transaction Successful", "Your transaction has been successfully processed.", "success");
-          }
-      } else if (finalStatus.status === 'TIMEOUT') {
-          setStatus("Payment Sent! We're finishing your vending in the background.");
-          showToast("Processing", "You can safely leave this page. Receipt will be in History.", "success");
-      } else {
-          setStatus("Vending Failed. Admin alerted."); 
-          showToast("Vending Error", finalStatus.message || "Payment received, but vending failed.", "error");
-      }
-
-      const updatedHistory = [{ 
-          id: realTxHash.slice(0,8), date: new Date().toLocaleString(), status: finalStatus.status === 'TIMEOUT' ? "PENDING" : finalStatus.status, 
-          amountNaira: isInternational ? `${intlCurrency || activeCountry.code} ${displayForeignAmount}` : calculatedNairaAmount, 
-          amountCrypto: cryptoToCharge, tokenUsed: selectedToken.symbol, service: uiCategory, network: displayNetwork.toUpperCase(), txHash: realTxHash, account: payloadBillersCode,
-          blockchain: currentBlockchainName, purchased_code: finalStatus.purchased_code, units: finalStatus.units, country_code: isInternational ? activeCountry.code : null
-      }, ...transactions];
-      setTransactions(updatedHistory); 
-      localStorage.setItem(`abapay_history_${address}`, JSON.stringify(updatedHistory));
-      setCurrentPage(1);
+      handleVendResult(finalStatus, realTxHash, backendPayload, uiCategory, displayNetwork, payloadBillersCode, currentBlockchainName);
 
       const balanceWei = await publicClient.readContract({ address: tokenAddress as `0x${string}`, abi: ERC20_ABI, functionName: 'balanceOf', args: [address] });
       setWalletBalance(parseFloat(formatUnits(balanceWei as bigint, selectedToken.decimals)).toFixed(4));
@@ -899,6 +931,50 @@ export default function Home() {
         setIsProcessing(false); 
     }
 }; // <--- THIS IS THE MISSING BRACKET!
+
+  // ⚡ x402 SETTLEMENT (main app only, Celo + USDC) — see README "x402 settlement".
+  //
+  // Deliberately much simpler than processBlockchainPayment above: there's no approval step,
+  // no preflight-intent row, no manual writeContract/waitForTransactionReceipt — the
+  // facilitator submits and confirms the payment inside fetchWithX402Payment itself. Since
+  // settlement is atomic within that single request, there's no "signed but unconfirmed"
+  // state to rescue in the catch block, unlike the contract-call path.
+  const processX402Payment = async () => {
+    if (!address) return setStatus("Connect Wallet First");
+    if (activeChain?.id !== celo.id && activeChain?.id !== celoSepolia.id) return setStatus("x402 is only available on Celo.");
+    if (selectedToken.symbol !== "USDC") return setStatus("x402 is only available for USDC.");
+
+    setIsProcessing(true);
+    setStatus("Settling payment via x402...");
+
+    const { backendPayload, uiCategory, displayNetwork, payloadBillersCode, currentBlockchainName } = buildBackendPayload();
+
+    try {
+      const finalStatus: any = await fetchWithX402Payment('/api/pay/x402', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(backendPayload),
+      });
+
+      // Unlike the contract path, the browser never sees this transaction directly — the
+      // facilitator submits it, not the connected wallet — so the server hands it back.
+      const realTxHash = (finalStatus.tx_hash || `x402_${Date.now()}`).toLowerCase();
+
+      handleVendResult(finalStatus, realTxHash, backendPayload, uiCategory, displayNetwork, payloadBillersCode, currentBlockchainName);
+
+      const tokenAddress = getAgentTokenAddress();
+      if (tokenAddress) {
+        const publicClient = createPublicClient({ chain: activeChain, transport: http() });
+        const balanceWei = await publicClient.readContract({ address: tokenAddress as `0x${string}`, abi: ERC20_ABI, functionName: 'balanceOf', args: [address] });
+        setWalletBalance(parseFloat(formatUnits(balanceWei as bigint, selectedToken.decimals)).toFixed(4));
+      }
+    } catch (e: any) {
+      setStatus(`Payment failed: ${e.message?.slice(0, 60) || "Unknown error"}`);
+      showToast("Payment Failed", e.message || "The x402 payment could not be completed.", "error");
+    } finally {
+      setIsProcessing(false);
+    }
+  };
 
   useEffect(() => { if (status && !isProcessing) { const timer = setTimeout(() => setStatus(""), 5000); return () => clearTimeout(timer); } }, [status, isProcessing]);
 
@@ -1193,11 +1269,26 @@ export default function Home() {
       // ⚡ THE FIX: Use Wagmi's official WalletClient instead of assuming window.ethereum exists!
       // This allows WalletConnect sockets to properly sign transactions.
       if (!client && wagmiWalletClient) {
-          const webClient = (wagmiWalletClient as any).extend(eip5792Actions()); 
+          const webClient = (wagmiWalletClient as any).extend(eip5792Actions());
           setClient(webClient);
       }
     }
   }, [environment, isWagmiConnected, wagmiAddress, wagmiChain, isMainnet, client, wagmiWalletClient]);
+
+  // ⚡ SYNC WAGMI WALLET → THIRDWEB ACTIVE WALLET ⚡
+  // Powers x402 settlement (processX402Payment/useFetchWithPayment) without a second
+  // wallet-connect prompt: whichever wallet the user already connected via wagmi
+  // (MetaMask, WalletConnect, Base Account SDK, Valora, MiniPay) becomes the account
+  // thirdweb signs x402 payment authorizations with.
+  useEffect(() => {
+    if (!wagmiWalletClient) return;
+    try {
+      const thirdwebWallet = viemAdapter.wallet.fromViem({ walletClient: wagmiWalletClient as any });
+      setActiveThirdwebWallet(thirdwebWallet);
+    } catch (e) {
+      console.error("Failed to sync wallet for x402:", e);
+    }
+  }, [wagmiWalletClient, setActiveThirdwebWallet]);
 
   // ⚡ 2. THE CHAMELEON ENVIRONMENT DETECTOR ⚡
   useEffect(() => {
@@ -1547,7 +1638,10 @@ export default function Home() {
 
   return (
     // ⚡ 1. UPDATED MAIN TAG: Centers vertically on PC and adds padding + Dark Mode Base
-    <main className="min-h-screen bg-slate-50 dark:bg-black text-slate-900 dark:text-slate-100 font-sans p-4 md:p-8 lg:p-12 flex flex-col items-center justify-start md:justify-center pb-20 md:pb-12 relative overflow-hidden transition-colors">
+    // overflow-hidden is md: only — it exists purely to clip the decorative PC-only glow
+    // blobs below. Applied unconditionally, it clips `position: fixed` descendants (the
+    // AIChat bubble, the header agent badge) on mobile WebKit, hiding them entirely.
+    <main className="min-h-screen bg-slate-50 dark:bg-black text-slate-900 dark:text-slate-100 font-sans p-4 md:p-8 lg:p-12 flex flex-col items-center justify-start md:justify-center pb-20 md:pb-12 relative md:overflow-hidden transition-colors">
       <style>{`@keyframes logoScale { 0%, 100% { transform: scale(1); opacity: 0.9; } 50% { transform: scale(1.1); opacity: 1; } } .animate-logo-scale { animation: logoScale 1.5s ease-in-out infinite; } .no-scrollbar::-webkit-scrollbar { display: none; } .no-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }`}</style>
 
       {/* ⚡ 2. NEW: Premium Ambient Web3 Glows (Only visible on PC) ⚡ */}
@@ -1622,13 +1716,25 @@ export default function Home() {
                  </div>
               </div>
 
-              <button 
+              <button
                   onClick={() => { setIsConfirmModalOpen(false); processBlockchainPayment(); }}
                   className={`w-full text-white dark:text-slate-900 font-black py-5 rounded-2xl flex items-center justify-center gap-2.5 transition-all active:scale-95 shadow-xl text-lg tracking-tight ${hasPendingDuplicate ? 'bg-orange-500 dark:bg-orange-500 hover:bg-orange-600 dark:hover:bg-orange-600 text-white shadow-orange-500/20' : 'bg-slate-900 dark:bg-white hover:bg-black dark:hover:bg-slate-200 shadow-slate-900/20 dark:shadow-white/10'}`}
               >
                   {hasPendingDuplicate ? <AlertTriangle size={22} className="text-white" /> : <ShieldCheck size={22} className="text-emerald-400 dark:text-emerald-600" />}
                   {hasPendingDuplicate ? 'PROCEED ANYWAY' : 'CONFIRM & PAY'}
               </button>
+
+              {/* ⚡ x402 SETTLEMENT — additive, Celo + USDC only. The default contract-call flow
+                   above (incl. Base sponsored gas) is unchanged; this is a distinct settlement
+                   rail so the payment is genuinely visible on x402scan. See README. */}
+              {!!process.env.NEXT_PUBLIC_THIRDWEB_CLIENT_ID && activeChain?.id === celo.id && selectedToken.symbol === "USDC" && !hasPendingDuplicate && (
+                  <button
+                      onClick={() => { setIsConfirmModalOpen(false); processX402Payment(); }}
+                      className="w-full mt-3 text-[11px] font-bold uppercase tracking-widest text-slate-400 hover:text-emerald-500 dark:text-slate-500 dark:hover:text-emerald-400 transition-colors"
+                  >
+                      Or pay via x402 →
+                  </button>
+              )}
            </div>
         </div>
       )}
@@ -1731,6 +1837,22 @@ export default function Home() {
               <span className="text-xl md:text-2xl font-black text-slate-900 dark:text-white leading-none tracking-tight transition-colors truncate">AbaPay<span className="text-emerald-500">.</span></span>
               <span className="text-[8px] md:text-[9px] font-black uppercase text-slate-400 dark:text-slate-500 tracking-widest mt-1 truncate">Seamless Payments.</span>
             </div>
+
+            {/* ⚡ AGENT quick-access — sits right beside the logo so it's always visible
+                 (the AGENT tab lives at the end of a horizontally-scrolling tab row below,
+                 which pushes it off-screen on narrow phones with no visible scrollbar hint). */}
+            <button
+              onClick={() => handleTabSwitch("agent")}
+              className="relative shrink-0 flex items-center gap-1.5 bg-slate-50 dark:bg-[#1a1a1f] border border-slate-100 dark:border-slate-800/80 hover:border-emerald-200 dark:hover:border-emerald-700 px-2.5 py-1.5 rounded-xl transition-all shadow-sm active:scale-95"
+              title="DeAI Agent — let AbaPay pay bills for you from chat"
+            >
+              <Sparkles size={14} className="text-emerald-500" />
+              <span className="text-[9px] font-black uppercase tracking-widest text-slate-600 dark:text-slate-300">Agent</span>
+              <span className="absolute -top-1.5 -right-1.5 flex h-4 items-center rounded-full bg-red-600 px-1 text-[6px] font-black uppercase tracking-wider text-white shadow-md">
+                <span className="absolute -top-0.5 -right-0.5 h-2 w-2 rounded-full bg-red-500 animate-ping"></span>
+                <span className="relative">New</span>
+              </span>
+            </button>
           </div>
           <div className="flex items-center flex-wrap justify-end gap-2">
 
@@ -2936,7 +3058,13 @@ export default function Home() {
         <AppFooter network={activeNetworkDisplay} />
 
         {/* ⚡ In-app DeAI assistant — understands requests, fills the form. Never pays. */}
-        <AIChat onPrefill={handleAIPrefill} onNavigate={handleAINavigate} />
+        <AIChat
+          onPrefill={handleAIPrefill}
+          onNavigate={handleAINavigate}
+          walletConnected={!!address}
+          onRequireWallet={() => showToast("Connect Your Wallet", "Connect your wallet first — the assistant fills a payment you still need to sign.", "error")}
+          walletAddress={address ?? undefined}
+        />
       </div>
     </main>
   );
