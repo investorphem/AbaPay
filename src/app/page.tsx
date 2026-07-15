@@ -2919,7 +2919,7 @@ export default function Home() {
         {/* ======================================= */}
         {activeTab === 'agent' && (
           <AgentHub
-            address={address}
+            address={address ?? undefined}
             selectedToken={selectedToken}
             activeChainName={activeChain?.name?.toUpperCase().includes('BASE') ? 'BASE' : 'CELO'}
             onApproveAllowance={handleApproveAgentAllowance}

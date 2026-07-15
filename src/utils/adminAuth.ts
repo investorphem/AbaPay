@@ -45,7 +45,7 @@ async function getAdminAddress(): Promise<string | null> {
 // 🔐 SERVER-SIDE ADMIN CHECK
 // Verifies that the request carries a valid session signature produced by the
 // contract owner wallet. Used by every /api/admin/* route.
-export async function verifyAdminRequest(req: Request): Promise<{ authorized: boolean; message: string }> {
+export async function verifyAdminRequest(req: Request): Promise<{ authorized: boolean; message: string; address?: string }> {
   const address = req.headers.get('x-admin-address');
   const signature = req.headers.get('x-admin-signature');
   const timestamp = req.headers.get('x-admin-timestamp');
@@ -79,5 +79,5 @@ export async function verifyAdminRequest(req: Request): Promise<{ authorized: bo
     return { authorized: false, message: 'Unauthorized: signature verification failed.' };
   }
 
-  return { authorized: true, message: 'OK' };
+  return { authorized: true, message: 'OK', address };
 }

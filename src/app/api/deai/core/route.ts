@@ -116,8 +116,8 @@ async function verifyAccount(intent: string, account: string, type?: string, pro
     return await realVerifyAccount(serviceID, account, type);
 }
 
-async function fetchCryptoBalances(walletAddress: string) {
-    return await realFetchCryptoBalances(walletAddress, 'CELO');
+async function fetchCryptoBalances(walletAddress: string, blockchain = 'CELO') {
+    return await realFetchCryptoBalances(walletAddress, blockchain);
 }
 
 async function fetchDataVariations(provider: string) {
@@ -330,8 +330,8 @@ export async function POST(req: Request) {
           isFixedPlan: !!d.variation_code,   // a plan's price IS the price — skip min/max
           verifiedMin: d.verified_min,
         });
-        if (!amountGate.allowed) {
-          return NextResponse.json({ action: 'REPLY', message: `⚠️ ${amountGate.reason}` });
+        if (!amountGate.valid) {
+          return NextResponse.json({ action: 'REPLY', message: `⚠️ ${amountGate.error}` });
         }
 
         // ⚡ OPERATOR GATE — the emergency brake. An operator can halt agent spending
@@ -586,7 +586,12 @@ export async function POST(req: Request) {
       }, { onConflict: 'chat_id' });
 
       // Fall through: re-enter the main flow with the provider now known.
-      intentData = session.intent_data;
+      // Resume from the stored intent (like AWAITING_DATA_PLAN / AWAITING_METER_TYPE):
+      // reset local status to the details baseline, clear the menu reply so the master
+      // sweep doesn't re-parse "1" as a fresh intent, and continue instead of returning.
+      session.status = 'AWAITING_DETAILS';
+      text = "";
+      isContinuingToAI = true;
       prependSystemMsg = `✅ *${picked.label}*\n\n`;
     }
     // ⚡ STATE: CABLE RENEW vs CHANGE (DStv/GOtv) ⚡
@@ -606,7 +611,10 @@ export async function POST(req: Request) {
         expires_at: new Date(Date.now() + 300000).toISOString(),
       }, { onConflict: 'chat_id' });
 
-      intentData = session.intent_data;
+      // Resume from the stored intent and continue into the master sweep.
+      session.status = 'AWAITING_DETAILS';
+      text = "";
+      isContinuingToAI = true;
       prependSystemMsg = picked === 'renew'
         ? `✅ *Renewing your current package*\n\n`
         : `✅ *Changing package*\n\n`;
@@ -672,7 +680,10 @@ export async function POST(req: Request) {
         expires_at: new Date(Date.now() + 300000).toISOString(),
       }, { onConflict: 'chat_id' });
 
-      intentData = session.intent_data;
+      // Resume from the stored intent and continue into the master sweep.
+      session.status = 'AWAITING_DETAILS';
+      text = "";
+      isContinuingToAI = true;
       prependSystemMsg = `✅ *${picked.label}* — ₦${Number(picked.price || 0).toLocaleString()}\n\n`;
     }
     // STATE: CHAIN SELECTION ⚡
