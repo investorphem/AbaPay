@@ -9,6 +9,17 @@ const CHANNELS = [
   { id: 'X', name: 'X (Twitter)', color: 'text-slate-900 dark:text-white', bot: 'https://x.com/AbaPays' },
 ];
 
+// ⚡ The bare bot links above open the chat with nothing pre-filled — the user then has to
+// remember and retype the link code themselves. Telegram and WhatsApp both support
+// deep-linking a pre-filled first message; X has no equivalent for DMs, so it falls back
+// to the bare link (the code stays visible on-screen for the user to paste manually).
+function buildChannelLinkUrl(channel: { id: string; bot: string }, linkCode: string | null): string {
+  if (!linkCode) return channel.bot;
+  if (channel.id === 'TELEGRAM') return `${channel.bot}?start=${encodeURIComponent(linkCode)}`;
+  if (channel.id === 'WHATSAPP') return `${channel.bot}?text=${encodeURIComponent(linkCode)}`;
+  return channel.bot;
+}
+
 interface Props {
   address?: string;
   selectedToken: any;
@@ -196,13 +207,16 @@ export function AgentHub({ address, selectedToken, activeChainName, onApproveAll
               </button>
             </div>
             <a
-              href={activeChannel.bot}
+              href={buildChannelLinkUrl(activeChannel, linkCode)}
               target="_blank"
               rel="noopener noreferrer"
               className="w-full py-3 bg-emerald-600 text-white rounded-xl text-xs font-black uppercase tracking-widest flex items-center justify-center gap-2"
             >
               Open {activeChannel.name} <ExternalLink size={14} />
             </a>
+            {activeChannel.id === 'X' && (
+              <p className="mt-2 text-[10px] text-slate-400 leading-relaxed">X can&apos;t pre-fill a DM — paste the code above once the chat opens.</p>
+            )}
           </div>
         )}
 

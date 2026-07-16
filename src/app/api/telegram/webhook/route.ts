@@ -23,11 +23,22 @@ export async function POST(req: Request) {
     const CORE_ENGINE_URL = `${protocol}://${host}/api/deai/core`;
 
     const body = await req.json();
-    const text = body.message?.text || "";
+    let text = body.message?.text || "";
     const chatId = body.message?.chat?.id?.toString();
     const messageId = body.message?.message_id;
 
     if (!text || !chatId) return NextResponse.json({ success: true });
+
+    // ⚡ TELEGRAM DEEP-LINK PAYLOAD ⚡
+    // The app's "Open Telegram" button links to t.me/<bot>?start=<code>. On first contact,
+    // Telegram sends that as a literal "/start <code>" message, not the bare code — unwrap
+    // it here so the link-code check in /api/deai/core (which expects just the code) sees
+    // ABA-XXXXXX instead of "/start ABA-XXXXXX". A bare "/start" (no payload, e.g. the user
+    // just opened the bot without a link code) passes through unchanged.
+    const startMatch = text.match(/^\/start(?:@\w+)?(?:\s+(.+))?$/i);
+    if (startMatch?.[1]) {
+      text = startMatch[1].trim();
+    }
 
     // 🔒 DELETE THE PIN FROM CHAT HISTORY IMMEDIATELY.
     //
