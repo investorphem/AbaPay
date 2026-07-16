@@ -120,6 +120,22 @@ async function fetchCryptoBalances(walletAddress: string, blockchain = 'CELO') {
     return await realFetchCryptoBalances(walletAddress, blockchain);
 }
 
+// ⚡ AbaPay operates on both Celo and Base — a flat balance list with no chain label left
+// users unable to tell which chain their funds are actually on. Fetch both and label them.
+async function fetchAllChainBalances(walletAddress: string) {
+    const [celo, base] = await Promise.all([
+        fetchCryptoBalances(walletAddress, 'CELO'),
+        fetchCryptoBalances(walletAddress, 'BASE'),
+    ]);
+    return { celo, base };
+}
+
+function formatChainBalances(balances: { celo: Record<string, string>; base: Record<string, string> }): string {
+    const celoLine = `⚫ Celo: ${balances.celo['USD₮'] || '0.0000'} USDT | ${balances.celo['USDC'] || '0.0000'} USDC | ${balances.celo['USDm'] || '0.0000'} cUSD`;
+    const baseLine = `🔵 Base: ${balances.base['USD₮'] || '0.0000'} USDT | ${balances.base['USDC'] || '0.0000'} USDC`;
+    return `${celoLine}\n${baseLine}`;
+}
+
 async function fetchDataVariations(provider: string) {
     const plans = await realFetchDataVariations(`${provider.toLowerCase()}-data`);
     return plans.map((p, i) => ({ id: String(i + 1), name: p.name, price: p.price, code: p.code }));
@@ -226,7 +242,7 @@ export async function POST(req: Request) {
     const currentCountry = globalUser?.country_code || 'NG';
     const currencySymbol = currentCountry === 'NG' ? '₦' : (currentCountry === 'GH' ? 'GH₵' : '$');
     const fiatBalance = globalUser?.fiat_balance_ngn || 0;
-    const crypto = await fetchCryptoBalances(globalUser?.wallet_address || "");
+    const crypto = await fetchAllChainBalances(globalUser?.wallet_address || "");
 
     let { data: session } = await supabase.from('deai_sessions').select('*').eq('chat_id', platform_id).single();
     const userInput = text.trim().toLowerCase();
@@ -241,7 +257,7 @@ export async function POST(req: Request) {
       await supabase.from('deai_sessions').delete().eq('chat_id', platform_id);
       return NextResponse.json({ 
         action: 'REPLY', 
-        message: `🌍 **Region:** ${currentCountry}\n💵 **Fiat:** ${currencySymbol}${fiatBalance}\n🪙 **Crypto:** ${crypto['USD₮'] || '0.0000'} USDT | ${crypto['USDC'] || '0.0000'} USDC | ${crypto['USDm'] || '0.0000'} cUSD\n\n👋 **Welcome to AbaPay AI!**\n\nI can help you pay bills and send crypto instantly.\n\n*Try saying:*\n💬 _Buy 500 MTN airtime for 08012345678_\n💬 _Pay 5000 electricity for meter 1122334455_\n📜 _Check my history_`
+        message: `🌍 **Region:** ${currentCountry}\n💵 **Fiat:** ${currencySymbol}${fiatBalance}\n🪙 **Crypto:**\n${formatChainBalances(crypto)}\n\n👋 **Welcome to AbaPay AI!**\n\nI can help you pay bills and send crypto instantly.\n\n*Try saying:*\n💬 _Buy 500 MTN airtime for 08012345678_\n💬 _Pay 5000 electricity for meter 1122334455_\n📜 _Check my history_`
       });
     }
 
@@ -1236,7 +1252,7 @@ export async function POST(req: Request) {
     if (intentData.intent === 'CHECK_BALANCE') {
         return NextResponse.json({
             action: 'REPLY',
-            message: `💰 **Your Balance**\n\n🌍 Region: ${currentCountry}\n💵 Fiat: ${currencySymbol}${fiatBalance}\n🪙 Crypto: ${crypto['USD₮'] || '0.0000'} USDT | ${crypto['USDC'] || '0.0000'} USDC | ${crypto['USDm'] || '0.0000'} cUSD`,
+            message: `💰 **Your Balance**\n\n🌍 Region: ${currentCountry}\n💵 Fiat: ${currencySymbol}${fiatBalance}\n🪙 Crypto:\n${formatChainBalances(crypto)}`,
         });
     }
 
