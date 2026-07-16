@@ -4,7 +4,7 @@ import React, { useState, useEffect, useCallback } from "react";
 import { Bot, Shield, Check, Copy, Trash2, Loader2, AlertTriangle, ExternalLink } from "lucide-react";
 
 const CHANNELS = [
-  { id: 'TELEGRAM', name: 'Telegram', color: 'text-sky-500', bot: 'https://t.me/AbaPayBot' },
+  { id: 'TELEGRAM', name: 'Telegram', color: 'text-sky-500', bot: 'https://t.me/abapayagentbot' },
   { id: 'WHATSAPP', name: 'WhatsApp', color: 'text-emerald-500', bot: 'https://wa.me/2347075418792' },
   { id: 'X', name: 'X (Twitter)', color: 'text-slate-900 dark:text-white', bot: 'https://x.com/AbaPays' },
 ];
