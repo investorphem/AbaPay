@@ -334,21 +334,33 @@ registry's verified source on Celoscan — see the script's header comment.
 
 #### x402 Settlement (main app only)
 
-The main web app's direct payment flow (`processBlockchainPayment` in `src/app/page.tsx`) can
-optionally settle via [x402](https://x402.org) instead of a plain `payBill` contract call, using
-the `thirdweb` SDK against a thirdweb-hosted facilitator. This makes the payment genuinely
-visible on x402scan — not a relabeled transaction — because x402 settlement requires an
-EIP-3009 (`transferWithAuthorization`) signature from the payer for that specific payment.
+The main web app's payment flow settles automatically via [x402](https://x402.org) — using the
+`thirdweb` SDK against a thirdweb-hosted facilitator — whenever the user is paying with **USDC on
+Celo**. There's no user-facing toggle: the same "Confirm & Pay" button routes through x402 for
+that combination and through the normal `payBill` contract call for everything else (Base, USDT,
+cUSD/USDm, or x402 unconfigured). This makes the payment genuinely visible on x402scan — not a
+relabeled transaction — because x402 settlement requires an EIP-3009
+(`transferWithAuthorization`) signature from the payer for that specific payment.
 
 That signature requirement is exactly why this is **scoped to the main app only**: the
 agent-initiated flow above depends on paying with *zero* signature at payment time (the whole
 point of `setSpendingAllowance`), which is fundamentally incompatible with x402's
 per-payment-signature model. Telegram/WhatsApp/X and the autonomous scheduler never use x402 and
-are unaffected.
+are unaffected — those payments already execute from `RELAYER_ADDRESS`, the same wallet
+registered under the ERC-8004 identity below, so they're already attributable to the agent
+without needing x402.
 
-- **Scope at launch: Celo + USDC only.** Celo-native USDC is a Circle FiatTokenV2 with native
-  EIP-3009 support; cUSD/USDT support isn't independently confirmed, so the UI only offers x402
-  as a payment method for that combination.
+- **Scope: Celo + USDC only, confirmed live** — not just a caution. Querying the thirdweb
+  facilitator's `/supported` endpoint for Celo mainnet returns exactly one entry: the `exact`
+  scheme, USDC, via native EIP-3009. No USDT, no cUSD/USDm, no CELO. That's a constraint of the
+  facilitator itself (those tokens don't implement `transferWithAuthorization`), not a
+  self-imposed limit — if the facilitator adds support later, no code change is needed to pick
+  it up, since the token/decimals are already resolved generically via `resolveTokenOnChain`.
+- **No automatic fallback to the contract-call flow on x402 failure.** If x402 errors after
+  reaching the server, retrying via the contract-call path could double-charge the user if the
+  facilitator's settlement actually landed but the response was lost in transit — the same class
+  of risk `processBlockchainPayment`'s own paymaster-fallback logic is careful about. The user
+  sees a clear error and can retry manually instead.
 - **Funds land in the same vault.** `payTo` is set to the existing `AbaPayV3` contract address —
   the same one the admin dashboard already reads balances from and manages refunds/withdrawals
   for. The vault's `balanceOf` doesn't care how tokens arrived, so x402-settled funds are

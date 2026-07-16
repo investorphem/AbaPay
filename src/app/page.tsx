@@ -1717,24 +1717,19 @@ export default function Home() {
               </div>
 
               <button
-                  onClick={() => { setIsConfirmModalOpen(false); processBlockchainPayment(); }}
+                  onClick={() => {
+                      setIsConfirmModalOpen(false);
+                      // ⚡ x402 is the automatic settlement rail for Celo + USDC — no user-facing
+                      // toggle. Everything else (Base, USDT, cUSD/USDm, or x402 unconfigured)
+                      // uses the normal contract-call flow, unchanged. See README "x402 settlement".
+                      const useX402 = !!process.env.NEXT_PUBLIC_THIRDWEB_CLIENT_ID && activeChain?.id === celo.id && selectedToken.symbol === "USDC";
+                      if (useX402) processX402Payment(); else processBlockchainPayment();
+                  }}
                   className={`w-full text-white dark:text-slate-900 font-black py-5 rounded-2xl flex items-center justify-center gap-2.5 transition-all active:scale-95 shadow-xl text-lg tracking-tight ${hasPendingDuplicate ? 'bg-orange-500 dark:bg-orange-500 hover:bg-orange-600 dark:hover:bg-orange-600 text-white shadow-orange-500/20' : 'bg-slate-900 dark:bg-white hover:bg-black dark:hover:bg-slate-200 shadow-slate-900/20 dark:shadow-white/10'}`}
               >
                   {hasPendingDuplicate ? <AlertTriangle size={22} className="text-white" /> : <ShieldCheck size={22} className="text-emerald-400 dark:text-emerald-600" />}
                   {hasPendingDuplicate ? 'PROCEED ANYWAY' : 'CONFIRM & PAY'}
               </button>
-
-              {/* ⚡ x402 SETTLEMENT — additive, Celo + USDC only. The default contract-call flow
-                   above (incl. Base sponsored gas) is unchanged; this is a distinct settlement
-                   rail so the payment is genuinely visible on x402scan. See README. */}
-              {!!process.env.NEXT_PUBLIC_THIRDWEB_CLIENT_ID && activeChain?.id === celo.id && selectedToken.symbol === "USDC" && !hasPendingDuplicate && (
-                  <button
-                      onClick={() => { setIsConfirmModalOpen(false); processX402Payment(); }}
-                      className="w-full mt-3 text-[11px] font-bold uppercase tracking-widest text-slate-400 hover:text-emerald-500 dark:text-slate-500 dark:hover:text-emerald-400 transition-colors"
-                  >
-                      Or pay via x402 →
-                  </button>
-              )}
            </div>
         </div>
       )}
