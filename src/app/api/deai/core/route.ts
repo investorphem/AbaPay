@@ -843,49 +843,60 @@ export async function POST(req: Request) {
     if (!isContinuingToAI) return NextResponse.json({ success: true });
 
     let intentData: any = {};
-    let skipAI = false;
-    
-    // Determine baseline Intent first
+
+    // Determine baseline Intent first — freshIntentCheck (a crude keyword match) is only
+    // ever a SEED/fallback value here, never a gate on whether the AI runs. It previously
+    // skipped the Claude call entirely whenever it matched a literal substring like
+    // "airtime" or "data" — meaning most clearly-worded messages never actually reached
+    // the AI at all, and got only the regex sweep's (extractEntities) far cruder
+    // extraction. Claude now always gets a chance to parse the real message; the keyword
+    // match and regex sweep remain purely as backstops if the AI call fails or misses a
+    // field.
     if (session?.status === 'AWAITING_DETAILS') {
         intentData = session.intent_data;
     } else {
         intentData = { intent: freshIntentCheck, amount_ngn: null, destination_account: null, provider: null, phone: null, email: null };
-        if (freshIntentCheck !== 'UNKNOWN') skipAI = true;
     }
 
     // ⚡ 4. THE MASTER SWEEP ⚡
     let aiParsed: any = null;
     if (text !== "") {
-        // Run the Claude intent engine for anything the fast-path didn't already resolve.
-        if (!skipAI) {
-            try {
-                aiParsed = await parseIntent(text);
+        try {
+            aiParsed = await parseIntent(text);
 
-                // Map the engine's intent names onto the core's SERVICE_RULES keys.
-                const intentMap: Record<string, string> = {
-                    VEND_AIRTIME: 'VEND_AIRTIME',
-                    VEND_DATA: 'VEND_DATA',
-                    PAY_ELECTRICITY: 'ELECTRICITY',
-                    PAY_CABLE: 'TV',
-                    TRANSACTION_HISTORY: 'TRANSACTION_HISTORY',
-                };
+            // Map the engine's intent names onto the core's SERVICE_RULES keys.
+            const intentMap: Record<string, string> = {
+                VEND_AIRTIME: 'VEND_AIRTIME',
+                VEND_DATA: 'VEND_DATA',
+                PAY_ELECTRICITY: 'ELECTRICITY',
+                PAY_CABLE: 'TV',
+                TRANSACTION_HISTORY: 'TRANSACTION_HISTORY',
+                CHECK_BALANCE: 'CHECK_BALANCE',
+                LIST_SCHEDULES: 'LIST_SCHEDULES',
+                CANCEL_SCHEDULE: 'CANCEL_SCHEDULE',
+                BANK_TRANSFER: 'BANK_TRANSFER',
+                EDUCATION: 'EDUCATION',
+                INTERNATIONAL: 'INTERNATIONAL',
+                HELP: 'HELP',
+            };
 
-                const mapped = intentMap[aiParsed.intent];
+            const mapped = intentMap[aiParsed.intent];
 
-                intentData = {
-                    ...intentData,
-                    ...(mapped ? { intent: mapped } : {}),
-                    ...(aiParsed.amount_ngn ? { amount_ngn: aiParsed.amount_ngn } : {}),
-                    ...(aiParsed.destination_account ? { destination_account: aiParsed.destination_account } : {}),
-                    ...(aiParsed.provider ? { provider: aiParsed.provider } : {}),
-                    ...(aiParsed.meter_type ? { meter_type: aiParsed.meter_type } : {}),
-                };
-            } catch (e) {
-                // Ignore AI errors — the regex sweep below still catches the common cases.
-            }
+            intentData = {
+                ...intentData,
+                ...(mapped ? { intent: mapped } : {}),
+                ...(aiParsed.amount_ngn ? { amount_ngn: aiParsed.amount_ngn } : {}),
+                ...(aiParsed.destination_account ? { destination_account: aiParsed.destination_account } : {}),
+                ...(aiParsed.provider ? { provider: aiParsed.provider } : {}),
+                ...(aiParsed.meter_type ? { meter_type: aiParsed.meter_type } : {}),
+            };
+        } catch (e) {
+            // Ignore AI errors — the regex sweep below still catches the common cases.
         }
-        
-        // ⚡ GUARANTEED REGEX OVERRIDE: Sweeps the text and catches everything AI missed
+
+        // ⚡ GUARANTEED REGEX OVERRIDE: fills in anything the AI didn't already resolve
+        // (extractEntities only ever sets a field when it's still falsy — never overwrites
+        // an AI-sourced value).
         intentData = extractEntities(text, intentData);
     }
 
@@ -1201,8 +1212,21 @@ export async function POST(req: Request) {
     if (!SERVICE_RULES[intentData.intent] && intentData.intent !== 'TRANSACTION_HISTORY' && intentData.intent !== 'CHECK_BALANCE') intentData.intent = 'UNKNOWN';
 
     if (intentData.intent === 'UNKNOWN') {
-        // Never a bare shrug — always show what IS possible.
-        return NextResponse.json({ action: 'REPLY', message: `🤔 I didn't quite catch that.\n\n${await describeCapabilities()}` });
+        // Never a bare shrug — always show what IS possible. The model may still have
+        // extracted partial signals (a number, an amount, a provider) even though it
+        // couldn't confidently settle on a full intent — use those to tailor the
+        // suggestion instead of always showing the identical static menu regardless of
+        // what the user actually typed.
+        const hints: string[] = [];
+        if (intentData.destination_account) hints.push(`a number/account (\`${intentData.destination_account}\`)`);
+        if (intentData.amount_ngn) hints.push(`an amount (₦${Number(intentData.amount_ngn).toLocaleString()})`);
+        if (intentData.provider) hints.push(`a provider (${intentData.provider})`);
+
+        const contextLine = hints.length
+            ? `I noticed ${hints.join(' and ')} in there, but wasn't sure what to do with it — try being a bit more specific, e.g. "buy 500 airtime for 08012345678" or "pay 2000 electricity for meter 04123456789".\n\n`
+            : '';
+
+        return NextResponse.json({ action: 'REPLY', message: `🤔 I didn't quite catch that.\n\n${contextLine}${await describeCapabilities()}` });
     }
 
     // ⚡ CHECK_BALANCE — this was previously forced to UNKNOWN (no SERVICE_RULES entry,
