@@ -22,7 +22,7 @@ Designed for low fees, cross-border utility vending (Nigeria + supported interna
 * **Agent-Initiated Payments (AbaPayV3):** Users can grant the DeAI agent a bounded, on-chain, revocable spending allowance (`setSpendingAllowance`) so it can pay bills on their behalf from Telegram/WhatsApp/X — with no wallet signature needed at payment time and no custody of user funds. See [AbaPayV3 — agent allowances](#abapayv3sol--agent-initiated-payments-️-not-audited) below.
 * **On-Chain Attribution:** Celo transactions carry an ERC-8021 attribution tag (`src/lib/attribution.ts`) crediting the Celo Builders program; a no-op on Base.
 * **On-Chain Agent Identity (ERC-8004):** AbaPay's DeAI agent is registered as a real on-chain identity on Celo via the ERC-8004 "Trustless Agents" registry, so it's discoverable on 8004scan.io / AgentScan — independent of, and unrelated to, how it moves money. See [ERC-8004 agent identity](#erc-8004-agent-identity) below.
-* **x402 Settlement (main app, Celo + USDC):** Payments made directly in the web app — where the user is present and signing — can settle via the [x402](https://x402.org) HTTP-payment protocol against a thirdweb-hosted facilitator, so they're genuinely indexed on x402scan, not just relabeled contract calls. This is strictly additive: the default on-chain `payBill` flow (including Base's sponsored-gas path) is unchanged, and the signature-free agent-initiated flow above is completely untouched — x402 requires a fresh signature per payment, which is incompatible with unattended agent payments, so it's deliberately scoped to the main app only. See [x402 settlement](#x402-settlement-main-app-only) below.
+* **x402 Settlement (main app, Celo + USDC):** Payments made directly in the web app — where the user is present and signing — settle automatically via the [x402](https://x402.org) HTTP-payment protocol against a thirdweb-hosted facilitator whenever the user pays with USDC on Celo (no user-facing toggle), so they're genuinely indexed on x402scan, not just relabeled contract calls. Everything else (Base, USDT, cUSD/USDm) uses the original on-chain `payBill` flow, including Base's sponsored-gas path, unchanged — and the signature-free agent-initiated flow above is completely untouched, since x402 requires a fresh signature per payment, incompatible with unattended agent payments. See [x402 settlement](#x402-settlement-main-app-only) below.
 * **Dynamic Exchange Engine:** Live market rate conversions with admin-configurable exchange rate and automated profit spread calculation, verified server-side to prevent underpayment exploits.
 * **Executive Admin Dashboard:** Real-time monitoring of VTpass fiat balance, on-chain vault balances per token/chain, transaction analytics, manual refund tools, and CSV export — protected behind admin auth.
 * **Sponsored Gas on Base:** Coinbase Smart Wallet / Base Account users can pay with zero gas fees — the app detects paymaster support via EIP-5792 and batches approval + payment into a single sponsored transaction. Wallets without this capability (MetaMask, WalletConnect, Valora, etc.) transparently fall back to the normal self-paid flow.
@@ -211,13 +211,28 @@ NEXT_PUBLIC_ERC8004_AGENT_ID=                                  # Optional. Set a
 ```
 Uses the same `CELO_PRIVATE_KEY` Hardhat already has configured — this is identity registration only, it never touches payments.
 
+**How to register:**
+1. Deploy `public/.well-known/agent.json` (edit its `wallet.address` to your real `RELAYER_ADDRESS` first) so it's reachable at `https://<your-domain>/.well-known/agent.json`.
+2. Set `ERC8004_AGENT_URI` above to that URL.
+3. `npx hardhat run scripts/register8004.ts --network sepolia` first — confirm the tx on [Celo Sepolia Celoscan](https://sepolia.celoscan.io) and check the `Registered` event for the correct URI and agent ID.
+4. Only after that passes: `npx hardhat run scripts/register8004.ts --network celo` — spends real gas, mints the identity permanently.
+5. Set `NEXT_PUBLIC_ERC8004_AGENT_ID` to the agent ID the script prints. Look it up at [8004scan.io](https://8004scan.io).
+
 ### x402 Settlement (main app, Celo + USDC)
 ```
 THIRDWEB_SECRET_KEY=your_thirdweb_secret_key            # Server-side: facilitator + settlePayment
-THIRDWEB_SERVER_WALLET_ADDRESS=0xYourThirdwebServerWallet # thirdweb Engine server wallet the facilitator settles from
+THIRDWEB_SERVER_WALLET_ADDRESS=0xYourThirdwebServerWallet # thirdweb server wallet the facilitator settles from
 NEXT_PUBLIC_THIRDWEB_CLIENT_ID=your_thirdweb_client_id    # Client-side: useFetchWithPayment
 ```
-Distinct infra from `RELAYER_PRIVATE_KEY` above — this powers the optional x402 payment method in the main web app only, not the agent.
+Distinct infra from `RELAYER_PRIVATE_KEY` above. This is not optional/toggleable in the UI — the main app's "Confirm & Pay" button automatically routes through x402 whenever the user pays with USDC on Celo (verified as the only asset the facilitator currently supports there — see below), and through the normal contract call for everything else. It never touches the agent-initiated flow.
+
+**How to get these:**
+1. Sign up at [thirdweb.com](https://thirdweb.com) → dashboard → **Add New → Create Project**.
+2. Name it, then set **Allowed Domains** to `localhost:3000` (dev) and your production domain — this restricts who can use your Client ID.
+3. thirdweb shows a **Secret Key** exactly once on completion — save it immediately (`THIRDWEB_SECRET_KEY`). The **Client ID** is visible anytime in the project's API Keys page (`NEXT_PUBLIC_THIRDWEB_CLIENT_ID`).
+4. In the same project, check the **Overview** or **Transactions → Server Wallets** section — newer projects auto-provision a default server wallet there. Copy its `0x...` address → `THIRDWEB_SERVER_WALLET_ADDRESS`. (If none exists, create one from that section.)
+5. Fund that server wallet with a small amount of native **CELO** (gas only, no stablecoins needed) — it's the wallet that actually submits x402 settlement transactions.
+6. Add all three vars to `.env.local` **and** to your hosting provider's production environment variables (e.g. Vercel → Project → Settings → Environment Variables), then redeploy — `NEXT_PUBLIC_*` vars are baked in at build time, so existing deployments won't pick them up without a rebuild.
 
 ### Cron / Maintenance
 ```

@@ -1280,15 +1280,29 @@ export default function Home() {
   // wallet-connect prompt: whichever wallet the user already connected via wagmi
   // (MetaMask, WalletConnect, Base Account SDK, Valora, MiniPay) becomes the account
   // thirdweb signs x402 payment authorizations with.
+  //
+  // viemAdapter.wallet.fromViem() returns a wallet whose internal account stays
+  // undefined until autoConnect()/connect() actually runs — thirdweb's setActiveWallet
+  // requires getAccount() to be non-null and throws synchronously otherwise. That throw
+  // happens inside an async function, so an un-awaited call here would silently become
+  // an unhandled rejection: the wallet would just never register, with no visible error,
+  // which is exactly what caused "wallet not connected" on every x402 attempt. Use
+  // autoConnect (reads eth_accounts, no popup) since the wallet is already connected via
+  // wagmi — connect() uses eth_requestAccounts and could prompt again unnecessarily.
   useEffect(() => {
     if (!wagmiWalletClient) return;
-    try {
-      const thirdwebWallet = viemAdapter.wallet.fromViem({ walletClient: wagmiWalletClient as any });
-      setActiveThirdwebWallet(thirdwebWallet);
-    } catch (e) {
-      console.error("Failed to sync wallet for x402:", e);
-    }
-  }, [wagmiWalletClient, setActiveThirdwebWallet]);
+    let cancelled = false;
+    (async () => {
+      try {
+        const thirdwebWallet = viemAdapter.wallet.fromViem({ walletClient: wagmiWalletClient as any });
+        await thirdwebWallet.autoConnect({ client: thirdwebClient });
+        if (!cancelled) await setActiveThirdwebWallet(thirdwebWallet);
+      } catch (e) {
+        console.error("Failed to sync wallet for x402:", e);
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [wagmiWalletClient, setActiveThirdwebWallet, thirdwebClient]);
 
   // ⚡ 2. THE CHAMELEON ENVIRONMENT DETECTOR ⚡
   useEffect(() => {
