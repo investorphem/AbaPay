@@ -28,7 +28,21 @@ const ABAPAY_ADMIN_ABI = [
   {"inputs":[{"internalType":"address","name":"tokenAddress","type":"address"},{"internalType":"address","name":"destination","type":"address"},{"internalType":"uint256","name":"amount","type":"uint256"}],"name":"queueWithdrawal","outputs":[],"stateMutability":"nonpayable","type":"function"},
   {"inputs":[{"internalType":"address","name":"tokenAddress","type":"address"}],"name":"cancelWithdrawal","outputs":[],"stateMutability":"nonpayable","type":"function"},
   {"inputs":[{"internalType":"address","name":"tokenAddress","type":"address"}],"name":"executeWithdrawal","outputs":[],"stateMutability":"nonpayable","type":"function"},
-  {"inputs":[{"internalType":"address","name":"","type":"address"}],"name":"pendingWithdrawals","outputs":[{"internalType":"uint256","name":"amount","type":"uint256"},{"internalType":"uint256","name":"executableAt","type":"uint256"},{"internalType":"address","name":"destination","type":"address"}],"stateMutability":"view","type":"function"}
+  {"inputs":[{"internalType":"address","name":"","type":"address"}],"name":"pendingWithdrawals","outputs":[{"internalType":"uint256","name":"amount","type":"uint256"},{"internalType":"uint256","name":"executableAt","type":"uint256"},{"internalType":"address","name":"destination","type":"address"}],"stateMutability":"view","type":"function"},
+  // ⚡ CONTRACT CONTROLS TAB — V2/V3 only. Reads/writes revert (or are simply absent) on V1,
+  // which the Contract tab's per-chain "supported: false" detection (mirroring the
+  // withdrawal pattern above) already accounts for.
+  {"inputs":[],"name":"relayer","outputs":[{"internalType":"address","name":"","type":"address"}],"stateMutability":"view","type":"function"},
+  {"inputs":[],"name":"paused","outputs":[{"internalType":"bool","name":"","type":"bool"}],"stateMutability":"view","type":"function"},
+  {"inputs":[{"internalType":"address","name":"","type":"address"}],"name":"isSupportedToken","outputs":[{"internalType":"bool","name":"","type":"bool"}],"stateMutability":"view","type":"function"},
+  {"inputs":[{"internalType":"address","name":"","type":"address"}],"name":"maxAgentPaymentPerTx","outputs":[{"internalType":"uint256","name":"","type":"uint256"}],"stateMutability":"view","type":"function"},
+  {"inputs":[{"internalType":"address","name":"","type":"address"}],"name":"maxRefundPerTx","outputs":[{"internalType":"uint256","name":"","type":"uint256"}],"stateMutability":"view","type":"function"},
+  {"inputs":[{"internalType":"address","name":"newRelayer","type":"address"}],"name":"setRelayer","outputs":[],"stateMutability":"nonpayable","type":"function"},
+  {"inputs":[{"internalType":"address","name":"tokenAddress","type":"address"},{"internalType":"bool","name":"status","type":"bool"}],"name":"setTokenSupport","outputs":[],"stateMutability":"nonpayable","type":"function"},
+  {"inputs":[{"internalType":"address","name":"tokenAddress","type":"address"},{"internalType":"uint256","name":"maxAmount","type":"uint256"}],"name":"setMaxAgentPayment","outputs":[],"stateMutability":"nonpayable","type":"function"},
+  {"inputs":[{"internalType":"address","name":"tokenAddress","type":"address"},{"internalType":"uint256","name":"maxAmount","type":"uint256"}],"name":"setMaxRefund","outputs":[],"stateMutability":"nonpayable","type":"function"},
+  {"inputs":[],"name":"pause","outputs":[],"stateMutability":"nonpayable","type":"function"},
+  {"inputs":[],"name":"unpause","outputs":[],"stateMutability":"nonpayable","type":"function"}
 ];
 
 // `supported: false` means the contract has no queueWithdrawal/pendingWithdrawals at all
@@ -67,6 +81,16 @@ export default function AdminDashboard() {
   // ⚡ TIMELOCKED WITHDRAWALS (V2/V3) — keyed by `${network}-${tokenSymbol}` ⚡
   const [queuedWithdrawals, setQueuedWithdrawals] = useState<Record<string, QueuedWithdrawal>>({});
   const [withdrawalBusyKey, setWithdrawalBusyKey] = useState<string | null>(null);
+
+  // ⚡ CONTRACT CONTROLS (V2/V3 owner functions) — per-chain state, keyed by network ⚡
+  const [contractControls, setContractControls] = useState<Record<'CELO' | 'BASE', {
+    supported: boolean;
+    relayer?: string;
+    paused?: boolean;
+    tokens?: Record<string, { supported: boolean; agentCap: string; refundCap: string }>;
+  }>>({ CELO: { supported: false }, BASE: { supported: false } });
+  const [ccBusyKey, setCcBusyKey] = useState<string | null>(null);
+  const [ccInputs, setCcInputs] = useState<Record<string, string>>({});
 
   const [vtBalance, setVtBalance] = useState("0.00"); 
   const [smsBalance, setSmsBalance] = useState("0");    
@@ -163,6 +187,7 @@ export default function AdminDashboard() {
     const authHeaders = headersOverride || adminHeaders;
     setIsFetching(true);
     await fetchOnChainBalances();
+    await fetchContractControls();
     await fetchVtPassHealth(authHeaders);
 
     try {
@@ -317,6 +342,178 @@ export default function AdminDashboard() {
       return { supported: true, amount, executableAt: Number(executableAt), destination };
     } catch {
       return { supported: false };
+    }
+  };
+
+  // ⚡ CONTRACT CONTROLS — reads relayer/paused/token-support/caps for both chains.
+  // Same "call reverts => V1, no such function" detection as readPendingWithdrawal.
+  const fetchContractControls = async () => {
+    const celoPublic = createPublicClient({ chain: isMainnet ? celo : celoSepolia, transport: http() });
+    const basePublic = createPublicClient({ chain: isMainnet ? base : baseSepolia, transport: http() });
+
+    const readOneChain = async (
+      publicClient: any,
+      contract: `0x${string}`,
+      symbols: readonly string[],
+      chainKey: 'celoMainnet' | 'baseMainnet',
+      chainKeyTest: 'celoSepolia' | 'baseSepolia'
+    ) => {
+      try {
+        const [relayer, paused] = await Promise.all([
+          publicClient.readContract({ address: contract, abi: ABAPAY_ADMIN_ABI, functionName: 'relayer' }) as Promise<string>,
+          publicClient.readContract({ address: contract, abi: ABAPAY_ADMIN_ABI, functionName: 'paused' }) as Promise<boolean>,
+        ]);
+
+        const tokens: Record<string, { supported: boolean; agentCap: string; refundCap: string }> = {};
+        for (const symbol of symbols) {
+          const tokenAddr = (isMainnet ? (TOKENS as any)[symbol]?.[chainKey] : (TOKENS as any)[symbol]?.[chainKeyTest]) as `0x${string}` | undefined;
+          if (!tokenAddr) continue;
+          const [supported, agentCap, refundCap] = await Promise.all([
+            publicClient.readContract({ address: contract, abi: ABAPAY_ADMIN_ABI, functionName: 'isSupportedToken', args: [tokenAddr] }) as Promise<boolean>,
+            publicClient.readContract({ address: contract, abi: ABAPAY_ADMIN_ABI, functionName: 'maxAgentPaymentPerTx', args: [tokenAddr] }) as Promise<bigint>,
+            publicClient.readContract({ address: contract, abi: ABAPAY_ADMIN_ABI, functionName: 'maxRefundPerTx', args: [tokenAddr] }) as Promise<bigint>,
+          ]);
+          tokens[symbol] = {
+            supported,
+            agentCap: formatUnits(agentCap, (TOKENS as any)[symbol].decimals),
+            refundCap: formatUnits(refundCap, (TOKENS as any)[symbol].decimals),
+          };
+        }
+
+        return { supported: true, relayer, paused, tokens };
+      } catch {
+        return { supported: false };
+      }
+    };
+
+    const [celoResult, baseResult] = await Promise.all([
+      CELO_CONTRACT && CELO_CONTRACT.length === 42
+        ? readOneChain(celoPublic, CELO_CONTRACT, ['USD₮', 'USDC', 'USDm'], 'celoMainnet', 'celoSepolia')
+        : Promise.resolve({ supported: false }),
+      BASE_CONTRACT && BASE_CONTRACT.length === 42
+        ? readOneChain(basePublic, BASE_CONTRACT, ['USD₮', 'USDC'], 'baseMainnet', 'baseSepolia')
+        : Promise.resolve({ supported: false }),
+    ]);
+
+    setContractControls({ CELO: celoResult, BASE: baseResult });
+  };
+
+  // Shared prelude for every contract-control write: resolve chain/contract, switch the
+  // admin wallet onto it if needed. Mirrors the pattern already used for withdrawals/refunds.
+  const prepareContractWrite = async (network: 'CELO' | 'BASE') => {
+    if (!client || !address) { alert('Connect your admin wallet first.'); return null; }
+    const targetChain = network === 'BASE' ? (isMainnet ? base : baseSepolia) : (isMainnet ? celo : celoSepolia);
+    const targetContract = network === 'BASE' ? BASE_CONTRACT : CELO_CONTRACT;
+    const currentChainId = await client.getChainId();
+    if (currentChainId !== targetChain.id) await client.switchChain({ id: targetChain.id });
+    return { targetChain, targetContract };
+  };
+
+  const handleSetRelayer = async (network: 'CELO' | 'BASE') => {
+    const key = `${network}-relayer`;
+    const newRelayer = (ccInputs[key] || '').trim();
+    if (!/^0x[a-fA-F0-9]{40}$/.test(newRelayer)) return alert('Enter a valid 0x address (or the zero address to disable the agent).');
+    if (!confirm(`Set the ${network} relayer to ${newRelayer}?\n\nThis changes which address is authorised to call payBillFor() on behalf of every user with an active allowance.`)) return;
+
+    setCcBusyKey(key);
+    try {
+      const prep = await prepareContractWrite(network);
+      if (!prep) return;
+      const hash = await client.writeContract({
+        chain: prep.targetChain, account: address, address: prep.targetContract,
+        abi: ABAPAY_ADMIN_ABI, functionName: 'setRelayer', args: [newRelayer],
+        dataSuffix: celoAttributionSuffix(prep.targetChain),
+      });
+      alert(`Relayer updated! Hash: ${hash.slice(0, 10)}`);
+      setTimeout(() => fetchContractControls(), 3000);
+    } catch (e: any) {
+      alert(e?.shortMessage || 'Failed to update relayer.');
+    } finally {
+      setCcBusyKey(null);
+    }
+  };
+
+  const handleTogglePause = async (network: 'CELO' | 'BASE', currentlyPaused: boolean) => {
+    const key = `${network}-pause`;
+    const action = currentlyPaused ? 'unpause' : 'pause';
+    if (!confirm(currentlyPaused
+      ? `Unpause the ${network} contract? Payments and agent spending resume immediately.`
+      : `⚠️ PAUSE the ${network} contract?\n\nThis immediately halts ALL payments (payBill, payBillFor) and agent spending on this chain. Refunds/withdrawals stay available. Use this if you suspect a live exploit or a compromised relayer key.`
+    )) return;
+
+    setCcBusyKey(key);
+    try {
+      const prep = await prepareContractWrite(network);
+      if (!prep) return;
+      const hash = await client.writeContract({
+        chain: prep.targetChain, account: address, address: prep.targetContract,
+        abi: ABAPAY_ADMIN_ABI, functionName: action, args: [],
+        dataSuffix: celoAttributionSuffix(prep.targetChain),
+      });
+      alert(`${action === 'pause' ? 'Paused' : 'Unpaused'}! Hash: ${hash.slice(0, 10)}`);
+      setTimeout(() => fetchContractControls(), 3000);
+    } catch (e: any) {
+      alert(e?.shortMessage || `Failed to ${action}.`);
+    } finally {
+      setCcBusyKey(null);
+    }
+  };
+
+  const handleToggleTokenSupport = async (network: 'CELO' | 'BASE', symbol: string, currentlySupported: boolean) => {
+    const key = `${network}-${symbol}-support`;
+    const tokenAddr = (isMainnet ? (TOKENS as any)[symbol]?.[network === 'BASE' ? 'baseMainnet' : 'celoMainnet'] : (TOKENS as any)[symbol]?.[network === 'BASE' ? 'baseSepolia' : 'celoSepolia']) as `0x${string}` | undefined;
+    if (!tokenAddr) return alert(`${symbol} is not configured on ${network}.`);
+    if (!confirm(currentlySupported
+      ? `Stop accepting ${symbol} on ${network}? Existing balances are unaffected; payBill/payBillFor for this token will revert until re-enabled.`
+      : `Start accepting ${symbol} on ${network}?`
+    )) return;
+
+    setCcBusyKey(key);
+    try {
+      const prep = await prepareContractWrite(network);
+      if (!prep) return;
+      const hash = await client.writeContract({
+        chain: prep.targetChain, account: address, address: prep.targetContract,
+        abi: ABAPAY_ADMIN_ABI, functionName: 'setTokenSupport', args: [tokenAddr, !currentlySupported],
+        dataSuffix: celoAttributionSuffix(prep.targetChain),
+      });
+      alert(`${symbol} support updated! Hash: ${hash.slice(0, 10)}`);
+      setTimeout(() => fetchContractControls(), 3000);
+    } catch (e: any) {
+      alert(e?.shortMessage || 'Failed to update token support.');
+    } finally {
+      setCcBusyKey(null);
+    }
+  };
+
+  const handleSetCap = async (network: 'CELO' | 'BASE', symbol: string, kind: 'agent' | 'refund') => {
+    const key = `${network}-${symbol}-${kind}`;
+    const raw = (ccInputs[key] || '').trim();
+    const decimals = (TOKENS as any)[symbol]?.decimals;
+    if (decimals === undefined || isNaN(Number(raw)) || Number(raw) < 0) return alert('Enter a valid, non-negative amount.');
+    const tokenAddr = (isMainnet ? (TOKENS as any)[symbol]?.[network === 'BASE' ? 'baseMainnet' : 'celoMainnet'] : (TOKENS as any)[symbol]?.[network === 'BASE' ? 'baseSepolia' : 'celoSepolia']) as `0x${string}` | undefined;
+    if (!tokenAddr) return alert(`${symbol} is not configured on ${network}.`);
+
+    const label = kind === 'agent' ? 'per-transaction agent-payment cap' : 'per-transaction refund cap';
+    if (!confirm(`Set the ${symbol} ${label} on ${network} to ${raw}?`)) return;
+
+    setCcBusyKey(key);
+    try {
+      const prep = await prepareContractWrite(network);
+      if (!prep) return;
+      const amountWei = parseUnits(raw, decimals);
+      const hash = await client.writeContract({
+        chain: prep.targetChain, account: address, address: prep.targetContract,
+        abi: ABAPAY_ADMIN_ABI, functionName: kind === 'agent' ? 'setMaxAgentPayment' : 'setMaxRefund', args: [tokenAddr, amountWei],
+        dataSuffix: celoAttributionSuffix(prep.targetChain),
+      });
+      alert(`Cap updated! Hash: ${hash.slice(0, 10)}`);
+      setCcInputs(p => ({ ...p, [key]: '' }));
+      setTimeout(() => fetchContractControls(), 3000);
+    } catch (e: any) {
+      alert(e?.shortMessage || 'Failed to update cap.');
+    } finally {
+      setCcBusyKey(null);
     }
   };
 
@@ -688,7 +885,7 @@ export default function AdminDashboard() {
 
             <div className="bg-[#111114] p-1.5 rounded-2xl border border-slate-800 flex justify-between items-center max-w-full">
               <div className="flex gap-1 overflow-x-auto no-scrollbar pr-4">
-                  {['analytics', 'system', 'agent', 'ops', 'ledger', 'vault', 'identity'].map((t) => (
+                  {['analytics', 'system', 'agent', 'ops', 'ledger', 'vault', 'contract', 'identity'].map((t) => (
                     <button key={t} onClick={() => setActiveTab(t)} className={`px-6 py-2 rounded-xl text-xs font-black uppercase transition-all whitespace-nowrap ${activeTab === t ? 'bg-slate-800 text-emerald-400' : 'text-slate-500 hover:text-slate-300'}`}>
                         {t === 'system' ? 'Controls' : t}
                     </button>
@@ -1089,6 +1286,146 @@ export default function AdminDashboard() {
                         <WithdrawControl tokenSymbol="USDC" network="BASE" hoverClass="hover:bg-blue-500" queued={queuedWithdrawals['BASE-USDC']} busy={withdrawalBusyKey === 'BASE-USDC'} onWithdraw={handleWithdrawal} onCancel={handleCancelWithdrawal} />
                     </div>
                 </div>
+              </div>
+            )}
+
+            {/* CONTRACT CONTROLS TAB — direct owner-function calls on AbaPayV3, per chain.
+                 Only shows for chains where the deployed contract actually exposes these
+                 functions (V2/V3) — a V1 contract shows a "not available" notice instead,
+                 same detection pattern as the vault tab's withdrawal flow. */}
+            {activeTab === 'contract' && (
+              <div className="space-y-6 animate-in fade-in">
+                {(['CELO', 'BASE'] as const).map((network) => {
+                  const cc = contractControls[network];
+                  const accentColor = network === 'CELO' ? 'emerald' : 'blue';
+                  const tokenSymbols = network === 'CELO' ? ['USD₮', 'USDC', 'USDm'] as const : ['USD₮', 'USDC'] as const;
+
+                  return (
+                    <div key={network} className="bg-[#111114] border border-slate-800 rounded-3xl p-8">
+                      <h3 className={`text-sm font-black text-${accentColor}-500 uppercase tracking-widest mb-6 border-b border-slate-800 pb-3 flex items-center gap-2`}>
+                        <span className={`w-2 h-2 rounded-full bg-${accentColor}-500`}></span> {network} — AbaPayV3 Contract Controls
+                      </h3>
+
+                      {!cc?.supported ? (
+                        <p className="text-xs text-slate-500 italic">
+                          {network} contract isn&apos;t configured, or doesn&apos;t expose these functions (V1 contracts predate them).
+                        </p>
+                      ) : (
+                        <div className="space-y-8">
+                          {/* RELAYER */}
+                          <div>
+                            <div className="flex items-center justify-between mb-2">
+                              <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest">Agent Relayer</label>
+                              <span className="text-[10px] font-mono text-slate-500">{cc.relayer}</span>
+                            </div>
+                            <div className="flex gap-2">
+                              <input
+                                type="text"
+                                placeholder="0x... new relayer address (0x0 to disable the agent)"
+                                value={ccInputs[`${network}-relayer`] || ''}
+                                onChange={(e) => setCcInputs(p => ({ ...p, [`${network}-relayer`]: e.target.value }))}
+                                className="flex-1 bg-slate-950 border border-slate-800 text-white text-xs font-mono py-3 px-4 rounded-xl outline-none focus:border-emerald-600"
+                              />
+                              <button
+                                onClick={() => handleSetRelayer(network)}
+                                disabled={ccBusyKey === `${network}-relayer`}
+                                className="bg-slate-800 hover:bg-slate-700 text-white text-[10px] font-black uppercase tracking-widest px-5 rounded-xl disabled:opacity-50 flex items-center gap-2"
+                              >
+                                {ccBusyKey === `${network}-relayer` ? <Loader2 size={12} className="animate-spin" /> : <Save size={12} />} Update
+                              </button>
+                            </div>
+                          </div>
+
+                          {/* PAUSE / KILL SWITCH */}
+                          <div className="flex items-center justify-between bg-slate-900 border border-slate-800 rounded-2xl p-5">
+                            <div>
+                              <p className="font-black text-white text-sm flex items-center gap-2">
+                                <Power size={16} className={cc.paused ? 'text-red-400' : 'text-emerald-400'} />
+                                {cc.paused ? 'Contract Paused' : 'Contract Active'}
+                              </p>
+                              <p className="text-[10px] text-slate-500 mt-1">Emergency stop — halts payBill/payBillFor immediately. Refunds/withdrawals stay available.</p>
+                            </div>
+                            <button
+                              onClick={() => handleTogglePause(network, !!cc.paused)}
+                              disabled={ccBusyKey === `${network}-pause`}
+                              className={`text-[10px] font-black uppercase tracking-widest px-5 py-3 rounded-xl disabled:opacity-50 ${cc.paused ? 'bg-emerald-600 hover:bg-emerald-500 text-white' : 'bg-red-600 hover:bg-red-500 text-white'}`}
+                            >
+                              {ccBusyKey === `${network}-pause` ? <Loader2 size={12} className="animate-spin inline" /> : (cc.paused ? 'Unpause' : 'Pause')}
+                            </button>
+                          </div>
+
+                          {/* PER-TOKEN CONTROLS */}
+                          <div>
+                            <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest mb-3 block">Token Support & Caps</label>
+                            <div className="space-y-4">
+                              {tokenSymbols.map((symbol) => {
+                                const t = cc.tokens?.[symbol];
+                                return (
+                                  <div key={symbol} className="bg-slate-900 border border-slate-800 rounded-2xl p-5">
+                                    <div className="flex items-center justify-between mb-4">
+                                      <span className="font-black text-white">{symbol}</span>
+                                      <button
+                                        onClick={() => handleToggleTokenSupport(network, symbol, !!t?.supported)}
+                                        disabled={ccBusyKey === `${network}-${symbol}-support`}
+                                        className={`text-[9px] font-black uppercase tracking-widest px-3 py-1.5 rounded-lg disabled:opacity-50 ${t?.supported ? 'bg-emerald-500/10 text-emerald-400' : 'bg-red-500/10 text-red-400'}`}
+                                      >
+                                        {ccBusyKey === `${network}-${symbol}-support` ? <Loader2 size={10} className="animate-spin inline" /> : (t?.supported ? 'Supported — tap to disable' : 'Not supported — tap to enable')}
+                                      </button>
+                                    </div>
+                                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                                      <div>
+                                        <label className="text-[9px] font-bold text-slate-500 uppercase tracking-widest mb-1 block">Max agent payment / tx (current: {t?.agentCap ?? '...'})</label>
+                                        <div className="flex gap-2">
+                                          <input
+                                            type="number" placeholder="e.g. 10"
+                                            value={ccInputs[`${network}-${symbol}-agent`] || ''}
+                                            onChange={(e) => setCcInputs(p => ({ ...p, [`${network}-${symbol}-agent`]: e.target.value }))}
+                                            className="flex-1 bg-slate-950 border border-slate-800 text-white text-xs py-2.5 px-3 rounded-xl outline-none focus:border-emerald-600"
+                                          />
+                                          <button
+                                            onClick={() => handleSetCap(network, symbol, 'agent')}
+                                            disabled={ccBusyKey === `${network}-${symbol}-agent`}
+                                            className="bg-slate-800 hover:bg-slate-700 text-white text-[9px] font-black uppercase px-3 rounded-xl disabled:opacity-50"
+                                          >
+                                            {ccBusyKey === `${network}-${symbol}-agent` ? <Loader2 size={10} className="animate-spin" /> : 'Set'}
+                                          </button>
+                                        </div>
+                                      </div>
+                                      <div>
+                                        <label className="text-[9px] font-bold text-slate-500 uppercase tracking-widest mb-1 block">Max refund / tx (current: {t?.refundCap ?? '...'})</label>
+                                        <div className="flex gap-2">
+                                          <input
+                                            type="number" placeholder="e.g. 10"
+                                            value={ccInputs[`${network}-${symbol}-refund`] || ''}
+                                            onChange={(e) => setCcInputs(p => ({ ...p, [`${network}-${symbol}-refund`]: e.target.value }))}
+                                            className="flex-1 bg-slate-950 border border-slate-800 text-white text-xs py-2.5 px-3 rounded-xl outline-none focus:border-emerald-600"
+                                          />
+                                          <button
+                                            onClick={() => handleSetCap(network, symbol, 'refund')}
+                                            disabled={ccBusyKey === `${network}-${symbol}-refund`}
+                                            className="bg-slate-800 hover:bg-slate-700 text-white text-[9px] font-black uppercase px-3 rounded-xl disabled:opacity-50"
+                                          >
+                                            {ccBusyKey === `${network}-${symbol}-refund` ? <Loader2 size={10} className="animate-spin" /> : 'Set'}
+                                          </button>
+                                        </div>
+                                      </div>
+                                    </div>
+                                  </div>
+                                );
+                              })}
+                            </div>
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  );
+                })}
+
+                <p className="text-[10px] text-slate-600 leading-relaxed px-2">
+                  These call AbaPayV3&apos;s owner-only functions directly (setRelayer, setTokenSupport, setMaxAgentPayment,
+                  setMaxRefund, pause/unpause) — every action here is a real, immediate on-chain transaction signed by
+                  your connected admin wallet. There is no undo; double-check values before confirming.
+                </p>
               </div>
             )}
 
