@@ -241,7 +241,7 @@ export async function POST(req: Request) {
       await supabase.from('deai_sessions').delete().eq('chat_id', platform_id);
       return NextResponse.json({ 
         action: 'REPLY', 
-        message: `🌍 **Region:** ${currentCountry}\n💵 **Fiat:** ${currencySymbol}${fiatBalance}\n🪙 **Crypto:** ${crypto.usdt} USDT | ${crypto.usdc} USDC | ${crypto.cusd} cUSD\n\n👋 **Welcome to AbaPay AI!**\n\nI can help you pay bills and send crypto instantly.\n\n*Try saying:*\n💬 _Buy 500 MTN airtime for 08012345678_\n💬 _Pay 5000 electricity for meter 1122334455_\n📜 _Check my history_` 
+        message: `🌍 **Region:** ${currentCountry}\n💵 **Fiat:** ${currencySymbol}${fiatBalance}\n🪙 **Crypto:** ${crypto['USD₮'] || '0.0000'} USDT | ${crypto['USDC'] || '0.0000'} USDC | ${crypto['USDm'] || '0.0000'} cUSD\n\n👋 **Welcome to AbaPay AI!**\n\nI can help you pay bills and send crypto instantly.\n\n*Try saying:*\n💬 _Buy 500 MTN airtime for 08012345678_\n💬 _Pay 5000 electricity for meter 1122334455_\n📜 _Check my history_`
       });
     }
 
@@ -789,7 +789,7 @@ export async function POST(req: Request) {
       const total = Number(session.intent_data.amount_ngn || 0) + Number(session.intent_data.fee || 0);
       return NextResponse.json({
           action: 'REPLY',
-          message: `🤖 **Final Checkout**\n\nService: ${session.intent_data.intent.replace('_', ' ')}\nAccount: ${session.intent_data.destination_account}\n${detailsRow}\nAmount: ${currencySymbol}${session.intent_data.amount_ngn || 0}\nPayment: **${selected}**\n**Total: ${currencySymbol}${total}**\n\n🔒 Reply with your **4-digit PIN** to confirm.`
+          message: `🤖 **Final Checkout**\n\nService: ${session.intent_data.intent.replace('_', ' ')}\nAccount: ${session.intent_data.destination_account}\n${detailsRow}\nAmount: ${currencySymbol}${session.intent_data.amount_ngn || 0}\nPayment: **${selected}**\n**Total: ${currencySymbol}${total}**\n\n🔒 Reply with your **PIN** to confirm.`
       });
     }
     // STATE: DATA PLAN
@@ -1198,11 +1198,22 @@ export async function POST(req: Request) {
       }
     }
 
-    if (!SERVICE_RULES[intentData.intent] && intentData.intent !== 'TRANSACTION_HISTORY') intentData.intent = 'UNKNOWN';
+    if (!SERVICE_RULES[intentData.intent] && intentData.intent !== 'TRANSACTION_HISTORY' && intentData.intent !== 'CHECK_BALANCE') intentData.intent = 'UNKNOWN';
 
     if (intentData.intent === 'UNKNOWN') {
         // Never a bare shrug — always show what IS possible.
         return NextResponse.json({ action: 'REPLY', message: `🤔 I didn't quite catch that.\n\n${await describeCapabilities()}` });
+    }
+
+    // ⚡ CHECK_BALANCE — this was previously forced to UNKNOWN (no SERVICE_RULES entry,
+    // since it isn't a payable service), even though describeCapabilities() itself tells
+    // users to say "balance". crypto/fiatBalance/currentCountry/currencySymbol are already
+    // computed above for the welcome banner — reuse them instead of re-fetching.
+    if (intentData.intent === 'CHECK_BALANCE') {
+        return NextResponse.json({
+            action: 'REPLY',
+            message: `💰 **Your Balance**\n\n🌍 Region: ${currentCountry}\n💵 Fiat: ${currencySymbol}${fiatBalance}\n🪙 Crypto: ${crypto['USD₮'] || '0.0000'} USDT | ${crypto['USDC'] || '0.0000'} USDC | ${crypto['USDm'] || '0.0000'} cUSD`,
+        });
     }
 
     if (intentData.intent === 'TRANSACTION_HISTORY') {

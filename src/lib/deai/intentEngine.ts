@@ -82,6 +82,16 @@ Rules:
    Only list what is genuinely absent. For CHECK_BALANCE / TRANSACTION_HISTORY / HELP, "missing" is [].
 8. confidence_score is 0.0-1.0. Be honest — if you're guessing, score low.
 9. If the message isn't a payment request or a supported command, intent is "UNKNOWN".
+10. NEVER return "UNKNOWN" just because details are missing. Users write in every style —
+   terse, casual, Nigerian Pidgin, formal — and most give partial requests. If the message
+   expresses ANY recognisable intent to use one of your services, extract that intent and
+   list what's missing; only use "UNKNOWN" when the message doesn't relate to any capability
+   at all (small talk, an unrelated question, gibberish).
+   - "I want to top up" / "recharge my line" / "buy credit" -> VEND_AIRTIME, missing ["provider","amount","account"] (all Nigerian slang for airtime).
+   - "balance" / "check my balance" / "how much do I have" -> CHECK_BALANCE.
+   - "I need data" / "buy me some MB" / "browsing data abeg" -> VEND_DATA, missing ["destination_account"] (or more, if genuinely absent).
+   - "light don go, need to buy units" -> PAY_ELECTRICITY, missing whatever isn't stated (Nigerian Pidgin for "the power went out").
+   - A single greeting with nothing else ("hi", "hello") when nothing else is stated -> "UNKNOWN" is correct here, since there's genuinely no intent yet.
 
 11. RECURRENCE — set is_recurring=true when the user wants this to repeat:
    - "every Tuesday buy 200 airtime"        -> intent VEND_AIRTIME, is_recurring true, frequency "weekly", day_of_week 2
