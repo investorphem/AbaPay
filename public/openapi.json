@@ -1,0 +1,86 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "AbaPay",
+    "version": "1.0.0",
+    "description": "AbaPay is a Web3 utility bill payment agent for Nigeria — airtime, data, electricity, cable TV, and more — settled on-chain. This endpoint accepts x402 payments in USDC on Celo to pay a bill on behalf of the caller.",
+    "contact": {
+      "email": "support@abapays.com",
+      "name": "AbaPay",
+      "url": "https://abapays.com"
+    }
+  },
+  "servers": [
+    { "url": "https://www.abapays.com" }
+  ],
+  "paths": {
+    "/api/pay/x402": {
+      "post": {
+        "operationId": "payBillViaX402",
+        "summary": "Pay a Nigerian utility bill (airtime, data, electricity, cable) via x402",
+        "description": "Settles a real-world bill payment via the x402 protocol. The caller pays in USDC on Celo; on confirmed settlement, AbaPay vends the underlying service (airtime top-up, data bundle, electricity token, cable subscription) through its provider integration and returns the result. Price is dynamic — it equals the live NGN value of the bill being paid, converted to USDC at the platform's current exchange rate, so there is no fixed catalog price for this resource.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": ["serviceID", "serviceCategory", "network", "billersCode", "nairaAmount", "token", "blockchain", "wallet_address"],
+                "properties": {
+                  "serviceID": { "type": "string", "description": "VTpass service identifier, e.g. \"mtn\", \"ikeja-electric\"" },
+                  "serviceCategory": { "type": "string", "description": "AIRTIME | DATA | ELECTRICITY | CABLE | BANK | EDUCATION" },
+                  "network": { "type": "string", "description": "Provider name, e.g. MTN, IKEJA-ELECTRIC, DSTV" },
+                  "billersCode": { "type": "string", "description": "Phone number, meter number, or smartcard/IUC number being paid for" },
+                  "nairaAmount": { "type": "number", "description": "Bill amount in Nigerian Naira — the source of truth for pricing this request" },
+                  "token": { "type": "string", "enum": ["USDC"], "description": "Only USDC is supported for x402 settlement at this time" },
+                  "blockchain": { "type": "string", "enum": ["CELO"], "description": "Only Celo is supported for x402 settlement at this time" },
+                  "wallet_address": { "type": "string", "description": "The paying wallet's address, for cross-checking against the x402 payment authorization's payer" }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Bill vended successfully (or queued for background processing).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "success": { "type": "boolean" },
+                    "status": { "type": "string", "enum": ["SUCCESS", "FAILED_VENDING", "TIMEOUT"] },
+                    "purchased_code": { "type": "string", "nullable": true, "description": "Electricity token or exam PIN, when applicable" },
+                    "units": { "type": "string", "nullable": true },
+                    "request_id": { "type": "string" },
+                    "tx_hash": { "type": "string", "description": "The on-chain settlement transaction hash" }
+                  }
+                }
+              }
+            }
+          },
+          "402": {
+            "description": "Payment required — standard x402 challenge response."
+          }
+        },
+        "x-payment-info": {
+          "price": {
+            "mode": "dynamic",
+            "currency": "USDC",
+            "min": "0.05"
+          },
+          "protocols": [
+            {
+              "protocol": "x402",
+              "version": 2,
+              "scheme": "exact",
+              "network": "eip155:42220",
+              "asset": "0xcebA9300f2b948710d2653dD7B07f33A8B32118C",
+              "payTo": "0x42Fa463798Ed129a9B5Ee51721CB6db1bfCBe3b9"
+            }
+          ]
+        }
+      }
+    }
+  }
+}
