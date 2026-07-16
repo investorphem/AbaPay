@@ -112,6 +112,29 @@ export async function POST(req: Request) {
       return NextResponse.json({ success: true, message: "Transaction was already refunded." });
     }
 
+    // ⚡ RECONCILE THE OPS QUEUE ⚡
+    //
+    // This is the OLDER of two refund paths (the Ledger tab's "Refund" button) — the newer
+    // one (Ops tab, /api/admin/refunds) also marks refund_queue.status = 'COMPLETED' when it
+    // records a refund. This endpoint never did, so a refund processed from the Ledger tab
+    // left its refund_queue row stuck on PENDING forever — the Ops tab kept listing it as
+    // still owed even though it had, in fact, been paid. Match by tx_hash (both tables key
+    // refunds to the same failed-vend transaction) and complete it here too.
+    if (record.tx_hash) {
+      await supabaseAdmin
+        .from('refund_queue')
+        .update({
+          status: 'COMPLETED',
+          refund_tx_hash: refundHash,
+          approved_by: auth.address || 'admin',
+          approved_at: new Date().toISOString(),
+          completed_at: new Date().toISOString(),
+          notes: 'Refunded via Ledger tab',
+        })
+        .eq('tx_hash', record.tx_hash)
+        .eq('status', 'PENDING');
+    }
+
     return NextResponse.json({ success: true });
   } catch (error: any) {
     console.error("Server Error:", error?.message);
