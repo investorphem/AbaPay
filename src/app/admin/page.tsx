@@ -953,6 +953,9 @@ export default function AdminDashboard() {
                             <p className="text-slate-200 font-bold uppercase flex items-center gap-1">
                                 {isBaseTx ? <span className="w-1.5 h-1.5 rounded-full bg-blue-500"></span> : <span className="w-1.5 h-1.5 rounded-full bg-emerald-500"></span>}
                                 {tx.blockchain || 'CELO'} • {tx.network || 'N/A'}
+                                {tx.payment_method === 'X402' && (
+                                  <span className="ml-1 text-[8px] font-black px-1.5 py-0.5 rounded bg-purple-500/10 text-purple-400 tracking-widest">x402</span>
+                                )}
                             </p>
                             <p className="text-[10px] text-slate-500 uppercase tracking-wider mt-0.5">{tx.service_category}</p>
                             <p className="text-[10px] text-blue-400 font-mono mt-1 font-bold">Acct/Ph: {tx.account_number}</p>
