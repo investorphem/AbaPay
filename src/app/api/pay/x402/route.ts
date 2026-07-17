@@ -125,9 +125,17 @@ async function handleX402Request(req: Request) {
   const celoNetworkName = isMainnet ? 'celo' : 'celo-sepolia';
   const facilitatorBaseUrl = isMainnet ? CELO_FACILITATOR_MAINNET : CELO_FACILITATOR_TESTNET;
 
+  // Field set is deliberately a superset of both x402 v1 and v2 PaymentRequirements:
+  // `maxAmountRequired`/`resource`/`description`/`mimeType` are what thirdweb's client
+  // (node_modules/thirdweb/src/x402/schemas.ts — extends the OLD x402/types package's
+  // flat schema) requires per-entry to parse and sign; `amount` is the v2 field name
+  // x402scan's validator checks for. Extra fields are simply ignored by whichever side
+  // doesn't look for them — verified thirdweb only reads `body.accepts[]` and doesn't
+  // validate unknown top-level keys.
   const acceptEntry = {
     scheme: 'exact',
     network: caip2Network,
+    amount: requiredWei.toString(),
     maxAmountRequired: requiredWei.toString(),
     resource: resourceUrl,
     description: `AbaPay ${network || serviceCategory || 'bill'} payment`,
@@ -139,10 +147,21 @@ async function handleX402Request(req: Request) {
   };
 
   if (!paymentHeader) {
-    // No payment attempted yet — issue the challenge. v1, body-based: works for both
-    // thirdweb's client (body fallback) and generic x402 scanners (body is all they read).
+    // No payment attempted yet — issue the challenge as x402 v2 (x402scan explicitly
+    // rejects v1 challenges now: "x402scan only supports v2 — update your paywall to
+    // return the v2 format"). thirdweb's client doesn't validate x402Version against an
+    // enum — it just reads body.accepts[] and echoes whatever version number is here into
+    // the payload it signs — so declaring 2 doesn't break our own app's payment flow.
+    // The settle step below deliberately does NOT trust that echoed version number; it
+    // always forwards to Celo's facilitator as v1 (see comment there for why).
     return NextResponse.json(
-      { x402Version: 1, error: 'Payment required', accepts: [acceptEntry] },
+      {
+        x402Version: 2,
+        error: 'Payment required',
+        resource: { url: resourceUrl, description: acceptEntry.description, mimeType: acceptEntry.mimeType },
+        accepts: [acceptEntry],
+        extensions: {},
+      },
       { status: 402 }
     );
   }
@@ -153,19 +172,23 @@ async function handleX402Request(req: Request) {
   // pre-check here.
   //
   // The header is base64 JSON produced by thirdweb's client (see node_modules/thirdweb/src/x402/encode.ts
-  // encodePayment / sign.ts preparePaymentHeader) in the FLAT x402 v1 shape:
+  // encodePayment / sign.ts preparePaymentHeader) in the FLAT shape:
   //   { x402Version, scheme, network, payload: { signature, authorization } }
   // thirdweb can only resolve a chain ID for signing from a CAIP-2 network string (e.g.
   // "eip155:42220") — it has no idea what "celo" means — so `acceptEntry.network` above must
-  // stay CAIP-2 for the client to sign successfully. But Celo's facilitator's /supported
-  // endpoint (verified live via curl) only lists these two exact (x402Version, scheme, network)
-  // combos: {2, exact, eip155:42220} and {1, exact, celo}. Since thirdweb always tags whatever
-  // x402Version we told it (1 here) onto the flat payload, our actual signed payload is
-  // {1, exact, eip155:42220} — which matches NEITHER kind — hence "unsupported_scheme".
-  // Fix: relabel `network` from CAIP-2 to the plain name (celoNetworkName) only in the copy we
-  // send to the facilitator. This is safe — the EIP-712 signature was already made over
-  // domain.chainId 42220 (derived from the CAIP-2 string at signing time), so this network
-  // label is pure metadata and doesn't affect signature validity.
+  // stay CAIP-2 for the client to sign successfully. The challenge above declares
+  // x402Version 2 (x402scan requires it), which thirdweb dutifully echoes back into
+  // decodedPayload.x402Version — but Celo's facilitator's /supported endpoint (verified live
+  // via curl) only lists these two exact (x402Version, scheme, network) combos:
+  // {2, exact, eip155:42220} and {1, exact, celo}. thirdweb can only ever produce the FLAT
+  // shape (never the fully-nested v2 PaymentPayload with resource/accepted/extensions), so
+  // trusting its echoed "2" would tag a flat payload as v2 — untested against Celo's real v2
+  // handler, and risky with real money. Instead we deliberately IGNORE decodedPayload's
+  // version and force x402Version 1 + network 'celo' below — the exact combo already proven
+  // to settle correctly on mainnet. This is safe: the EIP-712 signature was already made over
+  // domain.chainId 42220 (derived from the CAIP-2 string at signing time), and none of
+  // x402Version/scheme/network are part of the signed message — they're pure envelope
+  // metadata, so relabeling them here doesn't touch the signature at all.
   let settleResult: CeloSettleResponse;
   try {
     let decodedPayload: any;
@@ -175,14 +198,14 @@ async function handleX402Request(req: Request) {
       return NextResponse.json({ x402Version: 1, error: 'Malformed X-PAYMENT header', accepts: [acceptEntry] }, { status: 402 });
     }
 
-    const facilitatorPaymentPayload = { ...decodedPayload, network: celoNetworkName };
+    const facilitatorPaymentPayload = { ...decodedPayload, x402Version: 1, network: celoNetworkName };
     const facilitatorPaymentRequirements = { ...acceptEntry, network: celoNetworkName };
 
     const settleRes = await fetch(`${facilitatorBaseUrl}/settle`, {
       method: 'POST',
       headers: { 'X-API-Key': apiKey, 'Content-Type': 'application/json' },
       body: JSON.stringify({
-        x402Version: decodedPayload.x402Version || 1,
+        x402Version: 1,
         paymentPayload: facilitatorPaymentPayload,
         paymentRequirements: facilitatorPaymentRequirements,
       }),
