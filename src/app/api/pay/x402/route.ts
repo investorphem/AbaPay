@@ -147,16 +147,45 @@ async function handleX402Request(req: Request) {
     );
   }
 
-  // A payment header is present — forward it verbatim to Celo's facilitator to settle.
+  // A payment header is present — decode it and forward it to Celo's facilitator to settle.
   // Their /settle endpoint does verify + settle in one call, and per their own docs only
   // successful settlements consume a credit, so there's no need for a separate /verify
   // pre-check here.
+  //
+  // The header is base64 JSON produced by thirdweb's client (see node_modules/thirdweb/src/x402/encode.ts
+  // encodePayment / sign.ts preparePaymentHeader) in the FLAT x402 v1 shape:
+  //   { x402Version, scheme, network, payload: { signature, authorization } }
+  // thirdweb can only resolve a chain ID for signing from a CAIP-2 network string (e.g.
+  // "eip155:42220") — it has no idea what "celo" means — so `acceptEntry.network` above must
+  // stay CAIP-2 for the client to sign successfully. But Celo's facilitator's /supported
+  // endpoint (verified live via curl) only lists these two exact (x402Version, scheme, network)
+  // combos: {2, exact, eip155:42220} and {1, exact, celo}. Since thirdweb always tags whatever
+  // x402Version we told it (1 here) onto the flat payload, our actual signed payload is
+  // {1, exact, eip155:42220} — which matches NEITHER kind — hence "unsupported_scheme".
+  // Fix: relabel `network` from CAIP-2 to the plain name (celoNetworkName) only in the copy we
+  // send to the facilitator. This is safe — the EIP-712 signature was already made over
+  // domain.chainId 42220 (derived from the CAIP-2 string at signing time), so this network
+  // label is pure metadata and doesn't affect signature validity.
   let settleResult: CeloSettleResponse;
   try {
+    let decodedPayload: any;
+    try {
+      decodedPayload = JSON.parse(Buffer.from(paymentHeader, 'base64').toString('utf-8'));
+    } catch {
+      return NextResponse.json({ x402Version: 1, error: 'Malformed X-PAYMENT header', accepts: [acceptEntry] }, { status: 402 });
+    }
+
+    const facilitatorPaymentPayload = { ...decodedPayload, network: celoNetworkName };
+    const facilitatorPaymentRequirements = { ...acceptEntry, network: celoNetworkName };
+
     const settleRes = await fetch(`${facilitatorBaseUrl}/settle`, {
       method: 'POST',
       headers: { 'X-API-Key': apiKey, 'Content-Type': 'application/json' },
-      body: JSON.stringify({ payment: paymentHeader, network: celoNetworkName }),
+      body: JSON.stringify({
+        x402Version: decodedPayload.x402Version || 1,
+        paymentPayload: facilitatorPaymentPayload,
+        paymentRequirements: facilitatorPaymentRequirements,
+      }),
     });
     settleResult = await settleRes.json();
   } catch (err: any) {
