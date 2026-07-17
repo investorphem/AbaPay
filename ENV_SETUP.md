@@ -16,7 +16,7 @@ up a changed value for most deployment types.
 | Variable | Cost |
 |---|---|
 | `NEXT_PUBLIC_APP_MODE` | Free — just a string |
-| `NEXT_PUBLIC_NETWORK` | Free — just a string |
+| `NEXT_PUBLIC_NETWORK` | Free — just a string|
 | `NEXT_PUBLIC_FIXED_RATE` | Free — just a number |
 | `NEXT_PUBLIC_APP_URL` | Free — your own domain |
 
