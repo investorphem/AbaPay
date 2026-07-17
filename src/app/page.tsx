@@ -942,7 +942,7 @@ export default function Home() {
   const processX402Payment = async () => {
     if (!address) return setStatus("Connect Wallet First");
     if (activeChain?.id !== celo.id && activeChain?.id !== celoSepolia.id) return setStatus("x402 is only available on Celo.");
-    if (selectedToken.symbol !== "USDC") return setStatus("x402 is only available for USDC.");
+    if (selectedToken.symbol !== "USDC" && selectedToken.symbol !== "USD₮") return setStatus("x402 is only available for USDC and USDT.");
 
     setIsProcessing(true);
     setStatus("Settling payment via x402...");
@@ -1733,10 +1733,13 @@ export default function Home() {
               <button
                   onClick={() => {
                       setIsConfirmModalOpen(false);
-                      // ⚡ x402 is the automatic settlement rail for Celo + USDC — no user-facing
-                      // toggle. Everything else (Base, USDT, cUSD/USDm, or x402 unconfigured)
-                      // uses the normal contract-call flow, unchanged. See README "x402 settlement".
-                      const useX402 = !!process.env.NEXT_PUBLIC_THIRDWEB_CLIENT_ID && activeChain?.id === celo.id && selectedToken.symbol === "USDC";
+                      // ⚡ x402 is the automatic settlement rail for Celo + USDC/USDT (both have
+                      // real EIP-3009 transferWithAuthorization on Celo — see the X402_TOKEN_EIP712
+                      // comment in src/app/api/pay/x402/route.ts) — no user-facing toggle.
+                      // Everything else (Base, cUSD/USDm — no transferWithAuthorization — or x402
+                      // unconfigured) uses the normal contract-call flow, unchanged. See README
+                      // "x402 settlement".
+                      const useX402 = !!process.env.NEXT_PUBLIC_THIRDWEB_CLIENT_ID && activeChain?.id === celo.id && (selectedToken.symbol === "USDC" || selectedToken.symbol === "USD₮");
                       if (useX402) processX402Payment(); else processBlockchainPayment();
                   }}
                   className={`w-full text-white dark:text-slate-900 font-black py-5 rounded-2xl flex items-center justify-center gap-2.5 transition-all active:scale-95 shadow-xl text-lg tracking-tight ${hasPendingDuplicate ? 'bg-orange-500 dark:bg-orange-500 hover:bg-orange-600 dark:hover:bg-orange-600 text-white shadow-orange-500/20' : 'bg-slate-900 dark:bg-white hover:bg-black dark:hover:bg-slate-200 shadow-slate-900/20 dark:shadow-white/10'}`}

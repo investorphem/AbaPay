@@ -32,7 +32,7 @@
                   "network": { "type": "string", "description": "Provider name, e.g. MTN, IKEJA-ELECTRIC, DSTV" },
                   "billersCode": { "type": "string", "description": "Phone number, meter number, or smartcard/IUC number being paid for" },
                   "nairaAmount": { "type": "number", "description": "Bill amount in Nigerian Naira — the source of truth for pricing this request" },
-                  "token": { "type": "string", "enum": ["USDC"], "description": "Only USDC is supported for x402 settlement at this time" },
+                  "token": { "type": "string", "enum": ["USDC", "USD₮"], "description": "USDC and USDT (Tether) are supported for x402 settlement on Celo — both implement EIP-3009 transferWithAuthorization. cUSD and USDm are not supported (no transferWithAuthorization)." },
                   "blockchain": { "type": "string", "enum": ["CELO"], "description": "Only Celo is supported for x402 settlement at this time" },
                   "wallet_address": { "type": "string", "description": "The paying wallet's address, for cross-checking against the x402 payment authorization's payer" }
                 }
@@ -76,6 +76,14 @@
               "scheme": "exact",
               "network": "eip155:42220",
               "asset": "0xcebA9300f2b948710d2653dD7B07f33A8B32118C",
+              "payTo": "0x42Fa463798Ed129a9B5Ee51721CB6db1bfCBe3b9"
+            },
+            {
+              "protocol": "x402",
+              "version": 2,
+              "scheme": "exact",
+              "network": "eip155:42220",
+              "asset": "0x48065fbBE25f71C9282ddf5e1cD6D6A887483D5e",
               "payTo": "0x42Fa463798Ed129a9B5Ee51721CB6db1bfCBe3b9"
             }
           ]

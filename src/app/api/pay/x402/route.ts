@@ -4,8 +4,12 @@ import { executeVend, getStrictRequestId } from '@/lib/vend';
 import { resolveTokenOnChain } from '@/constants';
 import { sendTelegramAlert } from '@/lib/telegram';
 
-// ⚡ x402 SETTLEMENT — MAIN APP ONLY, CELO + USDC ONLY, via Celo's own x402 facilitator
+// ⚡ x402 SETTLEMENT — MAIN APP ONLY, CELO ONLY, via Celo's own x402 facilitator
 // (api.x402.celo.org / api.x402.sepolia.celo.org — "Built by Celo Core Co.") — NOT thirdweb.
+// Supports USDC and USD₮ (both have real EIP-3009 transferWithAuthorization on Celo — see
+// X402_TOKEN_EIP712 below for how each was verified). USDm is NOT supported — it's a Mento
+// stable token (same family as cUSD) with only EIP-2612 permit(), no transferWithAuthorization
+// function at all, and Celo's facilitator only speaks the "exact" EIP-3009 scheme.
 //
 // Switched off thirdweb for this route because:
 //   1. thirdweb requires a paid billing plan to settle on mainnet at all (DELEGATION_CHECK_FAILED
@@ -44,6 +48,28 @@ const FALLBACK_MIN_USDC = '0.05'; // matches public/openapi.json's x-payment-inf
 const CELO_FACILITATOR_MAINNET = 'https://api.x402.celo.org';
 const CELO_FACILITATOR_TESTNET = 'https://api.x402.sepolia.celo.org';
 
+// x402 needs EIP-3009 transferWithAuthorization, and Celo's facilitator only speaks the
+// "exact" scheme (its /supported endpoint advertises no "permit"/"upto" kind) — so only
+// tokens with a real transferWithAuthorization function are eligible, not just anything
+// SUPPORTED_TOKENS lists for the contract-call flow. Verified per-token on Celo mainnet
+// (Blockscout: ABI + on-chain DOMAIN_SEPARATOR cross-check against the computed EIP-712
+// domain hash) rather than assumed:
+//   - USDC: transferWithAuthorization present, domain {name:"USDC", version:"2"} (already
+//     proven working end-to-end with real settlements).
+//   - USD₮ (TetherTokenCeloExtension): transferWithAuthorization present. Domain version is
+//     "1", not "2" — its initialize() calls OpenZeppelin's __ERC20Permit_init(name), which
+//     always hardcodes version "1" internally (a different convention from USDC's own
+//     EIP712 setup). Confirmed by recomputing the domain hash and matching it byte-for-byte
+//     against the live on-chain DOMAIN_SEPARATOR().
+//   - USDm (StableTokenV3 — Mento's stable token family, same lineage as cUSD): only has
+//     EIP-2612 permit(), no transferWithAuthorization function exists in its ABI at all.
+//     Genuinely incompatible with this facilitator's "exact" scheme — not wired in below,
+//     and requesting it returns a clear error rather than silently falling back to USDC.
+const X402_TOKEN_EIP712: Record<string, { name: string; version: string }> = {
+  USDC: { name: 'USDC', version: '2' },
+  'USD₮': { name: 'Tether USD', version: '1' },
+};
+
 interface CeloSettleResponse {
   success: boolean;
   network: string;
@@ -81,9 +107,17 @@ async function handleX402Request(req: Request) {
 
   const explorerBase = isMainnet ? 'https://celoscan.io' : 'https://sepolia.celoscan.io';
 
-  const usdc = resolveTokenOnChain('USDC', 'CELO', isMainnet);
+  // Resolve which token to actually challenge/settle for. Falls back to USDC whenever the
+  // request doesn't specify a supported one (a bare probe, or a real request naming an
+  // unsupported token like USDm) — this is deliberate: the 402 challenge must always fire
+  // regardless of what the client asked for (see the "validation must never run before the
+  // payment challenge" note above), and the challenge's own `asset`/`extra` fields are what
+  // actually govern what the client signs, not the client's stated preference.
+  const requestedTokenSymbol: string = X402_TOKEN_EIP712[tokenSymbol] ? tokenSymbol : 'USDC';
+  const tokenDomain = X402_TOKEN_EIP712[requestedTokenSymbol];
+  const usdc = resolveTokenOnChain(requestedTokenSymbol, 'CELO', isMainnet);
   if (!usdc) {
-    return NextResponse.json({ success: false, status: 'FAILED_VENDING', message: 'USDC is not configured for this network.' }, { status: 500 });
+    return NextResponse.json({ success: false, status: 'FAILED_VENDING', message: `${requestedTokenSymbol} is not configured for this network.` }, { status: 500 });
   }
 
   const payTo = process.env.NEXT_PUBLIC_ABAPAY_CELO_ADDRESS || process.env.NEXT_PUBLIC_ABAPAY_ADDRESS;
@@ -143,7 +177,7 @@ async function handleX402Request(req: Request) {
     payTo,
     maxTimeoutSeconds: 86400,
     asset: usdc.address,
-    extra: { name: 'USDC', version: '2', primaryType: 'TransferWithAuthorization' },
+    extra: { name: tokenDomain.name, version: tokenDomain.version, primaryType: 'TransferWithAuthorization' },
   };
 
   if (!paymentHeader) {
@@ -229,7 +263,7 @@ async function handleX402Request(req: Request) {
     // payer one, so alert rather than silently telling the payer to just retry.
     const looksLikeCreditExhaustion = /credit/i.test(settleResult.errorReason || '') || /credit/i.test(settleResult.errorMessage || '');
     if (looksLikeCreditExhaustion) {
-      sendTelegramAlert(`🚨 *x402 FACILITATOR OUT OF CREDITS*\n\nCelo x402 settlement is failing — top up USDC credits at x402.celo.org.\n\nReason: ${settleResult.errorMessage || settleResult.errorReason}`).catch(() => {});
+      sendTelegramAlert(`🚨 *x402 FACILITATOR OUT OF CREDITS*\n\nCelo x402 settlement is failing — top up credits at x402.celo.org.\n\nReason: ${settleResult.errorMessage || settleResult.errorReason}`).catch(() => {});
     } else {
       console.error('[Pay/x402] Settle failed:', settleResult.errorReason, settleResult.errorMessage);
     }
@@ -242,7 +276,12 @@ async function handleX402Request(req: Request) {
   // ⚡ Payment is now CONFIRMED and irreversibly settled. Everything past this point is
   // "do we have enough to actually vend a bill" — scope/field checks live here, not before
   // the payment gate, so they never interfere with discovery probing.
-  if ((blockchain || '').toUpperCase() !== 'CELO' || tokenSymbol !== 'USDC' || vendAmount === null || !serviceID || !billersCode) {
+  //
+  // Note: this checks blockchain/vendAmount/etc, but NOT tokenSymbol against 'USDC' — the
+  // actual charged token is requestedTokenSymbol (resolved above from the request, falling
+  // back to USDC), which is what really went on-chain. It's used below in place of the raw
+  // client-claimed tokenSymbol for exactly that reason.
+  if ((blockchain || '').toUpperCase() !== 'CELO' || vendAmount === null || !serviceID || !billersCode) {
     console.error('[Pay/x402] Payment settled but request lacked real bill details:', { blockchain, tokenSymbol, vendAmount, serviceID, billersCode, tx: settleResult.transaction });
     return NextResponse.json({ success: false, status: 'FAILED_VENDING', message: 'Payment settled, but the request was missing bill details — contact support with your transaction hash.' }, { status: 400 });
   }
@@ -267,7 +306,7 @@ async function handleX402Request(req: Request) {
     amount_usdt: requiredCrypto, amount_naira: vendAmount, fee_naira: serviceFee, status: 'PENDING',
     wallet_address: (payer || wallet_address || 'UNKNOWN').toLowerCase(),
     customer_name: customer_name || null, customer_address: customer_address || null,
-    source_channel: source_channel || 'WEB', token_used: tokenSymbol,
+    source_channel: source_channel || 'WEB', token_used: requestedTokenSymbol,
     meter_account_type: meter_account_type || null, customer_email: email || null,
     operator_id: operator_id || null, country_code: country_code || null, product_type_id: product_type_id || null,
     subscription_type: subscription_type || null,
@@ -291,7 +330,7 @@ async function handleX402Request(req: Request) {
 
   const vendResult = await executeVend({
     vtRequestId, txHash, serviceID, serviceCategory, network, billersCode, phone,
-    variation_code, subscription_type, amount: requiredCrypto, tokenSymbol, vendAmount, displayAmount,
+    variation_code, subscription_type, amount: requiredCrypto, tokenSymbol: requestedTokenSymbol, vendAmount, displayAmount,
     foreignAmount, isForeign, operator_id, country_code, product_type_id, email,
     wallet_address: payer || wallet_address, blockchain: 'CELO', source_channel, customer_name, customer_address,
     baseRate,
