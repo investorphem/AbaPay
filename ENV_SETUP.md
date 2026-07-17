@@ -115,29 +115,36 @@ NEXT_PUBLIC_ERC8004_AGENT_ID=          # filled in AFTER registering
 
 ---
 
-## 5. x402 Settlement — thirdweb
+## 5. x402 Settlement — Celo's own facilitator + thirdweb (client-side only)
 
 ```
-THIRDWEB_SECRET_KEY=...
-NEXT_PUBLIC_THIRDWEB_CLIENT_ID=...
-THIRDWEB_SERVER_WALLET_ADDRESS=0x...
+CELO_X402_API_KEY=x402_...                 # Server-side: settles via api.x402.celo.org
+NEXT_PUBLIC_THIRDWEB_CLIENT_ID=...          # Client-side only: wallet-signing plumbing
 ```
-**Free to create an account and get these values — but mainnet usage requires a paid billing
-plan.** thirdweb's free tier only allows testnet paymaster/bundler services; attempting to
-settle on Celo **mainnet** without billing enabled fails with `DELEGATION_CHECK_FAILED`
-("Mainnets not enabled for this account"). On top of the billing plan, thirdweb also takes a
-small fee per settled transaction (observed ≈0.3% in practice — verify current pricing on their
-site, this isn't a fixed contractual number).
+**Free** — no billing plan required, unlike thirdweb (see below). Celo's facilitator charges
+a flat **$0.001 per settlement** from a prepaid USDC credit balance instead of a percentage
+cut or a subscription — you get free credits just for connecting a wallet (500 mainnet /
+1,000 testnet at time of writing).
 
-1. Sign up at [thirdweb.com](https://thirdweb.com) → dashboard → **Add New → Create Project**.
-2. Name it, set **Allowed Domains** to `localhost:3000` and your production domain.
-3. Copy the **Secret Key** shown once at creation (`THIRDWEB_SECRET_KEY`) and the **Client ID**
-   (`NEXT_PUBLIC_THIRDWEB_CLIENT_ID`, visible any time in API Keys).
-4. Check **Overview** or **Transactions → Server Wallets** — newer projects auto-provision a
-   default server wallet. Copy its address (`THIRDWEB_SERVER_WALLET_ADDRESS`).
-5. Fund that server wallet with a small amount of native CELO (gas only).
-6. **Before going live on mainnet:** dashboard → **Settings → Billing** → add a payment method.
-   Test on Celo Sepolia first — that works without billing enabled.
+1. Go to [x402.celo.org](https://x402.celo.org) → **Connect wallet** (signs a free message,
+   no gas, no transaction).
+2. Copy the API key shown — **it's only displayed once**, so save it immediately
+   (`CELO_X402_API_KEY`). The same key works for both `api.x402.celo.org` (mainnet) and
+   `api.x402.sepolia.celo.org` (testnet), tracked as separate credit pools.
+3. When credits run low, deposit USDC from the same dashboard (~$1 ≈ 1,000 credits). At 0
+   credits the facilitator returns 402 until topped up — the app sends a Telegram alert when
+   this happens rather than failing silently.
+4. `NEXT_PUBLIC_THIRDWEB_CLIENT_ID` is still needed for the **client-side only** — the wallet
+   connects and signs the payment through thirdweb's SDK regardless of which facilitator
+   actually settles it (the protocol is generic). Sign up at [thirdweb.com](https://thirdweb.com)
+   → **Add New → Create Project** → set **Allowed Domains** → copy the **Client ID**. No
+   secret key or server wallet needed — thirdweb no longer does the settling.
+
+**Why not thirdweb's own facilitator?** It requires a paid billing plan just to settle on
+mainnet at all (`DELEGATION_CHECK_FAILED` — "Mainnets not enabled for this account" —
+otherwise), plus a ~0.3% per-transaction cut on top, and routes funds through its own server
+wallet before forwarding them on rather than paying the destination directly. Celo's
+facilitator has none of those drawbacks for a Celo-only app.
 
 ---
 
@@ -336,7 +343,8 @@ Free — not issued by anyone, just protects the manual `/api/cleanup` endpoint.
 | Provider | Free tier? | Paid requirement |
 |---|---|---|
 | Celo / Base gas | — | Real gas costs (cents per tx), not a subscription |
-| thirdweb | Yes (testnet) | **Mainnet requires billing** + ~0.3%/tx fee |
+| Celo x402 facilitator | Yes, free credits on connect | Flat $0.001/settlement, prepaid USDC credits |
+| thirdweb | Free (client-side only now) | No longer used for settlement — just wallet-signing plumbing |
 | Supabase | Yes | Paid plans at higher usage |
 | Resend | Yes | Paid plans at higher volume |
 | Anthropic (Claude) | No meaningful free tier | Pay-as-you-go per token, always |

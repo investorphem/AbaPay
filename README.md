@@ -220,19 +220,29 @@ Uses the same `CELO_PRIVATE_KEY` Hardhat already has configured — this is iden
 
 ### x402 Settlement (main app, Celo + USDC)
 ```
-THIRDWEB_SECRET_KEY=your_thirdweb_secret_key            # Server-side: facilitator + settlePayment
-THIRDWEB_SERVER_WALLET_ADDRESS=0xYourThirdwebServerWallet # thirdweb server wallet the facilitator settles from
-NEXT_PUBLIC_THIRDWEB_CLIENT_ID=your_thirdweb_client_id    # Client-side: useFetchWithPayment
+CELO_X402_API_KEY=your_x402_celo_org_api_key   # Server-side: settles via api.x402.celo.org
+NEXT_PUBLIC_THIRDWEB_CLIENT_ID=your_thirdweb_client_id    # Client-side only: useFetchWithPayment's signing infra
 ```
-Distinct infra from `RELAYER_PRIVATE_KEY` above. This is not optional/toggleable in the UI — the main app's "Confirm & Pay" button automatically routes through x402 whenever the user pays with USDC on Celo (verified as the only asset the facilitator currently supports there — see below), and through the normal contract call for everything else. It never touches the agent-initiated flow.
+Distinct infra from `RELAYER_PRIVATE_KEY` above. This is not optional/toggleable in the UI — the main app's "Confirm & Pay" button automatically routes through x402 whenever the user pays with USDC on Celo (the only asset/chain combination supported today — see below), and through the normal contract call for everything else. It never touches the agent-initiated flow.
 
-**How to get these:**
-1. Sign up at [thirdweb.com](https://thirdweb.com) → dashboard → **Add New → Create Project**.
-2. Name it, then set **Allowed Domains** to `localhost:3000` (dev) and your production domain — this restricts who can use your Client ID.
-3. thirdweb shows a **Secret Key** exactly once on completion — save it immediately (`THIRDWEB_SECRET_KEY`). The **Client ID** is visible anytime in the project's API Keys page (`NEXT_PUBLIC_THIRDWEB_CLIENT_ID`).
-4. In the same project, check the **Overview** or **Transactions → Server Wallets** section — newer projects auto-provision a default server wallet there. Copy its `0x...` address → `THIRDWEB_SERVER_WALLET_ADDRESS`. (If none exists, create one from that section.)
-5. Fund that server wallet with a small amount of native **CELO** (gas only, no stablecoins needed) — it's the wallet that actually submits x402 settlement transactions.
-6. Add all three vars to `.env.local` **and** to your hosting provider's production environment variables (e.g. Vercel → Project → Settings → Environment Variables), then redeploy — `NEXT_PUBLIC_*` vars are baked in at build time, so existing deployments won't pick them up without a rebuild.
+Settlement runs through **Celo's own x402 facilitator** (`api.x402.celo.org` mainnet /
+`api.x402.sepolia.celo.org` testnet — built by Celo Core Co.), not thirdweb. thirdweb is
+still used client-side only, for `useFetchWithPayment`'s wallet-signing plumbing (protocol-
+generic — it reads the payment challenge from the response body, which works against any
+compliant facilitator, not just thirdweb's own). Chosen over thirdweb's own facilitator
+because: flat **$0.001/settlement** via prepaid credits vs. thirdweb's ~0.3% cut, **no
+billing plan required** to settle on mainnet (thirdweb requires one or every mainnet
+settlement fails with `DELEGATION_CHECK_FAILED`), and genuinely non-custodial — the signed
+payment authorization pays the vault directly, with no intermediate hop through the
+facilitator's own wallet.
+
+**How to get the API key:**
+1. Go to [x402.celo.org](https://x402.celo.org) → **Connect wallet** (any wallet works — this is just to sign a free, gasless message, not a transaction).
+2. You're issued an API key instantly, plus free credits (500 mainnet, 1000 testnet at time of writing) — **the full key is shown only once**, copy it immediately.
+3. Set `CELO_X402_API_KEY` to that key — the same key works for both the mainnet and testnet endpoints, which are tracked as separate credit pools.
+4. Top up credits (USDC deposit, $1 ≈ 1,000 credits) from the same dashboard before you run out — `/settle` starts returning 402 at 0 credits, and the app sends a Telegram alert when that happens (see `src/app/api/pay/x402/route.ts`).
+5. `NEXT_PUBLIC_THIRDWEB_CLIENT_ID` still needs a thirdweb project for the client-side pieces — sign up at [thirdweb.com](https://thirdweb.com) → **Add New → Create Project**, set **Allowed Domains**, and copy the **Client ID** (no secret key or server wallet needed anymore, since thirdweb no longer does the settling).
+6. Add both vars to `.env.local` **and** your hosting provider's production environment variables, then redeploy — `NEXT_PUBLIC_*` vars are baked in at build time, so existing deployments won't pick up a change without a rebuild.
 
 ### Cron / Maintenance
 ```
@@ -349,13 +359,24 @@ registry's verified source on Celoscan — see the script's header comment.
 
 #### x402 Settlement (main app only)
 
-The main web app's payment flow settles automatically via [x402](https://x402.org) — using the
-`thirdweb` SDK against a thirdweb-hosted facilitator — whenever the user is paying with **USDC on
+The main web app's payment flow settles automatically via [x402](https://x402.org) — through
+**Celo's own facilitator** (`api.x402.celo.org`, built by Celo Core Co. — see
+`src/app/api/pay/x402/route.ts`), not thirdweb — whenever the user is paying with **USDC on
 Celo**. There's no user-facing toggle: the same "Confirm & Pay" button routes through x402 for
 that combination and through the normal `payBill` contract call for everything else (Base, USDT,
 cUSD/USDm, or x402 unconfigured). This makes the payment genuinely visible on x402scan — not a
 relabeled transaction — because x402 settlement requires an EIP-3009
 (`transferWithAuthorization`) signature from the payer for that specific payment.
+
+The **402 challenge itself is built in-house** (a plain x402 v1, body-based response) rather
+than relying on any SDK's default — that's a deliberate choice, since thirdweb's own
+`settlePayment()` always delivers a fresh challenge via a base64 header with an empty JSON
+body, which generic x402 scanners (x402scan's discovery crawler included) don't parse,
+causing registration to silently fail with a correct-looking 402 status but no usable
+challenge. Client-side, `thirdweb`'s `useFetchWithPayment` (still used for its wallet-signing
+plumbing in `src/app/page.tsx`) is unaffected by any of this — it's protocol-generic and reads
+the challenge from the response body whenever there's no header present, so it works against
+this route exactly the same as it would against thirdweb's own.
 
 That signature requirement is exactly why this is **scoped to the main app only**: the
 agent-initiated flow above depends on paying with *zero* signature at payment time (the whole
@@ -365,12 +386,15 @@ are unaffected — those payments already execute from `RELAYER_ADDRESS`, the sa
 registered under the ERC-8004 identity below, so they're already attributable to the agent
 without needing x402.
 
-- **Scope: Celo + USDC only, confirmed live** — not just a caution. Querying the thirdweb
-  facilitator's `/supported` endpoint for Celo mainnet returns exactly one entry: the `exact`
-  scheme, USDC, via native EIP-3009. No USDT, no cUSD/USDm, no CELO. That's a constraint of the
-  facilitator itself (those tokens don't implement `transferWithAuthorization`), not a
-  self-imposed limit — if the facilitator adds support later, no code change is needed to pick
-  it up, since the token/decimals are already resolved generically via `resolveTokenOnChain`.
+- **Scope: Celo + USDC only, confirmed live** — not just a caution. Native Celo USDC (Circle's
+  FiatTokenV2) implements EIP-3009 `transferWithAuthorization`; cUSD/USDm and USDT don't, so
+  there's no signature scheme to settle them with. Not a self-imposed limit — if support is
+  added later, no code change is needed to pick it up, since the token/decimals are already
+  resolved generically via `resolveTokenOnChain`.
+- **Prepaid credits, not a billing subscription.** Celo's facilitator charges a flat
+  $0.001/settlement from a prepaid USDC credit balance (`CELO_X402_API_KEY`) — top up at
+  x402.celo.org. At 0 credits, `/settle` starts returning 402 and the app sends a Telegram
+  alert (this is an operator problem, not a payer one — retrying won't help until topped up).
 - **No automatic fallback to the contract-call flow on x402 failure.** If x402 errors after
   reaching the server, retrying via the contract-call path could double-charge the user if the
   facilitator's settlement actually landed but the response was lost in transit — the same class
