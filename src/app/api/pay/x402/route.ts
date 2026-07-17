@@ -106,9 +106,27 @@ async function handleX402Request(req: Request) {
   });
 
   if (result.status !== 200) {
-    // Payment required (or invalid) — hand thirdweb's 402 straight back so the client's
-    // fetchWithPayment can sign and retry, or so a discovery crawler sees a valid challenge.
-    return NextResponse.json(result.responseBody, { status: result.status, headers: result.responseHeaders });
+    // thirdweb's SDK always uses x402 protocol v2 for a fresh, unauthenticated challenge
+    // (no client payment header yet) — v2 delivers the challenge via a base64 PAYMENT-REQUIRED
+    // header and deliberately leaves responseBody empty ({}). thirdweb's own fetchWithPayment
+    // client reads that header correctly, but generic x402 scanners/crawlers (x402scan's
+    // discovery probe, most third-party clients) expect the challenge in the response BODY —
+    // that mismatch is exactly why registration failed with "No valid x402 response found"
+    // despite the status code being a correct 402. Decode the header back into JSON and put
+    // it in the body too, so both conventions are satisfied from the same response.
+    let responseBody: unknown = result.responseBody;
+    const isEmptyBody = responseBody && typeof responseBody === 'object' && Object.keys(responseBody).length === 0;
+    if (isEmptyBody) {
+      const challengeHeader = result.responseHeaders?.['PAYMENT-REQUIRED'] || result.responseHeaders?.['payment-required'];
+      if (challengeHeader) {
+        try {
+          responseBody = JSON.parse(Buffer.from(challengeHeader, 'base64').toString('utf-8'));
+        } catch {
+          // Fall through with the original (empty) body if decoding fails for any reason.
+        }
+      }
+    }
+    return NextResponse.json(responseBody, { status: result.status, headers: result.responseHeaders });
   }
 
   // ⚡ Payment is now CONFIRMED and irreversibly settled. Everything past this point is
