@@ -147,23 +147,30 @@ async function handleX402Request(req: Request) {
   };
 
   if (!paymentHeader) {
-    // No payment attempted yet — issue the challenge as x402 v2 (x402scan explicitly
-    // rejects v1 challenges now: "x402scan only supports v2 — update your paywall to
-    // return the v2 format"). thirdweb's client doesn't validate x402Version against an
-    // enum — it just reads body.accepts[] and echoes whatever version number is here into
-    // the payload it signs — so declaring 2 doesn't break our own app's payment flow.
-    // The settle step below deliberately does NOT trust that echoed version number; it
-    // always forwards to Celo's facilitator as v1 (see comment there for why).
-    return NextResponse.json(
-      {
-        x402Version: 2,
-        error: 'Payment required',
-        resource: { url: resourceUrl, description: acceptEntry.description, mimeType: acceptEntry.mimeType },
-        accepts: [acceptEntry],
-        extensions: {},
-      },
-      { status: 402 }
-    );
+    // No payment attempted yet — issue the challenge. Traced x402scan's actual crawler
+    // (@agentcash/discovery, the npm package it probes with — see node_modules-free repo
+    // read at github.com/Merit-Systems/x402scan): its probe only recognizes a v2 challenge
+    // via the `payment-required` RESPONSE HEADER (base64 JSON, x402Version must be exactly
+    // 2 — see parsePaymentRequiredBody2 in the package). A v2 challenge in the JSON BODY is
+    // explicitly rejected at the probe stage (parsePaymentRequiredBody requires the body's
+    // x402Version to be exactly 1, since it's only consulted when no header is present) —
+    // that mismatch is what caused "No valid x402 response found". So: header carries v2
+    // (for x402scan), body stays v1 for any generic/older client that only reads the body.
+    // thirdweb's own client (fetchWithPayment.ts) checks the header FIRST and falls back to
+    // body only if absent, and its per-entry schema (maxAmountRequired etc.) doesn't change
+    // with version — so this doesn't affect our own app's real payment flow either way.
+    const v2Challenge = {
+      x402Version: 2,
+      error: 'Payment required',
+      resource: { url: resourceUrl, description: acceptEntry.description, mimeType: acceptEntry.mimeType },
+      accepts: [acceptEntry],
+      extensions: {},
+    };
+    const v1Body = { x402Version: 1, error: 'Payment required', accepts: [acceptEntry] };
+    return NextResponse.json(v1Body, {
+      status: 402,
+      headers: { 'payment-required': Buffer.from(JSON.stringify(v2Challenge)).toString('base64') },
+    });
   }
 
   // A payment header is present — decode it and forward it to Celo's facilitator to settle.
