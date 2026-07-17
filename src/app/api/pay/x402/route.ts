@@ -1,12 +1,24 @@
 import { NextResponse } from 'next/server';
-import { createThirdwebClient } from 'thirdweb';
-import { celo, celoSepoliaTestnet } from 'thirdweb/chains';
-import { facilitator, settlePayment } from 'thirdweb/x402';
 import { supabaseAdmin as supabase } from '@/utils/supabase';
 import { executeVend, getStrictRequestId } from '@/lib/vend';
 import { resolveTokenOnChain } from '@/constants';
+import { sendTelegramAlert } from '@/lib/telegram';
 
-// ⚡ x402 SETTLEMENT — MAIN APP ONLY, CELO + USDC ONLY
+// ⚡ x402 SETTLEMENT — MAIN APP ONLY, CELO + USDC ONLY, via Celo's own x402 facilitator
+// (api.x402.celo.org / api.x402.sepolia.celo.org — "Built by Celo Core Co.") — NOT thirdweb.
+//
+// Switched off thirdweb for this route because:
+//   1. thirdweb requires a paid billing plan to settle on mainnet at all (DELEGATION_CHECK_FAILED
+//      otherwise) and takes ~0.3% per settlement. Celo's facilitator is flat $0.001/settlement,
+//      prepaid via credits, no billing plan required.
+//   2. thirdweb's SDK routes payment through ITS OWN server wallet first, then forwards to the
+//      real recipient in a separate step (visible as a 3-call batch on-chain). Celo's facilitator
+//      is genuinely non-custodial — the signed EIP-3009 authorization pays `payTo` (our vault)
+//      DIRECTLY; the facilitator only ever submits the pre-signed transaction, never holds funds.
+//   3. thirdweb's SDK always uses x402 protocol v2 for a fresh challenge, delivering it via a
+//      base64 header with an EMPTY response body — incompatible with generic x402 scanners
+//      (x402scan's crawler included) that expect the challenge in the body. Building the 402
+//      response ourselves (as v1, body-based) sidesteps that entirely.
 //
 // This is a SEPARATE settlement rail from the contract-call flow in /api/pay. It exists so
 // payments made here are genuinely visible on x402scan (real facilitator settlement, real
@@ -29,6 +41,17 @@ import { resolveTokenOnChain } from '@/constants';
 // real payment settles AND we have real bill details.
 
 const FALLBACK_MIN_USDC = '0.05'; // matches public/openapi.json's x-payment-info.price.min
+const CELO_FACILITATOR_MAINNET = 'https://api.x402.celo.org';
+const CELO_FACILITATOR_TESTNET = 'https://api.x402.sepolia.celo.org';
+
+interface CeloSettleResponse {
+  success: boolean;
+  network: string;
+  transaction: string;
+  payer: string;
+  errorReason?: string;
+  errorMessage?: string;
+}
 
 async function handleX402Request(req: Request) {
   let body: any = {};
@@ -63,6 +86,16 @@ async function handleX402Request(req: Request) {
     return NextResponse.json({ success: false, status: 'FAILED_VENDING', message: 'USDC is not configured for this network.' }, { status: 500 });
   }
 
+  const payTo = process.env.NEXT_PUBLIC_ABAPAY_CELO_ADDRESS || process.env.NEXT_PUBLIC_ABAPAY_ADDRESS;
+  if (!payTo) {
+    return NextResponse.json({ success: false, status: 'FAILED_VENDING', message: 'Vault address not configured.' }, { status: 500 });
+  }
+
+  const apiKey = process.env.CELO_X402_API_KEY;
+  if (!apiKey) {
+    return NextResponse.json({ success: false, status: 'FAILED_VENDING', message: 'x402 is not configured.' }, { status: 500 });
+  }
+
   // 1. RATE — the same server-side source of truth /api/pay uses. Unlike the contract
   // path, we don't need to verify a client-claimed amount against calldata: WE set the
   // price passed to the facilitator below, so the payer can only pay exactly what we ask.
@@ -81,64 +114,82 @@ async function handleX402Request(req: Request) {
     requiredWei = BigInt(Math.round(requiredCrypto * 10 ** usdc.decimals));
   }
 
-  const client = createThirdwebClient({ secretKey: process.env.THIRDWEB_SECRET_KEY! });
-  const thirdwebFacilitator = facilitator({
-    client,
-    serverWalletAddress: process.env.THIRDWEB_SERVER_WALLET_ADDRESS!,
-  });
+  // The x402 payment header the client signs and retries with. thirdweb's client-side
+  // useFetchWithPayment (already wired in the main app) reads the challenge from the
+  // response BODY when there's no PAYMENT-REQUIRED header — see fetchWithPayment.js — so
+  // building a plain v1-style body here works for both our own app AND generic scanners.
+  const paymentHeader = req.headers.get('x-payment') || req.headers.get('payment-signature');
 
-  const payTo = process.env.NEXT_PUBLIC_ABAPAY_CELO_ADDRESS || process.env.NEXT_PUBLIC_ABAPAY_ADDRESS;
-  if (!payTo) {
-    return NextResponse.json({ success: false, status: 'FAILED_VENDING', message: 'Vault address not configured.' }, { status: 500 });
+  const resourceUrl = req.url;
+  const caip2Network = isMainnet ? 'eip155:42220' : 'eip155:11142220';
+  const celoNetworkName = isMainnet ? 'celo' : 'celo-sepolia';
+  const facilitatorBaseUrl = isMainnet ? CELO_FACILITATOR_MAINNET : CELO_FACILITATOR_TESTNET;
+
+  const acceptEntry = {
+    scheme: 'exact',
+    network: caip2Network,
+    maxAmountRequired: requiredWei.toString(),
+    resource: resourceUrl,
+    description: `AbaPay ${network || serviceCategory || 'bill'} payment`,
+    mimeType: 'application/json',
+    payTo,
+    maxTimeoutSeconds: 86400,
+    asset: usdc.address,
+    extra: { name: 'USDC', version: '2', primaryType: 'TransferWithAuthorization' },
+  };
+
+  if (!paymentHeader) {
+    // No payment attempted yet — issue the challenge. v1, body-based: works for both
+    // thirdweb's client (body fallback) and generic x402 scanners (body is all they read).
+    return NextResponse.json(
+      { x402Version: 1, error: 'Payment required', accepts: [acceptEntry] },
+      { status: 402 }
+    );
   }
 
-  const result = await settlePayment({
-    resourceUrl: req.url,
-    method: req.method,
-    paymentData: req.headers.get('x-payment') || req.headers.get('payment-signature'),
-    payTo,
-    network: isMainnet ? celo : celoSepoliaTestnet,
-    price: { amount: requiredWei.toString(), asset: { address: usdc.address as `0x${string}`, decimals: usdc.decimals } },
-    facilitator: thirdwebFacilitator,
-    routeConfig: {
-      description: `AbaPay ${network || serviceCategory || 'bill'} payment`,
-    },
-  });
+  // A payment header is present — forward it verbatim to Celo's facilitator to settle.
+  // Their /settle endpoint does verify + settle in one call, and per their own docs only
+  // successful settlements consume a credit, so there's no need for a separate /verify
+  // pre-check here.
+  let settleResult: CeloSettleResponse;
+  try {
+    const settleRes = await fetch(`${facilitatorBaseUrl}/settle`, {
+      method: 'POST',
+      headers: { 'X-API-Key': apiKey, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ payment: paymentHeader, network: celoNetworkName }),
+    });
+    settleResult = await settleRes.json();
+  } catch (err: any) {
+    console.error('[Pay/x402] Celo facilitator unreachable:', err?.message);
+    return NextResponse.json({ x402Version: 1, error: 'Facilitator temporarily unavailable', accepts: [acceptEntry] }, { status: 402 });
+  }
 
-  if (result.status !== 200) {
-    // thirdweb's SDK always uses x402 protocol v2 for a fresh, unauthenticated challenge
-    // (no client payment header yet) — v2 delivers the challenge via a base64 PAYMENT-REQUIRED
-    // header and deliberately leaves responseBody empty ({}). thirdweb's own fetchWithPayment
-    // client reads that header correctly, but generic x402 scanners/crawlers (x402scan's
-    // discovery probe, most third-party clients) expect the challenge in the response BODY —
-    // that mismatch is exactly why registration failed with "No valid x402 response found"
-    // despite the status code being a correct 402. Decode the header back into JSON and put
-    // it in the body too, so both conventions are satisfied from the same response.
-    let responseBody: unknown = result.responseBody;
-    const isEmptyBody = responseBody && typeof responseBody === 'object' && Object.keys(responseBody).length === 0;
-    if (isEmptyBody) {
-      const challengeHeader = result.responseHeaders?.['PAYMENT-REQUIRED'] || result.responseHeaders?.['payment-required'];
-      if (challengeHeader) {
-        try {
-          responseBody = JSON.parse(Buffer.from(challengeHeader, 'base64').toString('utf-8'));
-        } catch {
-          // Fall through with the original (empty) body if decoding fails for any reason.
-        }
-      }
+  if (!settleResult.success) {
+    // "0 credits" also comes back as a settle failure per Celo's own docs ("the facilitator
+    // returns 402 Payment Required until you top up") — that's an operator problem, not a
+    // payer one, so alert rather than silently telling the payer to just retry.
+    const looksLikeCreditExhaustion = /credit/i.test(settleResult.errorReason || '') || /credit/i.test(settleResult.errorMessage || '');
+    if (looksLikeCreditExhaustion) {
+      sendTelegramAlert(`🚨 *x402 FACILITATOR OUT OF CREDITS*\n\nCelo x402 settlement is failing — top up USDC credits at x402.celo.org.\n\nReason: ${settleResult.errorMessage || settleResult.errorReason}`).catch(() => {});
+    } else {
+      console.error('[Pay/x402] Settle failed:', settleResult.errorReason, settleResult.errorMessage);
     }
-    return NextResponse.json(responseBody, { status: result.status, headers: result.responseHeaders });
+    return NextResponse.json(
+      { x402Version: 1, error: settleResult.errorMessage || settleResult.errorReason || 'Payment required', accepts: [acceptEntry] },
+      { status: 402 }
+    );
   }
 
   // ⚡ Payment is now CONFIRMED and irreversibly settled. Everything past this point is
   // "do we have enough to actually vend a bill" — scope/field checks live here, not before
   // the payment gate, so they never interfere with discovery probing.
   if ((blockchain || '').toUpperCase() !== 'CELO' || tokenSymbol !== 'USDC' || vendAmount === null || !serviceID || !billersCode) {
-    console.error('[Pay/x402] Payment settled but request lacked real bill details:', { blockchain, tokenSymbol, vendAmount, serviceID, billersCode });
+    console.error('[Pay/x402] Payment settled but request lacked real bill details:', { blockchain, tokenSymbol, vendAmount, serviceID, billersCode, tx: settleResult.transaction });
     return NextResponse.json({ success: false, status: 'FAILED_VENDING', message: 'Payment settled, but the request was missing bill details — contact support with your transaction hash.' }, { status: 400 });
   }
 
-  const txHash = result.paymentReceipt.transaction;
-  const payer = result.paymentReceipt.payer;
+  const txHash = settleResult.transaction;
+  const payer = settleResult.payer;
 
   // Cross-check the payer matches who the frontend claims is paying — mirrors the
   // SENDER_MISMATCH check in /api/webhook for the contract-call path.
