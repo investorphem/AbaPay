@@ -659,12 +659,24 @@ export default function AdminDashboard() {
       const valueInWei = parseUnits(cleanAmountString, decimals);
 
       // ⚡ ADDED 'chain: targetChain' to bypass viem strict mode error
+      //
+      // AbaPayV3's refundUser takes a 4th `reason` argument that V2 doesn't have. The shared
+      // ABAPAY_ADMIN_ABI intentionally keeps the OLD 3-arg shape (executeRefundOnChain below
+      // relies on that for its V3-then-V2 fallback), so this call needs its own inline V3 ABI
+      // — using the shared one here silently sent a wrong function selector, which the vault
+      // rejects with no matching function (bare "execution reverted", no decodable reason).
+      const refundReason = String(tx.api_response || tx.error_code || 'Failed vend').slice(0, 100);
       const refundHash = await client.writeContract({
           chain: targetChain,
           address: targetContract as `0x${string}`,
-          abi: ABAPAY_ADMIN_ABI,
+          abi: [{ inputs: [
+            { name: 'tokenAddress', type: 'address' },
+            { name: 'recipient', type: 'address' },
+            { name: 'amount', type: 'uint256' },
+            { name: 'reason', type: 'string' },
+          ], name: 'refundUser', outputs: [], stateMutability: 'nonpayable', type: 'function' }],
           functionName: 'refundUser',
-          args: [tokenAddr, tx.wallet_address, valueInWei],
+          args: [tokenAddr, tx.wallet_address, valueInWei, refundReason],
           account: address,
           dataSuffix: celoAttributionSuffix(targetChain), // Celo attribution only; no-op on Base
       });
