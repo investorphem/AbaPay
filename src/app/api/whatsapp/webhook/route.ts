@@ -83,6 +83,21 @@ export async function POST(req: Request) {
       }
 
       if (engineData.action === 'REPLY' || engineData.action === 'SUCCESS_RECEIPT' || engineData.action === 'REQUIRE_TOKEN_SELECTION') {
+        // ⚡ UNLIKE TELEGRAM, WE CANNOT DELETE THIS.
+        //
+        // Telegram's bot API lets a bot delete ANY message in its own 1:1 chat, including
+        // ones the user sent — see the PIN-deletion call in the Telegram webhook. WhatsApp's
+        // Cloud API has no equivalent: a business can never delete or redact a message the
+        // CUSTOMER sent, full stop — that's a deliberate platform restriction, not something
+        // a different API call or permission scope can unlock. The PIN the user just typed
+        // stays in their WhatsApp history regardless of anything this code does.
+        //
+        // The only thing actually possible: tell them, once, so they can delete it themselves.
+        let outgoingMessage = engineData.message as string;
+        if (/^\d{4,6}$/.test(text.trim())) {
+          outgoingMessage += '\n\n_🔒 For your security, please delete your last message (your PIN) from this chat — WhatsApp doesn\'t let AbaPay do that for you._';
+        }
+
         const sendRes = await fetch(`https://graph.facebook.com/v18.0/${WHATSAPP_PHONE_ID}/messages`, {
           method: 'POST',
           headers: {
@@ -93,7 +108,7 @@ export async function POST(req: Request) {
             messaging_product: "whatsapp",
             to: senderNumber,
             type: "text",
-            text: { body: engineData.message }
+            text: { body: outgoingMessage }
           })
         });
 

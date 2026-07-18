@@ -256,7 +256,7 @@ export async function POST(req: Request) {
           const channelLabel = channel === 'TELEGRAM' ? 'Telegram' : channel === 'WHATSAPP' ? 'WhatsApp' : 'X';
           return NextResponse.json({
             action: 'REPLY',
-            message: `⚠️ **Already linked elsewhere**\n\nYour ${channelLabel} is already linked to wallet \`${otherWallet.slice(0, 6)}...${otherWallet.slice(-4)}\`.\n\nTo link a different wallet, first open the **Agent Hub** tab in the AbaPay app (using that wallet) and unlink this ${channelLabel} channel — then come back and send this same code again.`,
+            message: `⚠️ *Already linked elsewhere*\n\nYour ${channelLabel} is already linked to wallet \`${otherWallet.slice(0, 6)}...${otherWallet.slice(-4)}\`.\n\nTo link a different wallet, first open the *Agent Hub* tab in the AbaPay app (using that wallet) and unlink this ${channelLabel} channel — then come back and send this same code again.`,
           });
         }
       }
@@ -274,7 +274,7 @@ export async function POST(req: Request) {
       const w = (pendingLink as any).wallet_address;
       return NextResponse.json({
         action: 'REPLY',
-        message: `✅ **Linked!**\n\nWallet: \`${w.slice(0, 6)}...${w.slice(-4)}\`\n\nYou can now pay bills right here — just tell me what you need, then confirm with your PIN.\n\n_Try: "Send 500 airtime to 08012345678"_`,
+        message: `✅ *Linked!*\n\nWallet: \`${w.slice(0, 6)}...${w.slice(-4)}\`\n\nYou can now pay bills right here — just tell me what you need, then confirm with your PIN.\n\n_Try: "Send 500 airtime to 08012345678"_`,
       });
     }
 
@@ -324,7 +324,7 @@ export async function POST(req: Request) {
     if (!identity || !identity.is_active) {
       return NextResponse.json({
         action: 'REPLY',
-        message: "🔒 **Not linked yet**\n\nLink this chat to your wallet at https://abapays.com — connect your wallet, choose this platform, set a PIN, and send me the code you get.\n\nOnce linked, you can pay bills right here.",
+        message: "🔒 *Not linked yet*\n\nLink this chat to your wallet at https://abapays.com — connect your wallet, choose this platform, set a PIN, and send me the code you get.\n\nOnce linked, you can pay bills right here.",
       });
     }
 
@@ -356,14 +356,14 @@ export async function POST(req: Request) {
     // ESCAPE HATCHES
     if (userInput === 'cancel') {
       await supabase.from('deai_sessions').delete().eq('chat_id', platform_id);
-      return NextResponse.json({ action: 'REPLY', message: "🚫 **Transaction Cancelled.**\n\nType **Start** whenever you are ready to make a new request." });
+      return NextResponse.json({ action: 'REPLY', message: "🚫 *Transaction Cancelled.*\n\nType *Start* whenever you are ready to make a new request." });
     }
 
     if (userInput === 'start' || userInput === 'help') {
       await supabase.from('deai_sessions').delete().eq('chat_id', platform_id);
       return NextResponse.json({ 
         action: 'REPLY', 
-        message: `🌍 **Region:** ${currentCountry}\n💵 **Fiat:** ${currencySymbol}${fiatBalance}\n🪙 **Crypto:**\n${formatChainBalances(crypto)}\n\n👋 **Welcome to AbaPay AI!**\n\nI can help you pay bills and send crypto instantly.\n\n*Try saying:*\n💬 _Buy 500 MTN airtime for 08012345678_\n💬 _Pay 5000 electricity for meter 1122334455_\n📜 _Check my history_`
+        message: `🌍 *Region:* ${currentCountry}\n💵 *Fiat:* ${currencySymbol}${fiatBalance}\n🪙 *Crypto:*\n${formatChainBalances(crypto)}\n\n👋 *Welcome to AbaPay AI!*\n\nI can help you pay bills and send crypto instantly.\n\n*Try saying:*\n💬 _Buy 500 MTN airtime for 08012345678_\n💬 _Pay 5000 electricity for meter 1122334455_\n📜 _Check my history_`
       });
     }
 
@@ -588,7 +588,7 @@ export async function POST(req: Request) {
                   // double-vend by calling executeVend again.
                   return NextResponse.json({
                     action: 'REPLY',
-                    message: `✅ **Paid!**\n\n🔗 \`${txHash}\`\n\n_Finishing up in the background — check History shortly._`,
+                    message: `✅ *Paid!*\n\n🔗 \`${txHash}\`\n\n_Finishing up in the background — check History shortly._`,
                   });
                 }
 
@@ -607,9 +607,9 @@ export async function POST(req: Request) {
                   return NextResponse.json({
                     action: 'REPLY',
                     message: [
-                      `✅ **Paid!**`,
+                      `✅ *Paid!*`,
                       ``,
-                      `**${d.provider || ''} ${serviceLabel}** — ₦${Number(d.amount_ngn).toLocaleString()}`,
+                      `*${d.provider || ''} ${serviceLabel}* — ₦${Number(d.amount_ngn).toLocaleString()}`,
                       d.customer_name ? `👤 ${d.customer_name}` : null,
                       `📱 ${d.destination_account}`,
                       `⛓️ ${chain} · ${amountCrypto} ${tokenSym}`,
@@ -617,7 +617,7 @@ export async function POST(req: Request) {
                       ``,
                       `🔗 \`${txHash}\``,
                       ``,
-                      `💳 Remaining agent allowance: **${left} ${tokenSym}**`,
+                      `💳 Remaining agent allowance: *${left} ${tokenSym}*`,
                       `_Your token — your wallet. AbaPay never held your funds._`,
                     ].filter(Boolean).join('\n'),
                   });
@@ -631,7 +631,7 @@ export async function POST(req: Request) {
                   action: 'REPLY',
                   message: vendResult.status === 'FAILED_VENDING'
                     ? `⚠️ Payment succeeded, but delivering it failed.\n\n🔗 \`${txHash}\`\n\n${vendResult.message || 'Your funds are being refunded — you don\'t need to do anything.'}`
-                    : `✅ **Paid!**\n\n🔗 \`${txHash}\`\n\n_Finishing up in the background — check History shortly._`,
+                    : `✅ *Paid!*\n\n🔗 \`${txHash}\`\n\n_Finishing up in the background — check History shortly._`,
                 });
               }
 
@@ -649,7 +649,7 @@ export async function POST(req: Request) {
                 preflightTxHash = null;
                 return NextResponse.json({
                   action: 'REPLY',
-                  message: `⏳ **Confirming your payment...**\n\n🔗 \`${txHash}\`\n\n_Your payment was sent but we lost connection confirming it. It may still go through — please don't pay again. Check History shortly, or message me again in a minute._`,
+                  message: `⏳ *Confirming your payment...*\n\n🔗 \`${txHash}\`\n\n_Your payment was sent but we lost connection confirming it. It may still go through — please don't pay again. Check History shortly, or message me again in a minute._`,
                 });
               }
 
@@ -705,26 +705,26 @@ export async function POST(req: Request) {
           // (pay this one via the link now, or approve a limit so future ones go straight
           // through from chat).
           const summary = allowanceShortfall ? [
-            `⚠️ **No approved limit for this**`,
+            `⚠️ *No approved limit for this*`,
             ``,
-            `You don't have an agent spend limit approved for **${tokenSym} on ${chain}** — need ${allowanceShortfall.needed} ${tokenSym}, approved: ${allowanceShortfall.have} ${tokenSym}.`,
+            `You don't have an agent spend limit approved for *${tokenSym} on ${chain}* — need ${allowanceShortfall.needed} ${tokenSym}, approved: ${allowanceShortfall.have} ${tokenSym}.`,
             ``,
-            `**${d.provider || ''} ${d.intent === 'ELECTRICITY' ? 'Electricity' : d.intent === 'VEND_DATA' ? 'Data' : d.intent === 'TV' ? 'Cable' : 'Airtime'}** — ₦${Number(d.amount_ngn).toLocaleString()}`,
+            `*${d.provider || ''} ${d.intent === 'ELECTRICITY' ? 'Electricity' : d.intent === 'VEND_DATA' ? 'Data' : d.intent === 'TV' ? 'Cable' : 'Airtime'}* — ₦${Number(d.amount_ngn).toLocaleString()}`,
             d.customer_name ? `👤 ${d.customer_name}` : null,
             `📱 ${d.destination_account}`,
             ``,
-            `👉 **[Tap here to pay this one now](${payUrl})**`,
+            `👉 *[Tap here to pay this one now](${payUrl})*`,
             ``,
             `_Or approve a ${tokenSym}/${chain} spend limit in the app's Agent tab so future payments like this go straight through from chat, no link needed. Link expires in 15 minutes._`,
           ].filter(Boolean).join('\n') : [
-            `✅ **PIN Verified!**`,
+            `✅ *PIN Verified!*`,
             ``,
-            `**${d.provider || ''} ${d.intent === 'ELECTRICITY' ? 'Electricity' : d.intent === 'VEND_DATA' ? 'Data' : d.intent === 'TV' ? 'Cable' : 'Airtime'}**`,
+            `*${d.provider || ''} ${d.intent === 'ELECTRICITY' ? 'Electricity' : d.intent === 'VEND_DATA' ? 'Data' : d.intent === 'TV' ? 'Cable' : 'Airtime'}*`,
             d.customer_name ? `👤 ${d.customer_name}` : null,
             `📱 ${d.destination_account}`,
             `💰 ₦${Number(d.amount_ngn).toLocaleString()}`,
             ``,
-            `👉 **[Tap here to approve & pay](${payUrl})**`,
+            `👉 *[Tap here to approve & pay](${payUrl})*`,
             ``,
             `_You'll sign with your own wallet — AbaPay never holds your funds. Link expires in 15 minutes._`,
           ].filter(Boolean).join('\n');
@@ -803,7 +803,7 @@ export async function POST(req: Request) {
       const total2 = Number(d2.amount_ngn || 0) + Number(d2.fee || 0);
       return NextResponse.json({
         action: 'REPLY',
-        message: `${d2.email ? `✅ Receipt will go to ${d2.email}.` : "👍 No receipt — proceeding without an email."}\n\n🤖 **Final Checkout**\n\nService: ${d2.intent.replace('_', ' ')}\nAccount: ${d2.destination_account}\n${detailsRow2}\nAmount: ${currencySymbol}${d2.amount_ngn || 0}\n**Total: ${currencySymbol}${total2}**\n\n🔒 Reply with your **PIN** to confirm.`,
+        message: `${d2.email ? `✅ Receipt will go to ${d2.email}.` : "👍 No receipt — proceeding without an email."}\n\n🤖 *Final Checkout*\n\nService: ${d2.intent.replace('_', ' ')}\nAccount: ${d2.destination_account}\n${detailsRow2}\nAmount: ${currencySymbol}${d2.amount_ngn || 0}\n*Total: ${currencySymbol}${total2}*\n\n🔒 Reply with your *PIN* to confirm.`,
       });
     }
     // ⚡ STATE: COLLECTING A COMPULSORY FIELD (phone / email) ⚡
@@ -1145,7 +1145,7 @@ export async function POST(req: Request) {
       const total = Number(session.intent_data.amount_ngn || 0) + Number(session.intent_data.fee || 0);
       return NextResponse.json({
           action: 'REPLY',
-          message: `🤖 **Final Checkout**\n\nService: ${session.intent_data.intent.replace('_', ' ')}\nAccount: ${session.intent_data.destination_account}\n${detailsRow}\nAmount: ${currencySymbol}${session.intent_data.amount_ngn || 0}\nPayment: **${selected}**\n**Total: ${currencySymbol}${total}**\n\n🔒 Reply with your **PIN** to confirm.`
+          message: `🤖 *Final Checkout*\n\nService: ${session.intent_data.intent.replace('_', ' ')}\nAccount: ${session.intent_data.destination_account}\n${detailsRow}\nAmount: ${currencySymbol}${session.intent_data.amount_ngn || 0}\nPayment: *${selected}*\n*Total: ${currencySymbol}${total}*\n\n🔒 Reply with your *PIN* to confirm.`
       });
     }
     // STATE: DATA PLAN
@@ -1166,7 +1166,7 @@ export async function POST(req: Request) {
         const typeMap: Record<string, string> = { '1': 'prepaid', '2': 'postpaid' };
         const selectedType = typeMap[userInput];
 
-        if (!selectedType) return NextResponse.json({ action: 'REPLY', message: "❌ Please reply with **1** for Prepaid or **2** for Postpaid." });
+        if (!selectedType) return NextResponse.json({ action: 'REPLY', message: "❌ Please reply with *1* for Prepaid or *2* for Postpaid." });
         
         const verification = await verifyAccount(
             session.intent_data.intent,
@@ -1186,7 +1186,7 @@ export async function POST(req: Request) {
         session.intent_data.verified_min = verification.min_amount;
         session.status = 'AWAITING_DETAILS'; 
         
-        prependSystemMsg = `✅ **Meter Verified!**\nName: ${verification.customer_name}\n${verification.customer_address ? `Address: ${verification.customer_address}\n` : ''}\n`;
+        prependSystemMsg = `✅ *Meter Verified!*\nName: ${verification.customer_name}\n${verification.customer_address ? `Address: ${verification.customer_address}\n` : ''}\n`;
         text = ""; 
         isContinuingToAI = true;
     }
@@ -1595,7 +1595,7 @@ export async function POST(req: Request) {
     if (intentData.intent === 'CHECK_BALANCE') {
         return NextResponse.json({
             action: 'REPLY',
-            message: `💰 **Your Balance**\n\n🌍 Region: ${currentCountry}\n💵 Fiat: ${currencySymbol}${fiatBalance}\n🪙 Crypto:\n${formatChainBalances(crypto)}`,
+            message: `💰 *Your Balance*\n\n🌍 Region: ${currentCountry}\n💵 Fiat: ${currencySymbol}${fiatBalance}\n🪙 Crypto:\n${formatChainBalances(crypto)}`,
         });
     }
 
@@ -1671,11 +1671,11 @@ export async function POST(req: Request) {
         
         for (const field of rules.required) {
             if (!intentData[field]) {
-                if (field === 'amount_ngn') missing.push("the **Amount**");
-                if (field === 'destination_account') missing.push("the **Target Number/Account**");
-                if (field === 'provider') missing.push("the **Network Provider**");
-                if (field === 'phone') missing.push("your **Contact Phone Number**");
-                if (field === 'email') missing.push("your **Email Address**");
+                if (field === 'amount_ngn') missing.push("the *Amount*");
+                if (field === 'destination_account') missing.push("the *Target Number/Account*");
+                if (field === 'provider') missing.push("the *Network Provider*");
+                if (field === 'phone') missing.push("your *Contact Phone Number*");
+                if (field === 'email') missing.push("your *Email Address*");
             }
         }
 
@@ -1707,7 +1707,7 @@ export async function POST(req: Request) {
         intentData.available_variations = variations;
         await supabase.from('deai_sessions').upsert({ chat_id: platform_id, platform, intent_data: intentData, status: 'AWAITING_DATA_PLAN', expires_at: new Date(Date.now() + 300000).toISOString() }, { onConflict: 'chat_id' });
         
-        let msg = `📊 **Select Data Plan for ${intentData.provider.toUpperCase()}**\n\n`;
+        let msg = `📊 *Select Data Plan for ${intentData.provider.toUpperCase()}*\n\n`;
         variations.forEach((v: any) => msg += `${v.id}️⃣ ${v.name} - ${currencySymbol}${v.price}\n`);
         msg += `\n*Reply with the number (e.g., 1).*`;
         
