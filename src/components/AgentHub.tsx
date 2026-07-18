@@ -25,7 +25,9 @@ interface Props {
   selectedToken: any;
   activeChainName: string;
   // Called to run the two on-chain approvals (ERC-20 approve + setSpendingAllowance).
-  onApproveAllowance: (amount: string) => Promise<void>;
+  // Returns a result rather than throwing, so this component can show its own confirmation —
+  // the page's shared `status` banner only renders inside the Pay tab, never here.
+  onApproveAllowance: (amount: string) => Promise<{ success: boolean; message: string } | void>;
   // Current on-chain allowance, in human units.
   currentAllowance: string | null;
   isApproving: boolean;
@@ -39,6 +41,25 @@ export function AgentHub({ address, selectedToken, activeChainName, onApproveAll
   const [linkCode, setLinkCode] = useState<string | null>(null);
   const [msg, setMsg] = useState('');
   const [allowanceInput, setAllowanceInput] = useState('10');
+  const [approvalResult, setApprovalResult] = useState<{ success: boolean; message: string } | null>(null);
+  const [copied, setCopied] = useState(false);
+
+  const handleApproveClick = async () => {
+    setApprovalResult(null);
+    const result = await onApproveAllowance(allowanceInput);
+    if (result) setApprovalResult(result);
+  };
+
+  const handleCopy = async () => {
+    if (!linkCode) return;
+    try {
+      await navigator.clipboard.writeText(linkCode);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    } catch {
+      setMsg('Could not copy — select and copy the code manually.');
+    }
+  };
 
   const loadLinks = useCallback(async () => {
     if (!address) return;
@@ -142,13 +163,19 @@ export function AgentHub({ address, selectedToken, activeChainName, onApproveAll
             className="flex-1 bg-slate-50 dark:bg-[#1a1a1f] border border-slate-100 dark:border-slate-800/80 rounded-2xl px-4 py-3 font-black text-slate-900 dark:text-white outline-none focus:border-emerald-300"
           />
           <button
-            onClick={() => onApproveAllowance(allowanceInput)}
+            onClick={handleApproveClick}
             disabled={isApproving || !address}
             className="px-5 py-3 bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 text-white rounded-2xl text-xs font-black uppercase tracking-widest transition-colors active:scale-95 flex items-center gap-2"
           >
             {isApproving ? <><Loader2 size={14} className="animate-spin" /> Signing…</> : 'Approve'}
           </button>
         </div>
+
+        {approvalResult && (
+          <p className={`mb-1 text-xs font-bold flex items-center gap-1.5 ${approvalResult.success ? 'text-emerald-600 dark:text-emerald-400' : 'text-orange-600 dark:text-orange-400'}`}>
+            {approvalResult.success ? <Check size={12} /> : <AlertTriangle size={12} />} {approvalResult.message}
+          </p>
+        )}
 
         <p className="mt-3 text-[10px] text-slate-400 dark:text-slate-500 leading-relaxed">
           🔒 This limit is enforced <strong>on-chain</strong>, not by our servers. The agent can never spend more than this —
@@ -200,12 +227,13 @@ export function AgentHub({ address, selectedToken, activeChainName, onApproveAll
             <div className="flex items-center gap-2 mb-3">
               <code className="flex-1 bg-white dark:bg-[#111114] px-3 py-2 rounded-xl font-mono font-black text-lg text-slate-900 dark:text-white text-center">{linkCode}</code>
               <button
-                onClick={() => navigator.clipboard?.writeText(linkCode)}
+                onClick={handleCopy}
                 className="p-2.5 bg-white dark:bg-[#111114] rounded-xl border border-emerald-100 dark:border-emerald-900/40"
               >
-                <Copy size={14} className="text-emerald-600" />
+                {copied ? <Check size={14} className="text-emerald-600" /> : <Copy size={14} className="text-emerald-600" />}
               </button>
             </div>
+            {copied && <p className="text-[10px] text-emerald-600 dark:text-emerald-400 font-bold -mt-2 mb-3">Copied!</p>}
             <a
               href={buildChannelLinkUrl(activeChannel, linkCode)}
               target="_blank"

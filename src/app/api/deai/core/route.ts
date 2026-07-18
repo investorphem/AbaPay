@@ -87,6 +87,26 @@ function extractEntities(text: string, currentData: any = {}) {
     return data;
 }
 
+// ⚡ EMAIL RECEIPT OPT-IN ⚡
+//
+// ELECTRICITY/TV/EDUCATION already force-collect an email via SERVICE_RULES (VTpass needs
+// it for those categories) — that stays compulsory, unrelated to this. Everyone else
+// (airtime, data, bank transfer) never got asked at all. This makes it an explicit,
+// validated opt-in for those: reply with an email to get a receipt, or say "skip"/"no" to
+// proceed without one — never blocking the payment either way.
+const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+const EMAIL_SKIP_WORDS = new Set(['no', 'skip', 'none', 'nope', 'no thanks', 'nothanks', 'n/a', 'na', 'nah']);
+
+function alreadyHasEmail(d: any): boolean {
+    return !!(d.email || d.customer_email);
+}
+
+function needsEmailOptIn(d: any): boolean {
+    if (d.email_choice_made) return false;
+    if (alreadyHasEmail(d)) return false; // already mandatory for this category, or already answered
+    return true;
+}
+
 // ⚡ Which tokens are actually available on a given chain?
 // Read from SUPPORTED_TOKENS — the SAME source the web app uses — so the agent can never
 // offer a token that doesn't exist on the selected chain (cUSD/USDm is Celo-only).
@@ -215,6 +235,13 @@ export async function POST(req: Request) {
       globalUser = {
         wallet_address: (link as any).wallet_address,
         country_code: 'NG',
+        // What the user actually approved an on-chain allowance for when they linked (see
+        // AgentHub.tsx's startLink) — the relay-vs-link decision below must default to THIS,
+        // not a hardcoded token/chain, or an allowance approved in e.g. USDC would never be
+        // found (checked under the wrong token) and every payment would silently fall back
+        // to the deep-link path even though the user has a working allowance.
+        approved_token: (link as any).approved_token || 'USD₮',
+        approved_chain: (link as any).approved_chain || 'CELO',
       };
     } else {
       // Legacy path
@@ -320,8 +347,12 @@ export async function POST(req: Request) {
         const serviceLabel = d.intent === 'ELECTRICITY' ? 'Electricity'
                            : d.intent === 'VEND_DATA' ? 'Data'
                            : d.intent === 'TV' ? 'Cable' : 'Airtime';
-        const chain = (d.chain || 'CELO').toUpperCase();
-        const tokenSym = d.selected_token || 'USD₮';
+        // Prefer whatever the user explicitly said in THIS conversation (d.chain/d.selected_token);
+        // otherwise default to whatever they actually approved an allowance for at link time
+        // (globalUser.approved_chain/approved_token), not a hardcoded guess — see the comment
+        // on globalUser's construction above for why this matters.
+        const chain = (d.chain || globalUser?.approved_chain || 'CELO').toUpperCase();
+        const tokenSym = d.selected_token || globalUser?.approved_token || 'USD₮';
 
         // ⚡ PATH A — AUTONOMOUS AGENT PAYMENT (user pre-approved an on-chain allowance)
         //
@@ -448,11 +479,16 @@ export async function POST(req: Request) {
             cableAction: d.cable_action || undefined,
             customerName: d.customer_name || undefined,
             customerAddress: d.customer_address || undefined,
-            // Honour the chain the user actually chose.
-            chain: (d.chain || 'CELO') as 'CELO' | 'BASE',
-            token: d.selected_token || 'USD₮',
+            // Same chain/token resolution as Path A above (falls back to what the user
+            // actually approved at link time, not a hardcoded guess).
+            chain: chain as 'CELO' | 'BASE',
+            token: tokenSym,
             channel: platform,
             chatId: platform_id,
+            // Receipt email — either forced by SERVICE_RULES (ELECTRICITY/TV/EDUCATION) or
+            // opted into via AWAITING_EMAIL_CHOICE above. The web app pre-fills this from the
+            // link (see the deep-link resolution effect in src/app/page.tsx).
+            email: d.email || d.customer_email || undefined,
           });
 
           const summary = [
@@ -509,7 +545,42 @@ export async function POST(req: Request) {
         await supabase.from('deai_sessions').update({ intent_data: session.intent_data }).eq('chat_id', platform_id);
         return NextResponse.json({ action: 'REPLY', message: `❌ *Incorrect PIN* (${4 - attempts} attempts left)` });
       }
-    } 
+    }
+    // ⚡ STATE: EMAIL RECEIPT OPT-IN ⚡
+    // Only entered for categories that don't already force an email (see needsEmailOptIn).
+    // Never blocks the payment: "skip"/"no" proceeds with no email at all.
+    else if (session?.status === 'AWAITING_EMAIL_CHOICE') {
+      const reply = text.trim();
+      const normalized = reply.toLowerCase().replace(/[.!]+$/, '');
+
+      if (!EMAIL_SKIP_WORDS.has(normalized)) {
+        if (!EMAIL_RE.test(reply)) {
+          return NextResponse.json({ action: 'REPLY', message: `⚠️ That doesn't look like a valid email address.\n\n📧 Reply with your email, or say *skip* to continue without a receipt.` });
+        }
+        session.intent_data.email = reply;
+        session.intent_data.customer_email = reply;
+      }
+      session.intent_data.email_choice_made = true;
+
+      await supabase.from('deai_sessions').upsert({
+        chat_id: platform_id, platform, intent_data: session.intent_data,
+        status: 'AWAITING_PIN',
+        expires_at: new Date(Date.now() + 300000).toISOString(),
+      }, { onConflict: 'chat_id' });
+
+      const d2 = session.intent_data;
+      let detailsRow2 = "";
+      if (d2.intent === 'VEND_DATA') detailsRow2 = `Plan: ${d2.variation_name}\nNetwork: ${d2.provider?.toUpperCase()}`;
+      else if (d2.intent === 'VEND_AIRTIME') detailsRow2 = `Network: ${d2.provider?.toUpperCase()}`;
+      else if (d2.intent === 'BANK_TRANSFER') detailsRow2 = `Bank: ${d2.provider?.toUpperCase()}`;
+      else detailsRow2 = `Name: ${d2.verified_name || 'N/A'}`;
+
+      const total2 = Number(d2.amount_ngn || 0) + Number(d2.fee || 0);
+      return NextResponse.json({
+        action: 'REPLY',
+        message: `${d2.email ? `✅ Receipt will go to ${d2.email}.` : "👍 No receipt — proceeding without an email."}\n\n🤖 **Final Checkout**\n\nService: ${d2.intent.replace('_', ' ')}\nAccount: ${d2.destination_account}\n${detailsRow2}\nAmount: ${currencySymbol}${d2.amount_ngn || 0}\n**Total: ${currencySymbol}${total2}**\n\n🔒 Reply with your **PIN** to confirm.`,
+      });
+    }
     // ⚡ STATE: COLLECTING A COMPULSORY FIELD (phone / email) ⚡
     // Entered when the parity gate found a required field the app would demand.
     else if (session?.status === 'AWAITING_FIELD') {
@@ -542,6 +613,17 @@ export async function POST(req: Request) {
           expires_at: new Date(Date.now() + 300000).toISOString(),
         }, { onConflict: 'chat_id' });
         return NextResponse.json({ action: 'REPLY', message: `✅ Got it.\n\n📝 ${next.ask}` });
+      }
+
+      // Compulsory fields done — ask about a receipt email before PIN, unless this category
+      // already forces one (ELECTRICITY/TV/EDUCATION) or the user already answered.
+      if (needsEmailOptIn(session.intent_data)) {
+        await supabase.from('deai_sessions').upsert({
+          chat_id: platform_id, platform, intent_data: session.intent_data,
+          status: 'AWAITING_EMAIL_CHOICE',
+          expires_at: new Date(Date.now() + 300000).toISOString(),
+        }, { onConflict: 'chat_id' });
+        return NextResponse.json({ action: 'REPLY', message: `✅ Got it.\n\n📧 Want an email receipt? Reply with your email, or say *skip*.` });
       }
 
       // All compulsory fields collected — move to PIN confirmation, with the conversion shown.
@@ -792,6 +874,17 @@ export async function POST(req: Request) {
             message: `⚠️ *Looks like a duplicate.*\n\nYou already paid ₦${Number(session.intent_data.amount_ngn).toLocaleString()} to meter ${session.intent_data.destination_account} today.\n\nIf you really meant to pay again, please do it in the app so you can confirm it deliberately.`,
           });
         }
+      }
+
+      // Ask about a receipt email before PIN, unless already forced/answered (see the other
+      // AWAITING_PIN transition above for the full rationale).
+      if (needsEmailOptIn(session.intent_data)) {
+        await supabase.from('deai_sessions').upsert({
+          chat_id: platform_id, platform, intent_data: session.intent_data,
+          status: 'AWAITING_EMAIL_CHOICE',
+          expires_at: new Date(Date.now() + 300000).toISOString(),
+        }, { onConflict: 'chat_id' });
+        return NextResponse.json({ action: 'REPLY', message: `📧 Want an email receipt? Reply with your email, or say *skip*.` });
       }
 
       await supabase.from('deai_sessions').upsert({ chat_id: platform_id, platform, intent_data: session.intent_data, status: 'AWAITING_PIN', expires_at: new Date(Date.now() + 300000).toISOString() }, { onConflict: 'chat_id' });
@@ -1075,9 +1168,12 @@ export async function POST(req: Request) {
                            : intentData.intent === 'TV' ? 'CABLE'
                            : intentData.intent === 'VEND_DATA' ? 'DATA' : 'AIRTIME';
 
-            // Will this actually auto-pay? Only if they've granted an on-chain allowance.
-            const tokenSym = 'USD₮';
-            const allowance = await getRemainingAllowance(globalUser?.wallet_address || '', tokenSym, 'CELO');
+            // Will this actually auto-pay? Only if they've granted an on-chain allowance —
+            // check under whatever token/chain they actually approved, not a hardcoded guess
+            // (same fix as the live-payment path above; see the globalUser comment there).
+            const tokenSym = globalUser?.approved_token || 'USD₮';
+            const schedChain = globalUser?.approved_chain || 'CELO';
+            const allowance = await getRemainingAllowance(globalUser?.wallet_address || '', tokenSym, schedChain);
             const canAutoPay = allowance.ok && allowance.remaining > 0;
 
             const { error: schedErr } = await supabase.from('scheduled_bills').insert({
@@ -1088,7 +1184,7 @@ export async function POST(req: Request) {
                 billers_code: intentData.destination_account,
                 amount_ngn: Number(intentData.amount_ngn),
                 meter_type: intentData.meter_type || null,
-                blockchain: 'CELO',
+                blockchain: schedChain,
                 token_used: tokenSym,
                 frequency: aiParsed.frequency || 'monthly',
                 day_of_week: aiParsed.day_of_week,

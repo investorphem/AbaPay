@@ -1057,10 +1057,13 @@ export default function Home() {
     }
   };
 
-  const handleApproveAgentAllowance = async (amount: string) => {
-    if (!address || !wagmiWalletClient) { setStatus("Connect your wallet first."); return; }
+  // Returns a result (rather than throwing) so AgentHub can show its own local confirmation —
+  // the shared `status` banner only renders inside the Pay tab's JSX, so a setStatus() call
+  // made while the user is on the Agent Hub tab was previously invisible.
+  const handleApproveAgentAllowance = async (amount: string): Promise<{ success: boolean; message: string }> => {
+    if (!address || !wagmiWalletClient) { const m = "Connect your wallet first."; setStatus(m); return { success: false, message: m }; }
     const amt = Number(amount);
-    if (!Number.isFinite(amt) || amt < 0) { setStatus("Enter a valid amount."); return; }
+    if (!Number.isFinite(amt) || amt < 0) { const m = "Enter a valid amount."; setStatus(m); return { success: false, message: m }; }
 
     setIsApprovingAgent(true);
     try {
@@ -1108,10 +1111,14 @@ export default function Home() {
       await pc.waitForTransactionReceipt({ hash, confirmations: 1 });
 
       await refreshAgentAllowance();
-      setStatus(amt === 0 ? "Agent access revoked." : `Agent can now spend up to ${amt} ${selectedToken.symbol}.`);
+      const successMsg = amt === 0 ? "Agent access revoked." : `Agent can now spend up to ${amt} ${selectedToken.symbol}.`;
+      setStatus(successMsg);
+      return { success: true, message: successMsg };
     } catch (e: any) {
       console.error('Agent allowance failed:', e);
-      setStatus(e?.shortMessage?.slice(0, 60) || "Could not set the agent limit. Is the contract AbaPayV3?");
+      const errMsg = e?.shortMessage?.slice(0, 60) || "Could not set the agent limit. Is the contract AbaPayV3?";
+      setStatus(errMsg);
+      return { success: false, message: errMsg };
     } finally {
       setIsApprovingAgent(false);
     }
@@ -1148,6 +1155,10 @@ export default function Home() {
         setActiveTab('pay');
         if (it.amountNgn) setNairaAmount(String(it.amountNgn));
         if (it.billersCode) setAccountNumber(it.billersCode);
+        // Receipt email the user opted into during chat (see AWAITING_EMAIL_CHOICE in
+        // src/app/api/deai/core/route.ts) — already validated server-side before the link
+        // was issued, so it's safe to pre-fill directly.
+        if (it.email) setCustomerEmail(it.email);
 
         const cat = (it.serviceCategory || '').toUpperCase();
         if (cat === 'ELECTRICITY') {

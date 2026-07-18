@@ -32,6 +32,7 @@ export interface DeepLinkIntent {
   cableAction?: string;           // renew | change (DStv/GOtv)
   customerName?: string;          // from VTpass verification
   customerAddress?: string;
+  email?: string;                 // receipt email, if the user opted in during chat
   // ⚡ CHAIN SELECTION: without this the app just used whatever chain the wallet happened to
   // be on, so an agent-originated payment could land on the wrong chain (wrong token set,
   // and — for the Celo hackathon — no attribution credit). Defaults to CELO.
