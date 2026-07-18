@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { ShieldCheck, Lock, Database, Share2, Trash2, UserCheck, Mail, Globe } from "lucide-react";
+import { ShieldCheck, Lock, Database, Share2, Trash2, UserCheck, Mail, Globe, Bot } from "lucide-react";
 
 export default function PrivacyPolicy() {
   return (
@@ -51,10 +51,18 @@ export default function PrivacyPolicy() {
             </ul>
 
             <h3 className="font-bold text-slate-800 dark:text-slate-200 mt-4 mb-2">B. Utility & Fiat Data</h3>
-            <ul className="list-disc pl-5 space-y-2">
+            <ul className="list-disc pl-5 space-y-2 mb-4">
               <li><strong>Utility Identifiers:</strong> Local and international phone numbers, Smartcard numbers, Meter numbers, and Bank Account numbers you provide for vending.</li>
               <li><strong>Verified KYC Data:</strong> When you verify an account, our API may retrieve the associated <strong>Customer Name, physical meter address, and Account Type</strong> from the relevant national or international grid/banking network to ensure you are paying the correct bill.</li>
               <li><strong>Contact Information:</strong> Email addresses optionally provided for transaction receipts or support tickets.</li>
+            </ul>
+
+            <h3 className="font-bold text-slate-800 dark:text-slate-200 mt-4 mb-2">C. DeAI Agent & Messaging Data</h3>
+            <ul className="list-disc pl-5 space-y-2">
+              <li><strong>Messaging Platform Identifiers:</strong> Your Telegram Chat ID, WhatsApp phone number, or X User ID, linked to your wallet address so the agent can recognize you across conversations.</li>
+              <li><strong>Chat Message Content:</strong> Messages you send to the DeAI agent are processed to determine your intent (e.g. "top up my phone with 500 naira") — including by our AI provider, Anthropic (Claude API). We do not use this content for advertising or sell it to third parties.</li>
+              <li><strong>Hashed Transaction PIN:</strong> Your DeAI transaction PIN is stored as a salted cryptographic hash — never in plaintext. AbaPay staff cannot view your actual PIN.</li>
+              <li><strong>On-Chain Allowance Data:</strong> The stablecoin, blockchain, and spending limit you've approved for the agent — this is public on-chain data, visible to anyone who inspects the blockchain, not private data we control.</li>
             </ul>
           </section>
 
@@ -78,6 +86,8 @@ export default function PrivacyPolicy() {
             <ul className="list-disc pl-5 space-y-2 mb-3">
               <li><strong>Utility Aggregators:</strong> We share necessary vending data with our API partners (e.g., VTpass Global) strictly for the purpose of executing your transaction across borders.</li>
               <li><strong>Blockchain Networks:</strong> Your public wallet address and transaction amount are permanently broadcasted to the public, immutable Base or Celo blockchains.</li>
+              <li><strong>AI Processing Partner:</strong> Chat messages sent to the DeAI agent are transmitted to Anthropic (Claude API) solely to interpret your request. Anthropic never receives your private keys, PIN, or any ability to sign transactions.</li>
+              <li><strong>Messaging Platforms:</strong> To operate the agent, we exchange data with Telegram, Meta (WhatsApp), and X's respective bot/webhook infrastructure.</li>
               <li><strong>Law Enforcement:</strong> If compelled by a valid subpoena or directive from relevant local or international law enforcement (e.g., EFCC, SEC, or FATF-aligned agencies), we may disclose metadata to prevent cross-border financial crimes.</li>
             </ul>
           </section>
@@ -104,8 +114,11 @@ export default function PrivacyPolicy() {
             <p className="mb-3 text-red-800 dark:text-red-300">
               <strong>Account & Data Deletion Request:</strong> If you wish to permanently delete your transaction history and associated utility data from the AbaPay servers, you may submit a formal Data Deletion Request. 
             </p>
-            <p className="text-red-800 dark:text-red-300 font-bold">
+            <p className="text-red-800 dark:text-red-300 font-bold mb-3">
               To request deletion, please email <a href="mailto:privacy@abapays.com" className="underline hover:text-red-600 dark:hover:text-red-400 transition-colors">privacy@abapays.com</a> with your connected Wallet Address. We will process your deletion request within 30 days, subject to mandatory global AML retention laws.
+            </p>
+            <p className="text-red-800 dark:text-red-300">
+              <strong>Unlinking a Messaging Account or Revoking Agent Access:</strong> You can unlink your Telegram, WhatsApp, or X account from your wallet, or revoke the DeAI agent's on-chain spending allowance, at any time from the Agent Hub in the App — no email required. Revoking the allowance takes effect on-chain immediately.
             </p>
           </section>
 

@@ -4,10 +4,11 @@ import { useState, useMemo } from "react";
 import Link from "next/link";
 import { useAccount } from "wagmi";
 import AppFooter from "@/components/AppFooter";
-import { 
-  ArrowLeft, ShieldCheck, Zap, Globe, 
+import {
+  ArrowLeft, ShieldCheck, Zap, Globe,
   Lock, Wallet, ChevronDown, BookOpen,
-  Star, Gift, Smartphone, Share2, HelpCircle
+  Star, Gift, Smartphone, Share2, HelpCircle,
+  Bot, KeyRound
 } from "lucide-react";
 
 export default function DocsPage() {
@@ -70,6 +71,60 @@ export default function DocsPage() {
                 desc="You do not need a local bank account to pay bills in supported countries. Whether you are in Lagos, London, or Los Angeles, as long as you have stablecoins, you can top-up phones in Ghana, pay electricity in Nigeria, or send data to Kenya instantly."
               />
             </div>
+          </section>
+
+          {/* DEAI CONVERSATIONAL AGENT */}
+          <section className="bg-white dark:bg-[#111114] border border-slate-100 dark:border-slate-800/60 rounded-[2.5rem] p-8 shadow-sm animate-in fade-in slide-in-from-bottom-4 transition-colors">
+            <h2 className="text-xl font-black mb-6 tracking-tight flex items-center gap-2 text-slate-900 dark:text-white">
+              <Bot className="text-indigo-500" size={20} /> DeAI — Pay Bills by Chat
+            </h2>
+            <p className="text-slate-600 dark:text-slate-300 font-medium mb-6 leading-relaxed">
+              DeAI is AbaPay's conversational agent — talk to it on <strong>Telegram, WhatsApp, X (Twitter)</strong>, or the in-app chat widget, and it handles the rest. No menus to memorize: just say what you want, like <em>"top up my 08012345678 with 500 naira"</em> or reply <em>"Celo"</em> and <em>"usdt"</em> instead of hunting for a numbered option.
+            </p>
+            <div className="space-y-4">
+              <div className="bg-indigo-50 dark:bg-indigo-900/20 border border-indigo-100 dark:border-indigo-800/50 p-5 rounded-2xl transition-colors">
+                <h4 className="text-sm font-black text-indigo-900 dark:text-indigo-100 mb-1">Two Ways to Pay</h4>
+                <p className="text-sm text-indigo-800 dark:text-indigo-300 font-medium leading-relaxed">
+                  If you've approved a spending allowance for a chain and stablecoin (see Agent Hub below), the agent pays instantly with no wallet signature needed. If you haven't, it sends you a secure, one-tap link to review and sign the payment yourself — same verified pipeline as the website either way.
+                </p>
+              </div>
+              <div className="bg-slate-50 dark:bg-[#1a1a1f] p-5 rounded-2xl border border-slate-100 dark:border-slate-800/80 transition-colors">
+                <h4 className="text-sm font-black text-slate-800 dark:text-slate-200 mb-1">See Your Balance & Limit Before You Choose</h4>
+                <p className="text-sm text-slate-600 dark:text-slate-400 font-medium leading-relaxed">
+                  When the agent asks which stablecoin to use, it shows the live wallet balance <em>and</em> your remaining approved agent limit for every option on that chain — so you're never picking blind.
+                </p>
+              </div>
+              <div className="bg-slate-50 dark:bg-[#1a1a1f] p-5 rounded-2xl border border-slate-100 dark:border-slate-800/80 transition-colors">
+                <h4 className="text-sm font-black text-slate-800 dark:text-slate-200 mb-1">Never Left Hanging</h4>
+                <p className="text-sm text-slate-600 dark:text-slate-400 font-medium leading-relaxed">
+                  Abandon a chat mid-payment and nothing is left dangling — the intent is cleaned up automatically. If a network hiccup happens right after you enter your PIN, the agent tracks the payment through to a confirmed on-chain result before ever telling you it failed, so you're never double-charged or left unsure.
+                </p>
+              </div>
+            </div>
+          </section>
+
+          {/* AGENT HUB */}
+          <section className="bg-white dark:bg-[#111114] border border-slate-100 dark:border-slate-800/60 rounded-[2.5rem] p-8 shadow-sm animate-in fade-in slide-in-from-bottom-4 transition-colors">
+            <h2 className="text-xl font-black mb-6 tracking-tight flex items-center gap-2 text-slate-900 dark:text-white">
+              <KeyRound className="text-emerald-500" size={20} /> Agent Hub — Your Spending Allowance
+            </h2>
+            <p className="text-slate-600 dark:text-slate-300 font-medium mb-6 leading-relaxed">
+              The Agent Hub tab is where you link a messaging account to your wallet and grant DeAI permission to pay on your behalf — entirely optional, and entirely under your control.
+            </p>
+            <ul className="space-y-4">
+              <li className="bg-slate-50 dark:bg-[#1a1a1f] p-5 rounded-2xl border border-slate-100 dark:border-slate-800/80 transition-colors">
+                <strong className="block text-sm font-black text-slate-800 dark:text-slate-200 mb-1">Choose Your Own Chain & Stablecoin</strong>
+                <span className="text-sm text-slate-600 dark:text-slate-400 font-medium leading-relaxed">Approvals are independent per chain and per token — approve USDC on Celo, USDT on Base, both, or neither. Each approval is its own on-chain transaction that only you can sign.</span>
+              </li>
+              <li className="bg-slate-50 dark:bg-[#1a1a1f] p-5 rounded-2xl border border-slate-100 dark:border-slate-800/80 transition-colors">
+                <strong className="block text-sm font-black text-slate-800 dark:text-slate-200 mb-1">Bounded and Revocable, On-Chain</strong>
+                <span className="text-sm text-slate-600 dark:text-slate-400 font-medium leading-relaxed">The smart contract itself — not AbaPay's servers — enforces the cap. The agent can never spend more than the remaining amount you've approved, and you can lower it, raise it, or revoke it to zero at any moment.</span>
+              </li>
+              <li className="bg-slate-50 dark:bg-[#1a1a1f] p-5 rounded-2xl border border-slate-100 dark:border-slate-800/80 transition-colors">
+                <strong className="block text-sm font-black text-slate-800 dark:text-slate-200 mb-1">No Allowance? No Problem.</strong>
+                <span className="text-sm text-slate-600 dark:text-slate-400 font-medium leading-relaxed">If you ask the agent to pay with a token you haven't approved yet, it tells you plainly and gives you the choice — approve it now in the Agent Hub, or complete just this one payment with a signed link instead.</span>
+              </li>
+            </ul>
           </section>
 
           {/* ABAPOINTS & REWARDS */}
@@ -192,6 +247,12 @@ export default function DocsPage() {
               <FAQItem q="How long does a transaction take?" a="Because we build on high-speed EVM networks, the blockchain portion confirms in roughly 3 to 5 seconds. The utility delivery typically arrives immediately after block confirmation." />
               <FAQItem q="What happens if I pay, but my electricity token isn't generated?" a="Utility networks occasionally lag. If this happens, your dashboard will display a 'Transaction Processing' badge. Our backend Webhook will continuously ping the utility provider until they generate your token, and will text/email you the result." />
               <FAQItem q="Who controls the funds?" a="You do. AbaPay is a non-custodial gateway. We do not have access to your private keys, and we cannot move your funds without you explicitly signing a transaction in your wallet." />
+              <FAQItem q="What is the DeAI agent?" a="DeAI is our conversational AI assistant, reachable on Telegram, WhatsApp, X, and the in-app chat widget. You can check your balance or pay a bill just by describing what you want in plain language — no need to open the app." />
+              <FAQItem q="Is it safe to let the agent pay bills automatically?" a="Yes. The agent can only ever spend from a bounded, on-chain spending allowance that you personally approve for a specific chain and stablecoin — it never has access to your full wallet balance, your private keys, or any other asset. You can lower or revoke that allowance at any time from the Agent Hub. Just protect your Telegram/WhatsApp/X account and your transaction PIN the same way you'd protect a banking PIN." />
+              <FAQItem q="How do I approve or revoke the agent's spending allowance?" a="Open the Agent Hub tab in the app, pick the chain and stablecoin you want the agent to be able to use, and approve a limit. To revoke it, set the limit back to zero at any time — the change takes effect on-chain immediately." />
+              <FAQItem q="What happens if I ask the agent to pay with a token I haven't approved?" a="The agent checks your allowance before attempting anything. If there isn't one for that chain/token, it tells you directly and lets you choose: approve a limit now in the Agent Hub, or complete just that one payment via a secure signed link instead — it will never guess or fail silently." />
+              <FAQItem q="Can I link more than one messaging account to my wallet?" a="Yes — you can link Telegram, WhatsApp, and X independently to the same wallet, and manage or unlink each one from the Agent Hub." />
+              <FAQItem q="What is x402 settlement, and does it change anything for me?" a="x402 is an HTTP-native payment protocol some of your web-app payments (USDC or USD₮ on Celo) settle through automatically, instead of a direct contract call. It's invisible in day-to-day use — same wallet signature, same vault, same refund protection — it simply makes that payment independently verifiable on public x402 explorers." />
             </div>
           </section>
 

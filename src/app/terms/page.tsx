@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { ShieldCheck, Scale, AlertTriangle, FileText, Globe } from "lucide-react";
+import { ShieldCheck, Scale, AlertTriangle, FileText, Globe, Bot } from "lucide-react";
 
 export default function TermsOfService() {
   return (
@@ -40,12 +40,15 @@ export default function TermsOfService() {
           <section>
             <h2 className="text-lg font-black text-slate-900 dark:text-white mb-3">2. Nature of Services</h2>
             <p className="mb-3">
-              AbaPay operates strictly as a <strong>Technology Interface and Borderless Digital Intermediary</strong>. We provide a non-custodial software protocol that allows users to interact with smart contracts on 
+              AbaPay operates strictly as a <strong>Technology Interface and Borderless Digital Intermediary</strong>. We provide a non-custodial software protocol that allows users to interact with smart contracts on
               {/* ⚡ MULTI-CHAIN UPDATE HERE ⚡ */}
               <strong> Base, Celo, and other supported EVM Blockchains</strong> to exchange digital assets (such as cUSD, USDC, or USDT) for fiat-denominated utility services (Airtime, Data, Electricity, and Bank Transfers) across Nigeria and supported international countries.
             </p>
-            <p>
+            <p className="mb-3">
               <strong>We are not a bank.</strong> We do not hold fiat currency deposits. All fiat utility vending is processed through licensed domestic and international Third-Party Aggregators (e.g., VTpass) and regulated Payment Solution Service Providers across our active geographic regions.
+            </p>
+            <p>
+              Payments may be initiated directly through the App, or through our conversational AI agent ("DeAI") on Telegram, WhatsApp, X, and the in-app chat widget — see <strong>Section 7</strong> below for the specific terms governing agent-initiated payments. Depending on the asset and network, on-chain settlement may occur either through a direct smart contract call or via the <strong>x402</strong> HTTP-payment protocol; both routes deposit funds into the same audited smart contract vault and carry identical obligations and protections under these Terms.
             </p>
           </section>
 
@@ -98,8 +101,26 @@ export default function TermsOfService() {
             </ul>
           </section>
 
+          <section className="bg-indigo-50/50 dark:bg-indigo-900/10 p-6 rounded-2xl border border-indigo-100 dark:border-indigo-900/30 transition-colors">
+            <h2 className="text-lg font-black text-slate-900 dark:text-white mb-3 flex items-center gap-2">
+              <Bot size={18} className="text-indigo-500"/> 7. DeAI Conversational Agent, Delegated Payments & Autonomous Scheduling
+            </h2>
+            <p className="mb-3">
+              AbaPay provides an AI-powered conversational agent ("<strong>DeAI</strong>") reachable via Telegram, WhatsApp, X, and an in-app chat widget, which lets you check balances and pay bills using natural language instead of the web interface. By linking a messaging account to your wallet or using DeAI in any form, you agree to the following, in addition to the rest of these Terms:
+            </p>
+            <ul className="list-disc pl-5 space-y-2 mb-3">
+              <li><strong>Two ways the agent moves your funds:</strong> (a) a <strong>signed deep link</strong> — DeAI sends a secure, time-limited link that opens the App pre-filled, and you review and sign the transaction yourself in your own wallet, exactly as on the website; or (b) a <strong>delegated on-chain allowance</strong> — if you have explicitly granted the agent a spending allowance (via "Approve" in the Agent Hub), it may execute a payment on your behalf with no fresh wallet signature, strictly bounded by the remaining amount, stablecoin, and blockchain you approved.</li>
+              <li><strong>You control the allowance, at all times.</strong> It is enforced on-chain by the smart contract itself, not by AbaPay's backend — you may lower, raise, or revoke it to zero at any time from your own wallet, and it never grants the agent access to your full wallet balance, your private keys, or any asset besides the specific one and chain you approved.</li>
+              <li><strong>Your linked messaging account and Transaction PIN are your responsibility.</strong> If a third party gains access to your Telegram, WhatsApp, or X account, or learns your PIN, they may be able to instruct the agent to spend from your approved allowance up to its bounds. AbaPay is not liable for losses resulting from a compromised messaging account, device, or PIN. Treat your PIN like a banking PIN, and revoke your allowance immediately if you suspect unauthorized access.</li>
+              <li><strong>Autonomous / Scheduled Payments.</strong> If you configure a recurring or scheduled bill payment, you authorize AbaPay's agent to execute it automatically when due, without further confirmation — bounded by the same on-chain allowance and per-transaction/daily caps. You may cancel a schedule at any time before it executes.</li>
+              <li><strong>Operator controls.</strong> We reserve the right to pause, rate-limit, or disable agent-initiated payments (in whole or per-channel) at any time, including via an emergency kill switch, without prior notice, for security, regulatory, or operational reasons.</li>
+              <li><strong>AI limitations.</strong> DeAI uses a third-party large language model (Anthropic's Claude) to interpret your messages and may occasionally misread a request. You are responsible for reviewing the confirmation details (service, account/meter/phone number, amount, chain, and token) presented before entering your PIN or signing — that confirmation is your final authorization.</li>
+              <li><strong>Optional email receipts.</strong> You may provide an email address in chat to receive a transaction receipt; this is never required to complete a payment.</li>
+            </ul>
+          </section>
+
           <section>
-            <h2 className="text-lg font-black text-slate-900 dark:text-white mb-3">7. Refunds and Reversals</h2>
+            <h2 className="text-lg font-black text-slate-900 dark:text-white mb-3">8. Refunds and Reversals</h2>
             <p>
               If your Web3 transaction is successfully confirmed but the Third-Party utility provider fails to deliver the service (e.g., failed token generation or foreign network rejection), AbaPay will automatically flag the transaction. Upon verification of the failure, AbaPay will issue a refund in the original stablecoin asset (less blockchain gas fees) to your connected wallet within 24 to 72 hours.
             </p>
@@ -107,7 +128,7 @@ export default function TermsOfService() {
 
           <section className="bg-slate-100 dark:bg-[#1a1a1f] p-6 rounded-2xl transition-colors">
             <h2 className="text-lg font-black text-slate-900 dark:text-white mb-3 flex items-center gap-2">
-              <Scale size={18} className="text-slate-700 dark:text-slate-400"/> 8. Governing Law & Dispute Resolution
+              <Scale size={18} className="text-slate-700 dark:text-slate-400"/> 9. Governing Law & Dispute Resolution
             </h2>
             <p className="mb-3">
               Because MASONODE TECHNOLOGIES LIMITED is headquartered in Nigeria, these Terms shall be governed by and construed in accordance with the laws of the Federal Republic of Nigeria, without regard to international conflict of law principles.
