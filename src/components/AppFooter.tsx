@@ -115,7 +115,7 @@ export default function AppFooter({ network = "Base & Celo" }: AppFooterProps) {
         </div>
       </div>
 
-      <p className="text-[9px] font-medium text-slate-300 dark:text-slate-600 uppercase tracking-[0.2em] mt-1">© 2026 MASONODE TECHNOLOGIES LIMITED • RC 9524980 • v3.0</p>
+      <p className="text-[9px] font-medium text-slate-300 dark:text-slate-600 uppercase tracking-[0.2em] mt-1">© 2026 MASONODE TECHNOLOGIES LIMITED • RC 9524980 • v3.1</p>
     </footer>
   );
 }

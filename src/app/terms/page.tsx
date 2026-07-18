@@ -17,7 +17,7 @@ export default function TermsOfService() {
           </div>
           <div className="text-right">
             <p className="text-xs font-bold text-slate-500 dark:text-slate-400 bg-slate-100 dark:bg-[#1a1a1f] px-3 py-1.5 rounded-lg inline-block transition-colors">
-              Effective Date: April 2026
+              Effective Date: July 2026
             </p>
           </div>
         </div>
