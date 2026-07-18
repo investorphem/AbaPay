@@ -21,6 +21,14 @@ export async function GET(req: Request) {
 
 export async function POST(req: Request) {
   try {
+    // ⚡ THESE TWO FAILING SILENTLY IS EXACTLY WHY "sent the code, nothing happened" is so
+    // hard to diagnose from the outside — `as string` is just a TypeScript assertion, not a
+    // runtime check, so a missing/expired token or wrong phone ID previously meant every
+    // outbound send below just quietly 400/401'd with nothing logged anywhere.
+    if (!WHATSAPP_TOKEN || !WHATSAPP_PHONE_ID) {
+      console.error('[WhatsApp] WHATSAPP_ACCESS_TOKEN or WHATSAPP_PHONE_NUMBER_ID is not configured — cannot send replies.');
+    }
+
     // Dynamically route to the Brain
     const host = req.headers.get('host');
     const protocol = host?.includes('localhost') ? 'http' : 'https';
@@ -66,8 +74,16 @@ export async function POST(req: Request) {
 
       const engineData = await response.json();
 
+      // ⚡ The core engine can reject a request (bad internal-auth secret, malformed payload)
+      // and respond with a 4xx + an `error` field instead of `action` — previously that meant
+      // silently doing nothing. Log it so a misconfigured DEAI_INTERNAL_SECRET is visible
+      // instead of looking identical to "the send just didn't work."
+      if (!response.ok) {
+        console.error('[WhatsApp] Core engine rejected the request:', response.status, JSON.stringify(engineData));
+      }
+
       if (engineData.action === 'REPLY' || engineData.action === 'SUCCESS_RECEIPT' || engineData.action === 'REQUIRE_TOKEN_SELECTION') {
-        await fetch(`https://graph.facebook.com/v18.0/${WHATSAPP_PHONE_ID}/messages`, {
+        const sendRes = await fetch(`https://graph.facebook.com/v18.0/${WHATSAPP_PHONE_ID}/messages`, {
           method: 'POST',
           headers: {
             'Authorization': `Bearer ${WHATSAPP_TOKEN}`,
@@ -80,6 +96,16 @@ export async function POST(req: Request) {
             text: { body: engineData.message }
           })
         });
+
+        // ⚡ THE ACTUAL FIX — this call's result was never checked. A bad/expired access
+        // token or wrong phone number ID makes Meta's Graph API return a 4xx with a detailed
+        // error body (e.g. "Invalid OAuth access token", "(#100) phone number ... does not
+        // exist") — none of that ever reached the logs before, so the send just silently
+        // failed with zero trace anywhere.
+        if (!sendRes.ok) {
+          const errBody = await sendRes.text();
+          console.error('[WhatsApp] Failed to send reply via Graph API:', sendRes.status, errBody);
+        }
       }
     }
 
