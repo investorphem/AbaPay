@@ -1000,26 +1000,59 @@ export default function Home() {
     return (selectedToken as any).celoSepolia || selectedToken.sepolia;
   }, [activeChain, selectedToken]);
 
-  const refreshAgentAllowance = useCallback(async () => {
-    if (!address || !ABAPAY_CONTRACT || !activeChain) return;
+  // ⚡ AGENT HUB — INDEPENDENT CHAIN/TOKEN RESOLUTION ⚡
+  //
+  // Deliberately separate from activeChain/selectedToken/getAgentTokenAddress above (which
+  // track the main Pay tab's selector and are used elsewhere on the page, e.g. refreshing
+  // wallet balance after an x402 payment). The Agent Hub lets the user pick a chain/token to
+  // approve an allowance for that's independent of whatever the Pay tab's selector happens
+  // to be set to — approving USDC on Base must never silently depend on the Pay tab
+  // currently showing USD₮ on Celo, which is exactly the bug this replaces.
+  const resolveAgentChain = useCallback((chainName: 'CELO' | 'BASE') => {
+    if (chainName === 'BASE') return isMainnet ? base : baseSepolia;
+    return isMainnet ? celo : celoSepolia;
+  }, [isMainnet]);
+
+  const resolveAgentContractFor = useCallback((chainName: 'CELO' | 'BASE'): `0x${string}` | undefined => {
+    if (chainName === 'BASE') return (process.env.NEXT_PUBLIC_ABAPAY_BASE_ADDRESS || process.env.NEXT_PUBLIC_ABAPAY_ADDRESS) as `0x${string}`;
+    return (process.env.NEXT_PUBLIC_ABAPAY_CELO_ADDRESS || process.env.NEXT_PUBLIC_ABAPAY_ADDRESS) as `0x${string}`;
+  }, []);
+
+  const resolveAgentTokenFor = useCallback((tokenSymbol: string, chainName: 'CELO' | 'BASE'): { address: string; decimals: number } | undefined => {
+    const token = (SUPPORTED_TOKENS as any[]).find((t: any) => t.symbol === tokenSymbol);
+    if (!token) return undefined;
+    const addr = chainName === 'BASE'
+      ? (isMainnet ? (token.baseMainnet || token.mainnet) : (token.baseSepolia || token.sepolia))
+      : (isMainnet ? (token.celoMainnet || token.mainnet) : (token.celoSepolia || token.sepolia));
+    if (!addr) return undefined;
+    return { address: addr, decimals: token.decimals };
+  }, [isMainnet]);
+
+  // Called by AgentHub whenever its own chain/token selection changes (including on mount),
+  // so the displayed "Agent can spend up to..." always reflects whatever combo is currently
+  // selected THERE, not the Pay tab's selector.
+  const checkAgentAllowanceFor = useCallback(async (tokenSymbol: string, chainName: 'CELO' | 'BASE'): Promise<string | null> => {
+    if (!address) { setAgentAllowance(null); return null; }
+    const contract = resolveAgentContractFor(chainName);
+    const tokenInfo = resolveAgentTokenFor(tokenSymbol, chainName);
+    if (!contract || !tokenInfo) { setAgentAllowance(null); return null; }
     try {
-      const tokenAddress = getAgentTokenAddress();
-      if (!tokenAddress) return;
-      const pc = createPublicClient({ chain: activeChain, transport: http() });
+      const pc = createPublicClient({ chain: resolveAgentChain(chainName), transport: http() });
       const raw = await pc.readContract({
-        address: ABAPAY_CONTRACT as `0x${string}`,
+        address: contract,
         abi: AGENT_ABI,
         functionName: 'remainingAllowance',
-        args: [address as `0x${string}`, tokenAddress as `0x${string}`],
+        args: [address as `0x${string}`, tokenInfo.address as `0x${string}`],
       }) as bigint;
-      setAgentAllowance(formatUnits(raw, selectedToken.decimals));
+      const formatted = formatUnits(raw, tokenInfo.decimals);
+      setAgentAllowance(formatted);
+      return formatted;
     } catch {
       // Contract may still be V1/V2 (no allowances) — treat as "agent payments not enabled".
       setAgentAllowance(null);
+      return null;
     }
-  }, [address, ABAPAY_CONTRACT, activeChain, selectedToken, AGENT_ABI, getAgentTokenAddress]);
-
-  useEffect(() => { refreshAgentAllowance(); }, [refreshAgentAllowance]);
+  }, [address, resolveAgentChain, resolveAgentContractFor, resolveAgentTokenFor, AGENT_ABI]);
 
 
   // ⚡ IN-APP AI CHAT: fill the form from a parsed request. The chat NEVER pays —
@@ -1060,38 +1093,51 @@ export default function Home() {
   // Returns a result (rather than throwing) so AgentHub can show its own local confirmation —
   // the shared `status` banner only renders inside the Pay tab's JSX, so a setStatus() call
   // made while the user is on the Agent Hub tab was previously invisible.
-  const handleApproveAgentAllowance = async (amount: string): Promise<{ success: boolean; message: string }> => {
+  //
+  // tokenSymbol/chainName come from AgentHub's OWN selector, independent of the Pay tab's
+  // selectedToken/activeChain — see the resolveAgentChain/etc comment above.
+  const handleApproveAgentAllowance = async (amount: string, tokenSymbol: string, chainName: 'CELO' | 'BASE'): Promise<{ success: boolean; message: string }> => {
     if (!address || !wagmiWalletClient) { const m = "Connect your wallet first."; setStatus(m); return { success: false, message: m }; }
     const amt = Number(amount);
     if (!Number.isFinite(amt) || amt < 0) { const m = "Enter a valid amount."; setStatus(m); return { success: false, message: m }; }
 
+    const tokenInfo = resolveAgentTokenFor(tokenSymbol, chainName);
+    const contract = resolveAgentContractFor(chainName);
+    if (!tokenInfo || !contract) { const m = `${tokenSymbol} isn't available on ${chainName}.`; setStatus(m); return { success: false, message: m }; }
+    const targetChain = resolveAgentChain(chainName);
+
     setIsApprovingAgent(true);
     try {
-      const tokenAddress = getAgentTokenAddress();
-      if (!tokenAddress) throw new Error("Unsupported token on this chain.");
+      // Make sure the wallet is actually on the chain we're about to sign for — the user may
+      // be approving a DIFFERENT chain here than whatever the Pay tab's wallet is currently on.
+      const currentChainId = await wagmiWalletClient.getChainId();
+      if (currentChainId !== targetChain.id) {
+        setStatus(`Switching to ${chainName}...`);
+        await wagmiWalletClient.switchChain({ id: targetChain.id });
+      }
 
-      const amountWei = parseUnits(amt.toFixed(selectedToken.decimals), selectedToken.decimals);
-      const pc = createPublicClient({ chain: activeChain, transport: http() });
+      const amountWei = parseUnits(amt.toFixed(tokenInfo.decimals), tokenInfo.decimals);
+      const pc = createPublicClient({ chain: targetChain, transport: http() });
 
       // 1) ERC-20 approval (skipped when revoking, or when already sufficient).
       if (amt > 0) {
         const current = await pc.readContract({
-          address: tokenAddress as `0x${string}`,
+          address: tokenInfo.address as `0x${string}`,
           abi: ERC20_ABI,
           functionName: 'allowance',
-          args: [address as `0x${string}`, ABAPAY_CONTRACT as `0x${string}`],
+          args: [address as `0x${string}`, contract],
         }) as bigint;
 
         if (current < amountWei) {
           setStatus("Approve the token spend in your wallet...");
           const h = await wagmiWalletClient.writeContract({
-            chain: activeChain,
-            address: tokenAddress as `0x${string}`,
+            chain: targetChain,
+            address: tokenInfo.address as `0x${string}`,
             abi: ERC20_ABI,
             functionName: 'approve',
-            args: [ABAPAY_CONTRACT, amountWei],
+            args: [contract, amountWei],
             account: address as `0x${string}`,
-            dataSuffix: celoAttributionSuffix(activeChain), // Celo attribution only; no-op on Base
+            dataSuffix: celoAttributionSuffix(targetChain), // Celo attribution only; no-op on Base
           });
           await pc.waitForTransactionReceipt({ hash: h, confirmations: 1 });
         }
@@ -1100,18 +1146,18 @@ export default function Home() {
       // 2) The on-chain agent cap — this is the security boundary.
       setStatus(amt === 0 ? "Revoking agent access..." : "Setting your agent spend limit...");
       const hash = await wagmiWalletClient.writeContract({
-        chain: activeChain,
-        address: ABAPAY_CONTRACT as `0x${string}`,
+        chain: targetChain,
+        address: contract,
         abi: AGENT_ABI,
         functionName: 'setSpendingAllowance',
-        args: [tokenAddress as `0x${string}`, amountWei],
+        args: [tokenInfo.address as `0x${string}`, amountWei],
         account: address as `0x${string}`,
-        dataSuffix: celoAttributionSuffix(activeChain), // Celo attribution only; no-op on Base
+        dataSuffix: celoAttributionSuffix(targetChain), // Celo attribution only; no-op on Base
       });
       await pc.waitForTransactionReceipt({ hash, confirmations: 1 });
 
-      await refreshAgentAllowance();
-      const successMsg = amt === 0 ? "Agent access revoked." : `Agent can now spend up to ${amt} ${selectedToken.symbol}.`;
+      await checkAgentAllowanceFor(tokenSymbol, chainName);
+      const successMsg = amt === 0 ? "Agent access revoked." : `Agent can now spend up to ${amt} ${tokenSymbol} on ${chainName}.`;
       setStatus(successMsg);
       return { success: true, message: successMsg };
     } catch (e: any) {
@@ -3073,6 +3119,7 @@ export default function Home() {
             selectedToken={selectedToken}
             activeChainName={activeChain?.name?.toUpperCase().includes('BASE') ? 'BASE' : 'CELO'}
             onApproveAllowance={handleApproveAgentAllowance}
+            onCheckAllowance={checkAgentAllowanceFor}
             currentAllowance={agentAllowance}
             isApproving={isApprovingAgent}
           />

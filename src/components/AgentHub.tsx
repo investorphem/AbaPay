@@ -2,12 +2,20 @@
 
 import React, { useState, useEffect, useCallback } from "react";
 import { Bot, Shield, Check, Copy, Trash2, Loader2, AlertTriangle, ExternalLink } from "lucide-react";
+import { SUPPORTED_TOKENS } from "@/constants";
 
 const CHANNELS = [
   { id: 'TELEGRAM', name: 'Telegram', color: 'text-sky-500', bot: 'https://t.me/abapayagentbot' },
   { id: 'WHATSAPP', name: 'WhatsApp', color: 'text-emerald-500', bot: 'https://wa.me/2347075418792' },
   { id: 'X', name: 'X (Twitter)', color: 'text-slate-900 dark:text-white', bot: 'https://x.com/AbaPays' },
 ];
+
+const CHAINS: Array<'CELO' | 'BASE'> = ['CELO', 'BASE'];
+
+function tokensFor(chainName: 'CELO' | 'BASE'): any[] {
+  const key = chainName.toLowerCase();
+  return (SUPPORTED_TOKENS as any[]).filter((t) => !t.supportedNetworks || t.supportedNetworks.includes(key));
+}
 
 // ⚡ The bare bot links above open the chat with nothing pre-filled — the user then has to
 // remember and retype the link code themselves. Telegram and WhatsApp both support
@@ -22,18 +30,25 @@ function buildChannelLinkUrl(channel: { id: string; bot: string }, linkCode: str
 
 interface Props {
   address?: string;
+  // Fallback defaults only, for the chain/token selector's initial value — NOT authoritative
+  // once the user picks something different here. See onApproveAllowance/onCheckAllowance.
   selectedToken: any;
   activeChainName: string;
-  // Called to run the two on-chain approvals (ERC-20 approve + setSpendingAllowance).
-  // Returns a result rather than throwing, so this component can show its own confirmation —
-  // the page's shared `status` banner only renders inside the Pay tab, never here.
-  onApproveAllowance: (amount: string) => Promise<{ success: boolean; message: string } | void>;
-  // Current on-chain allowance, in human units.
+  // Called to run the two on-chain approvals (ERC-20 approve + setSpendingAllowance) for
+  // WHATEVER chain/token this component's own selector currently has picked — independent of
+  // the Pay tab's selector, so approving USDC on Base can never silently depend on the Pay
+  // tab happening to show USD₮ on Celo. Returns a result rather than throwing, so this
+  // component can show its own confirmation — the page's shared `status` banner only renders
+  // inside the Pay tab, never here.
+  onApproveAllowance: (amount: string, tokenSymbol: string, chainName: 'CELO' | 'BASE') => Promise<{ success: boolean; message: string } | void>;
+  // Reads the on-chain allowance for a given chain/token and updates currentAllowance below.
+  onCheckAllowance: (tokenSymbol: string, chainName: 'CELO' | 'BASE') => Promise<string | null>;
+  // Current on-chain allowance, in human units, for whatever combo was last checked.
   currentAllowance: string | null;
   isApproving: boolean;
 }
 
-export function AgentHub({ address, selectedToken, activeChainName, onApproveAllowance, currentAllowance, isApproving }: Props) {
+export function AgentHub({ address, selectedToken, activeChainName, onApproveAllowance, onCheckAllowance, currentAllowance, isApproving }: Props) {
   const [links, setLinks] = useState<any[]>([]);
   const [loading, setLoading] = useState(false);
   const [channel, setChannel] = useState('TELEGRAM');
@@ -44,9 +59,37 @@ export function AgentHub({ address, selectedToken, activeChainName, onApproveAll
   const [approvalResult, setApprovalResult] = useState<{ success: boolean; message: string } | null>(null);
   const [copied, setCopied] = useState(false);
 
+  // Independent chain/token selection for THIS approval step — seeded from the Pay tab's
+  // current selector as a sensible starting point, but freely changeable here.
+  const [approvalChain, setApprovalChain] = useState<'CELO' | 'BASE'>(
+    (activeChainName === 'BASE' ? 'BASE' : 'CELO')
+  );
+  const [approvalTokenSymbol, setApprovalTokenSymbol] = useState<string>(
+    selectedToken?.symbol || 'USD₮'
+  );
+
+  // Re-check the on-chain allowance whenever the selection (or wallet) changes, so the
+  // "Agent can spend up to..." box always reflects the combo currently picked, not stale data
+  // from a previous selection.
+  useEffect(() => {
+    if (!address) return;
+    onCheckAllowance(approvalTokenSymbol, approvalChain);
+  }, [address, approvalTokenSymbol, approvalChain, onCheckAllowance]);
+
+  // Switching chains may drop the currently selected token if it isn't available there
+  // (e.g. USDm is Celo-only) — fall back to the first token that IS available.
+  const handleChainChange = (next: 'CELO' | 'BASE') => {
+    setApprovalChain(next);
+    setApprovalResult(null);
+    const available = tokensFor(next);
+    if (!available.some((t) => t.symbol === approvalTokenSymbol) && available[0]) {
+      setApprovalTokenSymbol(available[0].symbol);
+    }
+  };
+
   const handleApproveClick = async () => {
     setApprovalResult(null);
-    const result = await onApproveAllowance(allowanceInput);
+    const result = await onApproveAllowance(allowanceInput, approvalTokenSymbol, approvalChain);
     if (result) setApprovalResult(result);
   };
 
@@ -85,8 +128,11 @@ export function AgentHub({ address, selectedToken, activeChainName, onApproveAll
           wallet_address: address,
           channel,
           pin,
-          approved_token: selectedToken?.symbol,
-          approved_chain: activeChainName,
+          // Record whatever was actually approved in Step 1 above, not the Pay tab's
+          // unrelated selector — this is what the DeAI agent later reads to decide which
+          // token/chain to check an allowance for.
+          approved_token: approvalTokenSymbol,
+          approved_chain: approvalChain,
         }),
       });
       const data = await res.json();
@@ -140,15 +186,49 @@ export function AgentHub({ address, selectedToken, activeChainName, onApproveAll
           <h4 className="text-[11px] font-black uppercase tracking-widest text-slate-700 dark:text-slate-300">1. Approve a spend limit</h4>
         </div>
 
+        {/* Chain + token selector — which combo this approval applies to. */}
+        <div className="grid grid-cols-2 gap-2 mb-3">
+          <div className="grid grid-cols-2 gap-1.5">
+            {CHAINS.map((c) => (
+              <button
+                key={c}
+                onClick={() => handleChainChange(c)}
+                className={`py-2.5 rounded-xl border text-[10px] font-black uppercase tracking-widest transition-all ${
+                  approvalChain === c
+                    ? 'border-emerald-400 bg-emerald-50 dark:bg-emerald-900/20 text-emerald-700 dark:text-emerald-400'
+                    : 'border-slate-100 dark:border-slate-800/80 bg-slate-50 dark:bg-[#1a1a1f] text-slate-500'
+                }`}
+              >
+                {c}
+              </button>
+            ))}
+          </div>
+          <div className={`grid gap-1.5`} style={{ gridTemplateColumns: `repeat(${tokensFor(approvalChain).length}, minmax(0, 1fr))` }}>
+            {tokensFor(approvalChain).map((t: any) => (
+              <button
+                key={t.symbol}
+                onClick={() => { setApprovalTokenSymbol(t.symbol); setApprovalResult(null); }}
+                className={`py-2.5 rounded-xl border text-[10px] font-black uppercase tracking-widest transition-all ${
+                  approvalTokenSymbol === t.symbol
+                    ? 'border-emerald-400 bg-emerald-50 dark:bg-emerald-900/20 text-emerald-700 dark:text-emerald-400'
+                    : 'border-slate-100 dark:border-slate-800/80 bg-slate-50 dark:bg-[#1a1a1f] text-slate-500'
+                }`}
+              >
+                {t.symbol}
+              </button>
+            ))}
+          </div>
+        </div>
+
         {hasAllowance ? (
           <div className="mb-3 p-3 rounded-2xl bg-emerald-50 dark:bg-emerald-900/20 border border-emerald-100 dark:border-emerald-900/40">
             <p className="text-[10px] uppercase tracking-widest font-black text-emerald-700 dark:text-emerald-400">Agent can spend up to</p>
-            <p className="text-2xl font-black text-emerald-700 dark:text-emerald-400">{Number(currentAllowance).toFixed(2)} {selectedToken?.symbol}</p>
+            <p className="text-2xl font-black text-emerald-700 dark:text-emerald-400">{Number(currentAllowance).toFixed(2)} {approvalTokenSymbol} <span className="text-xs font-bold text-emerald-600/70 dark:text-emerald-400/70">on {approvalChain}</span></p>
           </div>
         ) : (
           <div className="mb-3 p-3 rounded-2xl bg-slate-50 dark:bg-[#1a1a1f] border border-slate-100 dark:border-slate-800/80">
             <p className="text-xs text-slate-500 dark:text-slate-400">
-              No limit set — the agent can&apos;t spend anything yet. It will send you a link to sign instead.
+              No limit set for {approvalTokenSymbol} on {approvalChain} — the agent can&apos;t spend anything yet for this combo. It will send you a link to sign instead.
             </p>
           </div>
         )}
