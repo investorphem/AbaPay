@@ -1,21 +1,50 @@
 "use client";
 
 import React, { useState, useRef, useEffect } from "react";
-import { Sparkles, X, Send, Loader2 } from "lucide-react";
+import { Sparkles, X, Send, Loader2, Check } from "lucide-react";
 
 // ⚡ IN-APP AI CHAT
 //
 // Same Claude intent engine, same feasibility rules as the Telegram/WhatsApp/X bots — so
 // the app and the bots always agree about what's possible.
 //
-// CRUCIAL DIFFERENCE: this widget CANNOT move money. There is no PIN and no relayer here.
-// The user is already holding their wallet, so the chat's only job is to understand the
-// request and PRE-FILL the payment form. The user reviews it and signs, exactly as always.
+// TWO THINGS THIS CAN DO NOW:
+//   1. IMMEDIATE, single recipient — unchanged: returns a `prefill`, the user reviews it in
+//      the form and signs themselves. The chat never moves money on its own here.
+//   2. FUTURE ("in 10 minutes"), RECURRING ("every Tuesday"), or MULTI-RECIPIENT — these
+//      can't be a single "sign now" transaction, so the backend proposes a `scheduleConfirm`
+//      instead (same on-chain-allowance model Telegram/WhatsApp/X use). Tapping Approve here
+//      commits it via POST /api/schedules, which re-verifies the allowance server-side before
+//      creating anything — this widget is just the UI for that confirmation.
 
-interface Msg { role: 'user' | 'assistant'; text: string; }
+interface ScheduleItem {
+  serviceCategory: string;
+  serviceID: string;
+  provider: string | null;
+  billersCode: string;
+  amountNgn: number;
+  meterType?: string;
+}
+
+interface ScheduleConfirm {
+  items: ScheduleItem[];
+  chain: string;
+  tokenSymbol: string;
+  runOnceInMinutes?: number;
+  recurring?: { frequency: 'daily' | 'weekly' | 'monthly'; dayOfWeek: number | null; dayOfMonth: number | null };
+  totalNgn: number;
+}
+
+interface Msg {
+  role: 'user' | 'assistant';
+  text: string;
+  scheduleConfirm?: ScheduleConfirm;
+  /** Once the user taps Approve (or it fails), the card shows a final state instead of the button. */
+  resolved?: 'approved' | 'failed';
+}
 
 interface Props {
-  onPrefill: (prefill: any, schedule?: any) => void;
+  onPrefill: (prefill: any) => void;
   onNavigate: (tab: string) => void;
   /** The chat pre-fills a payment the user still has to sign — meaningless without a wallet. */
   walletConnected: boolean;
@@ -23,9 +52,13 @@ interface Props {
   onRequireWallet: () => void;
   /** Sent as a rate-limit key so a connected wallet has its own quota, not just its IP's. */
   walletAddress?: string;
+  /** The chain/token currently selected in the Pay tab — used only to check an on-chain
+   *  allowance for scheduled/batched payments; irrelevant to the immediate "sign now" flow. */
+  chain?: string;
+  tokenSymbol?: string;
 }
 
-export function AIChat({ onPrefill, onNavigate, walletConnected, onRequireWallet, walletAddress }: Props) {
+export function AIChat({ onPrefill, onNavigate, walletConnected, onRequireWallet, walletAddress, chain, tokenSymbol }: Props) {
   const [open, setOpen] = useState(false);
   const [msgs, setMsgs] = useState<Msg[]>([
     { role: 'assistant', text: "Hi 👋 Tell me what you'd like to pay — e.g. \"Send ₦500 airtime to 08012345678\" or \"Pay ₦2,000 Ikeja electric, meter 04123456789\"." },
@@ -51,15 +84,20 @@ export function AIChat({ onPrefill, onNavigate, walletConnected, onRequireWallet
           'Content-Type': 'application/json',
           ...(walletAddress ? { 'X-Wallet-Address': walletAddress } : {}),
         },
-        body: JSON.stringify({ message: text }),
+        body: JSON.stringify({ message: text, chain, tokenSymbol }),
       });
       const data = await res.json();
 
-      setMsgs(m => [...m, { role: 'assistant', text: data.reply || "Sorry, I couldn't process that." }]);
+      setMsgs(m => [...m, {
+        role: 'assistant',
+        text: data.reply || "Sorry, I couldn't process that.",
+        scheduleConfirm: data.scheduleConfirm,
+      }]);
 
-      // The chat never pays — it only fills the form. The user still signs.
+      // The chat never pays on its own — it only fills the form (user still signs) or, for
+      // scheduled/batched requests, proposes a card the user has to explicitly tap Approve on.
       if (data.prefill) {
-        onPrefill(data.prefill, data.schedule);
+        onPrefill(data.prefill);
         setTimeout(() => setOpen(false), 1200);
       } else if (data.navigate) {
         onNavigate(data.navigate);
@@ -67,6 +105,56 @@ export function AIChat({ onPrefill, onNavigate, walletConnected, onRequireWallet
       }
     } catch {
       setMsgs(m => [...m, { role: 'assistant', text: 'Something went wrong. Please try again.' }]);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const approveSchedule = async (msgIndex: number, confirm: ScheduleConfirm) => {
+    if (!walletAddress) return;
+    setBusy(true);
+    try {
+      const batchId = confirm.items.length > 1 ? crypto.randomUUID() : undefined;
+      const runOnceAt = confirm.runOnceInMinutes
+        ? new Date(Date.now() + confirm.runOnceInMinutes * 60_000).toISOString()
+        : undefined;
+
+      const results = await Promise.all(confirm.items.map((item) =>
+        fetch('/api/schedules', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            wallet_address: walletAddress,
+            service_id: item.serviceID,
+            service_category: item.serviceCategory,
+            provider: item.provider,
+            billers_code: item.billersCode,
+            amount_ngn: item.amountNgn,
+            meter_type: item.meterType,
+            blockchain: confirm.chain,
+            token_used: confirm.tokenSymbol,
+            auto_execute: true,
+            batch_id: batchId,
+            ...(runOnceAt
+              ? { frequency: 'once', run_once_at: runOnceAt }
+              : confirm.recurring
+                ? { frequency: confirm.recurring.frequency, day_of_week: confirm.recurring.dayOfWeek, day_of_month: confirm.recurring.dayOfMonth }
+                : { frequency: 'once', run_once_at: new Date(Date.now() + 60_000).toISOString() }),
+          }),
+        }).then(r => r.json())
+      ));
+
+      const allOk = results.every(r => r.success);
+      setMsgs(m => m.map((msg, i) => i === msgIndex ? { ...msg, resolved: allOk ? 'approved' : 'failed' } : msg));
+      setMsgs(m => [...m, {
+        role: 'assistant',
+        text: allOk
+          ? `✅ Approved — ${confirm.items.length > 1 ? `all ${confirm.items.length} payments are` : 'this is'} scheduled. I'll message you here once ${confirm.items.length > 1 ? 'they run' : 'it runs'}.`
+          : `⚠️ ${results.find(r => !r.success)?.message || "Couldn't schedule that — please try again."}`,
+      }]);
+    } catch {
+      setMsgs(m => m.map((msg, i) => i === msgIndex ? { ...msg, resolved: 'failed' } : msg));
+      setMsgs(m => [...m, { role: 'assistant', text: '⚠️ Something went wrong scheduling that. Please try again.' }]);
     } finally {
       setBusy(false);
     }
@@ -119,6 +207,23 @@ export function AIChat({ onPrefill, onNavigate, walletConnected, onRequireWallet
               }`}
             >
               {m.text}
+              {m.scheduleConfirm && (
+                <div className="mt-2.5 pt-2.5 border-t border-slate-200 dark:border-slate-700/60">
+                  {m.resolved ? (
+                    <div className={`flex items-center gap-1.5 text-[11px] font-black ${m.resolved === 'approved' ? 'text-emerald-600 dark:text-emerald-400' : 'text-red-500'}`}>
+                      {m.resolved === 'approved' ? <><Check size={12} /> Approved</> : 'Not scheduled'}
+                    </div>
+                  ) : (
+                    <button
+                      onClick={() => approveSchedule(i, m.scheduleConfirm!)}
+                      disabled={busy}
+                      className="w-full bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 text-white text-[11px] font-black py-2 rounded-xl transition-colors active:scale-95"
+                    >
+                      Approve
+                    </button>
+                  )}
+                </div>
+              )}
             </div>
           </div>
         ))}

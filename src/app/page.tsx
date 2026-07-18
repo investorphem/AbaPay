@@ -3134,6 +3134,8 @@ export default function Home() {
           walletConnected={!!address}
           onRequireWallet={() => showToast("Connect Your Wallet", "Connect your wallet first — the assistant fills a payment you still need to sign.", "error")}
           walletAddress={address ?? undefined}
+          chain={activeChain?.name?.toUpperCase().includes('BASE') ? 'BASE' : 'CELO'}
+          tokenSymbol={selectedToken.symbol}
         />
       </div>
     </main>

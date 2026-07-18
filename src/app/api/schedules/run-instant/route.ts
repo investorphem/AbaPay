@@ -1,11 +1,14 @@
 import { NextResponse } from 'next/server';
 import { runScheduledBills } from '@/lib/scheduler';
 
-// ⚡ Triggers the scheduled-bill check: reads on-chain balances, warns on shortfalls,
-// and sends one-tap payment links for bills due today.
+// ⚡ ONE-OFF SCHEDULE RUNNER — "buy me MTN airtime in the next 10 minutes."
 //
-// Trigger with a free external cron (cron-job.org, GitHub Actions) once or twice daily —
-// no paid Vercel cron required. Protect with CRON_SECRET.
+// Unlike the daily/twice-daily /api/schedules/run (recurring bills — monthly/weekly/daily),
+// a one-off schedule needs to be checked at minute granularity to actually fire close to the
+// time the user asked for. Trigger this with a free external cron (cron-job.org) every
+// 1-5 minutes — no paid Vercel plan required, same pattern as /api/schedules/run and
+// /api/cleanup. Scoped to `frequency = 'once'` rows only, so it stays cheap even at that
+// frequency: most ticks will find nothing due and exit immediately.
 async function handle(req: Request) {
   const cronSecret = process.env.CRON_SECRET;
   if (cronSecret) {
@@ -17,9 +20,7 @@ async function handle(req: Request) {
     }
   }
 
-  // One-off ("in 10 minutes") schedules are handled by the separate, minute-cadence
-  // /api/schedules/run-instant — this daily/twice-daily cron only needs to scan recurring ones.
-  const result = await runScheduledBills({ scope: 'recurring' });
+  const result = await runScheduledBills({ scope: 'oneoff' });
   return NextResponse.json({ success: true, ...result });
 }
 

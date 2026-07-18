@@ -46,6 +46,9 @@ function baseUrl(): string {
 
 function isDueToday(bill: any, now: Date): boolean {
   const freq = (bill.frequency || 'monthly').toLowerCase();
+  // One-off: fires exactly once, the moment its target time has passed — not tied to any
+  // day-of-week/month. Deactivated immediately after its single attempt (see runScheduledBills).
+  if (freq === 'once') return !!bill.run_once_at && new Date(bill.run_once_at).getTime() <= now.getTime();
   if (freq === 'daily') return true;
   if (freq === 'weekly') return Number(bill.day_of_week) === now.getUTCDay();
   return Number(bill.day_of_month) === now.getUTCDate();
@@ -84,16 +87,21 @@ async function notify(bill: any, message: string, payUrl?: string) {
   }
 }
 
-export async function runScheduledBills(): Promise<ScheduleRunResult> {
+export async function runScheduledBills(opts: { scope?: 'recurring' | 'oneoff' | 'all' } = {}): Promise<ScheduleRunResult> {
+  const scope = opts.scope || 'all';
   const r: ScheduleRunResult = { checked: 0, paid: 0, warned: 0, notified: 0, skipped: 0, errors: 0 };
 
   const now = new Date();
   const today = now.toISOString().slice(0, 10);
 
-  const { data: bills, error } = await supabaseAdmin
-    .from('scheduled_bills')
-    .select('*')
-    .eq('is_active', true);
+  let query = supabaseAdmin.from('scheduled_bills').select('*').eq('is_active', true);
+  // The instant (one-off) cron runs every 1-5 minutes and should only ever scan 'once' rows —
+  // scanning every recurring bill on every tick would be pure waste. The regular daily cron
+  // keeps to recurring bills only; 'once' rows are picked up exclusively by the instant runner.
+  if (scope === 'oneoff') query = query.eq('frequency', 'once');
+  else if (scope === 'recurring') query = query.neq('frequency', 'once');
+
+  const { data: bills, error } = await query;
 
   if (error) {
     console.error('[Scheduler] load failed:', error.message);
@@ -113,6 +121,11 @@ export async function runScheduledBills(): Promise<ScheduleRunResult> {
       const approaching = isApproaching(bill, now);
       if (!due && !approaching) { r.skipped++; continue; }
 
+      // A one-off has no "next scheduled date" — it gets exactly one attempt, then is
+      // deactivated regardless of the outcome, so it can never fire twice.
+      const isOneOff = String(bill.frequency || '').toLowerCase() === 'once';
+      const doneUpdate = isOneOff ? { is_active: false } : {};
+
       const label = `${bill.provider || ''} ${bill.service_category}`.trim();
       const amountNgn = Number(bill.amount_ngn);
       const amountLabel = `₦${amountNgn.toLocaleString()}`;
@@ -128,8 +141,8 @@ export async function runScheduledBills(): Promise<ScheduleRunResult> {
       const gate = await checkServiceAllowed(intentKey);
       if (!gate.allowed) {
         if (due) {
-          await notify(bill, `⛔ *${label} — ${amountLabel}*\n\nYour scheduled payment was NOT made: ${gate.reason}\n\nWe'll retry on your next scheduled date.`);
-          await supabaseAdmin.from('scheduled_bills').update({ last_run_date: today }).eq('id', bill.id);
+          await notify(bill, `⛔ *${label} — ${amountLabel}*\n\nYour scheduled payment was NOT made: ${gate.reason}\n\n${isOneOff ? "You'll need to try again from the chat." : "We'll retry on your next scheduled date."}`);
+          await supabaseAdmin.from('scheduled_bills').update({ last_run_date: today, ...doneUpdate }).eq('id', bill.id);
           r.notified++;
         }
         continue;
@@ -144,7 +157,7 @@ export async function runScheduledBills(): Promise<ScheduleRunResult> {
         const opGate = await checkAgentSpendAllowed(supabaseAdmin, bill.wallet_address, amountNgn, { autonomous: true });
         if (!opGate.allowed) {
           await notify(bill, `⚠️ *${label} — ${amountLabel}*\n\n${opGate.reason}`);
-          await supabaseAdmin.from('scheduled_bills').update({ last_run_date: today }).eq('id', bill.id);
+          await supabaseAdmin.from('scheduled_bills').update({ last_run_date: today, ...doneUpdate }).eq('id', bill.id);
           r.notified++;
           continue;
         }
@@ -154,9 +167,9 @@ export async function runScheduledBills(): Promise<ScheduleRunResult> {
         if (!allowance.ok || allowance.remaining < needed) {
           await notify(
             bill,
-            `⚠️ *Couldn't auto-pay your ${label} bill (${amountLabel}).*\n\nYour approved agent limit is ${allowance.remaining.toFixed(2)} ${token} — this needs about ${needed.toFixed(2)}.\n\nRaise your limit in the AbaPay app and I'll get it next time.`
+            `⚠️ *Couldn't auto-pay your ${label} bill (${amountLabel}).*\n\nYour approved agent limit is ${allowance.remaining.toFixed(2)} ${token} — this needs about ${needed.toFixed(2)}.\n\n${isOneOff ? 'Raise your limit in the AbaPay app and try again from the chat.' : "Raise your limit in the AbaPay app and I'll get it next time."}`
           );
-          await supabaseAdmin.from('scheduled_bills').update({ last_run_date: today }).eq('id', bill.id);
+          await supabaseAdmin.from('scheduled_bills').update({ last_run_date: today, ...doneUpdate }).eq('id', bill.id);
           r.notified++;
           continue;
         }
@@ -230,6 +243,7 @@ export async function runScheduledBills(): Promise<ScheduleRunResult> {
               last_paid_at: new Date().toISOString(),
               last_tx_hash: txHash,
               consecutive_failures: 0,
+              ...doneUpdate,
             }).eq('id', bill.id);
 
             await notify(
@@ -244,12 +258,14 @@ export async function runScheduledBills(): Promise<ScheduleRunResult> {
 
           // Broadcast but unconfirmed (RPC/network hiccup) — it may still land. Keep the
           // renamed row for the webhook to resolve later; never delete it, and never treat
-          // this as a definite failure (that would risk a double-charge next run).
+          // this as a definite failure (that would risk a double-charge next run). A one-off
+          // still deactivates here — it gets exactly one attempt, and the webhook can still
+          // resolve this specific tx via its own rescue path even after deactivation.
           if (res.pending && res.txHash) {
             const txHash = res.txHash;
             await supabaseAdmin.from('transactions').update({ tx_hash: txHash }).eq('tx_hash', preflightTxHash);
             preflightTxHash = null;
-            await supabaseAdmin.from('scheduled_bills').update({ last_run_date: today }).eq('id', bill.id);
+            await supabaseAdmin.from('scheduled_bills').update({ last_run_date: today, ...doneUpdate }).eq('id', bill.id);
             await notify(bill, `⏳ *${label} — confirming your payment...*\n\n🔗 \`${txHash}\`\n\nWe lost connection confirming it, but it may still go through. Check History shortly before assuming it failed.`);
             r.notified++;
             continue;
@@ -261,7 +277,8 @@ export async function runScheduledBills(): Promise<ScheduleRunResult> {
             preflightTxHash = null;
           }
 
-          // Failed — count it, and pause the schedule if it keeps failing.
+          // Failed — count it, and pause the schedule if it keeps failing. A one-off never
+          // gets a retry, so doneUpdate (is_active: false) always wins over shouldPause for it.
           const fails = Number(bill.consecutive_failures || 0) + 1;
           const shouldPause = fails >= MAX_CONSECUTIVE_FAILURES;
 
@@ -269,13 +286,16 @@ export async function runScheduledBills(): Promise<ScheduleRunResult> {
             last_run_date: today,
             consecutive_failures: fails,
             is_active: !shouldPause,
+            ...doneUpdate,
           }).eq('id', bill.id);
 
           await notify(
             bill,
-            shouldPause
-              ? `🛑 *${label} schedule paused.*\n\nIt failed ${fails} times in a row: ${res.message}\n\nFix the issue and re-enable it in the AbaPay app.`
-              : `⚠️ *Couldn't auto-pay your ${label} bill (${amountLabel}).*\n\n${res.message}\n\nI'll try again on your next scheduled date.`
+            isOneOff
+              ? `⚠️ *Couldn't complete ${label} (${amountLabel}).*\n\n${res.message}\n\nYou'll need to try again from the chat.`
+              : shouldPause
+                ? `🛑 *${label} schedule paused.*\n\nIt failed ${fails} times in a row: ${res.message}\n\nFix the issue and re-enable it in the AbaPay app.`
+                : `⚠️ *Couldn't auto-pay your ${label} bill (${amountLabel}).*\n\n${res.message}\n\nI'll try again on your next scheduled date.`
           );
           r.errors++;
         } catch (relayErr) {
@@ -327,7 +347,7 @@ export async function runScheduledBills(): Promise<ScheduleRunResult> {
 
       await notify(bill, message, payUrl);
       await supabaseAdmin.from('scheduled_bills')
-        .update({ last_notified_at: new Date().toISOString(), ...(due ? { last_run_date: today } : {}) })
+        .update({ last_notified_at: new Date().toISOString(), ...(due ? { last_run_date: today, ...doneUpdate } : {}) })
         .eq('id', bill.id);
       r.notified++;
     } catch (err) {

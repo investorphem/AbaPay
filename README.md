@@ -256,9 +256,25 @@ facilitator's own wallet.
 
 ### Cron / Maintenance
 ```
-CRON_SECRET=any_long_random_string   # Optional. Protects the manual /api/cleanup endpoint.
+CRON_SECRET=any_long_random_string   # Optional. Protects /api/cleanup and both /api/schedules/run* endpoints.
 ```
 Stale abandoned pre-flight intents are swept automatically and opportunistically from inside the webhook (throttled, non-blocking) — this needs **no Vercel cron and works on the free/Hobby plan**. `/api/cleanup` remains available for manual runs or an external free scheduler (cron-job.org, GitHub Actions) if you want a guaranteed cadence during quiet periods.
+
+**Scheduled Bills / Autopay Agent — these two DO need an external cron to actually run:**
+unlike the webhook-driven cleanup above, nothing calls these on its own.
+- `/api/schedules/run` — recurring bills (monthly/weekly/daily). Register once or twice a
+  day at [cron-job.org](https://cron-job.org) (free) hitting `POST https://<your-domain>/api/schedules/run`
+  with header `Authorization: Bearer <CRON_SECRET>` (or `x-cron-secret: <CRON_SECRET>`).
+- `/api/schedules/run-instant` — one-off future payments from the DeAI chat ("buy me MTN
+  airtime in the next 10 minutes"). Needs a much tighter cadence to actually land close to
+  the requested time — register a **separate** free cron-job.org job hitting
+  `POST https://<your-domain>/api/schedules/run-instant` every **1–5 minutes**. It's cheap
+  even at that frequency: the query is scoped to `frequency = 'once'` rows only, so most
+  ticks find nothing due and return immediately.
+
+Without registering these, users can still create schedules (recurring or one-off) from the
+chat, but nothing will ever execute them — they'll sit `is_active` forever with no cron to
+pick them up.
 
 ---
 
@@ -469,6 +485,9 @@ Beyond the core tables, run the migrations in `supabase/migrations/` **in order*
   admin replies routed back to the user's original chat.
 * `010_x402_payment_method.sql` — adds `payment_method` (`CONTRACT` | `X402`) to `transactions`,
   distinguishing the settlement rail (see [x402 settlement](#x402-settlement-main-app-only)).
+* `011_one_off_schedules.sql` — adds `run_once_at` and `batch_id` to `scheduled_bills`, so a
+  single chat request can create a one-time future payment (`frequency = 'once'`) or a
+  multi-recipient batch, on top of the existing recurring monthly/weekly/daily schedules.
 
 ---
 

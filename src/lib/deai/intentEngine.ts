@@ -27,6 +27,12 @@ export type DeAIIntent =
   | 'HELP'
   | 'UNKNOWN';
 
+export interface ParsedRecipient {
+  provider: string | null;
+  amount_ngn: number | null;
+  destination_account: string | null;
+}
+
 export interface ParsedIntent {
   intent: DeAIIntent;
   provider: string | null;        // MTN | AIRTEL | GLO | 9MOBILE | disco id | dstv/gotv...
@@ -43,6 +49,17 @@ export interface ParsedIntent {
   frequency: 'daily' | 'weekly' | 'monthly' | null;
   day_of_week: number | null;     // 0=Sunday .. 6=Saturday
   day_of_month: number | null;    // 1-28
+
+  // ⚡ One-off future execution — "buy me MTN airtime in the next 10 minutes". Distinct from
+  // is_recurring: this fires exactly ONCE, `schedule_in_minutes` minutes from now. Null for
+  // an immediate ("right now") request or a genuinely recurring one.
+  schedule_in_minutes: number | null;
+
+  // ⚡ Multiple recipients in one message — "send 500 airtime to 08011111111 and 1000 data
+  // to 08022222222". Populated ONLY when 2+ distinct recipients are named; the singular
+  // provider/amount_ngn/destination_account fields above are null in that case (use this
+  // array instead). Left null/empty for the ordinary single-recipient case.
+  recipients: ParsedRecipient[] | null;
 }
 
 const SYSTEM_PROMPT = `You are the intent-routing engine for AbaPay, a Web3 utility bill payment app used in Nigeria.
@@ -63,7 +80,9 @@ Schema:
   "is_recurring": boolean,
   "frequency": "daily" | "weekly" | "monthly" | null,
   "day_of_week": number | null,
-  "day_of_month": number | null
+  "day_of_month": number | null,
+  "schedule_in_minutes": number | null,
+  "recipients": [{ "provider": string | null, "amount_ngn": number | null, "destination_account": string | null }] | null
 }
 
 Rules:
@@ -102,6 +121,28 @@ Rules:
    For a ONE-OFF payment, is_recurring is false and the three recurrence fields are null.
 12. "show my schedules" / "list my automations" -> LIST_SCHEDULES.
     "cancel my airtime schedule" / "stop my automation" -> CANCEL_SCHEDULE.
+
+13. ONE-OFF FUTURE EXECUTION — set schedule_in_minutes when the user wants this specific
+   payment to happen once, at a near-term future moment, rather than right now:
+   - "buy me 500 MTN airtime in the next 10 minutes" -> schedule_in_minutes: 10
+   - "top up 08012345678 in an hour"                 -> schedule_in_minutes: 60
+   - "in half an hour, buy 1000 data for me"         -> schedule_in_minutes: 30
+   - "in 2 days pay my electricity bill"             -> schedule_in_minutes: 2880
+   This is DIFFERENT from is_recurring — it fires exactly once. Do not set both
+   schedule_in_minutes and is_recurring=true for the same message. If the user gives no time
+   at all ("buy me airtime"), schedule_in_minutes is null (they mean right now).
+
+14. MULTIPLE RECIPIENTS — when the user names 2 or more distinct recipients/accounts for
+   airtime or data in ONE message, populate "recipients" as an array and leave the singular
+   provider/amount_ngn/destination_account fields null:
+   - "send 500 airtime to 08011111111 and 1000 to 08033333333 (glo)" ->
+     recipients: [
+       { "provider": null, "amount_ngn": 500, "destination_account": "08011111111" },
+       { "provider": "GLO", "amount_ngn": 1000, "destination_account": "08033333333" }
+     ]
+   Infer each recipient's network from its own phone prefix same as rule 2, when not stated.
+   For a single recipient, leave "recipients" null and use the ordinary singular fields —
+   do NOT wrap a single recipient in a one-item array.
 
 Never invent an account number or amount. If it isn't in the message, it's null.`;
 
@@ -172,7 +213,32 @@ function fallbackIntent(): ParsedIntent {
     frequency: null,
     day_of_week: null,
     day_of_month: null,
+    schedule_in_minutes: null,
+    recipients: null,
   };
+}
+
+const MAX_SCHEDULE_MINUTES = 10080; // 7 days — beyond that, this isn't a "near-term one-off" anymore
+
+function normalizeRecipients(raw: any): ParsedRecipient[] | null {
+  if (!Array.isArray(raw)) return null;
+  const cleaned = raw
+    .filter((r: any) => r && typeof r === 'object')
+    .map((r: any) => {
+      const amt = Number(r?.amount_ngn);
+      return {
+        provider: typeof r?.provider === 'string' ? r.provider.toUpperCase() : null,
+        amount_ngn: Number.isFinite(amt) && amt > 0 ? amt : null,
+        destination_account: typeof r?.destination_account === 'string' ? r.destination_account.replace(/\s+/g, '') : null,
+      };
+    })
+    // A recipient we can't actually act on (no amount or no account) is worse than useless —
+    // drop it rather than let it silently become a $0 or accountless payment downstream.
+    .filter((r) => r.amount_ngn !== null && r.destination_account);
+
+  // Rule 14: a single recipient must NOT come back as a one-item array — that's the ordinary
+  // singular-field case, and downstream code only branches into "batch mode" on 2+.
+  return cleaned.length >= 2 ? cleaned : null;
 }
 
 // Defensive normalisation — never trust model output shape blindly.
@@ -200,5 +266,11 @@ function normalize(p: any): ParsedIntent {
     day_of_week: Number.isInteger(p?.day_of_week) && p.day_of_week >= 0 && p.day_of_week <= 6 ? p.day_of_week : null,
     // Clamp to 28 so a schedule exists in every month (no 30th-of-February surprises).
     day_of_month: Number.isInteger(p?.day_of_month) && p.day_of_month >= 1 ? Math.min(p.day_of_month, 28) : null,
+    // A one-off request is never also "recurring" — if the model somehow set both, the
+    // recurring fields win (schedule_in_minutes is the less common, narrower feature).
+    schedule_in_minutes: p?.is_recurring !== true && Number.isFinite(Number(p?.schedule_in_minutes)) && Number(p.schedule_in_minutes) > 0
+      ? Math.min(Math.round(Number(p.schedule_in_minutes)), MAX_SCHEDULE_MINUTES)
+      : null,
+    recipients: normalizeRecipients(p?.recipients),
   };
 }
