@@ -1,6 +1,6 @@
 # ⚡ AbaPay Protocol
 
-AbaPay is a decentralized, Web3-native utility payment platform built on **Celo** and **Base**. It lets users pay for real-world bills — Airtime, Mobile Data, Electricity, Cable TV, Bank Transfers, Education PINs, and International Airtime/Data — using on-chain stablecoins (**USDT**, **USDC**, **cUSD**), with instant fiat settlement handled server-side via the VTpass API.
+AbaPay is a decentralized, Web3-native utility payment platform built on **Celo** and **Base**. It lets users pay for real-world bills — Airtime, Mobile Data, Electricity, Cable TV, Bank Transfers, Education PINs, and International Airtime/Data — using on-chain stablecoins (**USDT**, **USDC**, **cUSD/USDm**), with instant fiat settlement handled server-side via the VTpass API. Payments can be made directly in the web app, or hands-free through a conversational AI agent ("DeAI") on Telegram, WhatsApp, and X, spending from a bounded, user-revocable on-chain allowance — no custody, no server-side keys.
 
 Designed for low fees, cross-border utility vending (Nigeria + supported international countries), and mobile-first accessibility (optimized for Celo MiniPay, Farcaster Mini Apps, and any WalletConnect/MetaMask-compatible wallet).
 
@@ -18,11 +18,11 @@ Designed for low fees, cross-border utility vending (Nigeria + supported interna
 * **Automatic Refund Safety Net:** Failed vends after confirmed on-chain payment are automatically flagged, verified, and refunded on-chain to the user's wallet.
 * **DND-Fallback SMS:** Automated SMS delivery of electricity tokens/PINs, bypassing the Nigerian Do-Not-Disturb (DND) registry for critical transaction alerts.
 * **Multi-Channel Support & Notifications:** Built-in support ticketing, plus webhook integrations for Telegram, WhatsApp, and X (Twitter) so users and admins can transact/get notified from their preferred channel.
-* **Conversational AI Agent ("DeAI"):** A natural-language assistant (`/api/deai`) that lets users check balances and pay bills via chat-style commands, backed by Claude (Anthropic). Reachable via Telegram, WhatsApp, X, and an in-app chat widget (`src/components/AIChat.tsx`) on the storefront itself.
-* **Agent-Initiated Payments (AbaPayV3):** Users can grant the DeAI agent a bounded, on-chain, revocable spending allowance (`setSpendingAllowance`) so it can pay bills on their behalf from Telegram/WhatsApp/X — with no wallet signature needed at payment time and no custody of user funds. See [AbaPayV3 — agent allowances](#abapayv3sol--agent-initiated-payments-️-not-audited) below.
+* **Conversational AI Agent ("DeAI"):** A natural-language assistant (`/api/deai`) that lets users check balances and pay bills via chat-style commands, backed by Claude (Anthropic). Reachable via Telegram, WhatsApp, X, and an in-app chat widget (`src/components/AIChat.tsx`) on the storefront itself. Understands intent, not just menu numbers — replying "Celo" or "usdt" works exactly like replying "1" or "2" — and shows the live balance and approved agent limit for every token at the moment you're asked to pick one, so you're never choosing blind. If a session goes cold (network drop, abandoned mid-flow) it's recognised and cleaned up automatically rather than left dangling; and if a network hiccup happens right after you enter your PIN, the payment is never silently lost or double-spent — it's tracked through to a confirmed on-chain outcome before the agent reports back.
+* **Agent-Initiated Payments (AbaPayV3):** Users can grant the DeAI agent a bounded, on-chain, revocable spending allowance (`setSpendingAllowance`) — chosen independently per chain and per stablecoin from the Agent Hub tab — so it can pay bills on their behalf from Telegram/WhatsApp/X with no wallet signature needed at payment time and no custody of user funds. If no allowance is approved for the chain/token a chat payment needs, the agent detects that up front and offers a straight choice: approve it now, or complete this one payment via a signed deep link instead. See [AbaPayV3 — agent allowances](#abapayv3sol--agent-initiated-payments-️-not-audited) below.
 * **On-Chain Attribution:** Celo transactions carry an ERC-8021 attribution tag (`src/lib/attribution.ts`) crediting the Celo Builders program; a no-op on Base.
 * **On-Chain Agent Identity (ERC-8004):** AbaPay's DeAI agent is registered as a real on-chain identity on Celo via the ERC-8004 "Trustless Agents" registry, so it's discoverable on 8004scan.io / AgentScan — independent of, and unrelated to, how it moves money. See [ERC-8004 agent identity](#erc-8004-agent-identity) below.
-* **x402 Settlement (main app, Celo + USDC):** Payments made directly in the web app — where the user is present and signing — settle automatically via the [x402](https://x402.org) HTTP-payment protocol against a thirdweb-hosted facilitator whenever the user pays with USDC on Celo (no user-facing toggle), so they're genuinely indexed on x402scan, not just relabeled contract calls. Everything else (Base, USDT, cUSD/USDm) uses the original on-chain `payBill` flow, including Base's sponsored-gas path, unchanged — and the signature-free agent-initiated flow above is completely untouched, since x402 requires a fresh signature per payment, incompatible with unattended agent payments. See [x402 settlement](#x402-settlement-main-app-only) below.
+* **x402 Settlement (main app, Celo + USDC/USDT):** Payments made directly in the web app — where the user is present and signing — settle automatically via the [x402](https://x402.org) HTTP-payment protocol against Celo's own facilitator whenever the user pays with **USDC or USD₮ on Celo** (no user-facing toggle), so they're genuinely indexed on x402scan, not just relabeled contract calls. Everything else (Base, cUSD/USDm) uses the original on-chain `payBill` flow, including Base's sponsored-gas path, unchanged — and the signature-free agent-initiated flow above is completely untouched, since x402 requires a fresh signature per payment, incompatible with unattended agent payments. See [x402 settlement](#x402-settlement-main-app-only) below.
 * **Dynamic Exchange Engine:** Live market rate conversions with admin-configurable exchange rate and automated profit spread calculation, verified server-side to prevent underpayment exploits.
 * **Executive Admin Dashboard:** Real-time monitoring of VTpass fiat balance, on-chain vault balances per token/chain, transaction analytics, manual refund tools, and CSV export — protected behind admin auth.
 * **Sponsored Gas on Base:** Coinbase Smart Wallet / Base Account users can pay with zero gas fees — the app detects paymaster support via EIP-5792 and batches approval + payment into a single sponsored transaction. Wallets without this capability (MetaMask, WalletConnect, Valora, etc.) transparently fall back to the normal self-paid flow.
@@ -158,6 +158,16 @@ hold keys. Two paths exist:
    on-chain `spendingAllowance` (see [AbaPayV3](#abapayv3sol--agent-initiated-payments-️-not-audited)
    below), the relayer calls `payBillFor()` directly — no deep link, no signature at payment
    time — bounded entirely by the allowance the user set and revocable by them at any moment.
+   Before broadcasting, a `preflight_<wallet>_<timestamp>` transaction row is written (the same
+   pattern the web app uses ahead of a signature), then renamed to the real tx hash once
+   confirmed — so the payment is vended through the exact same verified pipeline as every other
+   rail, and a stale/abandoned attempt is swept automatically rather than left dangling. If the
+   RPC can't confirm the receipt in time (a network hiccup right after broadcast — including
+   right after the user enters their PIN), the agent reports it as *pending*, not failed, and
+   will never hand out a duplicate payment link for that same intent — avoiding both a lost
+   payment and a double-charge. If no allowance is approved for the chain/token a payment needs,
+   the agent detects that before ever attempting the relay and offers a choice: approve it now
+   in the Agent Hub, or complete just this one payment via a signed deep link.
 
 ### Telegram
 ```
@@ -361,12 +371,14 @@ registry's verified source on Celoscan — see the script's header comment.
 
 The main web app's payment flow settles automatically via [x402](https://x402.org) — through
 **Celo's own facilitator** (`api.x402.celo.org`, built by Celo Core Co. — see
-`src/app/api/pay/x402/route.ts`), not thirdweb — whenever the user is paying with **USDC on
-Celo**. There's no user-facing toggle: the same "Confirm & Pay" button routes through x402 for
-that combination and through the normal `payBill` contract call for everything else (Base, USDT,
-cUSD/USDm, or x402 unconfigured). This makes the payment genuinely visible on x402scan — not a
-relabeled transaction — because x402 settlement requires an EIP-3009
-(`transferWithAuthorization`) signature from the payer for that specific payment.
+`src/app/api/pay/x402/route.ts`), not thirdweb — whenever the user is paying with **USDC or
+USD₮ on Celo**. Each token settles against its own EIP-712 domain (`X402_TOKEN_EIP712` in that
+route) since Circle's USDC and Tether's USD₮ deployments don't share one. There's no
+user-facing toggle: the same "Confirm & Pay" button routes through x402 for either token on
+Celo and through the normal `payBill` contract call for everything else (Base, cUSD/USDm, or
+x402 unconfigured). This makes the payment genuinely visible on x402scan — not a relabeled
+transaction — because x402 settlement requires an EIP-3009 (`transferWithAuthorization`)
+signature from the payer for that specific payment.
 
 The **402 challenge itself is built in-house** (a plain x402 v1, body-based response) rather
 than relying on any SDK's default — that's a deliberate choice, since thirdweb's own
@@ -386,11 +398,12 @@ are unaffected — those payments already execute from `RELAYER_ADDRESS`, the sa
 registered under the ERC-8004 identity below, so they're already attributable to the agent
 without needing x402.
 
-- **Scope: Celo + USDC only, confirmed live** — not just a caution. Native Celo USDC (Circle's
-  FiatTokenV2) implements EIP-3009 `transferWithAuthorization`; cUSD/USDm and USDT don't, so
-  there's no signature scheme to settle them with. Not a self-imposed limit — if support is
-  added later, no code change is needed to pick it up, since the token/decimals are already
-  resolved generically via `resolveTokenOnChain`.
+- **Scope: Celo + USDC/USD₮, confirmed live** — not just a caution. Native Celo USDC (Circle's
+  FiatTokenV2) and native Celo USD₮ (Tether's deployment) both implement EIP-3009
+  `transferWithAuthorization`; cUSD/USDm doesn't, so there's no signature scheme to settle it
+  with. Not a self-imposed limit — if support is added for another token later, no code change
+  is needed beyond adding its EIP-712 domain, since the token/decimals are already resolved
+  generically via `resolveTokenOnChain`.
 - **Prepaid credits, not a billing subscription.** Celo's facilitator charges a flat
   $0.001/settlement from a prepaid USDC credit balance (`CELO_X402_API_KEY`) — top up at
   x402.celo.org. At 0 credits, `/settle` starts returning 402 and the app sends a Telegram
