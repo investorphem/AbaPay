@@ -1015,18 +1015,19 @@ export async function POST(req: Request) {
       const available = tokensForChain(chosenChain);
 
       const idx = parseInt(userInput, 10) - 1;
-      let selected = available[idx];
+      let selected: string | undefined = available[idx];
 
       // Accept the token's actual name too, not just its numbered position — same
       // reasoning as the chain-selection fix above. Covers the common ways people
       // actually type these (USD₮'s own symbol has a unicode ₮ nobody types by hand).
       if (!selected) {
         const normalized = userInput.replace(/[^a-z0-9]/g, '');
-        const aliasSymbol: Record<string, string> = {
+        const aliasMap: Record<string, string> = {
           usdc: 'USDC',
           usdt: 'USD₮', usd: 'USD₮', tether: 'USD₮',
           usdm: 'USDm', cusd: 'USDm',
-        }[normalized];
+        };
+        const aliasSymbol = aliasMap[normalized];
         if (aliasSymbol) selected = available.find((t) => t === aliasSymbol);
       }
 
