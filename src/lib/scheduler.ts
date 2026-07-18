@@ -5,6 +5,8 @@ import { createDeepLink } from '@/lib/deai/deeplink';
 import { relayPayBillFor, getRemainingAllowance } from '@/lib/deai/relayer';
 import { checkServiceAllowed, getServiceRules, checkAgentSpendAllowed } from '@/lib/serviceRules';
 import { sendTelegramToUser } from '@/lib/telegram';
+import { executeVend, getStrictRequestId } from '@/lib/vend';
+import { isMainnetEnv } from '@/lib/chain';
 import { Resend } from 'resend';
 
 const resend = new Resend(process.env.RESEND_API_KEY || 're_dummy_key_for_build');
@@ -159,51 +161,130 @@ export async function runScheduledBills(): Promise<ScheduleRunResult> {
           continue;
         }
 
-        const res = await relayPayBillFor({
-          userWallet: bill.wallet_address,
-          tokenSymbol: token,
-          serviceType: bill.service_id,
-          accountNumber: bill.billers_code,
-          amountCrypto: needed.toFixed(6),
-          blockchain: chain,
-          sourceChannel: 'SCHEDULE',        // unattended — highest-scrutiny alert
-          amountNgn,
-        });
+        // ⚡ THE SAME FIX APPLIED TO CHAT PAYMENTS (see src/app/api/deai/core/route.ts) —
+        // relayPayBillFor() only ever submits payBillFor() on-chain; nothing downstream
+        // actually calls VTpass to deliver the service or awards AbaPoints. The webhook that
+        // does both requires a matching PENDING transactions row to exist first, and this
+        // path never wrote one, so an autonomous payment would have moved the user's funds
+        // on-chain and then delivered NOTHING. Confirmed via Supabase that no schedule has
+        // ever actually fired yet, so this has not shortchanged anyone in practice — but it
+        // would have, the moment the first `auto_execute` schedule came due.
+        //
+        // Mirrors the exact same preflight_<wallet>_<ts> pattern: write a PENDING row before
+        // broadcasting, rename it to the real hash on success, delete it on failure. Once
+        // renamed, the webhook can also pick this up as a backup if the synchronous vend
+        // below is interrupted (server restart, timeout).
+        let preflightTxHash: string | null = `preflight_${bill.wallet_address}_${Date.now()}`;
+        const vtRequestId = getStrictRequestId();
+        const explorerBase = chain === 'BASE'
+          ? (isMainnetEnv() ? 'https://basescan.org' : 'https://sepolia.basescan.org')
+          : (isMainnetEnv() ? 'https://celoscan.io' : 'https://sepolia.celoscan.io');
 
-        if (res.success) {
+        try {
+          await supabaseAdmin.from('transactions').upsert({
+            tx_hash: preflightTxHash, request_id: vtRequestId, service_category: bill.service_category, service_id: bill.service_id,
+            variation_code: bill.variation_code || null, network: bill.provider || null, blockchain: chain,
+            account_number: bill.billers_code, phone: null,
+            amount_usdt: needed, amount_naira: amountNgn, fee_naira: 0, status: 'PENDING',
+            wallet_address: String(bill.wallet_address).toLowerCase(),
+            customer_name: bill.customer_name || null, customer_address: bill.customer_address || null,
+            source_channel: 'SCHEDULE', token_used: token,
+            meter_account_type: bill.meter_type || null, customer_email: bill.notify_email || null,
+            payment_method: 'AGENT_RELAY',
+          }, { onConflict: 'tx_hash' });
+
+          const res = await relayPayBillFor({
+            userWallet: bill.wallet_address,
+            tokenSymbol: token,
+            serviceType: bill.service_id,
+            accountNumber: bill.billers_code,
+            amountCrypto: needed.toFixed(6),
+            blockchain: chain,
+            sourceChannel: 'SCHEDULE',        // unattended — highest-scrutiny alert
+            amountNgn,
+          });
+
+          if (res.success) {
+            const txHash = res.txHash as string;
+            await supabaseAdmin.from('transactions').update({ tx_hash: txHash }).eq('tx_hash', preflightTxHash);
+            preflightTxHash = null; // renamed — nothing left to clean up
+
+            // Atomic PENDING -> PROCESSING lock, same as every other rail, so a retried
+            // webhook delivery for this same tx can never double-vend.
+            await supabaseAdmin.from('transactions').update({ status: 'PROCESSING' }).eq('tx_hash', txHash).eq('status', 'PENDING').select().single();
+
+            const left = (allowance.remaining - needed).toFixed(2);
+
+            const vendResult = await executeVend({
+              vtRequestId, txHash, serviceID: bill.service_id, serviceCategory: bill.service_category,
+              network: bill.provider || '', billersCode: bill.billers_code, phone: null,
+              variation_code: bill.variation_code || undefined, subscription_type: undefined,
+              amount: needed.toFixed(6), tokenSymbol: token, vendAmount: amountNgn, isForeign: false,
+              email: bill.notify_email || null, wallet_address: bill.wallet_address, blockchain: chain,
+              source_channel: 'SCHEDULE', customer_name: bill.customer_name || null, customer_address: bill.customer_address || null,
+              baseRate: rules.exchangeRate, explorerUrl: `${explorerBase}/tx/${txHash}`,
+            });
+
+            await supabaseAdmin.from('scheduled_bills').update({
+              last_run_date: today,
+              last_paid_at: new Date().toISOString(),
+              last_tx_hash: txHash,
+              consecutive_failures: 0,
+            }).eq('id', bill.id);
+
+            await notify(
+              bill,
+              vendResult.status === 'FAILED_VENDING'
+                ? `⚠️ *${label} — payment succeeded, but delivering it failed.*\n\n🔗 \`${txHash}\`\n\n${vendResult.message || "Your funds are being refunded — you don't need to do anything."}`
+                : `✅ *Paid automatically — ${label}*\n\n${amountLabel} (${needed.toFixed(4)} ${token})\n📱 ${bill.billers_code}\n🔗 \`${txHash}\`\n\n💳 Remaining agent limit: *${left} ${token}*`
+            );
+            r.paid++;
+            continue;
+          }
+
+          // Broadcast but unconfirmed (RPC/network hiccup) — it may still land. Keep the
+          // renamed row for the webhook to resolve later; never delete it, and never treat
+          // this as a definite failure (that would risk a double-charge next run).
+          if (res.pending && res.txHash) {
+            const txHash = res.txHash;
+            await supabaseAdmin.from('transactions').update({ tx_hash: txHash }).eq('tx_hash', preflightTxHash);
+            preflightTxHash = null;
+            await supabaseAdmin.from('scheduled_bills').update({ last_run_date: today }).eq('id', bill.id);
+            await notify(bill, `⏳ *${label} — confirming your payment...*\n\n🔗 \`${txHash}\`\n\nWe lost connection confirming it, but it may still go through. Check History shortly before assuming it failed.`);
+            r.notified++;
+            continue;
+          }
+
+          // Relay failed before/without confirming on-chain — nothing was charged.
+          if (preflightTxHash) {
+            await supabaseAdmin.from('transactions').delete().eq('tx_hash', preflightTxHash);
+            preflightTxHash = null;
+          }
+
+          // Failed — count it, and pause the schedule if it keeps failing.
+          const fails = Number(bill.consecutive_failures || 0) + 1;
+          const shouldPause = fails >= MAX_CONSECUTIVE_FAILURES;
+
           await supabaseAdmin.from('scheduled_bills').update({
             last_run_date: today,
-            last_paid_at: new Date().toISOString(),
-            last_tx_hash: res.txHash,
-            consecutive_failures: 0,
+            consecutive_failures: fails,
+            is_active: !shouldPause,
           }).eq('id', bill.id);
 
-          const left = (allowance.remaining - needed).toFixed(2);
           await notify(
             bill,
-            `✅ *Paid automatically — ${label}*\n\n${amountLabel} (${needed.toFixed(4)} ${token})\n📱 ${bill.billers_code}\n🔗 \`${res.txHash}\`\n\n💳 Remaining agent limit: *${left} ${token}*`
+            shouldPause
+              ? `🛑 *${label} schedule paused.*\n\nIt failed ${fails} times in a row: ${res.message}\n\nFix the issue and re-enable it in the AbaPay app.`
+              : `⚠️ *Couldn't auto-pay your ${label} bill (${amountLabel}).*\n\n${res.message}\n\nI'll try again on your next scheduled date.`
           );
-          r.paid++;
-          continue;
+          r.errors++;
+        } catch (relayErr) {
+          console.error('[Scheduler] autonomous relay errored:', relayErr);
+          if (preflightTxHash) {
+            try { await supabaseAdmin.from('transactions').delete().eq('tx_hash', preflightTxHash); } catch { /* best-effort cleanup */ }
+          }
+          r.errors++;
         }
-
-        // Failed — count it, and pause the schedule if it keeps failing.
-        const fails = Number(bill.consecutive_failures || 0) + 1;
-        const shouldPause = fails >= MAX_CONSECUTIVE_FAILURES;
-
-        await supabaseAdmin.from('scheduled_bills').update({
-          last_run_date: today,
-          consecutive_failures: fails,
-          is_active: !shouldPause,
-        }).eq('id', bill.id);
-
-        await notify(
-          bill,
-          shouldPause
-            ? `🛑 *${label} schedule paused.*\n\nIt failed ${fails} times in a row: ${res.message}\n\nFix the issue and re-enable it in the AbaPay app.`
-            : `⚠️ *Couldn't auto-pay your ${label} bill (${amountLabel}).*\n\n${res.message}\n\nI'll try again on your next scheduled date.`
-        );
-        r.errors++;
         continue;
       }
 

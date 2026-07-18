@@ -222,6 +222,35 @@ export async function POST(req: Request) {
         return NextResponse.json({ action: 'REPLY', message: "❌ That link code isn't valid (or was already used). Generate a fresh one in the AbaPay app." });
       }
 
+      // ⚡ RE-LINK DETECTION — agent_links has a unique constraint on (channel, channel_user_id),
+      // so if THIS chat/account is already verified against a DIFFERENT wallet, the update below
+      // would fail the constraint and previously surfaced only as a generic "couldn't complete
+      // linking" — giving the user no idea what actually went wrong or how to fix it. Check for
+      // this specific, common case up front so we can say exactly what's happening.
+      const { data: existingLink } = await supabase
+        .from('agent_links')
+        .select('id, wallet_address')
+        .eq('channel', channel)
+        .eq('channel_user_id', platform_id)
+        .eq('link_verified', true)
+        .maybeSingle();
+
+      if (existingLink) {
+        const sameWallet = String((existingLink as any).wallet_address).toLowerCase() === String((pendingLink as any).wallet_address).toLowerCase();
+        if (sameWallet) {
+          // Re-linking the same channel to the same wallet (e.g. refreshing a PIN or the
+          // approved token/chain) — replace the stale row rather than erroring.
+          await supabase.from('agent_links').delete().eq('id', (existingLink as any).id);
+        } else {
+          const otherWallet = String((existingLink as any).wallet_address);
+          const channelLabel = channel === 'TELEGRAM' ? 'Telegram' : channel === 'WHATSAPP' ? 'WhatsApp' : 'X';
+          return NextResponse.json({
+            action: 'REPLY',
+            message: `⚠️ **Already linked elsewhere**\n\nYour ${channelLabel} is already linked to wallet \`${otherWallet.slice(0, 6)}...${otherWallet.slice(-4)}\`.\n\nTo link a different wallet, first open the **Agent Hub** tab in the AbaPay app (using that wallet) and unlink this ${channelLabel} channel — then come back and send this same code again.`,
+          });
+        }
+      }
+
       const { error: claimErr } = await supabase
         .from('agent_links')
         .update({ channel_user_id: platform_id, link_verified: true, link_code: null })
@@ -229,7 +258,7 @@ export async function POST(req: Request) {
 
       if (claimErr) {
         console.error('[DeAI] link claim failed:', claimErr.message);
-        return NextResponse.json({ action: 'REPLY', message: "⚠️ Couldn't complete linking. Please try again." });
+        return NextResponse.json({ action: 'REPLY', message: "⚠️ Couldn't complete linking — that account may already be linked elsewhere. Check the Agent Hub tab in the app, or try generating a fresh code." });
       }
 
       const w = (pendingLink as any).wallet_address;
