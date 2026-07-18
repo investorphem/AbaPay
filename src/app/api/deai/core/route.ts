@@ -1254,6 +1254,23 @@ export async function POST(req: Request) {
         // (extractEntities only ever sets a field when it's still falsy — never overwrites
         // an AI-sourced value).
         intentData = extractEntities(text, intentData);
+
+        // ⚡ "Buy airtime to my WhatsApp number" / "recharge me" — WhatsApp's identity IS a
+        // phone number (platform_id is the sender's own wa_id), unlike Telegram/X where it's
+        // an opaque chat id. When no account was found anywhere above and the message reads
+        // as self-referential, default the target to the sender's own number instead of
+        // asking them to type back the number they're already messaging from.
+        if (platform === 'WHATSAPP' && !intentData.destination_account && ['VEND_AIRTIME', 'VEND_DATA'].includes(intentData.intent)) {
+            const selfReference = /\bmy\s*(whatsapp\s*)?number\b|\brecharge\s*me\b|\bmyself\b|\bfor\s*me\b/i.test(text);
+            if (selfReference) {
+                // wa_id is E.164 without "+" (e.g. "2348168811821") — the network-prefix
+                // detection below (extractEntities / the AI's own inference) expects the
+                // local format Nigerians actually use ("08168811821").
+                const waId = String(platform_id || '');
+                const localNumber = waId.startsWith('234') && waId.length === 13 ? `0${waId.slice(3)}` : waId;
+                intentData.destination_account = localNumber;
+            }
+        }
     }
 
     if (intentData?.intent === 'TRANSACTION_STATUS' || intentData?.intent === 'STATUS') intentData.intent = 'TRANSACTION_HISTORY';

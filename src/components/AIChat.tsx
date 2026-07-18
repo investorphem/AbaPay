@@ -1,6 +1,7 @@
 "use client";
 
 import React, { useState, useRef, useEffect } from "react";
+import { useWalletClient } from "wagmi";
 import { Sparkles, X, Send, Loader2, Check } from "lucide-react";
 
 // ⚡ IN-APP AI CHAT
@@ -60,6 +61,7 @@ interface Props {
 }
 
 export function AIChat({ onPrefill, onNavigate, walletConnected, onRequireWallet, walletAddress, chain, tokenSymbol }: Props) {
+  const { data: walletClient } = useWalletClient();
   const [open, setOpen] = useState(false);
   const [msgs, setMsgs] = useState<Msg[]>([
     { role: 'assistant', text: "Hi 👋 Tell me what you'd like to pay — e.g. \"Send ₦500 airtime to 08012345678\" or \"Pay ₦2,000 Ikeja electric, meter 04123456789\"." },
@@ -115,6 +117,27 @@ export function AIChat({ onPrefill, onNavigate, walletConnected, onRequireWallet
     if (!walletAddress) return;
     setBusy(true);
     try {
+      // 🔐 One signature covers the whole Approve click, even for a multi-recipient batch —
+      // proves you control this wallet before /api/schedules creates anything against it
+      // (it can set auto_execute: true, authorizing unattended spend from the on-chain
+      // allowance). See src/utils/walletAuth.ts.
+      if (!walletClient) {
+        setMsgs(m => [...m, { role: 'assistant', text: '⚠️ Wallet not ready — please try again.' }]);
+        return;
+      }
+      const timestamp = Date.now().toString();
+      let signature: string;
+      try {
+        signature = await walletClient.signMessage({
+          account: walletAddress as `0x${string}`,
+          message: `AbaPay Agent Action: ${timestamp}`,
+        });
+      } catch {
+        setMsgs(m => [...m, { role: 'assistant', text: '⚠️ Signature request was rejected or failed — please try again.' }]);
+        return;
+      }
+      const authHeaders = { 'x-wallet-signature': signature, 'x-wallet-timestamp': timestamp };
+
       const batchId = confirm.items.length > 1 ? crypto.randomUUID() : undefined;
       const runOnceAt = confirm.runOnceInMinutes
         ? new Date(Date.now() + confirm.runOnceInMinutes * 60_000).toISOString()
@@ -123,7 +146,7 @@ export function AIChat({ onPrefill, onNavigate, walletConnected, onRequireWallet
       const results = await Promise.all(confirm.items.map((item) =>
         fetch('/api/schedules', {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
+          headers: { 'Content-Type': 'application/json', ...authHeaders },
           body: JSON.stringify({
             wallet_address: walletAddress,
             service_id: item.serviceID,

@@ -3,6 +3,7 @@ import { supabaseAdmin } from '@/utils/supabase';
 import { enforceRateLimit } from '@/lib/rateLimit';
 import { getRemainingAllowance } from '@/lib/deai/relayer';
 import { getServiceRules } from '@/lib/serviceRules';
+import { verifyWalletOwnership } from '@/utils/walletAuth';
 
 // ⚡ SCHEDULED BILLS — in-app CRUD (the "Bill Pay & Autopay Agent")
 //
@@ -47,6 +48,14 @@ export async function POST(req: Request) {
     }
     if (!b.service_id || !b.billers_code || !b.amount_ngn) {
       return NextResponse.json({ success: false, message: 'Missing required fields' }, { status: 400 });
+    }
+
+    // 🔐 Prove the caller controls this wallet before creating anything against it — this is
+    // the endpoint that can set auto_execute: true, i.e. authorize the relayer to spend from
+    // the wallet's on-chain allowance unattended. See src/utils/walletAuth.ts.
+    const auth = await verifyWalletOwnership(req, wallet);
+    if (!auth.ok) {
+      return NextResponse.json({ success: false, message: auth.message }, { status: 401 });
     }
 
     const amount = Number(b.amount_ngn);
@@ -158,6 +167,11 @@ export async function DELETE(req: Request) {
 
     if (!id || !/^0x[a-f0-9]{40}$/.test(wallet)) {
       return NextResponse.json({ success: false, message: 'Schedule id and wallet required' }, { status: 400 });
+    }
+
+    const auth = await verifyWalletOwnership(req, wallet);
+    if (!auth.ok) {
+      return NextResponse.json({ success: false, message: auth.message }, { status: 401 });
     }
 
     // Scope the delete to the owning wallet — a user cannot delete someone else's schedule.

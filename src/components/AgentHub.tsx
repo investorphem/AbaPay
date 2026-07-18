@@ -1,6 +1,7 @@
 "use client";
 
 import React, { useState, useEffect, useCallback } from "react";
+import { useWalletClient } from "wagmi";
 import { Bot, Shield, Check, Copy, Trash2, Loader2, AlertTriangle, ExternalLink, KeyRound } from "lucide-react";
 import { SUPPORTED_TOKENS } from "@/constants";
 
@@ -49,6 +50,27 @@ interface Props {
 }
 
 export function AgentHub({ address, selectedToken, activeChainName, onApproveAllowance, onCheckAllowance, currentAllowance, isApproving }: Props) {
+  const { data: walletClient } = useWalletClient();
+
+  // 🔐 Every wallet-scoped mutation below (start a link, change/reset a PIN, unlink) must
+  // prove the connected wallet actually holds this address's private key — a bare address
+  // string proves nothing, since addresses are public. Signs a short-lived, timestamped
+  // message fresh for each action (not a cached session) so a wallet popup only ever appears
+  // right when the user deliberately clicks something sensitive. See src/utils/walletAuth.ts.
+  const getAuthHeaders = async (): Promise<Record<string, string> | null> => {
+    if (!walletClient || !address) return null;
+    try {
+      const timestamp = Date.now().toString();
+      const signature = await walletClient.signMessage({
+        account: address as `0x${string}`,
+        message: `AbaPay Agent Action: ${timestamp}`,
+      });
+      return { 'x-wallet-signature': signature, 'x-wallet-timestamp': timestamp };
+    } catch {
+      return null;
+    }
+  };
+
   const [links, setLinks] = useState<any[]>([]);
   const [loading, setLoading] = useState(false);
   const [channel, setChannel] = useState('TELEGRAM');
@@ -121,9 +143,12 @@ export function AgentHub({ address, selectedToken, activeChainName, onApproveAll
 
     setLoading(true); setMsg(''); setLinkCode(null);
     try {
+      const authHeaders = await getAuthHeaders();
+      if (!authHeaders) { setMsg('Signature request was rejected or failed — please try again.'); return; }
+
       const res = await fetch('/api/agent/link', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 'Content-Type': 'application/json', ...authHeaders },
         body: JSON.stringify({
           wallet_address: address,
           channel,
@@ -150,9 +175,12 @@ export function AgentHub({ address, selectedToken, activeChainName, onApproveAll
 
   const unlink = async (id: string) => {
     if (!address) return;
+    const authHeaders = await getAuthHeaders();
+    if (!authHeaders) { setMsg('Signature request was rejected or failed — please try again.'); return; }
+
     await fetch('/api/agent/link', {
       method: 'DELETE',
-      headers: { 'Content-Type': 'application/json' },
+      headers: { 'Content-Type': 'application/json', ...authHeaders },
       body: JSON.stringify({ id, wallet_address: address }),
     });
     loadLinks();
@@ -171,9 +199,12 @@ export function AgentHub({ address, selectedToken, activeChainName, onApproveAll
     if (!/^\d{4,6}$/.test(newPin)) { setPinMsg({ id, text: 'PIN must be 4-6 digits.', ok: false }); return; }
     setSavingPin(true);
     try {
+      const authHeaders = await getAuthHeaders();
+      if (!authHeaders) { setPinMsg({ id, text: 'Signature request was rejected or failed — please try again.', ok: false }); return; }
+
       const res = await fetch('/api/agent/link', {
         method: 'PATCH',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 'Content-Type': 'application/json', ...authHeaders },
         body: JSON.stringify({ id, wallet_address: address, new_pin: newPin }),
       });
       const data = await res.json();

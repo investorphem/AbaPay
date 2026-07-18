@@ -3,6 +3,7 @@ import crypto from 'crypto';
 import { supabaseAdmin } from '@/utils/supabase';
 import { hashPin } from '@/utils/pinSecurity';
 import { enforceRateLimit } from '@/lib/rateLimit';
+import { verifyWalletOwnership } from '@/utils/walletAuth';
 
 // ⚡ SOCIAL LINKING — done in the REAL APP, where the user has their wallet.
 //
@@ -49,6 +50,13 @@ export async function POST(req: Request) {
     }
     if (!/^\d{4,6}$/.test(String(pin || ''))) {
       return NextResponse.json({ success: false, message: 'PIN must be 4-6 digits' }, { status: 400 });
+    }
+
+    // 🔐 Prove the caller actually controls this wallet before binding a chat identity + PIN
+    // to it — see src/utils/walletAuth.ts for why a bare address string is not enough.
+    const auth = await verifyWalletOwnership(req, wallet);
+    if (!auth.ok) {
+      return NextResponse.json({ success: false, message: auth.message }, { status: 401 });
     }
 
     // One-time, cryptographically random link code (never Math.random).
@@ -110,6 +118,14 @@ export async function PATCH(req: Request) {
       return NextResponse.json({ success: false, message: 'PIN must be 4-6 digits' }, { status: 400 });
     }
 
+    // 🔐 THE FIX — this was the most serious gap: without this, anyone who knew a victim's
+    // public wallet address (not a secret) could reset their PIN and take over their linked
+    // chat identity outright. The wallet connection alone was never actually verified here.
+    const auth = await verifyWalletOwnership(req, wallet);
+    if (!auth.ok) {
+      return NextResponse.json({ success: false, message: auth.message }, { status: 401 });
+    }
+
     // Scoped to the owning wallet — you can only reset the PIN on your own linked channel.
     const { data, error } = await supabaseAdmin
       .from('agent_links')
@@ -148,6 +164,11 @@ export async function DELETE(req: Request) {
 
     if (!id || !/^0x[a-f0-9]{40}$/.test(wallet)) {
       return NextResponse.json({ success: false, message: 'Link id and wallet required' }, { status: 400 });
+    }
+
+    const auth = await verifyWalletOwnership(req, wallet);
+    if (!auth.ok) {
+      return NextResponse.json({ success: false, message: auth.message }, { status: 401 });
     }
 
     // Scoped to the owning wallet — you can only unlink your own channels.
