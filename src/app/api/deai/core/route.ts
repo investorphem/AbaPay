@@ -157,6 +157,28 @@ function formatChainBalances(balances: { celo: Record<string, string>; base: Rec
     return `${celoLine}\n${baseLine}`;
 }
 
+// ⚡ Renders the numbered token-choice list shown during chat checkout, WITH each token's
+// wallet balance and agent-approved spend limit alongside it — previously showed balance
+// alone (or, from the AWAITING_CHAIN reply handler, neither), leaving the user to guess
+// which token they actually have room to pay with instead of just picking blind and hitting
+// a "no allowance" wall two steps later.
+async function renderTokenChoicesWithAllowance(wallet: string, chain: 'CELO' | 'BASE'): Promise<string> {
+    const available = tokensForChain(chain);
+    const [balances, allowances] = await Promise.all([
+        fetchCryptoBalances(wallet, chain),
+        Promise.all(available.map((sym) => getRemainingAllowance(wallet, sym, chain))),
+    ]);
+
+    return available
+        .map((sym, i) => {
+            const bal = (balances as Record<string, string>)[sym] ?? '0.0000';
+            const allowance = allowances[i];
+            const approved = allowance.ok ? allowance.remaining.toFixed(2) : '0.00';
+            return `*${i + 1}.* ${sym} — balance _${bal}_ · approved limit _${approved}_`;
+        })
+        .join('\n');
+}
+
 async function fetchDataVariations(provider: string) {
     const plans = await realFetchDataVariations(`${provider.toLowerCase()}-data`);
     return plans.map((p, i) => ({ id: String(i + 1), name: p.name, price: p.price, code: p.code }));
@@ -398,6 +420,12 @@ export async function POST(req: Request) {
 
         const userWallet = spendGate.allowed ? globalUser?.wallet_address : null;
         let relayed = false;
+        // Set specifically when the reason we're about to fall back to Path B is "no/not
+        // enough allowance for THIS chain/token" — as opposed to being unlinked, the operator
+        // gate blocking, or the relay call itself failing. Lets the deep-link message below
+        // explain exactly why, and offer approving a limit as an alternative to paying via
+        // link every time. See needsEmailOptIn's sibling reasoning: never blocks the payment.
+        let allowanceShortfall: { needed: string; have: string } | null = null;
 
         if (userWallet) {
           // Reserved outside the try{} so the catch block can always clean it up, even if
@@ -407,6 +435,10 @@ export async function POST(req: Request) {
             const allowance = await getRemainingAllowance(userWallet, tokenSym, chain);
             const rate = await getExchangeRate();
             const amountCrypto = (Number(d.amount_ngn) / rate).toFixed(6);
+
+            if (!allowance.ok || allowance.remaining < Number(amountCrypto)) {
+              allowanceShortfall = { needed: amountCrypto, have: allowance.ok ? allowance.remaining.toFixed(2) : '0' };
+            }
 
             if (allowance.ok && allowance.remaining >= Number(amountCrypto)) {
               const serviceID = resolveServiceId(d.intent, d.provider || null) || d.provider || '';
@@ -592,7 +624,25 @@ export async function POST(req: Request) {
             email: d.email || d.customer_email || undefined,
           });
 
-          const summary = [
+          // Explain WHY they're getting a link, specifically when it's because there's no
+          // (or not enough) approved allowance for this exact chain/token — rather than the
+          // same "PIN Verified!" framing regardless of cause. Still hands them a working link
+          // either way, so this never blocks the payment; it just makes the choice explicit
+          // (pay this one via the link now, or approve a limit so future ones go straight
+          // through from chat).
+          const summary = allowanceShortfall ? [
+            `⚠️ **No approved limit for this**`,
+            ``,
+            `You don't have an agent spend limit approved for **${tokenSym} on ${chain}** — need ${allowanceShortfall.needed} ${tokenSym}, approved: ${allowanceShortfall.have} ${tokenSym}.`,
+            ``,
+            `**${d.provider || ''} ${d.intent === 'ELECTRICITY' ? 'Electricity' : d.intent === 'VEND_DATA' ? 'Data' : d.intent === 'TV' ? 'Cable' : 'Airtime'}** — ₦${Number(d.amount_ngn).toLocaleString()}`,
+            d.customer_name ? `👤 ${d.customer_name}` : null,
+            `📱 ${d.destination_account}`,
+            ``,
+            `👉 **[Tap here to pay this one now](${payUrl})**`,
+            ``,
+            `_Or approve a ${tokenSym}/${chain} spend limit in the app's Agent tab so future payments like this go straight through from chat, no link needed. Link expires in 15 minutes._`,
+          ].filter(Boolean).join('\n') : [
             `✅ **PIN Verified!**`,
             ``,
             `**${d.provider || ''} ${d.intent === 'ELECTRICITY' ? 'Electricity' : d.intent === 'VEND_DATA' ? 'Data' : d.intent === 'TV' ? 'Cable' : 'Airtime'}**`,
@@ -897,9 +947,10 @@ export async function POST(req: Request) {
 
       session.intent_data.chain = picked;
 
-      // Only offer tokens that actually EXIST on the chosen chain.
-      const available = tokensForChain(picked);
-      const list = available.map((t, i) => `*${i + 1}.* ${t}`).join('\n');
+      // Only offer tokens that actually EXIST on the chosen chain, with balance + approved
+      // agent limit alongside each so the user can tell which one they can actually pay
+      // with, instead of picking blind and hitting a "no allowance" wall later.
+      const list = await renderTokenChoicesWithAllowance(globalUser?.wallet_address || '', picked);
 
       await supabase.from('deai_sessions').upsert({
         chat_id: platform_id, platform, intent_data: session.intent_data,
@@ -1789,12 +1840,7 @@ export async function POST(req: Request) {
         await supabase.from('deai_sessions').upsert({ chat_id: platform_id, platform, intent_data: intentData, status: 'AWAITING_TOKEN', expires_at: new Date(Date.now() + 300000).toISOString() }, { onConflict: 'chat_id' });
 
         const chosenChain = (intentData.chain || 'CELO').toUpperCase() as 'CELO' | 'BASE';
-        const available = tokensForChain(chosenChain);
-        const balances = await fetchCryptoBalances(globalUser?.wallet_address || "", chosenChain);
-
-        const list = available
-            .map((sym, i) => `*${i + 1}.* ${sym} — _${balances[sym] ?? '0.0000'}_`)
-            .join('\n');
+        const list = await renderTokenChoicesWithAllowance(globalUser?.wallet_address || "", chosenChain);
 
         return NextResponse.json({
             action: 'REPLY',
