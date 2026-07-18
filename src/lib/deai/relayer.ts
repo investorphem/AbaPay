@@ -171,6 +171,15 @@ export async function relayPayBillFor(params: {
       dataSuffix: celoAttributionSuffix(chain),
     });
 
+    // ⚡ CONFIRM ON-CHAIN — writeContract only means the tx was SUBMITTED, not that it
+    // succeeded. Without this wait, a revert (e.g. a race against another spend that just
+    // exhausted the allowance) would still be reported back to the caller as success.
+    const receipt = await wallet.waitForTransactionReceipt({ hash, confirmations: 1 });
+    if (receipt.status !== 'success') {
+      console.error('[Relayer] payBillFor reverted on-chain:', hash);
+      return { success: false, message: 'Payment reverted on-chain. Please try again or pay in the app.' };
+    }
+
     // ⚡ OPERATOR ALERT — an agent just spent real user funds. The operator must be able
     // to see AT A GLANCE which channel it came from: a PIN in a Telegram chat and an
     // unattended scheduled execution have very different risk profiles.

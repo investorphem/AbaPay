@@ -14,6 +14,7 @@ import { providersFor, renderOptions, matchProvider, needsVariation, variationSe
 import { createClient } from '@supabase/supabase-js';
 import { verifyInternalRequest } from '@/utils/internalAuth';
 import { verifyPin, isHashedPin, hashPin } from '@/utils/pinSecurity';
+import { executeVend, getStrictRequestId } from '@/lib/vend';
 
 const supabase = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL as string,
@@ -353,6 +354,11 @@ export async function POST(req: Request) {
         // on globalUser's construction above for why this matters.
         const chain = (d.chain || globalUser?.approved_chain || 'CELO').toUpperCase();
         const tokenSym = d.selected_token || globalUser?.approved_token || 'USD₮';
+        // Shared between Path A's transaction record and Path B's deep link, so they can
+        // never drift apart on what a given intent maps to.
+        const serviceCategory = d.intent === 'ELECTRICITY' ? 'ELECTRICITY'
+                               : d.intent === 'TV' ? 'CABLE'
+                               : d.intent === 'VEND_DATA' ? 'DATA' : 'AIRTIME';
 
         // ⚡ PATH A — AUTONOMOUS AGENT PAYMENT (user pre-approved an on-chain allowance)
         //
@@ -394,6 +400,9 @@ export async function POST(req: Request) {
         let relayed = false;
 
         if (userWallet) {
+          // Reserved outside the try{} so the catch block can always clean it up, even if
+          // something throws between creating it and renaming/deleting it.
+          let preflightTxHash: string | null = null;
           try {
             const allowance = await getRemainingAllowance(userWallet, tokenSym, chain);
             const rate = await getExchangeRate();
@@ -401,6 +410,40 @@ export async function POST(req: Request) {
 
             if (allowance.ok && allowance.remaining >= Number(amountCrypto)) {
               const serviceID = resolveServiceId(d.intent, d.provider || null) || d.provider || '';
+              const vtRequestId = getStrictRequestId();
+
+              // ⚡ THE FIX — relayPayBillFor() only ever submitted payBillFor() on-chain; NOTHING
+              // downstream ever called VTpass to actually deliver the service. The webhook that
+              // does that requires a matching PENDING row to exist first (see src/app/api/webhook
+              // — it fast-exits with no matching record otherwise), and this path never created
+              // one. Confirmed via Blockscout that the relayer address has never once called
+              // payBillFor in production, so this has never actually shortchanged anyone — but it
+              // would have, the moment anyone with a working allowance used it.
+              //
+              // Mirrors /api/pay's intent_only pattern: write a PENDING row keyed by a
+              // preflight_<wallet>_<ts> placeholder BEFORE submitting on-chain, rename it to the
+              // real hash on success, delete it on failure. Once renamed, the webhook can also
+              // pick this transaction up as a backup if the synchronous vend below is interrupted
+              // (server restart, timeout) — same safety net the browser-initiated flow already has.
+              const isMainnetDb = process.env.NEXT_PUBLIC_NETWORK === 'mainnet' || process.env.NEXT_PUBLIC_NETWORK === 'celo' || process.env.NEXT_PUBLIC_NETWORK === 'base';
+              const explorerBaseDb = chain === 'BASE'
+                ? (isMainnetDb ? 'https://basescan.org' : 'https://sepolia.basescan.org')
+                : (isMainnetDb ? 'https://celoscan.io' : 'https://sepolia.celoscan.io');
+
+              preflightTxHash = `preflight_${userWallet}_${Date.now()}`;
+              await supabase.from('transactions').upsert({
+                tx_hash: preflightTxHash, request_id: vtRequestId, service_category: serviceCategory, service_id: serviceID,
+                variation_code: d.variation_code || null, network: d.provider || null, blockchain: chain,
+                account_number: d.destination_account, phone: d.phone || null,
+                amount_usdt: Number(amountCrypto), amount_naira: Number(d.amount_ngn), fee_naira: Number(d.fee || 0), status: 'PENDING',
+                wallet_address: userWallet.toLowerCase(),
+                customer_name: d.customer_name || null, customer_address: d.customer_address || null,
+                source_channel: platform, token_used: tokenSym,
+                meter_account_type: d.meter_type || null, customer_email: d.email || d.customer_email || null,
+                operator_id: d.operator_id || null, country_code: d.country_code || null, product_type_id: d.product_type_id || null,
+                subscription_type: d.cable_action || null,
+                payment_method: 'AGENT_RELAY',
+              }, { onConflict: 'tx_hash' });
 
               const res = await relayPayBillFor({
                 userWallet,
@@ -416,13 +459,27 @@ export async function POST(req: Request) {
               if (res.success) {
                 relayed = true;
                 const left = (allowance.remaining - Number(amountCrypto)).toFixed(2);
+                const txHash = res.txHash as string;
 
-                // 🔒 OUT-OF-BAND SPEND ALERT.
-                //
-                // This is the real defence against someone else having access to the chat:
-                // even if an attacker has the PIN, the OWNER is told immediately, by email
-                // and on every other linked channel. They can revoke (set limit to 0) before
-                // much damage is done. Silence is what turns a small compromise into a large one.
+                // Rename the preflight row to the real hash, then atomically lock it —
+                // same PENDING-to-PROCESSING pattern /api/pay and the webhook both use, so a
+                // retried/duplicate delivery can never double-vend.
+                await supabase.from('transactions').update({ tx_hash: txHash }).eq('tx_hash', preflightTxHash);
+                preflightTxHash = null; // renamed — nothing left for the catch block to clean up
+
+                const { data: lockedRecord } = await supabase
+                  .from('transactions')
+                  .update({ status: 'PROCESSING' })
+                  .eq('tx_hash', txHash)
+                  .eq('status', 'PENDING')
+                  .select()
+                  .single();
+
+                // 🔒 OUT-OF-BAND SPEND ALERT — sent regardless of vend outcome below, because
+                // the money already moved on-chain either way. This is the real defence against
+                // someone else having access to the chat: even if an attacker has the PIN, the
+                // OWNER is told immediately, by email and on every other linked channel. They can
+                // revoke (set limit to 0) before much damage is done.
                 try {
                   await notifySpendOutOfBand(globalUser?.wallet_address || '', {
                     amountNgn: Number(d.amount_ngn),
@@ -431,34 +488,80 @@ export async function POST(req: Request) {
                     service: `${d.provider || ''} ${serviceLabel}`,
                     account: d.destination_account,
                     channel: platform,
-                    txHash: res.txHash || '',
+                    txHash,
                     remaining: left,
                   });
                 } catch { /* never block a successful payment on alerting */ }
 
+                const explorerUrl = `${explorerBaseDb}/tx/${txHash}`;
+
+                if (!lockedRecord) {
+                  // Lost the lock race (webhook got there first) — it's already vending; don't
+                  // double-vend by calling executeVend again.
+                  return NextResponse.json({
+                    action: 'REPLY',
+                    message: `✅ **Paid!**\n\n🔗 \`${txHash}\`\n\n_Finishing up in the background — check History shortly._`,
+                  });
+                }
+
+                const vendResult = await executeVend({
+                  vtRequestId, txHash, serviceID, serviceCategory, network: d.provider || '', billersCode: d.destination_account,
+                  phone: d.phone || null, variation_code: d.variation_code, subscription_type: d.cable_action,
+                  amount: amountCrypto, tokenSymbol: tokenSym, vendAmount: Number(d.amount_ngn), displayAmount: undefined,
+                  foreignAmount: undefined, isForeign: false, operator_id: d.operator_id, country_code: d.country_code,
+                  product_type_id: d.product_type_id, email: d.email || d.customer_email || null,
+                  wallet_address: userWallet, blockchain: chain, source_channel: platform,
+                  customer_name: d.customer_name, customer_address: d.customer_address,
+                  baseRate: rate, explorerUrl,
+                });
+
+                if (vendResult.status === 'SUCCESS') {
+                  return NextResponse.json({
+                    action: 'REPLY',
+                    message: [
+                      `✅ **Paid!**`,
+                      ``,
+                      `**${d.provider || ''} ${serviceLabel}** — ₦${Number(d.amount_ngn).toLocaleString()}`,
+                      d.customer_name ? `👤 ${d.customer_name}` : null,
+                      `📱 ${d.destination_account}`,
+                      `⛓️ ${chain} · ${amountCrypto} ${tokenSym}`,
+                      vendResult.purchased_code ? `🔑 ${vendResult.purchased_code}` : null,
+                      ``,
+                      `🔗 \`${txHash}\``,
+                      ``,
+                      `💳 Remaining agent allowance: **${left} ${tokenSym}**`,
+                      `_Your token — your wallet. AbaPay never held your funds._`,
+                    ].filter(Boolean).join('\n'),
+                  });
+                }
+
+                // FAILED_VENDING (executeVend already auto-queued a refund) or TIMEOUT
+                // (still processing in the background) — either way the payment itself
+                // succeeded, so we don't fall through to Path B; that would offer a link to
+                // pay AGAIN for something already charged.
                 return NextResponse.json({
                   action: 'REPLY',
-                  message: [
-                    `✅ **Paid!**`,
-                    ``,
-                    `**${d.provider || ''} ${serviceLabel}** — ₦${Number(d.amount_ngn).toLocaleString()}`,
-                    d.customer_name ? `👤 ${d.customer_name}` : null,
-                    `📱 ${d.destination_account}`,
-                    `⛓️ ${chain} · ${amountCrypto} ${tokenSym}`,
-                    ``,
-                    `🔗 \`${res.txHash}\``,
-                    ``,
-                    `💳 Remaining agent allowance: **${left} ${tokenSym}**`,
-                    `_Your token — your wallet. AbaPay never held your funds._`,
-                  ].filter(Boolean).join('\n'),
+                  message: vendResult.status === 'FAILED_VENDING'
+                    ? `⚠️ Payment succeeded, but delivering it failed.\n\n🔗 \`${txHash}\`\n\n${vendResult.message || 'Your funds are being refunded — you don\'t need to do anything.'}`
+                    : `✅ **Paid!**\n\n🔗 \`${txHash}\`\n\n_Finishing up in the background — check History shortly._`,
                 });
               }
 
-              // Relay failed — fall through to the deep link so the user isn't stuck.
+              // Relay failed before/without confirming on-chain — nothing was charged.
+              // Clean up the preflight row and fall through to the deep link.
+              if (preflightTxHash) {
+                await supabase.from('transactions').delete().eq('tx_hash', preflightTxHash);
+                preflightTxHash = null;
+              }
               console.error('[DeAI] Relay failed, falling back to deep link:', res.message);
             }
           } catch (relayErr) {
             console.error('[DeAI] Relay path errored, falling back to deep link:', relayErr);
+            if (preflightTxHash) {
+              try {
+                await supabase.from('transactions').delete().eq('tx_hash', preflightTxHash);
+              } catch { /* best-effort cleanup */ }
+            }
           }
         }
 
@@ -468,9 +571,7 @@ export async function POST(req: Request) {
           const serviceID = resolveServiceId(d.intent, d.provider || null) || d.provider || '';
           const payUrl = createDeepLink(baseUrl, {
             serviceID,
-            serviceCategory: d.intent === 'ELECTRICITY' ? 'ELECTRICITY'
-                            : d.intent === 'TV' ? 'CABLE'
-                            : d.intent === 'VEND_DATA' ? 'DATA' : 'AIRTIME',
+            serviceCategory,
             provider: d.provider || '',
             billersCode: d.destination_account,
             amountNgn: Number(d.amount_ngn),
