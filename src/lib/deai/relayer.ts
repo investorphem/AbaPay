@@ -100,6 +100,11 @@ export interface RelayResult {
   success: boolean;
   txHash?: string;
   message?: string;
+  // Set when the transaction was BROADCAST but we couldn't confirm the outcome (RPC hiccup,
+  // timeout) — as opposed to a definite revert. The caller must treat this as "still in
+  // flight," never as "safe to retry" — the transaction may yet succeed, and retrying
+  // (e.g. handing the user a payment link) risks a double payment if it does.
+  pending?: boolean;
 }
 
 /**
@@ -174,7 +179,24 @@ export async function relayPayBillFor(params: {
     // ⚡ CONFIRM ON-CHAIN — writeContract only means the tx was SUBMITTED, not that it
     // succeeded. Without this wait, a revert (e.g. a race against another spend that just
     // exhausted the allowance) would still be reported back to the caller as success.
-    const receipt = await wallet.waitForTransactionReceipt({ hash, confirmations: 1 });
+    //
+    // If THIS specific call throws (RPC timeout, dropped connection, etc.), that is NOT the
+    // same as a revert — the transaction was already broadcast and may still confirm. Report
+    // it as `pending`, not `success: false`, so the caller never treats it as safe to retry
+    // (e.g. by handing the user a fresh payment link) while it might still land for real.
+    let receipt;
+    try {
+      receipt = await wallet.waitForTransactionReceipt({ hash, confirmations: 1 });
+    } catch (waitErr: any) {
+      console.error('[Relayer] Could not confirm payBillFor receipt (tx may still be in flight):', hash, waitErr?.message);
+      return {
+        success: false,
+        pending: true,
+        txHash: hash,
+        message: 'Your payment is broadcasting — confirming now, this can take a minute.',
+      };
+    }
+
     if (receipt.status !== 'success') {
       console.error('[Relayer] payBillFor reverted on-chain:', hash);
       return { success: false, message: 'Payment reverted on-chain. Please try again or pay in the app.' };

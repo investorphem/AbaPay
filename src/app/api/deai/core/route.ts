@@ -295,6 +295,23 @@ export async function POST(req: Request) {
     const crypto = await fetchAllChainBalances(globalUser?.wallet_address || "");
 
     let { data: session } = await supabase.from('deai_sessions').select('*').eq('chat_id', platform_id).single();
+
+    // ⚡ ABANDONED-TRANSACTION DETECTION ⚡
+    //
+    // Every session write sets expires_at (5 min for most steps, 10 for AWAITING_PIN), but
+    // NOTHING ever actually checked it — a user who went quiet mid-flow (network drop, closed
+    // the app, distracted) would have their stale intent resumed days later exactly where
+    // they left off: wrong amount, wrong recipient, a PIN prompt for a bill they've forgotten
+    // about. Enforce it here, once, right after loading: a session past its own expiry is
+    // treated as if it doesn't exist, so the very next message starts a clean intent instead
+    // of silently reviving a long-abandoned one. This does NOT touch pre-flight transaction
+    // rows — those already have their own generic cleanup (see cleanupStalePreflights) that
+    // fires regardless of session state.
+    if (session && session.expires_at && new Date(session.expires_at).getTime() < Date.now()) {
+      await supabase.from('deai_sessions').delete().eq('chat_id', platform_id);
+      session = null;
+    }
+
     const userInput = text.trim().toLowerCase();
 
     // ESCAPE HATCHES
@@ -576,6 +593,24 @@ export async function POST(req: Request) {
                   message: vendResult.status === 'FAILED_VENDING'
                     ? `⚠️ Payment succeeded, but delivering it failed.\n\n🔗 \`${txHash}\`\n\n${vendResult.message || 'Your funds are being refunded — you don\'t need to do anything.'}`
                     : `✅ **Paid!**\n\n🔗 \`${txHash}\`\n\n_Finishing up in the background — check History shortly._`,
+                });
+              }
+
+              // ⚡ BROADCAST BUT UNCONFIRMED (network/RPC hiccup while waiting for the
+              // receipt) — the transaction may still land for real. Falling through to Path
+              // B here would hand the user a payment link while the ORIGINAL payment could
+              // still confirm moments later — a real double-payment risk, not just a UX
+              // annoyance. So: keep the record (rename to the real hash, same as success —
+              // never delete it), don't vend yet since we don't know the outcome, and let the
+              // webhook's own on-chain confirmation + retry logic resolve it for real once an
+              // answer is available, exactly as it already does for the browser-initiated flow.
+              if (res.pending && res.txHash) {
+                const txHash = res.txHash;
+                await supabase.from('transactions').update({ tx_hash: txHash }).eq('tx_hash', preflightTxHash);
+                preflightTxHash = null;
+                return NextResponse.json({
+                  action: 'REPLY',
+                  message: `⏳ **Confirming your payment...**\n\n🔗 \`${txHash}\`\n\n_Your payment was sent but we lost connection confirming it. It may still go through — please don't pay again. Check History shortly, or message me again in a minute._`,
                 });
               }
 
@@ -938,7 +973,14 @@ export async function POST(req: Request) {
     // STATE: CHAIN SELECTION ⚡
     // Chain was previously hardcoded to CELO, so a user could never pay on Base from chat.
     else if (session?.status === 'AWAITING_CHAIN') {
-      const chainMap: Record<string, 'CELO' | 'BASE'> = { '1': 'CELO', '2': 'BASE' };
+      // Accept the actual chain name too, not just the numbered choice — a user typing
+      // "Celo" clearly means option 1, and rejecting that ("reply with 1 or 2") when the
+      // intent is completely unambiguous is exactly the rigid, un-smart behavior users
+      // complained about.
+      const chainMap: Record<string, 'CELO' | 'BASE'> = {
+        '1': 'CELO', 'celo': 'CELO',
+        '2': 'BASE', 'base': 'BASE',
+      };
       const picked = chainMap[userInput];
 
       if (!picked) {
@@ -973,7 +1015,20 @@ export async function POST(req: Request) {
       const available = tokensForChain(chosenChain);
 
       const idx = parseInt(userInput, 10) - 1;
-      const selected = available[idx];
+      let selected = available[idx];
+
+      // Accept the token's actual name too, not just its numbered position — same
+      // reasoning as the chain-selection fix above. Covers the common ways people
+      // actually type these (USD₮'s own symbol has a unicode ₮ nobody types by hand).
+      if (!selected) {
+        const normalized = userInput.replace(/[^a-z0-9]/g, '');
+        const aliasSymbol: Record<string, string> = {
+          usdc: 'USDC',
+          usdt: 'USD₮', usd: 'USD₮', tether: 'USD₮',
+          usdm: 'USDm', cusd: 'USDm',
+        }[normalized];
+        if (aliasSymbol) selected = available.find((t) => t === aliasSymbol);
+      }
 
       if (!selected) {
         const list = available.map((t, i) => `*${i + 1}.* ${t}`).join('\n');
