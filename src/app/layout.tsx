@@ -55,6 +55,8 @@ export const metadata: Metadata = {
     "fc:frame": JSON.stringify(farcasterFrameConfig),
     // ⚡ Base App Verification ⚡
     "base:app_id": "69ef3dd6e6b83cf73ad1dbb4",
+    // ⚡ Meta Business domain verification (WhatsApp Business Platform go-live) ⚡
+    "facebook-domain-verification": "djscrshqpbb6tui84nqzerhi409ezl",
   },
 };
 
