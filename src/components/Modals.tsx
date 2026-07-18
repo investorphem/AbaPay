@@ -64,6 +64,42 @@ export function ReceiptModal({ receipt, isMainnet, onClose, onSupport }: any) {
 
   const buildFallbackText = () => `🧾 AbaPay Receipt\n\nService: ${receipt.network} ${receipt.service}\nAmount: ${formatTxAmount(receipt.amountNaira)}\nStatus: ${receipt.status}\nAccount: ${receipt.account}\nRef: ${receipt.id}\n${hasPin ? `\nPIN/TOKEN: ${receipt.purchased_code}` : ''}\n\nSecured by ${receipt.blockchain || 'Celo'} ⚡`;
 
+  // ⚡ THE ACTUAL BUG — this project runs Tailwind v4, whose default palette (and every
+  // `/opacity` utility like `bg-emerald-900/20`) compiles to `oklch()`/`color-mix()` colors.
+  // html2canvas-pro can parse plain oklch(), but NOT color-mix() — which is what almost every
+  // opacity-modified color in this receipt (borders, tinted backgrounds, dark-mode variants)
+  // actually compiles to. That made html2canvas throw on the FIRST such element it walked,
+  // on every device, every time — not a webview quirk, a color-parsing crash before the
+  // download/share logic below ever ran.
+  //
+  // Fix: force every element's color-related properties to the browser's OWN resolved value
+  // via getComputedStyle (which always serializes to plain rgb()/rgba(), regardless of the
+  // source syntax) as a temporary inline style override, capture, then restore — so
+  // html2canvas only ever sees colors its parser actually understands.
+  const COLOR_PROPS = ['color', 'backgroundColor', 'borderTopColor', 'borderRightColor', 'borderBottomColor', 'borderLeftColor'] as const;
+
+  async function withResolvedColors<T>(root: HTMLElement, fn: () => Promise<T>): Promise<T> {
+    const elements: HTMLElement[] = [root, ...Array.from(root.querySelectorAll<HTMLElement>('*'))];
+    const snapshots = elements.map((el) => {
+      const prev: Partial<Record<typeof COLOR_PROPS[number], string>> = {};
+      for (const prop of COLOR_PROPS) prev[prop] = el.style[prop];
+      return { el, prev };
+    });
+
+    for (const el of elements) {
+      const computed = window.getComputedStyle(el);
+      for (const prop of COLOR_PROPS) el.style[prop] = computed[prop];
+    }
+
+    try {
+      return await fn();
+    } finally {
+      for (const { el, prev } of snapshots) {
+        for (const prop of COLOR_PROPS) el.style[prop] = prev[prop] || '';
+      }
+    }
+  }
+
   // ⚡ SHARE: Always render the receipt to an image first, then hand it to the
   // device's native share sheet so the user can send it via WhatsApp, Telegram,
   // Photos, Files, etc. — the same way any other app shares an image.
@@ -82,10 +118,10 @@ export function ReceiptModal({ receipt, isMainnet, onClose, onSupport }: any) {
       }
 
       const html2canvas = (await import('html2canvas-pro')).default;
-      const canvas = await html2canvas(receiptElement, {
+      const canvas = await withResolvedColors(receiptElement, () => html2canvas(receiptElement, {
           scale: 2,
           backgroundColor: null // Captures dark mode perfectly
-      });
+      }));
 
       const dataUrl = canvas.toDataURL('image/png');
       const blob = await (await fetch(dataUrl)).blob();

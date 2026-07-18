@@ -31,6 +31,11 @@ export interface ParsedRecipient {
   provider: string | null;
   amount_ngn: number | null;
   destination_account: string | null;
+  // ⚡ Per-recipient chain/token override — "send 500 to X on Celo with USDC and 1000 to Y
+  // on Base with USDT". Null when the recipient didn't specify one; the caller then falls
+  // back to whatever chain/token is currently selected in the app.
+  chain: 'CELO' | 'BASE' | null;
+  token: string | null;
 }
 
 export interface ParsedIntent {
@@ -60,6 +65,12 @@ export interface ParsedIntent {
   // provider/amount_ngn/destination_account fields above are null in that case (use this
   // array instead). Left null/empty for the ordinary single-recipient case.
   recipients: ParsedRecipient[] | null;
+
+  // ⚡ Chain/token override for the SINGULAR (non-batch) request — "pay this on Base with
+  // USDT". Null when unstated; the caller falls back to whatever's currently selected in
+  // the app. Recipients in a batch use their own per-item chain/token instead (see above).
+  chain: 'CELO' | 'BASE' | null;
+  token: string | null;
 }
 
 const SYSTEM_PROMPT = `You are the intent-routing engine for AbaPay, a Web3 utility bill payment app used in Nigeria.
@@ -82,7 +93,9 @@ Schema:
   "day_of_week": number | null,
   "day_of_month": number | null,
   "schedule_in_minutes": number | null,
-  "recipients": [{ "provider": string | null, "amount_ngn": number | null, "destination_account": string | null }] | null
+  "recipients": [{ "provider": string | null, "amount_ngn": number | null, "destination_account": string | null, "chain": "CELO" | "BASE" | null, "token": string | null }] | null,
+  "chain": "CELO" | "BASE" | null,
+  "token": string | null
 }
 
 Rules:
@@ -137,12 +150,24 @@ Rules:
    provider/amount_ngn/destination_account fields null:
    - "send 500 airtime to 08011111111 and 1000 to 08033333333 (glo)" ->
      recipients: [
-       { "provider": null, "amount_ngn": 500, "destination_account": "08011111111" },
-       { "provider": "GLO", "amount_ngn": 1000, "destination_account": "08033333333" }
+       { "provider": null, "amount_ngn": 500, "destination_account": "08011111111", "chain": null, "token": null },
+       { "provider": "GLO", "amount_ngn": 1000, "destination_account": "08033333333", "chain": null, "token": null }
      ]
    Infer each recipient's network from its own phone prefix same as rule 2, when not stated.
    For a single recipient, leave "recipients" null and use the ordinary singular fields —
    do NOT wrap a single recipient in a one-item array.
+
+15. CHAIN/TOKEN OVERRIDE — a user can name a specific blockchain and/or stablecoin, either
+   for the whole (singular) request or per-recipient inside a batch:
+   - "pay this on Base with USDT" -> chain: "BASE", token: "USD₮" (top-level fields)
+   - "send 500 to 08011111111 on celo with usdc and 1000 to 08033333333 on base with usdt" ->
+     recipients: [
+       { ..., "chain": "CELO", "token": "USDC" },
+       { ..., "chain": "BASE", "token": "USD₮" }
+     ]
+   Valid chain values: "CELO" | "BASE". Valid token values: "USDC" | "USD₮" | "USDm" (USDm is
+   Celo-only — never pair it with "BASE"). Leave null when the user doesn't name one; the
+   app falls back to whatever chain/token the user currently has selected.
 
 Never invent an account number or amount. If it isn't in the message, it's null.`;
 
@@ -215,10 +240,24 @@ function fallbackIntent(): ParsedIntent {
     day_of_month: null,
     schedule_in_minutes: null,
     recipients: null,
+    chain: null,
+    token: null,
   };
 }
 
 const MAX_SCHEDULE_MINUTES = 10080; // 7 days — beyond that, this isn't a "near-term one-off" anymore
+const VALID_TOKENS = ['USDC', 'USD₮', 'USDm'];
+
+function normalizeChain(raw: any): 'CELO' | 'BASE' | null {
+  const v = typeof raw === 'string' ? raw.toUpperCase() : null;
+  return v === 'CELO' || v === 'BASE' ? v : null;
+}
+
+function normalizeToken(raw: any): string | null {
+  if (typeof raw !== 'string') return null;
+  const match = VALID_TOKENS.find((t) => t.toUpperCase() === raw.toUpperCase());
+  return match || null;
+}
 
 function normalizeRecipients(raw: any): ParsedRecipient[] | null {
   if (!Array.isArray(raw)) return null;
@@ -226,10 +265,15 @@ function normalizeRecipients(raw: any): ParsedRecipient[] | null {
     .filter((r: any) => r && typeof r === 'object')
     .map((r: any) => {
       const amt = Number(r?.amount_ngn);
+      const chain = normalizeChain(r?.chain);
+      const token = normalizeToken(r?.token);
       return {
         provider: typeof r?.provider === 'string' ? r.provider.toUpperCase() : null,
         amount_ngn: Number.isFinite(amt) && amt > 0 ? amt : null,
         destination_account: typeof r?.destination_account === 'string' ? r.destination_account.replace(/\s+/g, '') : null,
+        // USDm is Celo-only — an impossible pairing means the model got it wrong; drop the
+        // override entirely rather than propagate a request that can never be fulfilled.
+        chain, token: token === 'USDm' && chain === 'BASE' ? null : token,
       };
     })
     // A recipient we can't actually act on (no amount or no account) is worse than useless —
@@ -272,5 +316,10 @@ function normalize(p: any): ParsedIntent {
       ? Math.min(Math.round(Number(p.schedule_in_minutes)), MAX_SCHEDULE_MINUTES)
       : null,
     recipients: normalizeRecipients(p?.recipients),
+    chain: normalizeChain(p?.chain),
+    token: (() => {
+      const t = normalizeToken(p?.token);
+      return t === 'USDm' && normalizeChain(p?.chain) === 'BASE' ? null : t;
+    })(),
   };
 }

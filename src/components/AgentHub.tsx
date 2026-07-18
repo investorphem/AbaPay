@@ -1,7 +1,7 @@
 "use client";
 
 import React, { useState, useEffect, useCallback } from "react";
-import { Bot, Shield, Check, Copy, Trash2, Loader2, AlertTriangle, ExternalLink } from "lucide-react";
+import { Bot, Shield, Check, Copy, Trash2, Loader2, AlertTriangle, ExternalLink, KeyRound } from "lucide-react";
 import { SUPPORTED_TOKENS } from "@/constants";
 
 const CHANNELS = [
@@ -156,6 +156,39 @@ export function AgentHub({ address, selectedToken, activeChainName, onApproveAll
       body: JSON.stringify({ id, wallet_address: address }),
     });
     loadLinks();
+  };
+
+  // ⚡ CHANGE / FORGOT PIN — same thing either way: your wallet connection here already
+  // proves ownership, so there's no "old PIN" to ask for. Tracked per-row so only one link's
+  // form is open at a time.
+  const [pinEditId, setPinEditId] = useState<string | null>(null);
+  const [newPin, setNewPin] = useState('');
+  const [pinMsg, setPinMsg] = useState<{ id: string; text: string; ok: boolean } | null>(null);
+  const [savingPin, setSavingPin] = useState(false);
+
+  const savePin = async (id: string) => {
+    if (!address) return;
+    if (!/^\d{4,6}$/.test(newPin)) { setPinMsg({ id, text: 'PIN must be 4-6 digits.', ok: false }); return; }
+    setSavingPin(true);
+    try {
+      const res = await fetch('/api/agent/link', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ id, wallet_address: address, new_pin: newPin }),
+      });
+      const data = await res.json();
+      if (data.success) {
+        setPinMsg({ id, text: 'PIN updated.', ok: true });
+        setNewPin('');
+        setTimeout(() => { setPinEditId(null); setPinMsg(null); }, 1500);
+      } else {
+        setPinMsg({ id, text: data.message || 'Could not update PIN.', ok: false });
+      }
+    } catch {
+      setPinMsg({ id, text: 'Something went wrong.', ok: false });
+    } finally {
+      setSavingPin(false);
+    }
   };
 
   const activeChannel = CHANNELS.find(c => c.id === channel)!;
@@ -341,19 +374,58 @@ export function AgentHub({ address, selectedToken, activeChainName, onApproveAll
           <h4 className="text-[11px] font-black uppercase tracking-widest text-slate-700 dark:text-slate-300 mb-3">Linked</h4>
           <div className="space-y-2">
             {links.map((l) => (
-              <div key={l.id} className="flex items-center justify-between p-3 rounded-2xl bg-slate-50 dark:bg-[#1a1a1f] border border-slate-100 dark:border-slate-800/80">
-                <div className="flex items-center gap-2">
-                  {l.link_verified
-                    ? <Check size={14} className="text-emerald-600" />
-                    : <Loader2 size={14} className="text-slate-400" />}
-                  <span className="text-xs font-black text-slate-700 dark:text-slate-300">{l.channel}</span>
-                  <span className="text-[10px] text-slate-400 uppercase tracking-widest">
-                    {l.link_verified ? 'Active' : 'Awaiting code'}
-                  </span>
+              <div key={l.id} className="p-3 rounded-2xl bg-slate-50 dark:bg-[#1a1a1f] border border-slate-100 dark:border-slate-800/80">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-2">
+                    {l.link_verified
+                      ? <Check size={14} className="text-emerald-600" />
+                      : <Loader2 size={14} className="text-slate-400" />}
+                    <span className="text-xs font-black text-slate-700 dark:text-slate-300">{l.channel}</span>
+                    <span className="text-[10px] text-slate-400 uppercase tracking-widest">
+                      {l.link_verified ? 'Active' : 'Awaiting code'}
+                    </span>
+                  </div>
+                  <div className="flex items-center gap-1">
+                    <button
+                      onClick={() => { setPinEditId(pinEditId === l.id ? null : l.id); setNewPin(''); setPinMsg(null); }}
+                      className="p-2 text-slate-400 hover:text-emerald-600 transition-colors"
+                      title="Change PIN"
+                    >
+                      <KeyRound size={14} />
+                    </button>
+                    <button onClick={() => unlink(l.id)} className="p-2 text-slate-400 hover:text-red-500 transition-colors" title="Unlink">
+                      <Trash2 size={14} />
+                    </button>
+                  </div>
                 </div>
-                <button onClick={() => unlink(l.id)} className="p-2 text-slate-400 hover:text-red-500 transition-colors">
-                  <Trash2 size={14} />
-                </button>
+
+                {pinEditId === l.id && (
+                  <div className="mt-3 pt-3 border-t border-slate-200 dark:border-slate-800 flex flex-col gap-2">
+                    <p className="text-[10px] text-slate-400 leading-relaxed">
+                      Forgot your PIN or just want to change it — set a new one below. Your wallet connection here is all the verification needed; the old PIN isn't required.
+                    </p>
+                    <div className="flex gap-2">
+                      <input
+                        type="text"
+                        inputMode="numeric"
+                        value={newPin}
+                        onChange={(e) => setNewPin(e.target.value.replace(/\D/g, '').slice(0, 6))}
+                        placeholder="New 4-6 digit PIN"
+                        className="flex-1 px-3 py-2 rounded-xl bg-white dark:bg-[#111114] border border-slate-200 dark:border-slate-800 text-xs text-slate-900 dark:text-white outline-none focus:border-emerald-400"
+                      />
+                      <button
+                        onClick={() => savePin(l.id)}
+                        disabled={savingPin}
+                        className="px-4 py-2 bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 text-white rounded-xl text-[10px] font-black uppercase tracking-widest transition-colors active:scale-95"
+                      >
+                        {savingPin ? <Loader2 size={12} className="animate-spin" /> : 'Save'}
+                      </button>
+                    </div>
+                    {pinMsg && pinMsg.id === l.id && (
+                      <p className={`text-[10px] font-bold ${pinMsg.ok ? 'text-emerald-600' : 'text-red-500'}`}>{pinMsg.text}</p>
+                    )}
+                  </div>
+                )}
               </div>
             ))}
           </div>

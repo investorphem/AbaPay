@@ -195,7 +195,7 @@ export async function POST(req: Request) {
       return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
     }
 
-    let { platform, platform_id, text } = await req.json();
+    let { platform, platform_id, text, chat_type } = await req.json();
 
     // 🔐 INPUT VALIDATION: reject malformed payloads before they touch any logic
     if (typeof text !== 'string' || typeof platform_id !== 'string' || !platform_id || text.length > 1000) {
@@ -203,6 +203,9 @@ export async function POST(req: Request) {
     }
 
     const channel = platform === 'TELEGRAM' ? 'TELEGRAM' : platform === 'WHATSAPP' ? 'WHATSAPP' : 'X';
+    // Only Telegram's webhook currently sends this — WhatsApp/X callers omit it, which
+    // defaults to 'private' below and preserves their existing (DM-only) behaviour untouched.
+    const isGroupChat = typeof chat_type === 'string' && chat_type !== 'private';
 
     // ⚡ LINK-CODE CLAIM ⚡
     // The user links a channel from the APP (where their wallet is), gets a one-time code,
@@ -210,6 +213,13 @@ export async function POST(req: Request) {
     // identically for Telegram, WhatsApp, and X.
     const maybeCode = text.trim().toUpperCase();
     if (/^ABA-[A-F0-9]{6}$/.test(maybeCode)) {
+      // ⚡ DM-ONLY — a link code is a one-time credential. Typing it into a group puts it in
+      // front of every member for as long as the message is visible; anyone fast enough could
+      // claim it before its rightful owner. Wallet linking only ever happens in a private chat.
+      if (isGroupChat) {
+        return NextResponse.json({ action: 'REPLY', message: '🔒 For your security, please DM me directly to link your wallet — not in a group.' });
+      }
+
       const { data: pendingLink } = await supabase
         .from('agent_links')
         .select('*')

@@ -36,6 +36,8 @@ interface ScheduleItem {
   billersCode: string;
   amountNgn: number;
   meterType?: string;
+  chain: string;
+  tokenSymbol: string;
 }
 
 async function checkAutonomousCapacity(wallet: string, chain: string, tokenSymbol: string, totalNgn: number, exchangeRate: number) {
@@ -49,7 +51,7 @@ async function checkAutonomousCapacity(wallet: string, chain: string, tokenSymbo
   if (!allowance.ok || allowance.remaining < neededCrypto) {
     return {
       ok: false as const, neededCrypto, allowanceRemaining: allowance.ok ? allowance.remaining : 0, balance,
-      reason: `You don't have enough approved agent limit for this — need ${neededCrypto.toFixed(4)} ${tokenSymbol} on ${chain}, approved: ${allowance.ok ? allowance.remaining.toFixed(2) : '0'} ${tokenSymbol}.\n\nApprove a higher limit for ${tokenSymbol} on ${chain} in the Agent Hub tab, then ask me again.`,
+      reason: `You don't have enough approved agent limit for ${tokenSymbol} on ${chain} — need ${neededCrypto.toFixed(4)}, approved: ${allowance.ok ? allowance.remaining.toFixed(2) : '0'}.\n\nApprove a higher limit for ${tokenSymbol} on ${chain} in the Agent Hub tab, then ask me again.`,
     };
   }
   if (balance < neededCrypto) {
@@ -59,6 +61,19 @@ async function checkAutonomousCapacity(wallet: string, chain: string, tokenSymbo
     };
   }
   return { ok: true as const, neededCrypto, allowanceRemaining: allowance.remaining, balance };
+}
+
+/** Groups items by (chain, token) — a batch can freely mix chains/tokens per recipient, and
+ *  each group needs its own independent allowance/balance check against its own subtotal. */
+function groupByChainToken(items: ScheduleItem[]): Map<string, ScheduleItem[]> {
+  const groups = new Map<string, ScheduleItem[]>();
+  for (const item of items) {
+    const key = `${item.chain}|${item.tokenSymbol}`;
+    const list = groups.get(key) || [];
+    list.push(item);
+    groups.set(key, list);
+  }
+  return groups;
 }
 
 const WEEKDAY_NAMES = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
@@ -173,9 +188,12 @@ export async function POST(req: Request) {
     const isForeign = !!(ai.country && ai.country !== 'NG');
     const effectiveIntent = isForeign ? 'INTERNATIONAL' : ai.intent;
 
-    // ⚡ MULTI-RECIPIENT BATCH — "send 500 airtime to 08011111111 and 1000 to 08033333333".
-    // All-or-nothing: if any recipient can't be resolved, we say which one rather than
-    // silently dropping it or paying some and not others.
+    // ⚡ MULTI-RECIPIENT BATCH — "send 500 to X on Celo with USDC and 1000 to Y on Base with
+    // USDT". Each recipient can name its OWN chain/token (falls back to whatever's currently
+    // selected in the app); the batch groups by (chain, token) and checks the allowance and
+    // balance for EACH group's own subtotal — a Celo/USDC shortfall doesn't block a Base/USDT
+    // group that's perfectly fine. All-or-nothing across the whole batch: if any recipient or
+    // any group comes up short, nothing is proposed until it's fixed.
     if (ai.recipients && ai.recipients.length >= 2) {
       if (!walletAddr) {
         return NextResponse.json({ success: true, reply: 'Connect your wallet first — sending to multiple people needs an approved agent limit.' });
@@ -201,20 +219,30 @@ export async function POST(req: Request) {
           provider: rec.provider,
           billersCode: rec.destination_account as string,
           amountNgn: rec.amount_ngn as number,
+          chain: rec.chain || chain,
+          tokenSymbol: rec.token || tokenSymbol,
         });
       }
 
-      const totalNgn = items.reduce((s, it) => s + it.amountNgn, 0);
-      const capacity = await checkAutonomousCapacity(walletAddr, chain, tokenSymbol, totalNgn, rules.exchangeRate);
-      if (!capacity.ok) {
-        return NextResponse.json({ success: true, reply: capacity.reason });
+      const groups = groupByChainToken(items);
+      const groupSummaries: string[] = [];
+      for (const [key, groupItems] of groups) {
+        const [groupChain, groupToken] = key.split('|');
+        const groupTotal = groupItems.reduce((s, it) => s + it.amountNgn, 0);
+        const capacity = await checkAutonomousCapacity(walletAddr, groupChain, groupToken, groupTotal, rules.exchangeRate);
+        if (!capacity.ok) {
+          return NextResponse.json({ success: true, reply: `${groupItems.length} of these ${groupItems.length === 1 ? 'is' : 'are'} on ${groupToken}/${groupChain}: ${capacity.reason}` });
+        }
+        groupSummaries.push(`• ${groupToken} on ${groupChain}: ${groupItems.length} payment${groupItems.length === 1 ? '' : 's'}, ₦${groupTotal.toLocaleString()} (${capacity.neededCrypto.toFixed(4)} ${groupToken}) — approved ${capacity.allowanceRemaining.toFixed(2)}, balance ${capacity.balance.toFixed(2)}`);
       }
+
+      const totalNgn = items.reduce((s, it) => s + it.amountNgn, 0);
 
       return NextResponse.json({
         success: true,
-        reply: `Got it — ${items.length} payments totalling ₦${totalNgn.toLocaleString()} (${capacity.neededCrypto.toFixed(4)} ${tokenSymbol} on ${chain}).\n\nYou have ${capacity.allowanceRemaining.toFixed(2)} ${tokenSymbol} approved and ${capacity.balance.toFixed(2)} ${tokenSymbol} in your wallet — enough to cover it.\n\nTap Approve to send all ${items.length} now.`,
+        reply: `Got it — ${items.length} payments totalling ₦${totalNgn.toLocaleString()}:\n\n${groupSummaries.join('\n')}\n\nTap Approve to send all ${items.length} now.`,
         scheduleConfirm: {
-          items, chain, tokenSymbol,
+          items,
           runOnceInMinutes: 1, // fires on the very next instant-cron tick — as close to "now" as this mechanism gets
           totalNgn,
         },
@@ -240,6 +268,9 @@ export async function POST(req: Request) {
         });
       }
 
+      const itemChain = ai.chain || chain;
+      const itemToken = ai.token || tokenSymbol;
+
       const item: ScheduleItem = {
         serviceCategory: serviceCategoryForIntent(effectiveIntent),
         serviceID: resolveServiceId(effectiveIntent, ai.provider) || ai.provider || '',
@@ -247,9 +278,11 @@ export async function POST(req: Request) {
         billersCode: ai.destination_account as string,
         amountNgn: ai.amount_ngn as number,
         meterType: ai.meter_type || undefined,
+        chain: itemChain,
+        tokenSymbol: itemToken,
       };
 
-      const capacity = await checkAutonomousCapacity(walletAddr, chain, tokenSymbol, item.amountNgn, rules.exchangeRate);
+      const capacity = await checkAutonomousCapacity(walletAddr, itemChain, itemToken, item.amountNgn, rules.exchangeRate);
       if (!capacity.ok) {
         return NextResponse.json({
           success: true,
@@ -265,9 +298,9 @@ export async function POST(req: Request) {
 
       return NextResponse.json({
         success: true,
-        reply: `Got it — ${item.provider || ''} ${item.serviceCategory.toLowerCase()} for ₦${item.amountNgn.toLocaleString()}, ${when} (${capacity.neededCrypto.toFixed(4)} ${tokenSymbol} on ${chain}).\n\nYou have ${capacity.allowanceRemaining.toFixed(2)} ${tokenSymbol} approved and ${capacity.balance.toFixed(2)} ${tokenSymbol} in your wallet.\n\nTap Approve to confirm.`,
+        reply: `Got it — ${item.provider || ''} ${item.serviceCategory.toLowerCase()} for ₦${item.amountNgn.toLocaleString()}, ${when} (${capacity.neededCrypto.toFixed(4)} ${itemToken} on ${itemChain}).\n\nYou have ${capacity.allowanceRemaining.toFixed(2)} ${itemToken} approved and ${capacity.balance.toFixed(2)} ${itemToken} in your wallet.\n\nTap Approve to confirm.`,
         scheduleConfirm: {
-          items: [item], chain, tokenSymbol,
+          items: [item],
           runOnceInMinutes: ai.schedule_in_minutes || undefined,
           recurring: ai.is_recurring ? { frequency: ai.frequency, dayOfWeek: ai.day_of_week, dayOfMonth: ai.day_of_month } : undefined,
           totalNgn: item.amountNgn,

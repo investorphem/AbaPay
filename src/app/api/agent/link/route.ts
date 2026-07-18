@@ -90,6 +90,54 @@ export async function POST(req: Request) {
   }
 }
 
+// ⚡ CHANGE / RESET PIN — the app itself never asks for the OLD PIN. The wallet connection
+// that gets a user into the Agent Hub in the first place IS the authentication here (same
+// trust model as DELETE/unlink below) — the chat PIN only ever confirms a payment inside a
+// chat session where there's no wallet to sign with. A forgotten PIN and a deliberate PIN
+// change are therefore the same operation: prove you hold the wallet, set a new PIN.
+export async function PATCH(req: Request) {
+  const limited = await enforceRateLimit(req, 'agent-link-write', 10, 300);
+  if (limited) return limited;
+
+  try {
+    const { id, wallet_address, new_pin } = await req.json();
+    const wallet = String(wallet_address || '').toLowerCase();
+
+    if (!id || !/^0x[a-f0-9]{40}$/.test(wallet)) {
+      return NextResponse.json({ success: false, message: 'Link id and wallet required' }, { status: 400 });
+    }
+    if (!/^\d{4,6}$/.test(String(new_pin || ''))) {
+      return NextResponse.json({ success: false, message: 'PIN must be 4-6 digits' }, { status: 400 });
+    }
+
+    // Scoped to the owning wallet — you can only reset the PIN on your own linked channel.
+    const { data, error } = await supabaseAdmin
+      .from('agent_links')
+      .update({
+        pin_hash: hashPin(String(new_pin)),
+        // Clear any lockout from prior failed attempts — a fresh PIN deserves a fresh count.
+        failed_pin_attempts: 0,
+        locked_until: null,
+      })
+      .eq('id', id)
+      .ilike('wallet_address', wallet)
+      .select('id')
+      .maybeSingle();
+
+    if (error) {
+      console.error('[AgentLink] PIN reset failed:', error.message);
+      return NextResponse.json({ success: false, message: 'Could not update PIN.' }, { status: 500 });
+    }
+    if (!data) {
+      return NextResponse.json({ success: false, message: 'That link was not found for this wallet.' }, { status: 404 });
+    }
+
+    return NextResponse.json({ success: true, message: 'PIN updated.' });
+  } catch {
+    return NextResponse.json({ success: false, message: 'Invalid request' }, { status: 400 });
+  }
+}
+
 export async function DELETE(req: Request) {
   const limited = await enforceRateLimit(req, 'agent-link-write', 10, 300);
   if (limited) return limited;

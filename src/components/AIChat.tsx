@@ -24,12 +24,13 @@ interface ScheduleItem {
   billersCode: string;
   amountNgn: number;
   meterType?: string;
+  /** Each item carries its own chain/token — a batch can mix chains/tokens per recipient. */
+  chain: string;
+  tokenSymbol: string;
 }
 
 interface ScheduleConfirm {
   items: ScheduleItem[];
-  chain: string;
-  tokenSymbol: string;
   runOnceInMinutes?: number;
   recurring?: { frequency: 'daily' | 'weekly' | 'monthly'; dayOfWeek: number | null; dayOfMonth: number | null };
   totalNgn: number;
@@ -131,8 +132,8 @@ export function AIChat({ onPrefill, onNavigate, walletConnected, onRequireWallet
             billers_code: item.billersCode,
             amount_ngn: item.amountNgn,
             meter_type: item.meterType,
-            blockchain: confirm.chain,
-            token_used: confirm.tokenSymbol,
+            blockchain: item.chain,
+            token_used: item.tokenSymbol,
             auto_execute: true,
             batch_id: batchId,
             ...(runOnceAt
