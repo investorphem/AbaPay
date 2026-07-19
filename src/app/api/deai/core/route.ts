@@ -68,6 +68,10 @@ const fallbackIntentMatcher = (text: string) => {
     if (t.includes('transfer') || t.includes('send money') || t.includes('bank')) return 'BANK_TRANSFER';
     if (t.includes('education') || t.includes('waec') || t.includes('jamb') || t.includes('school')) return 'EDUCATION';
     if (t.includes('history') || t.includes('status') || t.includes('recent')) return 'TRANSACTION_HISTORY';
+    // Without this, "Balance" typed mid-flow never triggered the CONTEXT PIVOT — the user
+    // stayed trapped in whatever field the bot was waiting on, getting the same "reply with
+    // the Target Number/Account" prompt back no matter how many times they asked.
+    if (t.includes('balance') || t.includes('how much do i have')) return 'CHECK_BALANCE';
     return 'UNKNOWN';
 };
 
@@ -257,12 +261,18 @@ export async function POST(req: Request) {
         .eq('link_verified', true)
         .maybeSingle();
 
+      let wasRelink = false;
       if (existingLink) {
         const sameWallet = String((existingLink as any).wallet_address).toLowerCase() === String((pendingLink as any).wallet_address).toLowerCase();
         if (sameWallet) {
           // Re-linking the same channel to the same wallet (e.g. refreshing a PIN or the
-          // approved token/chain) — replace the stale row rather than erroring.
+          // approved token/chain) — replace the stale row rather than erroring. Flagged so
+          // the confirmation below says explicitly that a previous link existed and its PIN
+          // was replaced, instead of a plain "Linked!" that looks like a silent first-time
+          // link (which is confusing, and — if the user DIDN'T initiate this — a signal
+          // their wallet may be compromised that they'd otherwise never see).
           await supabase.from('agent_links').delete().eq('id', (existingLink as any).id);
+          wasRelink = true;
         } else {
           const otherWallet = String((existingLink as any).wallet_address);
           const channelLabel = channel === 'TELEGRAM' ? 'Telegram' : channel === 'WHATSAPP' ? 'WhatsApp' : 'X';
@@ -286,7 +296,9 @@ export async function POST(req: Request) {
       const w = (pendingLink as any).wallet_address;
       return NextResponse.json({
         action: 'REPLY',
-        message: `✅ *Linked!*\n\nWallet: \`${w.slice(0, 6)}...${w.slice(-4)}\`\n\nYou can now pay bills right here — just tell me what you need, then confirm with your PIN.\n\n_Try: "Send 500 airtime to 08012345678"_`,
+        message: wasRelink
+          ? `🔄 *Re-linked!*\n\nThis chat was already linked to wallet \`${w.slice(0, 6)}...${w.slice(-4)}\` — your previous link (and its PIN) has been replaced with this new one.\n\n_If you didn't do this yourself, revoke your agent allowance in the app immediately._`
+          : `✅ *Linked!*\n\nWallet: \`${w.slice(0, 6)}...${w.slice(-4)}\`\n\nYou can now pay bills right here — just tell me what you need, then confirm with your PIN.\n\n_Try: "Send 500 airtime to 08012345678"_`,
       });
     }
 
@@ -1327,7 +1339,20 @@ export async function POST(req: Request) {
         // Bank transfer and Education stay app-only (see capabilities.ts for why).
         // INTERNATIONAL is fully supported in chat — validated against VTpass's live country list.
         const appOnly = ['BANK_TRANSFER', 'EDUCATION'];
-        const isForeign = aiParsed.country && aiParsed.country !== 'NG';
+
+        // 🔴 THE "can't send airtime to NI" BUG: the AI sometimes emits a stray/wrong country
+        // code (e.g. "NI" for Nigeria instead of ISO "NG"), and the old check treated ANY
+        // non-NG value on ANY intent as an international AIRTIME request — so "I need
+        // electricity for my ibedc prepaid meter" got answered with "I can't send airtime to
+        // NI", twice over wrong (wrong service, phantom country). Two guards:
+        //   1. Normalize common Nigeria mis-codes to NG before comparing.
+        //   2. Only airtime/data can be international — electricity/TV/bank/education are
+        //      domestic-only services, so a country code on those intents is parser noise,
+        //      never a reason to reroute the request.
+        const NIGERIA_ALIASES = new Set(['NG', 'NI', 'NGA']);
+        const normalizedCountry = aiParsed.country && NIGERIA_ALIASES.has(String(aiParsed.country).toUpperCase()) ? 'NG' : aiParsed.country;
+        const canBeForeign = ['VEND_AIRTIME', 'VEND_DATA', 'INTERNATIONAL', 'UNKNOWN'].includes(aiParsed.intent);
+        const isForeign = canBeForeign && normalizedCountry && normalizedCountry !== 'NG';
         const effectiveIntent = isForeign ? 'INTERNATIONAL' : aiParsed.intent;
 
         if (appOnly.includes(effectiveIntent)) {
@@ -1349,7 +1374,7 @@ export async function POST(req: Request) {
         if (effectiveIntent === 'INTERNATIONAL') {
             const f = await assessFeasibility({
                 intent: 'INTERNATIONAL',
-                country: aiParsed.country,
+                country: normalizedCountry,
                 account: aiParsed.destination_account,
                 amountNgn: aiParsed.amount_ngn,
             });
