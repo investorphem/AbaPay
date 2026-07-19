@@ -1303,6 +1303,12 @@ export async function POST(req: Request) {
                 // user SAID it, not from whenever the last field finally arrived.
                 ...(aiParsed.is_recurring && !intentData.is_recurring ? { is_recurring: true, frequency: aiParsed.frequency, day_of_week: aiParsed.day_of_week, day_of_month: aiParsed.day_of_month } : {}),
                 ...(aiParsed.schedule_in_minutes && aiParsed.schedule_in_minutes > 0 && !intentData.schedule_run_at ? { schedule_run_at: new Date(Date.now() + aiParsed.schedule_in_minutes * 60_000).toISOString() } : {}),
+                // The AI extracts chain/token when the user names them ("on Celo", "with
+                // USDC") — previously discarded here, so saying "Celo" was met with the same
+                // question again. Persisting them means naming a chain/token at ANY point in
+                // the conversation skips the corresponding selection prompt entirely.
+                ...(aiParsed.chain && !intentData.chain ? { chain: aiParsed.chain } : {}),
+                ...(aiParsed.token && !intentData.selected_token ? { selected_token: aiParsed.token } : {}),
             };
         } catch (e) {
             // Ignore AI errors — the regex sweep below still catches the common cases.
@@ -1494,6 +1500,14 @@ export async function POST(req: Request) {
         // rest of the details.
         const isOneOffFuture = !!intentData.schedule_run_at;
         if ((intentData.is_recurring || aiParsed.is_recurring || isOneOffFuture) && ['VEND_AIRTIME', 'VEND_DATA', 'ELECTRICITY', 'TV'].includes(intentData.intent)) {
+            // Same phone-prefix network inference the MISSING FIELD ENGINE does for the
+            // immediate-payment path — that engine runs AFTER this block, so without
+            // repeating it here, a scheduled "buy airtime for my number" asked "which
+            // network?" even though the answer was sitting in the number's own prefix.
+            if (['VEND_AIRTIME', 'VEND_DATA'].includes(intentData.intent) && intentData.destination_account && !intentData.provider) {
+                intentData.provider = detectNetwork(intentData.destination_account);
+            }
+
             const f = await assessFeasibility({
                 intent: intentData.intent,
                 provider: intentData.provider,
@@ -1521,8 +1535,11 @@ export async function POST(req: Request) {
             // Will this actually auto-pay? Only if they've granted an on-chain allowance —
             // check under whatever token/chain they actually approved, not a hardcoded guess
             // (same fix as the live-payment path above; see the globalUser comment there).
-            const tokenSym = globalUser?.approved_token || 'USD₮';
-            const schedChain = globalUser?.approved_chain || 'CELO';
+            // A chain/token the user explicitly named in conversation wins over the linked
+            // defaults — "buy airtime in 3 minutes ... Celo ... USDC" should schedule
+            // exactly that, not silently fall back to whatever was approved at link time.
+            const tokenSym = intentData.selected_token || globalUser?.approved_token || 'USD₮';
+            const schedChain = (intentData.chain || globalUser?.approved_chain || 'CELO').toUpperCase();
             const allowance = await getRemainingAllowance(globalUser?.wallet_address || '', tokenSym, schedChain);
             const canAutoPay = allowance.ok && allowance.remaining > 0;
 
