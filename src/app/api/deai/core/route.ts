@@ -42,6 +42,11 @@ const detectNetwork = (phone: any) => {
   return null;
 };
 
+// A bare "Hey"/"Good morning" carries zero financial content — it deserves a short, warm
+// reply, not the full capability menu (which reads like a wall of text for a plain greeting).
+// Anchored to the WHOLE message so "hey buy me airtime" still falls through to real parsing.
+const GREETING_RE = /^(hi+|hey+|hell+o+|yo+|sup|howdy|hola|good\s*(morning|afternoon|evening|day)|what'?s\s*up)[\s!.?]*$/i;
+
 const fallbackIntentMatcher = (text: string) => {
     const t = text.toLowerCase();
     if (t.includes('airtime') || t.includes('recharge')) return 'VEND_AIRTIME';
@@ -1607,6 +1612,17 @@ export async function POST(req: Request) {
     if (!SERVICE_RULES[intentData.intent] && intentData.intent !== 'TRANSACTION_HISTORY' && intentData.intent !== 'CHECK_BALANCE') intentData.intent = 'UNKNOWN';
 
     if (intentData.intent === 'UNKNOWN') {
+        // ⚡ A plain greeting isn't a failed request — it's not a request at all. Dumping the
+        // entire capability menu in response to "Hey" reads as robotic and overwhelming for
+        // what should be a one-line reply. Full menu is still one message away — HELP/"what
+        // can you do" already returns describeCapabilities().
+        if (GREETING_RE.test(text.trim())) {
+            return NextResponse.json({
+                action: 'REPLY',
+                message: `👋 Hey! What can I help you with — airtime, data, a bill, or your balance?`,
+            });
+        }
+
         // Never a bare shrug — always show what IS possible. The model may still have
         // extracted partial signals (a number, an amount, a provider) even though it
         // couldn't confidently settle on a full intent — use those to tailor the
