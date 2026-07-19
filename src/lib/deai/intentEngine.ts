@@ -71,6 +71,11 @@ export interface ParsedIntent {
   // the app. Recipients in a batch use their own per-item chain/token instead (see above).
   chain: 'CELO' | 'BASE' | null;
   token: string | null;
+
+  // ⚡ Detected language of the user's message (e.g. "en", "pcm", "ha", "yo", "ig", "fr").
+  // The reply layer can use this to answer in the user's own language. Purely advisory —
+  // never affects how money is parsed or moved.
+  language: string | null;
 }
 
 const SYSTEM_PROMPT = `You are the intent-routing engine for AbaPay, a Web3 utility bill payment app used in Nigeria.
@@ -95,7 +100,8 @@ Schema:
   "schedule_in_minutes": number | null,
   "recipients": [{ "provider": string | null, "amount_ngn": number | null, "destination_account": string | null, "chain": "CELO" | "BASE" | null, "token": string | null }] | null,
   "chain": "CELO" | "BASE" | null,
-  "token": string | null
+  "token": string | null,
+  "language": string | null
 }
 
 Rules:
@@ -124,6 +130,16 @@ Rules:
    - "I need data" / "buy me some MB" / "browsing data abeg" -> VEND_DATA, missing ["destination_account"] (or more, if genuinely absent).
    - "light don go, need to buy units" -> PAY_ELECTRICITY, missing whatever isn't stated (Nigerian Pidgin for "the power went out").
    - A single greeting with nothing else ("hi", "hello") when nothing else is stated -> "UNKNOWN" is correct here, since there's genuinely no intent yet.
+
+10b. READ THE SUBTEXT — infer intent from the SITUATION a user describes, not just explicit
+   keywords. Real people describe a problem, not a product. Map the underlying need:
+   - "I'm sitting in the dark" / "no light since morning" / "NEPA has taken light"  -> PAY_ELECTRICITY.
+   - "my phone is dead" / "I'm about to be cut off" / "I can't call anybody"          -> VEND_AIRTIME.
+   - "I can't browse" / "my internet finished" / "no MB to load WhatsApp"             -> VEND_DATA.
+   - "I want to watch the match" / "my DStv expired" / "TV no dey work"               -> PAY_CABLE.
+   Only infer when the situation clearly points to ONE service. If it's ambiguous
+   ("everything is down"), stay UNKNOWN and let the app ask. Never invent an amount or
+   account from subtext — infer only the INTENT; leave unstated fields in "missing".
 
 11. RECURRENCE — set is_recurring=true when the user wants this to repeat:
    - "every Tuesday buy 200 airtime"        -> intent VEND_AIRTIME, is_recurring true, frequency "weekly", day_of_week 2
@@ -168,6 +184,12 @@ Rules:
    Valid chain values: "CELO" | "BASE". Valid token values: "USDC" | "USD₮" | "USDm" (USDm is
    Celo-only — never pair it with "BASE"). Leave null when the user doesn't name one; the
    app falls back to whatever chain/token the user currently has selected.
+
+16. LANGUAGE — set "language" to the BCP-47-ish code of the language the user actually wrote
+   in, so the app can reply in kind: "en" (English), "pcm" (Nigerian Pidgin), "ha" (Hausa),
+   "yo" (Yoruba), "ig" (Igbo), "fr" (French), "sw" (Swahili), "ar" (Arabic), etc. For plain
+   English or a bare number/command, use "en". Judge by the message's own words, not the
+   user's assumed nationality.
 
 Never invent an account number or amount. If it isn't in the message, it's null.`;
 
@@ -242,6 +264,7 @@ function fallbackIntent(): ParsedIntent {
     recipients: null,
     chain: null,
     token: null,
+    language: null,
   };
 }
 
@@ -321,5 +344,7 @@ function normalize(p: any): ParsedIntent {
       const t = normalizeToken(p?.token);
       return t === 'USDm' && normalizeChain(p?.chain) === 'BASE' ? null : t;
     })(),
+    // Short language code, letters only, capped — never trust free-form model output verbatim.
+    language: typeof p?.language === 'string' && /^[a-z]{2,3}$/i.test(p.language.trim()) ? p.language.trim().toLowerCase() : null,
   };
 }
