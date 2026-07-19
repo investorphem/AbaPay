@@ -1,7 +1,7 @@
 // src/app/api/deai/core/route.ts
 import { NextResponse } from 'next/server';
 import { parseIntent } from '@/lib/deai/intentEngine';
-import { verifyAccount as realVerifyAccount, fetchDataVariations as realFetchDataVariations, fetchCryptoBalances as realFetchCryptoBalances, resolveServiceId } from '@/lib/deai/services';
+import { verifyAccount as realVerifyAccount, fetchCryptoBalances as realFetchCryptoBalances, resolveServiceId } from '@/lib/deai/services';
 import { createDeepLink } from '@/lib/deai/deeplink';
 import { relayPayBillFor, getRemainingAllowance } from '@/lib/deai/relayer';
 import { checkServiceAllowed, checkAgentSpendAllowed } from '@/lib/serviceRules';
@@ -177,11 +177,6 @@ async function renderTokenChoicesWithAllowance(wallet: string, chain: 'CELO' | '
             return `*${i + 1}.* ${sym} — balance _${bal}_ · approved limit _${approved}_`;
         })
         .join('\n');
-}
-
-async function fetchDataVariations(provider: string) {
-    const plans = await realFetchDataVariations(`${provider.toLowerCase()}-data`);
-    return plans.map((p, i) => ({ id: String(i + 1), name: p.name, price: p.price, code: p.code }));
 }
 
 export async function POST(req: Request) {
@@ -367,11 +362,29 @@ export async function POST(req: Request) {
       });
     }
 
-    // CONTEXT PIVOT
+    // CONTEXT PIVOT — lets a user escape a stuck menu/selection state by clearly naming a
+    // different service, instead of being stuck replying "Invalid selection" forever.
+    //
+    // 🔴 THE BUG THIS FIXES: this only ever checked AWAITING_DETAILS. Every OTHER "waiting for
+    // a specific reply" state (picking a data plan category, a variation, a provider, a cable
+    // action...) had no escape hatch at all — a user who got derailed into the wrong flow (see
+    // the intent-overwrite fix below) and then said "Electric" / "It's electric I want to buy"
+    // just kept hearing "Invalid selection. Please reply with a valid number from the list."
+    // forever, with no way out except knowing to type the exact word "cancel".
+    //
+    // Deliberately EXCLUDES AWAITING_PIN (a stray keyword mid-PIN-entry must never abort a
+    // payment one step from completing) and AWAITING_SUPPORT_MESSAGE (a support ticket's free
+    // text can legitimately contain words like "electric" or "data" without meaning "start
+    // over").
+    const INTERRUPTIBLE_STATES = new Set([
+        'AWAITING_DETAILS', 'AWAITING_FIELD', 'AWAITING_PROVIDER', 'AWAITING_CABLE_ACTION',
+        'AWAITING_PLAN_CATEGORY', 'AWAITING_VARIATION', 'AWAITING_CHAIN', 'AWAITING_TOKEN',
+        'AWAITING_METER_TYPE', 'AWAITING_EMAIL_CHOICE',
+    ]);
     const freshIntentCheck = fallbackIntentMatcher(text);
-    if (session && session.status === 'AWAITING_DETAILS' && freshIntentCheck !== 'UNKNOWN' && freshIntentCheck !== session.intent_data.intent) {
+    if (session && INTERRUPTIBLE_STATES.has(session.status) && freshIntentCheck !== 'UNKNOWN' && freshIntentCheck !== session.intent_data.intent) {
         await supabase.from('deai_sessions').delete().eq('chat_id', platform_id);
-        session = null; 
+        session = null;
     }
 
     let isContinuingToAI = false;
@@ -1148,19 +1161,6 @@ export async function POST(req: Request) {
           message: `🤖 *Final Checkout*\n\nService: ${session.intent_data.intent.replace('_', ' ')}\nAccount: ${session.intent_data.destination_account}\n${detailsRow}\nAmount: ${currencySymbol}${session.intent_data.amount_ngn || 0}\nPayment: *${selected}*\n*Total: ${currencySymbol}${total}*\n\n🔒 Reply with your *PIN* to confirm.`
       });
     }
-    // STATE: DATA PLAN
-    else if (session?.status === 'AWAITING_DATA_PLAN') {
-        const selection = text.trim();
-        const variation = session.intent_data.available_variations.find((v: any) => v.id === selection);
-        if (!variation) return NextResponse.json({ action: 'REPLY', message: "❌ Invalid selection. Please reply with a valid number from the list." });
-        
-        session.intent_data.variation_code = variation.code;
-        session.intent_data.variation_name = variation.name;
-        session.intent_data.amount_ngn = variation.price; 
-        session.status = 'AWAITING_DETAILS'; 
-        text = ""; 
-        isContinuingToAI = true;
-    }
     // STATE: METER TYPE
     else if (session?.status === 'AWAITING_METER_TYPE') {
         const typeMap: Record<string, string> = { '1': 'prepaid', '2': 'postpaid' };
@@ -1238,13 +1238,32 @@ export async function POST(req: Request) {
 
             const mapped = intentMap[aiParsed.intent];
 
+            // 🔴 THE BUG THIS FIXES: parseIntent() re-parses each message in complete
+            // isolation, with zero memory of the conversation. Mid-flow (session status
+            // AWAITING_DETAILS — we've already committed to an intent and are just collecting
+            // the remaining fields), a stray follow-up like a bare phone number would get
+            // freshly (mis)classified — e.g. "08168811821" alone read as a new VEND_DATA
+            // request — and silently overwrite the REAL, already-in-progress intent (the
+            // user's actual ELECTRICITY request), abandoning it entirely. Worse, the same
+            // unconditional overwrite clobbered destination_account (the meter number already
+            // given) with whatever number showed up in the new message, so the correct value
+            // was gone and the field engine kept re-asking for it forever.
+            //
+            // Fix: once we're continuing an established flow, the AI's fresh parse may only
+            // fill in fields that are STILL missing, and may never re-route the intent itself
+            // — a genuine change of mind is handled by the CONTEXT PIVOT check above (and now
+            // covers every "waiting for a reply" state, not just this one), which explicitly
+            // resets the session first. If we get here with AWAITING_DETAILS still active,
+            // the user is continuing, not switching.
+            const continuingFlow = session?.status === 'AWAITING_DETAILS';
+
             intentData = {
                 ...intentData,
-                ...(mapped ? { intent: mapped } : {}),
-                ...(aiParsed.amount_ngn ? { amount_ngn: aiParsed.amount_ngn } : {}),
-                ...(aiParsed.destination_account ? { destination_account: aiParsed.destination_account } : {}),
-                ...(aiParsed.provider ? { provider: aiParsed.provider } : {}),
-                ...(aiParsed.meter_type ? { meter_type: aiParsed.meter_type } : {}),
+                ...(!continuingFlow && mapped ? { intent: mapped } : {}),
+                ...(aiParsed.amount_ngn && !intentData.amount_ngn ? { amount_ngn: aiParsed.amount_ngn } : {}),
+                ...(aiParsed.destination_account && !intentData.destination_account ? { destination_account: aiParsed.destination_account } : {}),
+                ...(aiParsed.provider && !intentData.provider ? { provider: aiParsed.provider } : {}),
+                ...(aiParsed.meter_type && !intentData.meter_type ? { meter_type: aiParsed.meter_type } : {}),
             };
         } catch (e) {
             // Ignore AI errors — the regex sweep below still catches the common cases.
@@ -1718,18 +1737,15 @@ export async function POST(req: Request) {
         }
     }
 
-    // DATA VARIATIONS GATE 
-    if (intentData.intent === 'VEND_DATA' && !intentData.variation_code) {
-        const variations = await fetchDataVariations(intentData.provider);
-        intentData.available_variations = variations;
-        await supabase.from('deai_sessions').upsert({ chat_id: platform_id, platform, intent_data: intentData, status: 'AWAITING_DATA_PLAN', expires_at: new Date(Date.now() + 300000).toISOString() }, { onConflict: 'chat_id' });
-        
-        let msg = `📊 *Select Data Plan for ${intentData.provider.toUpperCase()}*\n\n`;
-        variations.forEach((v: any) => msg += `${v.id}️⃣ ${v.name} - ${currencySymbol}${v.price}\n`);
-        msg += `\n*Reply with the number (e.g., 1).*`;
-        
-        return NextResponse.json({ action: 'REPLY', message: msg });
-    }
+    // ⚡ THE OLD "DATA VARIATIONS GATE" USED TO LIVE HERE.
+    //
+    // It dumped every plan VTpass returned (MTN alone: ~50) as one flat numbered wall of
+    // text, instead of the category-grouped menu (Daily/Weekly/Monthly/...) the web app
+    // shows. Worse: it ran unconditionally BEFORE the correct, already-built replacement
+    // below (`requiresVariation` + fetchVariations + groupDataPlans + AWAITING_PLAN_CATEGORY /
+    // AWAITING_VARIATION) ever got a chance to run — that properly-grouped flow was fully
+    // implemented and imported, but permanently shadowed as dead code by this block returning
+    // first. Deleting this is the fix: VEND_DATA now falls through to the real implementation.
 
     intentData.fee = ['ELECTRICITY', 'TV', 'EDUCATION'].includes(intentData.intent) ? 100 : 0;
 
