@@ -1,6 +1,7 @@
 // src/app/api/deai/core/route.ts
 import { NextResponse } from 'next/server';
 import { parseIntent } from '@/lib/deai/intentEngine';
+import { humanizeReply } from '@/lib/deai/humanize';
 import { verifyAccount as realVerifyAccount, fetchCryptoBalances as realFetchCryptoBalances, resolveServiceId } from '@/lib/deai/services';
 import { createDeepLink } from '@/lib/deai/deeplink';
 import { relayPayBillFor, getRemainingAllowance } from '@/lib/deai/relayer';
@@ -230,7 +231,33 @@ async function renderTokenChoicesWithAllowance(wallet: string, chain: 'CELO' | '
         .join('\n');
 }
 
+// Carries the detected language + the user's message out of handleCore so the POST wrapper
+// can localize the finished reply (see humanizeReply). Purely a decoration channel — the
+// reply's FACTS are already fixed by handleCore; the wrapper only rewrites the prose.
+interface HumanizeCtx { lang?: string; userText?: string; channel?: string }
+
 export async function POST(req: Request) {
+  const ctx: HumanizeCtx = {};
+  const res = await handleCore(req, ctx);
+
+  // ⚡ LOCALIZE THE REPLY into the user's language / tone / channel style — safely. Only when
+  // a non-English language was detected; the humanizer itself verifies no number, hash, or
+  // link is altered and falls back to the original otherwise (see src/lib/deai/humanize.ts).
+  if (ctx.lang && ctx.lang !== 'en') {
+    try {
+      const data = await res.clone().json();
+      if (data?.action === 'REPLY' && typeof data.message === 'string') {
+        const localized = await humanizeReply(data.message, { language: ctx.lang, channel: ctx.channel || '', userText: ctx.userText });
+        if (localized && localized !== data.message) {
+          return NextResponse.json({ ...data, message: localized }, { status: res.status });
+        }
+      }
+    } catch { /* any hiccup: fall through to the original, unlocalized reply */ }
+  }
+  return res;
+}
+
+async function handleCore(req: Request, ctx: HumanizeCtx): Promise<NextResponse> {
   try {
     // 🔐 INTERNAL ONLY: this route is the DeAI "brain" and must only be reachable
     // via our own bot webhook routes. Without this check, anyone who knows a
@@ -242,6 +269,8 @@ export async function POST(req: Request) {
     }
 
     let { platform, platform_id, text, chat_type } = await req.json();
+    ctx.userText = typeof text === 'string' ? text : '';
+    ctx.channel = platform;
 
     // 🔐 INPUT VALIDATION: reject malformed payloads before they touch any logic
     if (typeof text !== 'string' || typeof platform_id !== 'string' || !platform_id || text.length > 1000) {
@@ -397,6 +426,7 @@ export async function POST(req: Request) {
       // Try to understand a payment request and hand back a ready-to-pay link.
       let gi: any = null;
       try { gi = await parseIntent(text); } catch {}
+      if (gi?.language && gi.language !== 'en') ctx.lang = gi.language;
       let gData: any = { intent: 'UNKNOWN' };
       if (gi) {
         const gMap: Record<string, string> = { VEND_AIRTIME: 'VEND_AIRTIME', VEND_DATA: 'VEND_DATA', PAY_ELECTRICITY: 'ELECTRICITY', PAY_CABLE: 'TV' };
@@ -481,6 +511,11 @@ export async function POST(req: Request) {
       await supabase.from('deai_sessions').delete().eq('chat_id', platform_id);
       session = null;
     }
+
+    // Language baseline: reuse whatever language was detected earlier this conversation (stored
+    // on the session), so short follow-ups like "1" or a bare PIN still get replies in the
+    // user's language. A fresh non-English detection later this turn overrides it.
+    if (session?.intent_data?.language) ctx.lang = session.intent_data.language;
 
     const userInput = text.trim().toLowerCase();
 
@@ -1405,6 +1440,9 @@ export async function POST(req: Request) {
     if (text !== "") {
         try {
             aiParsed = await parseIntent(text);
+            // Only a fresh NON-English detection updates the language — a bare "1"/"2" menu
+            // reply parses as "en" and must not wipe a Yoruba/Pidgin user's remembered language.
+            if (aiParsed?.language && aiParsed.language !== 'en') ctx.lang = aiParsed.language;
 
             // Map the engine's intent names onto the core's SERVICE_RULES keys.
             const intentMap: Record<string, string> = {
@@ -1466,6 +1504,9 @@ export async function POST(req: Request) {
                 // the conversation skips the corresponding selection prompt entirely.
                 ...(aiParsed.chain && !intentData.chain ? { chain: aiParsed.chain } : {}),
                 ...(aiParsed.token && !intentData.selected_token ? { selected_token: aiParsed.token } : {}),
+                // Remember the user's language on the session so every later reply this
+                // conversation (including short "1"/PIN turns) can be localized too.
+                ...(aiParsed.language && aiParsed.language !== 'en' ? { language: aiParsed.language } : {}),
             };
         } catch (e) {
             // Ignore AI errors — the regex sweep below still catches the common cases.
@@ -2376,6 +2417,10 @@ export async function POST(req: Request) {
             message: `${prependSystemMsg}⛓️ *${chosenChain}*\n\n💰 *Which token?*\n\n${list}\n\n_Reply with the number._`,
         });
     }
+
+    // Fallback — every real flow above returns; this only guards the (unreachable in practice)
+    // case where all fields are already set but no branch claimed the turn.
+    return NextResponse.json({ action: 'REPLY', message: "🤔 I didn't catch that — say *help* to see what I can do." });
 
   } catch (error) {
     console.error("System Error:", error);
