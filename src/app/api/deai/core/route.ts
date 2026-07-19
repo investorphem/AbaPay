@@ -47,6 +47,18 @@ const detectNetwork = (phone: any) => {
 // Anchored to the WHOLE message so "hey buy me airtime" still falls through to real parsing.
 const GREETING_RE = /^(hi+|hey+|hell+o+|yo+|sup|howdy|hola|good\s*(morning|afternoon|evening|day)|what'?s\s*up)[\s!.?]*$/i;
 
+// Human-phrased guesses for the "did you mean...?" suggestion below — keeps the bot on-task
+// (always steering back toward an actual bill-pay action) instead of a flat capability dump.
+const INTENT_GUESS_LABELS: Record<string, string> = {
+    VEND_AIRTIME: 'top up airtime',
+    VEND_DATA: 'buy a data bundle',
+    ELECTRICITY: 'pay an electricity bill',
+    TV: 'subscribe to or renew a cable TV package',
+    BANK_TRANSFER: 'make a bank transfer',
+    EDUCATION: 'buy an education PIN (WAEC/JAMB)',
+    TRANSACTION_HISTORY: 'check your transaction history',
+};
+
 const fallbackIntentMatcher = (text: string) => {
     const t = text.toLowerCase();
     if (t.includes('airtime') || t.includes('recharge')) return 'VEND_AIRTIME';
@@ -1623,6 +1635,18 @@ export async function POST(req: Request) {
             });
         }
 
+        // ⚡ SMART GUESS — before falling back to the full capability dump, see if the crude
+        // keyword matcher (freshIntentCheck) spotted a plausible service the AI itself didn't
+        // commit to. A genuinely ambiguous message ("subscribe my TV", "recharge") deserves a
+        // direct, actionable question — "did you mean X?" — not a wall of every capability
+        // the bot has, most of which are irrelevant to what was actually typed.
+        if (freshIntentCheck !== 'UNKNOWN' && INTENT_GUESS_LABELS[freshIntentCheck]) {
+            return NextResponse.json({
+                action: 'REPLY',
+                message: `🤔 Did you mean you'd like to ${INTENT_GUESS_LABELS[freshIntentCheck]}? Tell me the amount and the account/number, and I'll take it from there.`,
+            });
+        }
+
         // Never a bare shrug — always show what IS possible. The model may still have
         // extracted partial signals (a number, an amount, a provider) even though it
         // couldn't confidently settle on a full intent — use those to tailor the
@@ -1739,8 +1763,22 @@ export async function POST(req: Request) {
             if (intentData.amount_ngn) savedItems.push(`₦${intentData.amount_ngn}`);
             if (intentData.destination_account) savedItems.push(`${intentData.destination_account}`);
             if (intentData.email) savedItems.push(`Email Saved`);
-            
+
             let echoMsg = savedItems.length > 0 ? `💡 *Got it! (${savedItems.join(" | ")})*\n\n` : "";
+
+            // ⚡ CLARIFYING-QUESTION DETECTION — "Did you mean the meter number?" is a question
+            // ABOUT what we're asking, not an attempt to answer it. Repeating the exact same
+            // generic prompt back reads as not having understood the question at all. When
+            // there's exactly one missing field and the reply looks like a question, confirm
+            // directly instead.
+            const looksLikeQuestion = /\?\s*$/.test(text.trim()) || /\b(did you mean|do you mean|you mean|is it)\b/i.test(text);
+            if (looksLikeQuestion && missing.length === 1) {
+                const fieldLabel = missing[0].replace(/\*/g, '');
+                return NextResponse.json({
+                    action: 'REPLY',
+                    message: `${prependSystemMsg}Yes — please reply with ${fieldLabel} to continue your ${intentData.intent.replace('_', ' ').toLowerCase()} request.`,
+                });
+            }
 
             return NextResponse.json({ action: 'REPLY', message: `${prependSystemMsg}${echoMsg}To complete your ${intentData.intent.replace('_', ' ')}, please reply with ${missing.join(", ")}.` });
         }
@@ -1952,6 +1990,39 @@ export async function POST(req: Request) {
             action: 'REPLY',
             message: `${prependSystemMsg}💡 *${intentData.provider_label || intentData.provider}* — meter \`${intentData.destination_account}\`\n\nIs this *Prepaid* or *Postpaid*?\n\n*1.* Prepaid\n*2.* Postpaid`,
         });
+    }
+
+    // ⚡ ELECTRICITY VERIFICATION — runs whenever meter_type + provider are known, regardless
+    // of WHERE meter_type came from.
+    //
+    // 🔴 THE BUG THIS FIXES: verifyAccount() only ever ran inside the AWAITING_METER_TYPE
+    // handler above (i.e. only when the user was ASKED prepaid/postpaid and replied). A user
+    // who stated it upfront ("my prepaid meter 14533083334") skipped that handler entirely —
+    // meter_type was already set, so the gate above never fired — meaning verification was
+    // NEVER ATTEMPTED AT ALL. The unverified meter number then sailed straight through
+    // provider, chain, and token selection, only to fail much later at the parity check with
+    // a generic "I couldn't verify that account" — giving no indication of which account,
+    // which provider, or that the whole electricity flow (not some unrelated data purchase)
+    // was what actually failed.
+    if (intentData.intent === 'ELECTRICITY' && intentData.meter_type && intentData.provider && !intentData.verified_name) {
+        const verification = await verifyAccount(intentData.intent, intentData.destination_account, intentData.meter_type, intentData.provider);
+
+        if (!verification.success) {
+            // Keep everything ELSE (provider, meter_type, phone, email) so the user only has
+            // to send a corrected meter number, not restart the whole request from scratch.
+            intentData.destination_account = null;
+            await supabase.from('deai_sessions').upsert({ chat_id: platform_id, platform, intent_data: intentData, status: 'AWAITING_DETAILS', expires_at: new Date(Date.now() + 300000).toISOString() }, { onConflict: 'chat_id' });
+            return NextResponse.json({
+                action: 'REPLY',
+                message: `❌ ${verification.message || "That meter number couldn't be verified"} for *${intentData.provider_label || intentData.provider}*.\n\nPlease reply with the correct meter number.`,
+            });
+        }
+
+        intentData.verified_name = verification.customer_name;
+        intentData.customer_name = verification.customer_name;
+        intentData.customer_address = verification.customer_address;
+        if (verification.min_amount) intentData.verified_min = verification.min_amount;
+        prependSystemMsg += `✅ *Meter Verified!*\nName: ${verification.customer_name}\n${verification.customer_address ? `Address: ${verification.customer_address}\n` : ''}\n`;
     }
 
     // ⚡ CHAIN SELECTION FIRST, THEN TOKEN ⚡
