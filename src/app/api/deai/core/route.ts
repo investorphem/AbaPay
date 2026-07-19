@@ -31,14 +31,24 @@ const SERVICE_RULES: Record<string, any> = {
     EDUCATION: { min: 1000, max: 50000, required: ['amount_ngn', 'destination_account', 'phone', 'email'] }
 };
 
-const detectNetwork = (phone: any) => {
+// ⚡ Nigerian network prefixes — kept in sync with the list in intentEngine.ts's SYSTEM_PROMPT
+// so the AI's inference and this deterministic fallback can never disagree. The old table was
+// missing several live prefixes (MTN 0814; Airtel 0708/0901; Glo 0815), which is why some
+// numbers were mis-detected (e.g. a Glo 0815 number falling through and being guessed wrong).
+const NETWORK_PREFIXES: Record<string, string[]> = {
+  mtn:    ["0803","0806","0703","0706","0813","0816","0810","0814","0903","0906","0913","0916"],
+  airtel: ["0802","0808","0708","0812","0701","0902","0907","0901","0912"],
+  glo:    ["0805","0807","0705","0815","0811","0905","0915"],
+  etisalat:["0809","0817","0818","0909","0908"],
+};
+
+const detectNetwork = (phone: any): string | null => {
   if (!phone) return null;
-  const phoneStr = String(phone).padStart(11, '0');
-  const prefix = phoneStr.substring(0, 4);
-  if (["0803","0806","0810","0813","0814","0816","0903","0906","0913","0916","0703","0706"].includes(prefix)) return "mtn";
-  if (["0802","0808","0812","0902","0907","0912","0701","0708"].includes(prefix)) return "airtel";
-  if (["0805","0807","0811","0905","0705","0915"].includes(prefix)) return "glo";
-  if (["0809","0817","0818","0908","0909"].includes(prefix)) return "etisalat";
+  const phoneStr = String(phone).replace(/\D/g, '').replace(/^234/, '0');
+  const prefix = phoneStr.padStart(11, '0').substring(0, 4);
+  for (const [network, prefixes] of Object.entries(NETWORK_PREFIXES)) {
+    if (prefixes.includes(prefix)) return network;
+  }
   return null;
 };
 
@@ -1456,10 +1466,17 @@ export async function POST(req: Request) {
                 return NextResponse.json({ action: 'REPLY', message: "📭 You have no automations yet.\n\n_Try: \"Every Tuesday buy ₦200 airtime for 08012345678\"_" });
             }
 
+            const ordinalDay = (n: number) => `${n}${n === 1 ? 'st' : n === 2 ? 'nd' : n === 3 ? 'rd' : 'th'}`;
             const lines = (scheds as any[]).map((sc) => {
-                const when = sc.frequency === 'weekly'
+                // 🔴 "on the nullth monthly" bug: a one-off ('once') schedule has no
+                // day_of_month, so the default branch rendered "nullth". Handle 'once'
+                // explicitly with its run_once_at time.
+                const when = sc.frequency === 'once'
+                    ? (sc.run_once_at ? `once, at ${new Date(sc.run_once_at).toLocaleString('en-GB', { timeZone: 'Africa/Lagos', hour: '2-digit', minute: '2-digit', day: '2-digit', month: 'short' })}` : 'once')
+                    : sc.frequency === 'weekly'
                     ? `every ${['Sunday','Monday','Tuesday','Wednesday','Thursday','Friday','Saturday'][sc.day_of_week] || '?'}`
-                    : sc.frequency === 'daily' ? 'daily' : `on the ${sc.day_of_month}${sc.day_of_month === 1 ? 'st' : sc.day_of_month === 2 ? 'nd' : sc.day_of_month === 3 ? 'rd' : 'th'} monthly`;
+                    : sc.frequency === 'daily' ? 'daily'
+                    : sc.day_of_month ? `on the ${ordinalDay(sc.day_of_month)} monthly` : 'monthly';
                 return `• *${sc.provider || ''} ${sc.service_category}* — ₦${Number(sc.amount_ngn).toLocaleString()} ${when}\n  ${sc.billers_code} · ${sc.auto_execute ? '🤖 auto-pays' : '🔔 reminds you'}`;
             });
 
@@ -1886,6 +1903,22 @@ export async function POST(req: Request) {
     // first. Deleting this is the fix: VEND_DATA now falls through to the real implementation.
 
     intentData.fee = ['ELECTRICITY', 'TV', 'EDUCATION'].includes(intentData.intent) ? 100 : 0;
+
+    // 🔴 THE "PRODUCT DOES NOT EXIST" BUG: the AI infers a phone network from ANY number in
+    // the message (it's told to), including the CONTACT phone on an electricity request. So
+    // "buy electric for my meter ... 08168811821" came back with provider "MTN" — a telecom
+    // network, never a valid electricity disco or cable provider. That wrong value then
+    // bypassed the disco picker below (which only fires when provider is empty), and the
+    // request failed at VTpass ("PRODUCT DOES NOT EXIST") trying to verify a meter against a
+    // phone-network serviceID. Validate the provider against the ACTUAL option list for this
+    // intent; if it doesn't match (a telecom on ELECTRICITY/TV), drop it so the picker fires.
+    if (intentData.provider && ['ELECTRICITY', 'TV'].includes(intentData.intent)) {
+        const spec = providersFor(intentData.intent);
+        if (spec && !matchProvider(String(intentData.provider), spec.options)) {
+            intentData.provider = null;
+            intentData.provider_label = null;
+        }
+    }
 
     // ⚡ PROVIDER GATE — list the options, don't make them guess ⚡
     //
