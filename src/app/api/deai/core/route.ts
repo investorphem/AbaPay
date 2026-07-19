@@ -1644,12 +1644,12 @@ export async function POST(req: Request) {
         // rest of the details.
         const isOneOffFuture = !!intentData.schedule_run_at;
         if ((intentData.is_recurring || aiParsed.is_recurring || isOneOffFuture) && ['VEND_AIRTIME', 'VEND_DATA', 'ELECTRICITY', 'TV'].includes(intentData.intent)) {
-            // Same phone-prefix network inference the MISSING FIELD ENGINE does for the
-            // immediate-payment path — that engine runs AFTER this block, so without
-            // repeating it here, a scheduled "buy airtime for my number" asked "which
-            // network?" even though the answer was sitting in the number's own prefix.
-            if (['VEND_AIRTIME', 'VEND_DATA'].includes(intentData.intent) && intentData.destination_account && !intentData.provider) {
-                intentData.provider = detectNetwork(intentData.destination_account);
+            // Same prefix-is-authoritative rule as the MISSING FIELD ENGINE below (which runs
+            // after this block) — override the AI's network guess with the number's own prefix
+            // so a scheduled airtime never locks in the wrong network.
+            if (['VEND_AIRTIME', 'VEND_DATA'].includes(intentData.intent) && intentData.destination_account) {
+                const detected = detectNetwork(intentData.destination_account);
+                if (detected) { if (intentData.provider !== detected) intentData.provider_label = null; intentData.provider = detected; }
             }
 
             const f = await assessFeasibility({
@@ -2000,8 +2000,23 @@ export async function POST(req: Request) {
     }
 
     // --- 5. THE MISSING FIELD ENGINE ---
-    if (['VEND_AIRTIME', 'VEND_DATA'].includes(intentData.intent) && intentData.destination_account && !intentData.provider) {
-        intentData.provider = detectNetwork(intentData.destination_account);
+    // 🔴 THE "wrong network" BUG: the AI infers a network from the phone number too, and that
+    // guess merged in FIRST — so when the AI guessed wrong (e.g. Glo for an MTN number), the
+    // old `!intentData.provider` guard meant this deterministic prefix lookup never got to
+    // correct it. The MAIN APP has no AI: it derives the network purely from the number's
+    // prefix and is therefore always right. Match it exactly — for airtime/data, the prefix
+    // is authoritative and OVERRIDES the AI's guess whenever we can resolve it. Only when the
+    // prefix is unknown do we keep whatever the AI/earlier turns provided.
+    if (['VEND_AIRTIME', 'VEND_DATA'].includes(intentData.intent) && intentData.destination_account) {
+        const detected = detectNetwork(intentData.destination_account);
+        if (detected) {
+            if (intentData.provider && intentData.provider !== detected) {
+                // The AI (or a stale value) disagreed with the number's own prefix — trust the
+                // prefix, and drop any label tied to the wrong guess.
+                intentData.provider_label = null;
+            }
+            intentData.provider = detected;
+        }
     }
 
     const rules = SERVICE_RULES[intentData.intent];
