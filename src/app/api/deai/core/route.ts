@@ -1838,9 +1838,26 @@ export async function POST(req: Request) {
     // users to say "balance". crypto/fiatBalance/currentCountry/currencySymbol are already
     // computed above for the welcome banner — reuse them instead of re-fetching.
     if (intentData.intent === 'CHECK_BALANCE') {
+        // ⚡ "what's my balance in my currency / in naira" — express the stablecoin holdings
+        // as their local-currency (NGN) equivalent at the live rate, instead of only showing
+        // raw token amounts. Since stablecoins are ~$1, total tokens × the USD→NGN rate is a
+        // close, useful figure for a user who thinks in Naira.
+        const wantsLocal = /\b(in|my)\s+(naira|ngn|currency|local)\b|in my currency|worth|value/i.test(text);
+        if (wantsLocal) {
+            const rate = await getExchangeRate();
+            let totalTokens = 0;
+            for (const chainBals of [crypto.celo, crypto.base]) {
+                for (const v of Object.values(chainBals || {})) totalTokens += Number(v) || 0;
+            }
+            const ngnValue = totalTokens * rate;
+            return NextResponse.json({
+                action: 'REPLY',
+                message: `💰 *Your Balance (in ${currencySymbol})*\n\n≈ *${currencySymbol}${ngnValue.toLocaleString(undefined, { maximumFractionDigits: 0 })}*\n_(${totalTokens.toFixed(4)} in stablecoins across Celo + Base, at ${currencySymbol}${rate.toLocaleString()}/$)_\n\n🪙 Breakdown:\n${formatChainBalances(crypto)}`,
+            });
+        }
         return NextResponse.json({
             action: 'REPLY',
-            message: `💰 *Your Balance*\n\n🌍 Region: ${currentCountry}\n💵 Fiat: ${currencySymbol}${fiatBalance}\n🪙 Crypto:\n${formatChainBalances(crypto)}`,
+            message: `💰 *Your Balance*\n\n🌍 Region: ${currentCountry}\n💵 Fiat: ${currencySymbol}${fiatBalance}\n🪙 Crypto:\n${formatChainBalances(crypto)}\n\n_Tip: ask "what's my balance in naira" to see the value in ${currencySymbol}._`,
         });
     }
 

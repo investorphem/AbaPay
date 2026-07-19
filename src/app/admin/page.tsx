@@ -804,37 +804,65 @@ export default function AdminDashboard() {
       const amountWei = parseUnits(Number(r.amount_crypto).toFixed(tokenMeta.decimals), tokenMeta.decimals);
 
       const [acct] = await client.requestAddresses();
-      await client.switchChain({ id: chain.id }).catch(() => {});
 
-      // V3 adds a `reason` argument; V2 does not. Try V3 first, fall back to V2.
+      // 🔴 Don't silently swallow a failed chain switch — if the wallet stays on the wrong
+      // chain, writeContract targets the wrong network and reverts with a confusing error.
+      try {
+        await client.switchChain({ id: chain.id });
+      } catch {
+        alert(`Please switch your wallet to ${isBase ? 'Base' : 'Celo'} and try the refund again.`);
+        return null;
+      }
+
+      const v3Abi = [{ inputs: [
+        { name: 'tokenAddress', type: 'address' },
+        { name: 'recipient', type: 'address' },
+        { name: 'amount', type: 'uint256' },
+        { name: 'reason', type: 'string' },
+      ], name: 'refundUser', outputs: [], stateMutability: 'nonpayable', type: 'function' }] as const;
+
+      // V3 adds a `reason` argument; V2 does not. Try V3 first, fall back to V2 — BUT keep
+      // the V3 error, because if the deployed contract IS V3 (it is), a legit revert here
+      // (e.g. maxRefundPerTx not set — V3 fails CLOSED on refunds until the owner calls
+      // setMaxRefund — or an insufficient vault balance) is the ACTUAL cause. The old code
+      // swallowed it and surfaced the V2 attempt's meaningless selector-mismatch revert
+      // instead, so the operator never learned the real reason ("execution reverted").
       let hash: string;
+      let v3Err: any = null;
       try {
         hash = await client.writeContract({
-          chain, account: acct, address: contract,
-          abi: [{ inputs: [
-            { name: 'tokenAddress', type: 'address' },
-            { name: 'recipient', type: 'address' },
-            { name: 'amount', type: 'uint256' },
-            { name: 'reason', type: 'string' },
-          ], name: 'refundUser', outputs: [], stateMutability: 'nonpayable', type: 'function' }],
+          chain, account: acct, address: contract, abi: v3Abi,
           functionName: 'refundUser',
           args: [tokenAddress, r.wallet_address, amountWei, String(r.reason || 'Failed vend').slice(0, 100)],
-          dataSuffix: celoAttributionSuffix(chain), // Celo attribution only; no-op on Base
+          dataSuffix: celoAttributionSuffix(chain),
         });
-      } catch {
-        hash = await client.writeContract({
-          chain, account: acct, address: contract,
-          abi: ABAPAY_ADMIN_ABI,
-          functionName: 'refundUser',
-          args: [tokenAddress, r.wallet_address, amountWei],
-          dataSuffix: celoAttributionSuffix(chain), // Celo attribution only; no-op on Base
-        });
+      } catch (err: any) {
+        v3Err = err;
+        try {
+          hash = await client.writeContract({
+            chain, account: acct, address: contract, abi: ABAPAY_ADMIN_ABI,
+            functionName: 'refundUser',
+            args: [tokenAddress, r.wallet_address, amountWei],
+            dataSuffix: celoAttributionSuffix(chain),
+          });
+        } catch {
+          // Both failed — the V3 error is the informative one. Surface a hint for the most
+          // common cause (the refund cap) so the operator knows where to look.
+          const msg = String(v3Err?.shortMessage || v3Err?.message || 'execution reverted');
+          const capHint = /MaxRefund|ExceedsMax|refund/i.test(msg)
+            ? '\n\nLikely cause: the per-transaction refund cap for this token is unset or too low. Set it in Contract Controls → Max Refund, then retry.'
+            : /balance|transfer/i.test(msg)
+            ? '\n\nLikely cause: the vault does not hold enough of this token to cover the refund.'
+            : '';
+          alert(`Refund reverted: ${msg}${capHint}`);
+          return null;
+        }
       }
 
       return hash;
     } catch (e: any) {
       console.error('Refund failed:', e);
-      alert(e?.shortMessage || 'Refund transaction failed.');
+      alert(e?.shortMessage || e?.message || 'Refund transaction failed.');
       return null;
     }
   };
