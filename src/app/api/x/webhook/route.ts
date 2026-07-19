@@ -70,6 +70,14 @@ export async function POST(req: Request) {
       const engineData = await response.json();
 
       if (engineData.action === 'REPLY' || engineData.action === 'SUCCESS_RECEIPT' || engineData.action === 'REQUIRE_TOKEN_SELECTION') {
+        // ⚡ Like WhatsApp — X's API gives a business no reliable way to delete a message the
+        // USER sent, so a PIN they typed stays in the DM thread. Telegram auto-deletes it
+        // (see the telegram webhook); here we can only advise them to remove it themselves.
+        let outgoingMessage = engineData.message as string;
+        if (/^\d{4,6}$/.test(text.trim())) {
+          outgoingMessage += '\n\n🔒 For your security, please delete your last message (your PIN) from this chat.';
+        }
+
         await fetch(`https://api.twitter.com/2/dm_conversations/with/${senderId}/messages`, {
           method: 'POST',
           headers: {
@@ -77,7 +85,7 @@ export async function POST(req: Request) {
             'Content-Type': 'application/json'
           },
           body: JSON.stringify({
-            text: engineData.message
+            text: outgoingMessage
           })
         });
       }

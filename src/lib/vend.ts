@@ -35,13 +35,15 @@ export function getStrictRequestId(): string {
   return `${year}${month}${day}${safeHour}${minute}${randomString}`;
 }
 
+// Human, reassuring phrasings — a failed vend already triggers an automatic refund, so the
+// tone is "here's what happened, and you're covered," never a bare error code.
 const error_messages: Record<string, string> = {
-  '011': 'Invalid details. Check your phone/meter number.',
-  '014': 'Daily limit exceeded with this provider.',
-  '016': 'Provider network is unstable. Please try again.',
-  '018': 'Service temporarily unavailable.',
-  '030': 'Provider network is down.',
-  '400': 'Transaction failed due to a system error.',
+  '011': "That didn't go through — please double-check the phone or meter number.",
+  '014': "You've hit the provider's daily limit for this service. Try again tomorrow.",
+  '016': "The provider's network is a bit shaky right now — worth trying again shortly.",
+  '018': 'This service is briefly unavailable — please try again in a few minutes.',
+  '030': "The provider's network is down at the moment. Please try again soon.",
+  '400': 'Something went wrong on the provider side while processing this.',
 };
 
 // ⚡ Where did this transaction come from? Operators need to distinguish a web payment
@@ -221,7 +223,7 @@ export async function executeVend(input: VendInput): Promise<VendResult> {
 
     return { success: true, status: 'SUCCESS', purchased_code: dbPurchasedCode, units: vendedUnits, request_id: vtRequestId };
   } else {
-    const friendlyMessage = error_messages[payData.code as string] || 'Service is temporarily undergoing maintenance.';
+    const friendlyMessage = error_messages[payData.code as string] || "The provider couldn't complete this one right now.";
     await supabase.from('transactions').update({ status: 'FAILED_VENDING', error_code: payData.code, api_response: payData.response_description }).eq('tx_hash', txHash);
     try {
       await sendTelegramAlert(`❌ *VENDING REJECTED*\n📲 *Source:* ${channelBadge(source_channel)}\n⛓️ *Chain:* ${blockchain || 'CELO'}\n🛒 *Product:* ${network} ${serviceCategory}\n👤 *User:* ${billersCode}\n🚨 *Admin Error:* Code ${payData.code} - ${payData.response_description}\n🗣 *User Message:* ${friendlyMessage}\n🔍 *Explorer:* ${explorerUrl}`);

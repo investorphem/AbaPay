@@ -5,6 +5,7 @@ import { enforceRateLimit, enforceRateLimitByKey } from '@/lib/rateLimit';
 import { resolveServiceId, fetchCryptoBalances } from '@/lib/deai/services';
 import { getServiceRules } from '@/lib/serviceRules';
 import { getRemainingAllowance } from '@/lib/deai/relayer';
+import { humanizeReply } from '@/lib/deai/humanize';
 import { supabaseAdmin } from '@/utils/supabase';
 
 // ⚡ IN-APP AI CHAT
@@ -87,6 +88,23 @@ function ordinal(n: number): string {
 }
 
 export async function POST(req: Request) {
+  const ctx: { lang?: string; userText?: string } = {};
+  const res = await handleChat(req, ctx);
+  // Localize the in-app reply into the user's language (non-English only) — same safe
+  // humanizer the social channels use; it preserves every number/hash/link or falls back.
+  if (ctx.lang && ctx.lang !== 'en') {
+    try {
+      const data = await res.clone().json();
+      if (typeof data?.reply === 'string') {
+        const localized = await humanizeReply(data.reply, { language: ctx.lang, channel: 'INAPP', userText: ctx.userText });
+        if (localized && localized !== data.reply) return NextResponse.json({ ...data, reply: localized }, { status: res.status });
+      }
+    } catch { /* fall through to the original reply */ }
+  }
+  return res;
+}
+
+async function handleChat(req: Request, ctx: { lang?: string; userText?: string }): Promise<Response> {
   const limited = await enforceRateLimit(req, 'deai-chat', 20, 60);
   if (limited) return limited;
 
@@ -122,6 +140,8 @@ export async function POST(req: Request) {
     }
 
     const ai = await parseIntent(message);
+    ctx.userText = message;
+    if (ai?.language && ai.language !== 'en') ctx.lang = ai.language;
 
     // Help / capability menu
     if (ai.intent === 'HELP' || ai.intent === 'UNKNOWN') {
