@@ -1293,6 +1293,16 @@ export async function POST(req: Request) {
                 ...(aiParsed.destination_account && !intentData.destination_account ? { destination_account: aiParsed.destination_account } : {}),
                 ...(aiParsed.provider && !intentData.provider ? { provider: aiParsed.provider } : {}),
                 ...(aiParsed.meter_type && !intentData.meter_type ? { meter_type: aiParsed.meter_type } : {}),
+                // ⚡ Scheduling context must survive multi-turn collection — "buy airtime in
+                // the next 2 minutes" usually arrives MISSING the amount, and the follow-up
+                // ("100") is parsed fresh with no memory of the request. Without persisting
+                // these into intentData (and therefore into the saved session), the schedule
+                // was silently forgotten by the time all fields arrived, and the payment
+                // executed IMMEDIATELY instead — money moving at a time the user didn't ask
+                // for. Stored as an absolute timestamp so "2 minutes" counts from when the
+                // user SAID it, not from whenever the last field finally arrived.
+                ...(aiParsed.is_recurring && !intentData.is_recurring ? { is_recurring: true, frequency: aiParsed.frequency, day_of_week: aiParsed.day_of_week, day_of_month: aiParsed.day_of_month } : {}),
+                ...(aiParsed.schedule_in_minutes && aiParsed.schedule_in_minutes > 0 && !intentData.schedule_run_at ? { schedule_run_at: new Date(Date.now() + aiParsed.schedule_in_minutes * 60_000).toISOString() } : {}),
             };
         } catch (e) {
             // Ignore AI errors — the regex sweep below still catches the common cases.
@@ -1471,8 +1481,19 @@ export async function POST(req: Request) {
             return NextResponse.json({ action: 'REPLY', message: `✅ Cancelled ${target.length} automation${target.length === 1 ? '' : 's'}.` });
         }
 
-        // "every Tuesday buy 200 airtime for 08012345678"
-        if (aiParsed.is_recurring && ['VEND_AIRTIME', 'VEND_DATA', 'ELECTRICITY', 'TV'].includes(intentData.intent)) {
+        // "every Tuesday buy 200 airtime for 08012345678"  (recurring)
+        // "buy airtime for my number in the next 2 minutes" (one-off future)
+        //
+        // 🔴 THE BUG: schedule_in_minutes (the one-off case) was only ever wired into the
+        // in-app web chat (/api/deai/chat) — this route, which serves Telegram/WhatsApp/X,
+        // checked is_recurring alone. So "in the next 2 minutes" was silently DROPPED and
+        // the payment executed immediately instead — technically a spend the user only
+        // authorized for 2 minutes later, and a scheduling feature that looked broken.
+        // Reads the PERSISTED intentData fields (see the merge block above), so a schedule
+        // stated in the first message survives however many turns it takes to collect the
+        // rest of the details.
+        const isOneOffFuture = !!intentData.schedule_run_at;
+        if ((intentData.is_recurring || aiParsed.is_recurring || isOneOffFuture) && ['VEND_AIRTIME', 'VEND_DATA', 'ELECTRICITY', 'TV'].includes(intentData.intent)) {
             const f = await assessFeasibility({
                 intent: intentData.intent,
                 provider: intentData.provider,
@@ -1485,6 +1506,10 @@ export async function POST(req: Request) {
                 return NextResponse.json({ action: 'REPLY', message: [`⚠️ ${f.reason}`, ``, ...f.suggestions.map(s2 => `• ${s2}`)].join('\n') });
             }
             if (f.missing.length) {
+                // Save the session INCLUDING the scheduling fields — without this, the reply
+                // that supplies the missing amount/number arrived to a bot with no memory
+                // that a schedule was ever requested.
+                await supabase.from('deai_sessions').upsert({ chat_id: platform_id, platform, intent_data: intentData, status: 'AWAITING_DETAILS', expires_at: new Date(Date.now() + 300000).toISOString() }, { onConflict: 'chat_id' });
                 return NextResponse.json({ action: 'REPLY', message: [`🔁 Happy to set that up — ${f.reason}`, ``, ...f.suggestions.map(s2 => `• ${s2}`)].join('\n') });
             }
 
@@ -1511,11 +1536,13 @@ export async function POST(req: Request) {
                 meter_type: intentData.meter_type || null,
                 blockchain: schedChain,
                 token_used: tokenSym,
-                frequency: aiParsed.frequency || 'monthly',
-                day_of_week: aiParsed.day_of_week,
-                day_of_month: aiParsed.day_of_month,
+                frequency: isOneOffFuture ? 'once' : (intentData.frequency || aiParsed.frequency || 'monthly'),
+                day_of_week: isOneOffFuture ? null : (intentData.day_of_week ?? aiParsed.day_of_week),
+                day_of_month: isOneOffFuture ? null : (intentData.day_of_month ?? aiParsed.day_of_month),
+                run_once_at: isOneOffFuture ? intentData.schedule_run_at : null,
                 auto_execute: canAutoPay,
                 notify_telegram: platform === 'TELEGRAM' ? platform_id : null,
+                notify_email: intentData.email || intentData.customer_email || null,
                 is_active: true,
             });
 
@@ -1524,23 +1551,38 @@ export async function POST(req: Request) {
                 return NextResponse.json({ action: 'REPLY', message: "⚠️ Couldn't save that automation. Please try again." });
             }
 
-            const when = aiParsed.frequency === 'weekly'
-                ? `every ${['Sunday','Monday','Tuesday','Wednesday','Thursday','Friday','Saturday'][aiParsed.day_of_week ?? 0]}`
-                : aiParsed.frequency === 'daily' ? 'every day'
-                : `on the ${aiParsed.day_of_month}th of each month`;
+            const schedFreq = intentData.frequency || aiParsed.frequency;
+            const schedDow = intentData.day_of_week ?? aiParsed.day_of_week;
+            const schedDom = intentData.day_of_month ?? aiParsed.day_of_month;
+            const minutesAway = isOneOffFuture ? Math.max(1, Math.round((new Date(intentData.schedule_run_at).getTime() - Date.now()) / 60_000)) : 0;
+            const when = isOneOffFuture
+                ? `once, in about ${minutesAway} minute${minutesAway === 1 ? '' : 's'}`
+                : schedFreq === 'weekly'
+                ? `every ${['Sunday','Monday','Tuesday','Wednesday','Thursday','Friday','Saturday'][schedDow ?? 0]}`
+                : schedFreq === 'daily' ? 'every day'
+                : `on the ${schedDom}th of each month`;
+
+            // A one-off with no allowance is a dead end on non-Telegram channels — the
+            // scheduler's reminder path only reaches Telegram/email, so "I'll remind you"
+            // would be a promise we can't keep on WhatsApp/X. Say so honestly instead.
+            const oneOffNoAutoNote = platform === 'TELEGRAM'
+                ? `🔔 I'll *send you a one-tap payment link* here when it's time.\n\n_Want it fully automatic? Approve a spend limit in the AbaPay app._`
+                : `⚠️ Without an approved spend limit I can't pay this automatically — approve a limit for ${tokenSym} on ${schedChain} in the AbaPay app *before it's due*, or it won't run.`;
 
             return NextResponse.json({
                 action: 'REPLY',
                 message: [
-                    `🔁 *Automation set!*`,
+                    isOneOffFuture ? `⏱ *Scheduled!*` : `🔁 *Automation set!*`,
                     ``,
                     `*${intentData.provider} ${category}* — ₦${Number(intentData.amount_ngn).toLocaleString()}`,
                     `📱 ${intentData.destination_account}`,
                     `📅 ${when}`,
                     ``,
                     canAutoPay
-                        ? `🤖 I'll *pay this automatically* from your approved limit (${allowance.remaining.toFixed(2)} ${tokenSym} left). No action needed from you.`
-                        : `🔔 I'll *remind you* each time with a one-tap link.\n\n_Want me to pay it automatically? Approve a spend limit in the AbaPay app and I'll take it from there._`,
+                        ? `🤖 I'll *pay this automatically* from your approved limit (${allowance.remaining.toFixed(2)} ${tokenSym} left). No action needed from you.${isOneOffFuture ? '\n\n_Check History for the receipt once it runs._' : ''}`
+                        : isOneOffFuture
+                            ? oneOffNoAutoNote
+                            : `🔔 I'll *remind you* each time with a one-tap link.\n\n_Want me to pay it automatically? Approve a spend limit in the AbaPay app and I'll take it from there._`,
                 ].join('\n'),
             });
         }
