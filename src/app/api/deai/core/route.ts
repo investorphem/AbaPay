@@ -188,6 +188,26 @@ function formatChainBalances(balances: { celo: Record<string, string>; base: Rec
     return `${celoLine}\n${baseLine}`;
 }
 
+// ⚡ Local-currency breakdown: each token's value shown IN the requested currency (₦), not
+// as a raw stablecoin amount. Stablecoins are ~$1, so tokenAmount × rate is the fiat value.
+// Zero-balance tokens are hidden to keep it readable.
+function formatChainBalancesInFiat(
+    balances: { celo: Record<string, string>; base: Record<string, string> },
+    rate: number,
+    symbol: string,
+): string {
+    const fmt = (amt: string | undefined) => `${symbol}${((Number(amt) || 0) * rate).toLocaleString(undefined, { maximumFractionDigits: 0 })}`;
+    const line = (label: string, bals: Record<string, string>, keys: [string, string][]) => {
+        const parts = keys
+            .filter(([k]) => (Number(bals[k]) || 0) > 0)
+            .map(([k, lbl]) => `${lbl} ${fmt(bals[k])}`);
+        return parts.length ? `${label} ${parts.join(' | ')}` : null;
+    };
+    const celo = line('⚫ Celo:', balances.celo, [['USD₮', 'USDT'], ['USDC', 'USDC'], ['USDm', 'cUSD']]);
+    const base = line('🔵 Base:', balances.base, [['USD₮', 'USDT'], ['USDC', 'USDC']]);
+    return [celo, base].filter(Boolean).join('\n') || `_No stablecoin balance yet._`;
+}
+
 // ⚡ Renders the numbered token-choice list shown during chat checkout, WITH each token's
 // wallet balance and agent-approved spend limit alongside it — previously showed balance
 // alone (or, from the AWAITING_CHAIN reply handler, neither), leaving the user to guess
@@ -1929,7 +1949,7 @@ export async function POST(req: Request) {
             const ngnValue = totalTokens * rate;
             return NextResponse.json({
                 action: 'REPLY',
-                message: `💰 *Your Balance (in ${currencySymbol})*\n\n≈ *${currencySymbol}${ngnValue.toLocaleString(undefined, { maximumFractionDigits: 0 })}*\n_(${totalTokens.toFixed(4)} in stablecoins across Celo + Base, at ${currencySymbol}${rate.toLocaleString()}/$)_\n\n🪙 Breakdown:\n${formatChainBalances(crypto)}`,
+                message: `💰 *Your Balance (in ${currencySymbol})*\n\n≈ *${currencySymbol}${ngnValue.toLocaleString(undefined, { maximumFractionDigits: 0 })}* total\n\n🪙 Breakdown (value in ${currencySymbol}):\n${formatChainBalancesInFiat(crypto, rate, currencySymbol)}\n\n_At ${currencySymbol}${rate.toLocaleString()}/$._`,
             });
         }
         return NextResponse.json({
