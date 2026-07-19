@@ -648,9 +648,32 @@ export default function Home() {
       setCurrentPage(1);
   };
 
+  // ⚡ FRESH ON-CHAIN BALANCE GUARD — checks the ACTUAL token balance on-chain right now,
+  // not the cached `walletBalance` state (which can be stale if the user just moved funds or
+  // switched token/chain). Returns true if there's enough to cover the payment. Used by BOTH
+  // pay paths so a low balance is caught with a clear message BEFORE the user commits to a
+  // transaction that would otherwise fail confusingly at settlement (the x402 path had no
+  // balance check at all, so it always failed the hard way).
+  const hasEnoughBalanceOnChain = async (): Promise<boolean> => {
+    try {
+      if (!address || !activeChain) return false;
+      const tokenAddress = getAgentTokenAddress();
+      if (!tokenAddress) return false;
+      const publicClient = createPublicClient({ chain: activeChain, transport: http() });
+      const balanceWei = await publicClient.readContract({ address: tokenAddress as `0x${string}`, abi: ERC20_ABI, functionName: 'balanceOf', args: [address] }) as bigint;
+      const balance = parseFloat(formatUnits(balanceWei, selectedToken.decimals));
+      setWalletBalance(balance.toFixed(4)); // keep the UI figure in sync while we're here
+      return balance >= parseFloat(cryptoToCharge);
+    } catch {
+      // If we genuinely can't read the balance, don't hard-block — fall back to the cached
+      // value so a transient RPC hiccup doesn't stop a user who actually has the funds.
+      return parseFloat(walletBalance) >= parseFloat(cryptoToCharge);
+    }
+  };
+
   const processBlockchainPayment = async () => {
     if (!address || !client) return setStatus("Connect Wallet First");
-    if (parseFloat(cryptoToCharge) > parseFloat(walletBalance)) return setStatus(`Insufficient ${selectedToken.symbol} Balance.`);
+    if (!(await hasEnoughBalanceOnChain())) return setStatus(`Insufficient ${selectedToken.symbol} balance — you need ${cryptoToCharge} ${selectedToken.symbol}. Top up and try again.`);
 
     setIsProcessing(true); 
     setStatus("Initiating Blockchain Escrow...");
@@ -943,6 +966,9 @@ export default function Home() {
     if (!address) return setStatus("Connect Wallet First");
     if (activeChain?.id !== celo.id && activeChain?.id !== celoSepolia.id) return setStatus("x402 is only available on Celo.");
     if (selectedToken.symbol !== "USDC" && selectedToken.symbol !== "USD₮") return setStatus("x402 is only available for USDC and USDT.");
+    // 🔴 Was missing entirely — x402 payments failed at settlement on a low balance instead
+    // of being caught here first.
+    if (!(await hasEnoughBalanceOnChain())) return setStatus(`Insufficient ${selectedToken.symbol} balance — you need ${cryptoToCharge} ${selectedToken.symbol}. Top up and try again.`);
 
     setIsProcessing(true);
     setStatus("Settling payment via x402...");
@@ -1665,10 +1691,25 @@ export default function Home() {
       }
       if (activeService.id === "INTERNET" && internetProvider.includes("-data") && accountNumber.length >= 4) {
         const prefix = accountNumber.substring(0, 4);
-        if (["0803","0806","0810","0813","0814","0816","0903","0906","0913","0916","0703","0706"].includes(prefix)) setInternetProvider("mtn-data");
-        else if (["0802","0808","0812","0902","0907","0912","0701","0708"].includes(prefix)) setInternetProvider("airtel-data");
-        else if (["0805","0807","0811","0905","0705","0915"].includes(prefix)) setInternetProvider("glo-data");
-        else if (["0809","0817","0818","0908","0909"].includes(prefix)) setInternetProvider("etisalat-data");
+        let detected: string | null = null;
+        if (["0803","0806","0810","0813","0814","0816","0903","0906","0913","0916","0703","0706"].includes(prefix)) detected = "mtn-data";
+        else if (["0802","0808","0812","0902","0907","0912","0701","0708"].includes(prefix)) detected = "airtel-data";
+        else if (["0805","0807","0811","0905","0705","0915"].includes(prefix)) detected = "glo-data";
+        else if (["0809","0817","0818","0908","0909"].includes(prefix)) detected = "etisalat-data";
+
+        // 🔴 THE STALE-PLAN BUG: if the number's prefix flips the network (e.g. user picked
+        // MTN, chose an MTN plan, then typed a Glo number), the previously-selected plan
+        // belongs to the OLD network and can't be vended under the new one — VTpass rejects
+        // it. The manual provider dropdown already clears the plan on change (see handleProvider
+        // change); the auto-detect never did, so the mismatched plan sailed through to a failed
+        // payment. Clear the plan (and its amount) whenever auto-detect actually switches the
+        // network, forcing the user to pick a plan that belongs to the detected network.
+        if (detected && detected !== internetProvider) {
+          setInternetProvider(detected);
+          setSelectedInternetPlan(null);
+          setNairaAmount("");
+          setInternetVariations([]);
+        }
       }
     }
   }, [accountNumber, activeService.id, activeTab, internetProvider, isInternational]);
