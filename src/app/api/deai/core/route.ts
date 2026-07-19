@@ -459,6 +459,56 @@ export async function POST(req: Request) {
         }
         await supabase.from('deai_sessions').delete().eq('chat_id', platform_id);
 
+        // 🔒 PIN-CONFIRMED SCHEDULE CREATION — if the pending action is a schedule (not an
+        // immediate payment), create the scheduled_bills row now that the PIN is verified.
+        // This is what stops a third party with chat access from silently setting up a
+        // standing spend. notify_channel/notify_channel_id are stored so the scheduler can
+        // report the run's outcome back on THIS channel (fixes the "silent after run" gap).
+        if (session.intent_data?.pending_schedule) {
+          const ps = session.intent_data.pending_schedule;
+          const { error: schedErr } = await supabase.from('scheduled_bills').insert({
+            wallet_address: (globalUser?.wallet_address || '').toLowerCase(),
+            service_id: ps.service_id,
+            service_category: ps.service_category,
+            provider: ps.provider,
+            billers_code: ps.billers_code,
+            amount_ngn: ps.amount_ngn,
+            meter_type: ps.meter_type,
+            blockchain: ps.blockchain,
+            token_used: ps.token_used,
+            frequency: ps.frequency,
+            day_of_week: ps.day_of_week,
+            day_of_month: ps.day_of_month,
+            run_once_at: ps.run_once_at,
+            auto_execute: ps.auto_execute,
+            notify_channel: platform,
+            notify_channel_id: platform_id,
+            notify_telegram: platform === 'TELEGRAM' ? platform_id : null,
+            notify_email: session.intent_data.email || session.intent_data.customer_email || null,
+            is_active: true,
+          });
+
+          if (schedErr) {
+            console.error('[DeAI] PIN-confirmed schedule create failed:', schedErr.message);
+            return NextResponse.json({ action: 'REPLY', message: "⚠️ Couldn't save that automation. Please try again." });
+          }
+
+          return NextResponse.json({
+            action: 'REPLY',
+            message: [
+              `${ps.is_one_off ? '⏱ *Scheduled!*' : '🔁 *Automation set!*'}`,
+              ``,
+              `*${ps.provider || ''} ${ps.service_category}* — ₦${Number(ps.amount_ngn).toLocaleString()}`,
+              `📱 ${ps.billers_code}`,
+              `📅 ${ps.when}`,
+              ``,
+              ps.auto_execute
+                ? `🤖 I'll pay it automatically and message you here with the result${ps.is_one_off ? ' once it runs' : ' each time'}.`
+                : `🔔 I'll notify you here when it's due.`,
+            ].join('\n'),
+          });
+        }
+
         // ⚡ REAL PAYMENT HAND-OFF ⚡
         //
         // This previously replied "Your transaction has been submitted" and then did
@@ -1558,34 +1608,25 @@ export async function POST(req: Request) {
             const tokenSym = intentData.selected_token || globalUser?.approved_token || 'USD₮';
             const schedChain = (intentData.chain || globalUser?.approved_chain || 'CELO').toUpperCase();
             const allowance = await getRemainingAllowance(globalUser?.wallet_address || '', tokenSym, schedChain);
-            const canAutoPay = allowance.ok && allowance.remaining > 0;
 
-            const { error: schedErr } = await supabase.from('scheduled_bills').insert({
-                wallet_address: (globalUser?.wallet_address || '').toLowerCase(),
-                service_id: serviceID,
-                service_category: category,
-                provider: intentData.provider,
-                billers_code: intentData.destination_account,
-                amount_ngn: Number(intentData.amount_ngn),
-                meter_type: intentData.meter_type || null,
-                blockchain: schedChain,
-                token_used: tokenSym,
-                frequency: isOneOffFuture ? 'once' : (intentData.frequency || aiParsed.frequency || 'monthly'),
-                day_of_week: isOneOffFuture ? null : (intentData.day_of_week ?? aiParsed.day_of_week),
-                day_of_month: isOneOffFuture ? null : (intentData.day_of_month ?? aiParsed.day_of_month),
-                run_once_at: isOneOffFuture ? intentData.schedule_run_at : null,
-                auto_execute: canAutoPay,
-                notify_telegram: platform === 'TELEGRAM' ? platform_id : null,
-                notify_email: intentData.email || intentData.customer_email || null,
-                is_active: true,
-            });
+            // ⚡ UPFRONT BALANCE CHECK — a scheduled auto-payment needs the tokens to actually
+            // be in the wallet when it runs. Previously the user only found out the balance
+            // was too low when the scheduled run failed later (or worse, waited for a credit
+            // that never came). Check now, and say so immediately.
+            const schedRate = await getExchangeRate();
+            const neededCrypto = Number(intentData.amount_ngn) / schedRate;
+            const schedBalances = await fetchCryptoBalances(globalUser?.wallet_address || '', schedChain);
+            const heldToken = Number(schedBalances[tokenSym] ?? 0);
+            const canAutoPay = allowance.ok && allowance.remaining >= neededCrypto;
 
-            if (schedErr) {
-                console.error('[DeAI] schedule create failed:', schedErr.message);
-                return NextResponse.json({ action: 'REPLY', message: "⚠️ Couldn't save that automation. Please try again." });
+            if (canAutoPay && heldToken < neededCrypto) {
+                return NextResponse.json({
+                    action: 'REPLY',
+                    message: `⚠️ *Balance too low for this schedule.*\n\nThis needs about ${neededCrypto.toFixed(4)} ${tokenSym} on ${schedChain}, but your balance is ${heldToken.toFixed(4)} ${tokenSym}.\n\nTop up first, then set the schedule again — I won't create one that can't actually run.`,
+                });
             }
 
-            const schedFreq = intentData.frequency || aiParsed.frequency;
+            const schedFreq = isOneOffFuture ? 'once' : (intentData.frequency || aiParsed.frequency || 'monthly');
             const schedDow = intentData.day_of_week ?? aiParsed.day_of_week;
             const schedDom = intentData.day_of_month ?? aiParsed.day_of_month;
             const minutesAway = isOneOffFuture ? Math.max(1, Math.round((new Date(intentData.schedule_run_at).getTime() - Date.now()) / 60_000)) : 0;
@@ -1596,27 +1637,54 @@ export async function POST(req: Request) {
                 : schedFreq === 'daily' ? 'every day'
                 : `on the ${schedDom}th of each month`;
 
-            // A one-off with no allowance is a dead end on non-Telegram channels — the
-            // scheduler's reminder path only reaches Telegram/email, so "I'll remind you"
-            // would be a promise we can't keep on WhatsApp/X. Say so honestly instead.
-            const oneOffNoAutoNote = platform === 'TELEGRAM'
-                ? `🔔 I'll *send you a one-tap payment link* here when it's time.\n\n_Want it fully automatic? Approve a spend limit in the AbaPay app._`
-                : `⚠️ Without an approved spend limit I can't pay this automatically — approve a limit for ${tokenSym} on ${schedChain} in the AbaPay app *before it's due*, or it won't run.`;
+            // 🔒 REQUIRE PIN BEFORE CREATING A SCHEDULE — a schedule is a STANDING
+            // authorization to spend from the user's allowance, unattended. Without a PIN
+            // gate, anyone with momentary access to the linked chat could set up a recurring
+            // drain. Stash the fully-resolved schedule and confirm with the PIN, exactly like
+            // an immediate payment. The AWAITING_PIN handler detects pending_schedule and
+            // creates the row instead of paying immediately.
+            intentData.pending_schedule = {
+                service_id: serviceID,
+                service_category: category,
+                provider: intentData.provider,
+                billers_code: intentData.destination_account,
+                amount_ngn: Number(intentData.amount_ngn),
+                meter_type: intentData.meter_type || null,
+                blockchain: schedChain,
+                token_used: tokenSym,
+                frequency: schedFreq,
+                day_of_week: isOneOffFuture ? null : schedDow,
+                day_of_month: isOneOffFuture ? null : schedDom,
+                run_once_at: isOneOffFuture ? intentData.schedule_run_at : null,
+                auto_execute: canAutoPay,
+                when,
+                is_one_off: isOneOffFuture,
+                allowance_remaining: allowance.ok ? allowance.remaining : 0,
+            };
+            await supabase.from('deai_sessions').upsert({
+                chat_id: platform_id, platform, intent_data: intentData,
+                status: 'AWAITING_PIN', expires_at: new Date(Date.now() + 300000).toISOString(),
+            }, { onConflict: 'chat_id' });
+
+            const autoNote = canAutoPay
+                ? `🤖 It'll *pay automatically* from your approved limit (${allowance.remaining.toFixed(2)} ${tokenSym} on ${schedChain}).`
+                : platform === 'TELEGRAM'
+                    ? `🔔 I'll *send you a one-tap payment link* here when it's due (you have no auto-pay limit approved).`
+                    : `⚠️ You have no approved spend limit, so this can't auto-pay — approve one for ${tokenSym} on ${schedChain} in the app before it's due, or it won't run.`;
 
             return NextResponse.json({
                 action: 'REPLY',
                 message: [
-                    isOneOffFuture ? `⏱ *Scheduled!*` : `🔁 *Automation set!*`,
+                    `${isOneOffFuture ? '⏱' : '🔁'} *Confirm this ${isOneOffFuture ? 'scheduled payment' : 'automation'}*`,
                     ``,
                     `*${intentData.provider} ${category}* — ₦${Number(intentData.amount_ngn).toLocaleString()}`,
                     `📱 ${intentData.destination_account}`,
                     `📅 ${when}`,
+                    `💳 ${tokenSym} on ${schedChain}`,
                     ``,
-                    canAutoPay
-                        ? `🤖 I'll *pay this automatically* from your approved limit (${allowance.remaining.toFixed(2)} ${tokenSym} left). No action needed from you.${isOneOffFuture ? '\n\n_Check History for the receipt once it runs._' : ''}`
-                        : isOneOffFuture
-                            ? oneOffNoAutoNote
-                            : `🔔 I'll *remind you* each time with a one-tap link.\n\n_Want me to pay it automatically? Approve a spend limit in the AbaPay app and I'll take it from there._`,
+                    autoNote,
+                    ``,
+                    `🔒 Reply with your *PIN* to set it up.`,
                 ].join('\n'),
             });
         }

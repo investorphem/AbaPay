@@ -5,6 +5,7 @@ import { createDeepLink } from '@/lib/deai/deeplink';
 import { relayPayBillFor, getRemainingAllowance } from '@/lib/deai/relayer';
 import { checkServiceAllowed, getServiceRules, checkAgentSpendAllowed } from '@/lib/serviceRules';
 import { sendTelegramToUser } from '@/lib/telegram';
+import { sendWhatsAppMessage } from '@/lib/whatsapp';
 import { executeVend, getStrictRequestId } from '@/lib/vend';
 import { isMainnetEnv } from '@/lib/chain';
 import { Resend } from 'resend';
@@ -67,7 +68,21 @@ function isApproaching(bill: any, now: Date): boolean {
 }
 
 async function notify(bill: any, message: string, payUrl?: string) {
-  if (bill.notify_telegram) {
+  // ⚡ Report back on whatever channel created the schedule. Previously only telegram/email
+  // were handled, so a schedule set up from WhatsApp or X ran completely silently — the user
+  // had no idea whether it succeeded or failed until they happened to check History.
+  const channel = String(bill.notify_channel || '').toUpperCase();
+  const channelId = bill.notify_channel_id;
+  if (channelId) {
+    try {
+      if (channel === 'WHATSAPP') await sendWhatsAppMessage(channelId, message);
+      else if (channel === 'TELEGRAM') await sendTelegramToUser(channelId, message);
+      // X DMs require the Account Activity API's send endpoint; not wired yet — falls through
+      // to email if the user provided one.
+    } catch (e) { console.error(`[Scheduler] ${channel} notify failed`, e); }
+  }
+  // Legacy column, still honoured for schedules created before notify_channel existed.
+  if (bill.notify_telegram && channel !== 'TELEGRAM') {
     try { await sendTelegramToUser(bill.notify_telegram, message); } catch (e) { console.error('[Scheduler] telegram failed', e); }
   }
   if (bill.notify_email) {
