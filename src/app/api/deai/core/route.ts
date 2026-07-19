@@ -356,9 +356,86 @@ export async function POST(req: Request) {
     }
 
     if (!identity || !identity.is_active) {
+      // ⚡ GUEST MODE — no wallet linked yet. Previously a dead-end that repeated the same
+      // "not linked" wall to every message (even "thank you"). A guest can't relayer-pay or
+      // use a PIN, but they can still do EVERYTHING via a signed deep link that opens the app,
+      // connects their wallet, and prefills the payment — non-custodial, no link-code needed.
+      const gt = text.trim().toLowerCase();
+      const guestHost = req.headers.get('host');
+      const guestBase = guestHost?.includes('localhost') ? `http://${guestHost}` : `https://${guestHost}`;
+
+      if (GREETING_RE.test(gt)) {
+        return NextResponse.json({
+          action: 'REPLY',
+          message: `👋 Hey! I can help you pay bills — airtime, data, electricity, cable and more.\n\nYou're not linked to a wallet yet, so I'll hand you a secure link to finish each payment in your web3 browser. Just tell me what you need, e.g. _"buy 500 MTN airtime for 08012345678"_.\n\n_Want to skip the link every time and pay right here with just a PIN? Link once at https://abapays.com._`,
+        });
+      }
+      if (gt.length < 25 && /(thank|thanks|thank you|ok|okay|cool|nice|great|👍|alright)/i.test(gt)) {
+        return NextResponse.json({ action: 'REPLY', message: `You're welcome! 🙌 Whenever you're ready to pay a bill, just tell me what you need.` });
+      }
+
+      // Try to understand a payment request and hand back a ready-to-pay link.
+      let gi: any = null;
+      try { gi = await parseIntent(text); } catch {}
+      let gData: any = { intent: 'UNKNOWN' };
+      if (gi) {
+        const gMap: Record<string, string> = { VEND_AIRTIME: 'VEND_AIRTIME', VEND_DATA: 'VEND_DATA', PAY_ELECTRICITY: 'ELECTRICITY', PAY_CABLE: 'TV' };
+        gData = { intent: gMap[gi.intent] || 'UNKNOWN', amount_ngn: gi.amount_ngn, destination_account: gi.destination_account, provider: gi.provider, meter_type: gi.meter_type };
+      }
+      gData = extractEntities(text, gData);
+      if (['VEND_AIRTIME', 'VEND_DATA'].includes(gData.intent) && gData.destination_account && !gData.provider) {
+        gData.provider = detectNetwork(gData.destination_account);
+      }
+
+      // Enough to open a prefilled payment? Need at least a service + an account number. The
+      // app completes whatever's missing (plan choice, amount, wallet connect, signing).
+      if (['VEND_AIRTIME', 'VEND_DATA', 'ELECTRICITY', 'TV'].includes(gData.intent) && gData.destination_account) {
+        const category = gData.intent === 'ELECTRICITY' ? 'ELECTRICITY' : gData.intent === 'TV' ? 'CABLE' : gData.intent === 'VEND_DATA' ? 'DATA' : 'AIRTIME';
+        const serviceID = resolveServiceId(gData.intent, gData.provider || null) || gData.provider || '';
+        const payUrl = createDeepLink(guestBase, {
+          serviceID,
+          serviceCategory: category,
+          provider: gData.provider || '',
+          billersCode: gData.destination_account,
+          amountNgn: Number(gData.amount_ngn) || 0,
+          meterType: gData.meter_type || undefined,
+          channel: platform,
+          chatId: platform_id,
+        });
+        return NextResponse.json({
+          action: 'REPLY',
+          message: [
+            `✅ Got it — here's your secure payment link:`,
+            ``,
+            `*${(gData.provider || '').toUpperCase()} ${category}*${gData.amount_ngn ? ` — ₦${Number(gData.amount_ngn).toLocaleString()}` : ''}`,
+            `📱 ${gData.destination_account}`,
+            ``,
+            `👉 *[Tap to pay in your web3 browser](${payUrl})*`,
+            ``,
+            `_Connect your wallet, confirm, and sign — you keep custody the whole way. Link expires in 15 minutes._`,
+            ``,
+            `_Tip: link your wallet once at https://abapays.com and you can pay right here with just a PIN, no link needed._`,
+          ].join('\n'),
+        });
+      }
+
+      // Couldn't pin down a full request — tell them what they CAN do, and that a link is
+      // generated for them (no signup/PIN needed to start).
       return NextResponse.json({
         action: 'REPLY',
-        message: "🔒 *Not linked yet*\n\nLink this chat to your wallet at https://abapays.com — connect your wallet, choose this platform, set a PIN, and send me the code you get.\n\nOnce linked, you can pay bills right here.",
+        message: [
+          `🔒 You're not linked to a wallet yet — but you can still pay right now. I'll generate a secure link for you to complete each payment in your web3 browser (no PIN or signup needed to start).`,
+          ``,
+          `*Here's what I can do for you:*`,
+          `• 📱 Airtime — _"₦500 airtime for 08012345678"_`,
+          `• 🌐 Data — _"2GB data for 08012345678"_`,
+          `• 💡 Electricity — _"₦2000 Ikeja electric, meter 04123456789"_`,
+          `• 📺 Cable TV — _"Renew my DStv, smartcard 1234567890"_`,
+          ``,
+          `Just tell me what you need and I'll send you a link to finish it.`,
+          ``,
+          `_Prefer to pay here with just a PIN every time? Link your wallet once at https://abapays.com._`,
+        ].join('\n'),
       });
     }
 
