@@ -251,7 +251,21 @@ async function handleX402Request(req: Request) {
         paymentRequirements: facilitatorPaymentRequirements,
       }),
     });
-    settleResult = await settleRes.json();
+    // ⚡ Capture the RAW response — the old code did `.json()` and then only read
+    // `errorReason`/`errorMessage`, which logged "undefined undefined" whenever the
+    // facilitator returned a DIFFERENT error shape (or a non-JSON / non-200 body). That hid
+    // the actual reason a settlement was rejected. Log status + full raw body so the real
+    // cause is always visible.
+    const rawSettleText = await settleRes.text();
+    try {
+      settleResult = JSON.parse(rawSettleText);
+    } catch {
+      console.error('[Pay/x402] Settle returned non-JSON:', settleRes.status, rawSettleText.slice(0, 500));
+      return NextResponse.json({ x402Version: 1, error: `Facilitator error (${settleRes.status})`, accepts: [acceptEntry] }, { status: 402 });
+    }
+    if (!settleRes.ok || !settleResult.success) {
+      console.error('[Pay/x402] Settle rejected:', settleRes.status, 'token:', requestedTokenSymbol, 'asset:', usdc.address, 'raw:', rawSettleText.slice(0, 800));
+    }
   } catch (err: any) {
     console.error('[Pay/x402] Celo facilitator unreachable:', err?.message);
     return NextResponse.json({ x402Version: 1, error: 'Facilitator temporarily unavailable', accepts: [acceptEntry] }, { status: 402 });
@@ -260,15 +274,19 @@ async function handleX402Request(req: Request) {
   if (!settleResult.success) {
     // "0 credits" also comes back as a settle failure per Celo's own docs ("the facilitator
     // returns 402 Payment Required until you top up") — that's an operator problem, not a
-    // payer one, so alert rather than silently telling the payer to just retry.
-    const looksLikeCreditExhaustion = /credit/i.test(settleResult.errorReason || '') || /credit/i.test(settleResult.errorMessage || '');
+    // payer one, so alert rather than silently telling the payer to just retry. Scan every
+    // stringy field on the response, not just the two we used to know about, since the
+    // facilitator's error shape has varied.
+    const allText = JSON.stringify(settleResult);
+    const looksLikeCreditExhaustion = /credit/i.test(allText);
     if (looksLikeCreditExhaustion) {
-      sendTelegramAlert(`🚨 *x402 FACILITATOR OUT OF CREDITS*\n\nCelo x402 settlement is failing — top up credits at x402.celo.org.\n\nReason: ${settleResult.errorMessage || settleResult.errorReason}`).catch(() => {});
+      sendTelegramAlert(`🚨 *x402 FACILITATOR OUT OF CREDITS*\n\nCelo x402 settlement is failing — top up credits at x402.celo.org.\n\n${allText.slice(0, 300)}`).catch(() => {});
     } else {
-      console.error('[Pay/x402] Settle failed:', settleResult.errorReason, settleResult.errorMessage);
+      console.error('[Pay/x402] Settle failed (parsed):', allText.slice(0, 800));
     }
+    const reason = settleResult.errorMessage || settleResult.errorReason || (settleResult as any).error || (settleResult as any).message || 'Payment could not be settled';
     return NextResponse.json(
-      { x402Version: 1, error: settleResult.errorMessage || settleResult.errorReason || 'Payment required', accepts: [acceptEntry] },
+      { x402Version: 1, error: reason, accepts: [acceptEntry] },
       { status: 402 }
     );
   }
