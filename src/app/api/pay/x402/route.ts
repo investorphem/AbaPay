@@ -97,10 +97,18 @@ async function chainConfigFor(chainKey: ChainKey, isMainnet: boolean): Promise<X
     if (!id || !secret) return null; // Base x402 disabled until CDP creds exist — stays dormant
     const payTo = process.env.NEXT_PUBLIC_ABAPAY_BASE_ADDRESS;
     if (!payTo) return null;
+    // 🔴 THE BUG THIS FIXES: settleNetworkName was 'base' (a bare chain name, matching Celo's
+    // facilitator's OWN convention — see the Celo branch below). CDP's facilitator instead
+    // expects CAIP-2 throughout (its PAYMENT-RESPONSE headers and payment-option `network`
+    // fields are always "eip155:<chainId>", confirmed independently, not a bare chain name).
+    // A live settle call with 'base' came back `{"errorReason":"invalid_network","errorMessage":
+    // "invalid network: "}` — CDP's validator tried to split it as CAIP-2, found no colon, and
+    // was left with nothing to report. Reusing `caip2` here (same value the challenge already
+    // uses) is the fix — no separate "settle name" exists for CDP, unlike Celo.
     return {
       chainKey,
       caip2: isMainnet ? 'eip155:8453' : 'eip155:84532',
-      settleNetworkName: isMainnet ? 'base' : 'base-sepolia',
+      settleNetworkName: isMainnet ? 'eip155:8453' : 'eip155:84532',
       settleX402Version: 2,
       facilitatorSettleUrl: `https://${CDP_FACILITATOR_HOST}${CDP_FACILITATOR_SETTLE_PATH}`,
       payTo,
