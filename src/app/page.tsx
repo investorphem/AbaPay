@@ -36,7 +36,8 @@ import { HistoryTab } from "@/components/HistoryTab";
 
 export default function Home() {
   const { address: wagmiAddress, isConnected: isWagmiConnected, chain: wagmiChain } = useAccount();
-  const { connectors, connect } = useConnect();
+  const { connectors, connect, status: connectStatus } = useConnect();
+  const autoConnectTried = useRef(false);
   const { disconnect } = useDisconnect();
   // ⚡ ADD THIS: Grabs the live WalletConnect provider securely
   const { data: wagmiWalletClient } = useWalletClient();
@@ -1327,15 +1328,32 @@ export default function Home() {
 
     const isWeb3Browser = typeof window !== 'undefined' && Boolean((window as any).ethereum);
     if (!isWeb3Browser || connectors.length === 0) return; // Wait for connectors to load
+    if (connectStatus === 'pending') return; // a connection attempt is already in flight
 
-    // Find ANY injected provider (MetaMask, Trust, Coinbase, generic EIP-6963)
+    // Find ANY injected provider (MetaMask, Trust, Coinbase, generic EIP-6963). If it isn't
+    // discovered yet, bail WITHOUT marking the attempt — the effect re-runs when `connectors`
+    // updates (EIP-6963 discovery is async), so we retry the moment it appears.
     const injectedConnector = connectors.find(c => c.type === 'injected' || c.id === 'injected' || c.id === 'metaMask');
-    
-    if (injectedConnector) {
-      connect({ connector: injectedConnector });
-      localStorage.setItem('abapay_connected', 'true');
-    }
-  }, [address, environment, connectors, connect]);
+    if (!injectedConnector) return;
+
+    // Only auto-fire ONCE. If the injected provider isn't ready or the user dismisses it,
+    // we do NOT keep retrying — instead the manual "Connect" button stays visible so the
+    // user can pick WalletConnect/Valora themselves (exactly the desired fallback).
+    if (autoConnectTried.current) return;
+    autoConnectTried.current = true;
+
+    connect(
+      { connector: injectedConnector },
+      {
+        onSuccess: () => localStorage.setItem('abapay_connected', 'true'),
+        onError: () => {
+          // Auto-connect couldn't complete — clear the flag so the visible Connect button
+          // is the clean path forward (WalletConnect option included).
+          localStorage.removeItem('abapay_connected');
+        },
+      }
+    );
+  }, [address, environment, connectors, connect, connectStatus]);
 
   // =======================================================================
 
