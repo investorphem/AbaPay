@@ -58,6 +58,14 @@ const detectNetwork = (phone: any): string | null => {
 // Anchored to the WHOLE message so "hey buy me airtime" still falls through to real parsing.
 const GREETING_RE = /^(hi+|hey+|hell+o+|yo+|sup|howdy|hola|good\s*(morning|afternoon|evening|day)|what'?s\s*up)[\s!.?]*$/i;
 
+// ⚡ "Buy airtime to my WhatsApp number/account" / "recharge me" / "for myself" — WhatsApp's
+// identity IS a phone number (platform_id is the sender's own wa_id), unlike Telegram/X where
+// it's an opaque chat id. Shared between the linked-user flow and guest mode (both use the
+// same wa_id) so a self-referential phrase is recognized identically in both places.
+// Matches "number"/"account"/"line" after "my (whatsapp)", a bare "my whatsapp" with nothing
+// after it, "myself", "recharge me", and "for me".
+const WHATSAPP_SELF_REFERENCE_RE = /\bmy\s*(whatsapp\s*)?(number|account|line)\b|\bmy\s*whatsapp\b|\brecharge\s*me\b|\bmyself\b|\bfor\s*me\b/i;
+
 // Human-phrased guesses for the "did you mean...?" suggestion below — keeps the bot on-task
 // (always steering back toward an actual bill-pay action) instead of a flat capability dump.
 const INTENT_GUESS_LABELS: Record<string, string> = {
@@ -572,6 +580,21 @@ async function handleCore(req: Request, ctx: HumanizeCtx): Promise<NextResponse>
         gData = { intent: gMap[gi.intent] || 'UNKNOWN', amount_ngn: gi.amount_ngn, destination_account: gi.destination_account, provider: gi.provider, meter_type: gi.meter_type };
       }
       gData = extractEntities(text, gData);
+
+      // 🔴 THE BUG THIS FIXES: a guest saying "buy 100 airtime to my WhatsApp account" had
+      // amount + intent resolved but destination_account stayed empty (nothing in the message
+      // is a phone number — "my WhatsApp account" isn't one), so it fell straight through to
+      // the generic capability menu instead of generating the payment link. Guest mode never
+      // had the self-reference resolution the LINKED-user flow already has (see
+      // WHATSAPP_SELF_REFERENCE_RE above) — same identity fact applies here: platform_id IS
+      // the sender's own wa_id on WhatsApp, so resolve it the same way.
+      if (platform === 'WHATSAPP' && !gData.destination_account && ['VEND_AIRTIME', 'VEND_DATA'].includes(gData.intent)) {
+        if (WHATSAPP_SELF_REFERENCE_RE.test(text)) {
+          const waId = String(platform_id || '');
+          gData.destination_account = waId.startsWith('234') && waId.length === 13 ? `0${waId.slice(3)}` : waId;
+        }
+      }
+
       if (['VEND_AIRTIME', 'VEND_DATA'].includes(gData.intent) && gData.destination_account && !gData.provider) {
         gData.provider = detectNetwork(gData.destination_account);
       }
@@ -1694,7 +1717,11 @@ async function handleCore(req: Request, ctx: HumanizeCtx): Promise<NextResponse>
         // as self-referential, default the target to the sender's own number instead of
         // asking them to type back the number they're already messaging from.
         if (platform === 'WHATSAPP' && !intentData.destination_account && ['VEND_AIRTIME', 'VEND_DATA'].includes(intentData.intent)) {
-            const selfReference = /\bmy\s*(whatsapp\s*)?number\b|\brecharge\s*me\b|\bmyself\b|\bfor\s*me\b/i.test(text);
+            // 🔴 THE GAP: only matched "my WhatsApp NUMBER" — a real user wrote "my WhatsApp
+            // ACCOUNT" and fell straight through. Broadened to any of number/account/line, and
+            // to a bare "my whatsapp" with nothing after it (WHATSAPP_SELF_REFERENCE_RE, shared
+            // with guest mode below so both paths recognize exactly the same phrasing).
+            const selfReference = WHATSAPP_SELF_REFERENCE_RE.test(text);
             if (selfReference) {
                 // wa_id is E.164 without "+" (e.g. "2348168811821") — the network-prefix
                 // detection below (extractEntities / the AI's own inference) expects the
