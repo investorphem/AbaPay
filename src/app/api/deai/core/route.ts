@@ -240,20 +240,27 @@ async function renderTokenChoicesWithAllowance(wallet: string, chain: 'CELO' | '
 }
 
 // ⚡ Every token/chain the user has actually FUNDED an agent allowance for (remaining > 0),
-// across both chains. Used to decide, for a schedule where the user didn't name a token/chain,
-// whether to just use the single approved allowance or — when there's more than one — ask which
-// to spend from rather than silently defaulting. Base yields nothing until V3 is deployed there
-// (getRemainingAllowance returns ok:false with no contract), so today this surfaces Celo only.
-async function listFundedAllowances(wallet: string): Promise<{ token: string; chain: 'CELO' | 'BASE'; remaining: number }[]> {
+// across both chains, WITH the actual wallet balance alongside each — otherwise the "which
+// balance?" prompt only showed the approved limit (a number that says nothing about whether
+// the tokens are actually there right now), while every OTHER token-choice list in this file
+// (renderTokenChoicesWithAllowance) shows both. A schedule with a real allowance but an empty
+// wallet is exactly the case the balance-too-low check further down exists to catch — showing
+// the balance UP FRONT lets the user see that before picking, not after confirming.
+async function listFundedAllowances(wallet: string): Promise<{ token: string; chain: 'CELO' | 'BASE'; remaining: number; held: string }[]> {
     if (!wallet) return [];
     const chains: ('CELO' | 'BASE')[] = ['CELO', 'BASE'];
-    const out: { token: string; chain: 'CELO' | 'BASE'; remaining: number }[] = [];
+    const out: { token: string; chain: 'CELO' | 'BASE'; remaining: number; held: string }[] = [];
     await Promise.all(chains.map(async (chain) => {
         const toks = tokensForChain(chain);
-        const allowances = await Promise.all(toks.map((sym) => getRemainingAllowance(wallet, sym, chain)));
+        const [allowances, balances] = await Promise.all([
+            Promise.all(toks.map((sym) => getRemainingAllowance(wallet, sym, chain))),
+            fetchCryptoBalances(wallet, chain),
+        ]);
         toks.forEach((sym, i) => {
             const a = allowances[i];
-            if (a.ok && a.remaining > 0) out.push({ token: sym, chain, remaining: a.remaining });
+            if (a.ok && a.remaining > 0) {
+                out.push({ token: sym, chain, remaining: a.remaining, held: (balances as Record<string, string>)[sym] ?? '0.0000' });
+            }
         });
     }));
     return out;
@@ -287,7 +294,7 @@ async function buildScheduleConfirm(
                 message: [
                     `💳 *Which balance should this schedule pay from?*`,
                     ``,
-                    ...funded.map((o, i) => `*${i + 1}.* ${o.token} on ${o.chain} — approved limit _${o.remaining.toFixed(2)}_`),
+                    ...funded.map((o, i) => `*${i + 1}.* ${o.token} on ${o.chain} — balance _${o.held}_ · approved limit _${o.remaining.toFixed(2)}_`),
                     ``,
                     `Just reply with the number.`,
                 ].join('\n'),
