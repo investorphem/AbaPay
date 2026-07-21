@@ -1,7 +1,7 @@
 {
   "type": "Agent",
   "name": "AbaPay",
-  "description": "Autonomous bill-payment agent for Nigerian utilities (airtime, data, electricity, cable, education, bank) over Telegram, WhatsApp, X, and a web app, settling on Celo and Base.",
+  "description": "Autonomous bill-payment agent for airtime, data, electricity, cable, education and bank payments across 170+ countries, over Telegram, WhatsApp, X, and a web app, settling on Celo and Base.",
   "image": "https://abapays.com/logo.png",
   "endpoints": [
     { "type": "wallet", "address": "0x4f9B9C40345258684cfe23F02FDb2B88F1d2eA62", "chainId": 42220 },
