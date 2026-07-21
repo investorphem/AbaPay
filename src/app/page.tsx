@@ -965,8 +965,14 @@ export default function Home() {
   // state to rescue in the catch block, unlike the contract-call path.
   const processX402Payment = async () => {
     if (!address) return setStatus("Connect Wallet First");
-    if (activeChain?.id !== celo.id && activeChain?.id !== celoSepolia.id) return setStatus("x402 is only available on Celo.");
-    if (selectedToken.symbol !== "USDC" && selectedToken.symbol !== "USD₮") return setStatus("x402 is only available for USDC and USDT.");
+    // Celo: USDC + USD₮ (both have EIP-3009). Base: USDC only (Base USD₮ has no
+    // transferWithAuthorization) and only when the Coinbase-facilitator rail is enabled.
+    const onCelo = activeChain?.id === celo.id || activeChain?.id === celoSepolia.id;
+    const onBase = activeChain?.id === base.id || activeChain?.id === baseSepolia.id;
+    const baseX402Enabled = process.env.NEXT_PUBLIC_BASE_X402_ENABLED === 'true';
+    if (!onCelo && !(onBase && baseX402Enabled)) return setStatus("x402 is only available on Celo.");
+    if (onCelo && selectedToken.symbol !== "USDC" && selectedToken.symbol !== "USD₮") return setStatus("x402 is only available for USDC and USDT.");
+    if (onBase && selectedToken.symbol !== "USDC") return setStatus("x402 on Base is available for USDC only.");
     // 🔴 Was missing entirely — x402 payments failed at settlement on a low balance instead
     // of being caught here first.
     if (!(await hasEnoughBalanceOnChain())) return setStatus(`Insufficient ${selectedToken.symbol} balance — you need ${cryptoToCharge} ${selectedToken.symbol}. Top up and try again.`);
@@ -1849,13 +1855,18 @@ export default function Home() {
               <button
                   onClick={() => {
                       setIsConfirmModalOpen(false);
-                      // ⚡ x402 is the automatic settlement rail for Celo + USDC/USDT (both have
-                      // real EIP-3009 transferWithAuthorization on Celo — see the X402_TOKEN_EIP712
-                      // comment in src/app/api/pay/x402/route.ts) — no user-facing toggle.
-                      // Everything else (Base, cUSD/USDm — no transferWithAuthorization — or x402
-                      // unconfigured) uses the normal contract-call flow, unchanged. See README
-                      // "x402 settlement".
-                      const useX402 = !!process.env.NEXT_PUBLIC_THIRDWEB_CLIENT_ID && activeChain?.id === celo.id && (selectedToken.symbol === "USDC" || selectedToken.symbol === "USD₮");
+                      // ⚡ x402 is the automatic settlement rail — no user-facing toggle:
+                      //   • Celo + USDC/USD₮ (both have EIP-3009) → Celo facilitator
+                      //   • Base + USDC (Base USD₮ has no transferWithAuthorization) → Coinbase
+                      //     CDP facilitator, ONLY when NEXT_PUBLIC_BASE_X402_ENABLED === 'true'
+                      //     (server-side CDP creds must be configured too — see route.ts).
+                      // Everything else (cUSD/USDm, Base while x402 disabled, x402 unconfigured)
+                      // uses the normal contract-call flow, unchanged. See README "x402 settlement".
+                      const hasThirdweb = !!process.env.NEXT_PUBLIC_THIRDWEB_CLIENT_ID;
+                      // Celo condition kept byte-identical to the original (mainnet, USDC/USD₮).
+                      const celoX402 = activeChain?.id === celo.id && (selectedToken.symbol === "USDC" || selectedToken.symbol === "USD₮");
+                      const baseX402 = (activeChain?.id === base.id || activeChain?.id === baseSepolia.id) && selectedToken.symbol === "USDC" && process.env.NEXT_PUBLIC_BASE_X402_ENABLED === 'true';
+                      const useX402 = hasThirdweb && (celoX402 || baseX402);
                       if (useX402) processX402Payment(); else processBlockchainPayment();
                   }}
                   className={`w-full text-white dark:text-slate-900 font-black py-5 rounded-2xl flex items-center justify-center gap-2.5 transition-all active:scale-95 shadow-xl text-lg tracking-tight ${hasPendingDuplicate ? 'bg-orange-500 dark:bg-orange-500 hover:bg-orange-600 dark:hover:bg-orange-600 text-white shadow-orange-500/20' : 'bg-slate-900 dark:bg-white hover:bg-black dark:hover:bg-slate-200 shadow-slate-900/20 dark:shadow-white/10'}`}
