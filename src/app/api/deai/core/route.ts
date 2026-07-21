@@ -551,15 +551,40 @@ async function handleCore(req: Request, ctx: HumanizeCtx): Promise<NextResponse>
       }
     }
 
-    if (!identity || !identity.is_active) {
-      // ⚡ GUEST MODE — no wallet linked yet. Previously a dead-end that repeated the same
-      // "not linked" wall to every message (even "thank you"). A guest can't relayer-pay or
-      // use a PIN, but they can still do EVERYTHING via a signed deep link that opens the app,
-      // connects their wallet, and prefills the payment — non-custodial, no link-code needed.
-      const gt = text.trim().toLowerCase();
-      const guestHost = req.headers.get('host');
-      const guestBase = guestHost?.includes('localhost') ? `http://${guestHost}` : `https://${guestHost}`;
+    // ⚡ GUEST MODE — no wallet linked yet.
+    //
+    // Previously this was a hard early-return with its OWN crude, one-shot regex/AI parse —
+    // no field-by-field collection, no provider disambiguation, no electricity/meter
+    // verification, no duplicate-payment guard, none of the hardening the linked-user flow
+    // has. A guest asking for something that needed a follow-up question (missing amount, an
+    // ambiguous provider, an unverified meter) just fell through to a generic "here's what I
+    // can do" menu instead of actually being asked. And because that whole branch never
+    // touched `deai_sessions`, a guest could never have a genuine multi-turn conversation at
+    // all — every message was parsed in total isolation.
+    //
+    // A guest CAN do everything a linked user can except confirm with a PIN (there's no PIN
+    // to check and no on-chain allowance to spend from) — so instead of a separate, thinner
+    // implementation, a guest now flows through the EXACT SAME state machine as a linked user
+    // (session-backed AWAITING_DETAILS/FIELD/PROVIDER/CABLE_ACTION/PLAN_CATEGORY/VARIATION/
+    // METER_TYPE — all of it is service-level, not wallet-level, so none of it needs to
+    // change for a guest). The only two things that genuinely don't apply without a linked
+    // wallet:
+    //   1. Chain/token selection (AWAITING_CHAIN/AWAITING_TOKEN) — that's choosing which
+    //      on-chain ALLOWANCE to spend from, a concept that doesn't exist without one. Skipped
+    //      for guests at the chain-selection choke point (search "isGuest" further down) —
+    //      straight to the deep link once all SERVICE fields are collected.
+    //   2. The final PIN prompt — replaced by the exact same "Path B" deep-link hand-off a
+    //      LINKED user with no allowance already gets (see the AWAITING_PIN handler above).
+    // Everything else — verification, disambiguation, duplicate checks, error messages — is
+    // now identically hardened for guests and linked users, because it's the same code.
+    //
+    // Wallet-only intents (balance, history, schedules) are separately redirected below
+    // (search "isGuest" in the CHECK_BALANCE/TRANSACTION_HISTORY/LIST_SCHEDULES section) —
+    // there is no wallet on file for a guest to check any of those against.
+    const isGuest = !identity || !identity.is_active;
 
+    if (isGuest) {
+      const gt = text.trim().toLowerCase();
       if (GREETING_RE.test(gt)) {
         return NextResponse.json({
           action: 'REPLY',
@@ -569,86 +594,6 @@ async function handleCore(req: Request, ctx: HumanizeCtx): Promise<NextResponse>
       if (gt.length < 25 && /(thank|thanks|thank you|ok|okay|cool|nice|great|👍|alright)/i.test(gt)) {
         return NextResponse.json({ action: 'REPLY', message: `You're welcome! 🙌 Whenever you're ready to pay a bill, just tell me what you need.` });
       }
-
-      // Try to understand a payment request and hand back a ready-to-pay link.
-      let gi: any = null;
-      try { gi = await parseIntent(text); } catch {}
-      if (gi?.language && gi.language !== 'en') ctx.lang = gi.language;
-      let gData: any = { intent: 'UNKNOWN' };
-      if (gi) {
-        const gMap: Record<string, string> = { VEND_AIRTIME: 'VEND_AIRTIME', VEND_DATA: 'VEND_DATA', PAY_ELECTRICITY: 'ELECTRICITY', PAY_CABLE: 'TV' };
-        gData = { intent: gMap[gi.intent] || 'UNKNOWN', amount_ngn: gi.amount_ngn, destination_account: gi.destination_account, provider: gi.provider, meter_type: gi.meter_type };
-      }
-      gData = extractEntities(text, gData);
-
-      // 🔴 THE BUG THIS FIXES: a guest saying "buy 100 airtime to my WhatsApp account" had
-      // amount + intent resolved but destination_account stayed empty (nothing in the message
-      // is a phone number — "my WhatsApp account" isn't one), so it fell straight through to
-      // the generic capability menu instead of generating the payment link. Guest mode never
-      // had the self-reference resolution the LINKED-user flow already has (see
-      // WHATSAPP_SELF_REFERENCE_RE above) — same identity fact applies here: platform_id IS
-      // the sender's own wa_id on WhatsApp, so resolve it the same way.
-      if (platform === 'WHATSAPP' && !gData.destination_account && ['VEND_AIRTIME', 'VEND_DATA'].includes(gData.intent)) {
-        if (WHATSAPP_SELF_REFERENCE_RE.test(text)) {
-          const waId = String(platform_id || '');
-          gData.destination_account = waId.startsWith('234') && waId.length === 13 ? `0${waId.slice(3)}` : waId;
-        }
-      }
-
-      if (['VEND_AIRTIME', 'VEND_DATA'].includes(gData.intent) && gData.destination_account && !gData.provider) {
-        gData.provider = detectNetwork(gData.destination_account);
-      }
-
-      // Enough to open a prefilled payment? Need at least a service + an account number. The
-      // app completes whatever's missing (plan choice, amount, wallet connect, signing).
-      if (['VEND_AIRTIME', 'VEND_DATA', 'ELECTRICITY', 'TV'].includes(gData.intent) && gData.destination_account) {
-        const category = gData.intent === 'ELECTRICITY' ? 'ELECTRICITY' : gData.intent === 'TV' ? 'CABLE' : gData.intent === 'VEND_DATA' ? 'DATA' : 'AIRTIME';
-        const serviceID = resolveServiceId(gData.intent, gData.provider || null) || gData.provider || '';
-        const payUrl = createDeepLink(guestBase, {
-          serviceID,
-          serviceCategory: category,
-          provider: gData.provider || '',
-          billersCode: gData.destination_account,
-          amountNgn: Number(gData.amount_ngn) || 0,
-          meterType: gData.meter_type || undefined,
-          channel: platform,
-          chatId: platform_id,
-        });
-        return NextResponse.json({
-          action: 'REPLY',
-          message: [
-            `✅ Got it — here's your secure payment link:`,
-            ``,
-            `*${(gData.provider || '').toUpperCase()} ${category}*${gData.amount_ngn ? ` — ₦${Number(gData.amount_ngn).toLocaleString()}` : ''}`,
-            `📱 ${gData.destination_account}`,
-            ``,
-            `👉 *[Tap to pay in your web3 browser](${payUrl})*`,
-            ``,
-            `_Connect your wallet, confirm, and sign — you keep custody the whole way. Link expires in 15 minutes._`,
-            ``,
-            `_Tip: link your wallet once at https://abapays.com and you can pay right here with just a PIN, no link needed._`,
-          ].join('\n'),
-        });
-      }
-
-      // Couldn't pin down a full request — tell them what they CAN do, and that a link is
-      // generated for them (no signup/PIN needed to start).
-      return NextResponse.json({
-        action: 'REPLY',
-        message: [
-          `🔒 You're not linked to a wallet yet — but you can still pay right now. I'll generate a secure link for you to complete each payment in your web3 browser (no PIN or signup needed to start).`,
-          ``,
-          `*Here's what I can do for you:*`,
-          `• 📱 Airtime — _"₦500 airtime for 08012345678"_`,
-          `• 🌐 Data — _"2GB data for 08012345678"_`,
-          `• 💡 Electricity — _"₦2000 Ikeja electric, meter 04123456789"_`,
-          `• 📺 Cable TV — _"Renew my DStv, smartcard 1234567890"_`,
-          ``,
-          `Just tell me what you need and I'll send you a link to finish it.`,
-          ``,
-          `_Prefer to pay here with just a PIN every time? Link your wallet once at https://abapays.com._`,
-        ].join('\n'),
-      });
     }
 
     const currentCountry = globalUser?.country_code || 'NG';
@@ -726,8 +671,12 @@ async function handleCore(req: Request, ctx: HumanizeCtx): Promise<NextResponse>
     // STATE: PIN CONFIRMATION
     if (session?.status === 'AWAITING_PIN') {
       // 🔒 LOCKOUT GATE — checked BEFORE we even look at the PIN, so a locked identity
-      // cannot keep guessing. Survives session resets.
-      if (identity._linkId) {
+      // cannot keep guessing. Survives session resets. Guarded to !isGuest because `identity`
+      // is null for a guest — this state should be unreachable for one (guests are forked to
+      // a deep link before chain selection, well before AWAITING_PIN is ever entered — see
+      // "isGuest" at the chain-selection choke point above), but the guard below turns "should
+      // never happen" into "provably can't crash" rather than trusting that invariant alone.
+      if (!isGuest && identity._linkId) {
         const gateCheck = await checkPinAllowed(identity._linkId);
         if (!gateCheck.allowed) {
           await supabase.from('deai_sessions').delete().eq('chat_id', platform_id);
@@ -735,14 +684,20 @@ async function handleCore(req: Request, ctx: HumanizeCtx): Promise<NextResponse>
         }
       }
 
-      if (verifyPin(text.trim(), identity.deai_pin)) {
-        // Correct PIN — wipe the failure counter.
-        if (identity._linkId) await clearPinFailures(identity._linkId);
+      // ⚡ GUEST SAFETY NET — this state should be unreachable for a guest (see above), but if
+      // it's ever reached anyway (e.g. a future code path that sets AWAITING_PIN without going
+      // through the chain-selection choke point), treat it as "final execution reached" and
+      // hand back the deep link rather than evaluating a PIN that doesn't exist for `identity`
+      // (which is null) — `isGuest ||` short-circuits verifyPin so identity.deai_pin is never
+      // touched.
+      if (isGuest || verifyPin(text.trim(), identity.deai_pin)) {
+        // Correct PIN — wipe the failure counter. (No-op for a guest — never set above.)
+        if (!isGuest && identity._linkId) await clearPinFailures(identity._linkId);
 
         // 🔐 TRANSPARENT MIGRATION: if this PIN was still stored as legacy
         // plaintext, upgrade it to a salted scrypt hash on this successful login.
         // Write back to whichever table this identity actually came from.
-        if (!isHashedPin(identity.deai_pin)) {
+        if (!isGuest && !isHashedPin(identity.deai_pin)) {
           const newHash = hashPin(text.trim());
           if (identity._source === 'agent_links') {
             await supabase.from('agent_links').update({ pin_hash: newHash }).eq('id', identity._linkId);
@@ -758,7 +713,10 @@ async function handleCore(req: Request, ctx: HumanizeCtx): Promise<NextResponse>
         // This is what stops a third party with chat access from silently setting up a
         // standing spend. notify_channel/notify_channel_id are stored so the scheduler can
         // report the run's outcome back on THIS channel (fixes the "silent after run" gap).
-        if (session.intent_data?.pending_schedule) {
+        // Never true for a guest — scheduling creation is redirected to "link your wallet"
+        // well before pending_schedule is ever stashed (see the scheduling section above) —
+        // but the guard costs nothing and removes any doubt.
+        if (!isGuest && session.intent_data?.pending_schedule) {
           const ps = session.intent_data.pending_schedule;
           const { error: schedErr } = await supabase.from('scheduled_bills').insert({
             wallet_address: (globalUser?.wallet_address || '').toLowerCase(),
@@ -1735,6 +1693,21 @@ async function handleCore(req: Request, ctx: HumanizeCtx): Promise<NextResponse>
 
     if (intentData?.intent === 'TRANSACTION_STATUS' || intentData?.intent === 'STATUS') intentData.intent = 'TRANSACTION_HISTORY';
 
+    // ⚡ GUEST GATE — WALLET-ONLY INTENTS ⚡
+    // Balance, history, and schedules are all keyed by a wallet_address the bot only knows
+    // for a LINKED user (globalUser). Without this gate, CHECK_BALANCE/TRANSACTION_HISTORY
+    // would silently return empty/meaningless results (globalUser?.wallet_address || "" —
+    // defensively coded, but pointless for a guest), and TRANSACTION_HISTORY specifically
+    // would CRASH — its query reads globalUser.wallet_address with no optional chaining at
+    // all, since it was only ever reached after the old guest branch's hard early-return and
+    // was never exercised without a linked identity. Redirect clearly instead of either.
+    if (isGuest && ['CHECK_BALANCE', 'TRANSACTION_HISTORY', 'LIST_SCHEDULES', 'CANCEL_SCHEDULE'].includes(intentData.intent)) {
+        return NextResponse.json({
+            action: 'REPLY',
+            message: `🔒 That needs a linked wallet — link yours once at https://abapays.com and you can check this right here, no PIN needed just to look.`,
+        });
+    }
+
     // ⚡ 4b. CAPABILITY & FEASIBILITY ⚡
     //
     // The agent should never shrug. For EVERY request we ask: can we actually do this,
@@ -1919,6 +1892,18 @@ async function handleCore(req: Request, ctx: HumanizeCtx): Promise<NextResponse>
         // rest of the details.
         const isOneOffFuture = !!intentData.schedule_run_at;
         if ((intentData.is_recurring || aiParsed.is_recurring || isOneOffFuture) && ['VEND_AIRTIME', 'VEND_DATA', 'ELECTRICITY', 'TV'].includes(intentData.intent)) {
+            // ⚡ GUEST GATE — a schedule is stored keyed by wallet_address (scheduled_bills)
+            // and, if auto_execute, needs an on-chain allowance to actually run — neither
+            // exists for a guest. Redirect to link a wallet rather than silently building a
+            // schedule tied to no one (or, worse, reaching buildScheduleConfirm's own
+            // AWAITING_PIN transition with no identity to verify against).
+            if (isGuest) {
+                return NextResponse.json({
+                    action: 'REPLY',
+                    message: `🔒 Automated/scheduled payments need a linked wallet (so I know where to check your balance and who to notify). Link yours once at https://abapays.com, then set this up again — or pay it right now instead and I'll send you a link.`,
+                });
+            }
+
             // Same prefix-is-authoritative rule as the MISSING FIELD ENGINE below (which runs
             // after this block) — override the AI's network guess with the number's own prefix
             // so a scheduled airtime never locks in the wrong network.
@@ -2507,6 +2492,68 @@ async function handleCore(req: Request, ctx: HumanizeCtx): Promise<NextResponse>
         intentData.customer_address = verification.customer_address;
         if (verification.min_amount) intentData.verified_min = verification.min_amount;
         prependSystemMsg += `✅ *Meter Verified!*\nName: ${verification.customer_name}\n${verification.customer_address ? `Address: ${verification.customer_address}\n` : ''}\n`;
+    }
+
+    // ⚡ GUEST FORK — everything SERVICE-level above (provider resolution, electricity/meter
+    // verification, feasibility) just ran identically for a guest as it would for a linked
+    // user, because it's the same code. Chain/token selection is where the two flows
+    // genuinely diverge: it means "which on-chain ALLOWANCE should the agent spend from" — a
+    // concept that doesn't exist without a linked wallet. So instead of asking, a guest goes
+    // straight to the same signed deep-link hand-off a LINKED user with no allowance already
+    // gets ("Path B" in the AWAITING_PIN handler above) — built from the exact same collected,
+    // verified data. This is the ONE place "generate a link instead of asking for a PIN" (the
+    // final-execution step) actually happens for a guest.
+    if (isGuest) {
+        const category = intentData.intent === 'ELECTRICITY' ? 'ELECTRICITY'
+                        : intentData.intent === 'TV' ? 'CABLE'
+                        : intentData.intent === 'VEND_DATA' ? 'DATA' : 'AIRTIME';
+        const serviceID = resolveServiceId(intentData.intent, intentData.provider || null) || intentData.provider || '';
+        const guestHost = req.headers.get('host');
+        const guestProto = guestHost?.includes('localhost') ? 'http' : 'https';
+        const guestBaseUrl = `${guestProto}://${guestHost}`;
+        const serviceLabel = intentData.intent === 'ELECTRICITY' ? 'Electricity'
+                            : intentData.intent === 'VEND_DATA' ? 'Data'
+                            : intentData.intent === 'TV' ? 'Cable' : 'Airtime';
+
+        await supabase.from('deai_sessions').delete().eq('chat_id', platform_id);
+
+        try {
+            const payUrl = createDeepLink(guestBaseUrl, {
+                serviceID,
+                serviceCategory: category,
+                provider: intentData.provider || '',
+                billersCode: intentData.destination_account,
+                amountNgn: Number(intentData.amount_ngn),
+                variationCode: intentData.variation_code || undefined,
+                meterType: intentData.meter_type || undefined,
+                cableAction: intentData.cable_action || undefined,
+                customerName: intentData.customer_name || undefined,
+                customerAddress: intentData.customer_address || undefined,
+                channel: platform,
+                chatId: platform_id,
+            });
+
+            return NextResponse.json({
+                action: 'REPLY',
+                message: [
+                    `${prependSystemMsg}✅ *Ready to pay*`,
+                    ``,
+                    `*${intentData.provider || ''} ${serviceLabel}*`,
+                    intentData.customer_name ? `👤 ${intentData.customer_name}` : null,
+                    `📱 ${intentData.destination_account}`,
+                    `💰 ₦${Number(intentData.amount_ngn).toLocaleString()}`,
+                    ``,
+                    `👉 *[Tap here to pay in your web3 browser](${payUrl})*`,
+                    ``,
+                    `_You'll connect and sign with your own wallet — AbaPay never holds your funds. Link expires in 15 minutes._`,
+                    ``,
+                    `_Tip: link your wallet once at https://abapays.com and you can pay right here with just a PIN, no link needed._`,
+                ].filter(Boolean).join('\n'),
+            });
+        } catch (linkErr) {
+            console.error('[DeAI] Failed to build guest payment link:', linkErr);
+            return NextResponse.json({ action: 'REPLY', message: "⚠️ I couldn't generate your payment link. Please try again, or pay directly at https://abapays.com" });
+        }
     }
 
     // ⚡ CHAIN SELECTION FIRST, THEN TOKEN ⚡
