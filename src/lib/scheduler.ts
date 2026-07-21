@@ -2,7 +2,7 @@ import 'server-only';
 import { supabaseAdmin } from '@/utils/supabase';
 import { fetchCryptoBalances } from '@/lib/deai/services';
 import { createDeepLink } from '@/lib/deai/deeplink';
-import { relayPayBillFor, getRemainingAllowance } from '@/lib/deai/relayer';
+import { relayPayBillFor, getRemainingAllowance, checkRelayerGas } from '@/lib/deai/relayer';
 import { checkServiceAllowed, getServiceRules, checkAgentSpendAllowed } from '@/lib/serviceRules';
 import { sendTelegramToUser } from '@/lib/telegram';
 import { sendWhatsAppMessage } from '@/lib/whatsapp';
@@ -123,6 +123,14 @@ export async function runScheduledBills(opts: { scope?: 'recurring' | 'oneoff' |
     return { ...r, errors: 1 };
   }
   if (!bills || bills.length === 0) return r;
+
+  // ⛽ Watchdog: before running any autonomous payments, make sure the relayer that pays their
+  // gas isn't about to run dry. This is the "fails silently at 3am" guard — check each chain
+  // that has an auto-execute schedule and ping Telegram (throttled) if it's below the floor.
+  const autoChains = Array.from(new Set(
+    (bills as any[]).filter(b => b.auto_execute).map(b => String(b.blockchain || 'CELO').toUpperCase())
+  ));
+  await Promise.all(autoChains.map(c => checkRelayerGas(c)));
 
   const rules = await getServiceRules();
 

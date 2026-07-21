@@ -96,6 +96,44 @@ export async function getRemainingAllowance(
   }
 }
 
+// ⚡ RELAYER GAS WATCHDOG ⚡
+//
+// The relayer pays gas for every agent-initiated and every AUTONOMOUS scheduled payment. If
+// it runs dry, those payments fail silently at whatever hour the schedule fires — the exact
+// "fails silently at 3am" scenario. This reads the relayer's native-gas balance and pings the
+// operator's Telegram when it drops below a per-chain floor, throttled so it warns without
+// spamming. Called after each relay and once per scheduler tick.
+const GAS_LOW_FLOOR: Record<string, { limit: number; symbol: string }> = {
+  CELO: { limit: 1, symbol: 'CELO' },
+  BASE: { limit: 0.001, symbol: 'ETH' },
+};
+const lastGasAlertAt: Record<string, number> = {};
+const GAS_ALERT_COOLDOWN_MS = 3 * 60 * 60 * 1000; // at most one low-gas ping per chain every 3h
+
+export async function checkRelayerGas(blockchain = 'CELO'): Promise<void> {
+  try {
+    const pk = process.env.RELAYER_PRIVATE_KEY;
+    if (!pk) return;
+    const chainKey = blockchain.toUpperCase();
+    const cfg = GAS_LOW_FLOOR[chainKey] || GAS_LOW_FLOOR.CELO;
+    const account = privateKeyToAccount(pk as `0x${string}`);
+    const client = getPublicClient(blockchain);
+    const balWei = (await client.getBalance({ address: account.address })) as bigint;
+    const bal = Number(formatUnits(balWei, 18)); // native gas token is 18-decimals on both chains
+    if (bal >= cfg.limit) return;
+    if (Date.now() - (lastGasAlertAt[chainKey] || 0) < GAS_ALERT_COOLDOWN_MS) return;
+    lastGasAlertAt[chainKey] = Date.now();
+    await sendTelegramAlert(
+      `⛽ *RELAYER GAS LOW — ${chainKey}*\n\n` +
+      `The agent relayer is down to *${bal.toFixed(4)} ${cfg.symbol}* (floor ${cfg.limit} ${cfg.symbol}).\n\n` +
+      `Top it up soon — chat-agent and autonomous scheduled payments on ${chainKey} will start failing once it empties.\n\n` +
+      `Relayer: \`${account.address}\``
+    );
+  } catch {
+    // A monitoring check must never break or delay a real payment.
+  }
+}
+
 export interface RelayResult {
   success: boolean;
   txHash?: string;
@@ -218,6 +256,10 @@ export async function relayPayBillFor(params: {
         `Hash: \`${hash}\``
       );
     } catch { /* alerting must never block a successful payment */ }
+
+    // Watch the relayer's gas after each spend — a low balance here is the early warning
+    // before autonomous payments start failing. Fire-and-forget; never blocks the result.
+    void checkRelayerGas(blockchain);
 
     return { success: true, txHash: hash };
   } catch (err: any) {
