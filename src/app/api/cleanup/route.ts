@@ -1,13 +1,16 @@
 import { NextResponse } from 'next/server';
 import { cleanupStalePreflights } from '@/lib/cleanupPreflights';
+import { reconcileStuckProcessing } from '@/lib/reconcileStuck';
 
-// ⚡ Manual / optional-cron trigger for the stale-preflight sweep.
+// ⚡ Manual / optional-cron trigger for the stale-preflight + stuck-PROCESSING sweeps.
 //
-// NOTE: This does NOT require a Vercel cron. The same cleanup runs automatically
-// and opportunistically from inside the webhook (see src/lib/cleanupPreflights.ts),
-// so on the free plan you can simply rely on that. This endpoint remains available
-// for manual runs, an external free cron (e.g. cron-job.org / GitHub Actions), or a
-// real Vercel cron if you later upgrade.
+// NOTE: This does NOT require a Vercel cron. Both sweeps also run automatically and
+// opportunistically from inside the webhook (see src/lib/cleanupPreflights.ts and
+// src/lib/reconcileStuck.ts), so on the free plan you can rely on that alone — but since
+// reconcileStuckProcessing is the safety net for a genuinely stuck payment (money already
+// moved, delivery unconfirmed), an external free cron hitting this every few minutes
+// (e.g. cron-job.org / GitHub Actions) is strongly recommended rather than depending
+// entirely on incidental webhook traffic to trigger it.
 //
 // If CRON_SECRET is set, callers must present it (Bearer or x-cron-secret header).
 
@@ -22,8 +25,12 @@ async function handle(req: Request) {
     }
   }
 
-  const result = await cleanupStalePreflights({ force: true });
-  return NextResponse.json(result, { status: result.ok ? 200 : 500 });
+  const [preflightResult, stuckResult] = await Promise.all([
+    cleanupStalePreflights({ force: true }),
+    reconcileStuckProcessing({ force: true }),
+  ]);
+  const ok = preflightResult.ok && stuckResult.ok;
+  return NextResponse.json({ preflight: preflightResult, stuckProcessing: stuckResult }, { status: ok ? 200 : 500 });
 }
 
 export async function GET(req: Request) { return handle(req); }

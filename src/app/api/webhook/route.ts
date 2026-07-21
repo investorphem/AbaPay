@@ -8,6 +8,7 @@ import { Resend } from 'resend';
 import { decodeEventLog, parseUnits } from 'viem';
 import { ABAPAY_CONTRACT_ABI_EVENTS, resolveTokenOnChain } from '@/constants';
 import { cleanupStalePreflights } from '@/lib/cleanupPreflights';
+import { reconcileStuckProcessing } from '@/lib/reconcileStuck';
 import { resolveChain, getPublicClient, explorerBaseFor } from '@/lib/chain';
 import { buildReceiptEmail } from '@/lib/receiptEmail';
 import { enqueueRefund } from '@/lib/refunds';
@@ -97,6 +98,9 @@ export async function POST(req: Request) {
         // instance, and never blocks or delays this webhook's response. This keeps
         // abandoned pre-flight intents from lingering as PENDING on the free plan.
         cleanupStalePreflights().catch(() => {});
+        // Same opportunistic, throttled pattern — catches PROCESSING rows orphaned by a
+        // server crash mid-vend on ANY route (contract-call, x402, agent relayer, scheduler).
+        reconcileStuckProcessing().catch(() => {});
 
         // Extract the user's wallet address from Alchemy payload to find abandoned preflights
         const fromAddress = activity.fromAddress || null;
