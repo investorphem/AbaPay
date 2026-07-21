@@ -1,25 +1,31 @@
 import hre from "hardhat";
 
 /**
- * Registers AbaPay's DeAI agent as an on-chain identity via ERC-8004 (Trustless Agents)
- * on Celo, so it's discoverable on 8004scan.io / AgentScan.
+ * Registers AbaPay's DeAI agent as an on-chain identity via ERC-8004 (Trustless Agents),
+ * so it's discoverable on 8004scan.io / AgentScan. Run once per chain — Celo and Base each
+ * get their OWN agent ID (identity is per-chain; there is no cross-chain agent record).
  *
  * This is identity-only — it does NOT touch payments. The relayer's existing
  * signature-free bill-pay flow (contracts/AbaPayV3.sol, src/lib/deai/relayer.ts) is
  * completely unaffected by this script.
  *
  * Registry addresses (third-party, AbaPay does not control them — env-overridable):
- *   - Celo mainnet:      0x8004A169FB4a3325136EB29fA0ceB6D2e539a432
- *   - Celo Sepolia:      0x8004A818BFB912233c491871b3d84c89A494BD9e
+ *   - Celo mainnet:  0x8004A169FB4a3325136EB29fA0ceB6D2e539a432
+ *   - Celo Sepolia:  0x8004A818BFB912233c491871b3d84c89A494BD9e
+ *   - Base mainnet:  0x8004A169FB4a3325136EB29fA0ceB6D2e539a432 (SAME address as Celo mainnet —
+ *     confirmed on-chain via `eth_getCode`, byte-identical bytecode on both chains, consistent
+ *     with a canonical CREATE2 deployment of the reference ERC-8004 registry. Verified directly
+ *     against the RPC, not assumed from documentation.)
  *
  * ⚠️ Before running on mainnet, confirm `register(string)` is the correct selector against
- * the verified implementation source on Celoscan for the address above — this script assumes
- * the single-argument overload from the ERC-8004 reference contracts.
+ * the verified implementation source on the block explorer for the address above — this
+ * script assumes the single-argument overload from the ERC-8004 reference contracts.
  *
  * Usage:
  *   ERC8004_AGENT_URI=https://abapays.com/.well-known/agent.json \
  *     npx hardhat run scripts/register8004.ts --network sepolia
  *   (then, once verified) --network celo
+ *   (and separately, for a Base identity) --network base
  */
 
 const REGISTRY_ABI = [
@@ -47,6 +53,7 @@ const REGISTRY_ABI = [
 const DEFAULT_REGISTRY: Record<string, string> = {
   celo: "0x8004A169FB4a3325136EB29fA0ceB6D2e539a432",
   sepolia: "0x8004A818BFB912233c491871b3d84c89A494BD9e",
+  base: "0x8004A169FB4a3325136EB29fA0ceB6D2e539a432", // same address as celo — see header note
 };
 
 async function main() {
@@ -62,9 +69,9 @@ async function main() {
   }
 
   const registryAddress =
-    networkName === "celo"
-      ? process.env.ERC8004_REGISTRY_CELO_MAINNET || DEFAULT_REGISTRY.celo
-      : process.env.ERC8004_REGISTRY_CELO_SEPOLIA || DEFAULT_REGISTRY.sepolia;
+    networkName === "celo" ? (process.env.ERC8004_REGISTRY_CELO_MAINNET || DEFAULT_REGISTRY.celo)
+    : networkName === "base" ? (process.env.ERC8004_REGISTRY_BASE_MAINNET || DEFAULT_REGISTRY.base)
+    : (process.env.ERC8004_REGISTRY_CELO_SEPOLIA || DEFAULT_REGISTRY.sepolia);
 
   console.log(`📇 Registry: ${registryAddress}`);
   console.log(`🔗 Agent card: ${agentURI}`);
