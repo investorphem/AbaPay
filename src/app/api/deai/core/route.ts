@@ -231,6 +231,145 @@ async function renderTokenChoicesWithAllowance(wallet: string, chain: 'CELO' | '
         .join('\n');
 }
 
+// ⚡ Every token/chain the user has actually FUNDED an agent allowance for (remaining > 0),
+// across both chains. Used to decide, for a schedule where the user didn't name a token/chain,
+// whether to just use the single approved allowance or — when there's more than one — ask which
+// to spend from rather than silently defaulting. Base yields nothing until V3 is deployed there
+// (getRemainingAllowance returns ok:false with no contract), so today this surfaces Celo only.
+async function listFundedAllowances(wallet: string): Promise<{ token: string; chain: 'CELO' | 'BASE'; remaining: number }[]> {
+    if (!wallet) return [];
+    const chains: ('CELO' | 'BASE')[] = ['CELO', 'BASE'];
+    const out: { token: string; chain: 'CELO' | 'BASE'; remaining: number }[] = [];
+    await Promise.all(chains.map(async (chain) => {
+        const toks = tokensForChain(chain);
+        const allowances = await Promise.all(toks.map((sym) => getRemainingAllowance(wallet, sym, chain)));
+        toks.forEach((sym, i) => {
+            const a = allowances[i];
+            if (a.ok && a.remaining > 0) out.push({ token: sym, chain, remaining: a.remaining });
+        });
+    }));
+    return out;
+}
+
+// ⚡ Builds the schedule confirmation (or the "which balance?" ambiguity prompt) and stashes
+// the pending schedule for the PIN step. Extracted so it can be reached from two places: the
+// main scheduling parse, and the AWAITING_SCHEDULE_ALLOWANCE reply handler once the user has
+// picked which funded allowance to use. Re-entrant: if selected_token/chain are already set
+// (the user named them, or just chose one), it skips straight to the confirm.
+async function buildScheduleConfirm(
+    intentData: any, wallet: string, platform: string, platform_id: string,
+    approvedToken?: string, approvedChain?: string,
+): Promise<NextResponse> {
+    const isOneOffFuture = !!intentData.schedule_run_at;
+
+    // ⚡ ASK ONLY WHEN AMBIGUOUS — if the user never named a token/chain and has MORE THAN ONE
+    // funded allowance, let them choose instead of silently picking the linked default. Exactly
+    // one funded allowance → use it (nothing to choose). Zero → fall through; the "no approved
+    // limit" note below explains what to do.
+    if (!intentData.selected_token && !intentData.chain) {
+        const funded = await listFundedAllowances(wallet);
+        if (funded.length > 1) {
+            intentData.schedule_allowance_options = funded.map((f) => ({ token: f.token, chain: f.chain }));
+            await supabase.from('deai_sessions').upsert({
+                chat_id: platform_id, platform, intent_data: intentData,
+                status: 'AWAITING_SCHEDULE_ALLOWANCE', expires_at: new Date(Date.now() + 300000).toISOString(),
+            }, { onConflict: 'chat_id' });
+            return NextResponse.json({
+                action: 'REPLY',
+                message: [
+                    `💳 *Which balance should this schedule pay from?*`,
+                    ``,
+                    ...funded.map((o, i) => `*${i + 1}.* ${o.token} on ${o.chain} — approved limit _${o.remaining.toFixed(2)}_`),
+                    ``,
+                    `Just reply with the number.`,
+                ].join('\n'),
+            });
+        }
+        if (funded.length === 1) {
+            intentData.selected_token = funded[0].token;
+            intentData.chain = funded[0].chain;
+        }
+    }
+
+    const serviceID = resolveServiceId(intentData.intent, intentData.provider) || intentData.provider;
+    const category = intentData.intent === 'ELECTRICITY' ? 'ELECTRICITY'
+                   : intentData.intent === 'TV' ? 'CABLE'
+                   : intentData.intent === 'VEND_DATA' ? 'DATA' : 'AIRTIME';
+
+    const tokenSym = intentData.selected_token || approvedToken || 'USD₮';
+    const schedChain = (intentData.chain || approvedChain || 'CELO').toUpperCase();
+    const allowance = await getRemainingAllowance(wallet, tokenSym, schedChain);
+
+    const schedRate = await getExchangeRate();
+    const neededCrypto = Number(intentData.amount_ngn) / schedRate;
+    const schedBalances = await fetchCryptoBalances(wallet, schedChain);
+    const heldToken = Number(schedBalances[tokenSym] ?? 0);
+    const canAutoPay = allowance.ok && allowance.remaining >= neededCrypto;
+
+    if (canAutoPay && heldToken < neededCrypto) {
+        return NextResponse.json({
+            action: 'REPLY',
+            message: `⚠️ *Balance too low for this schedule.*\n\nThis needs about ${neededCrypto.toFixed(4)} ${tokenSym} on ${schedChain}, but your balance is ${heldToken.toFixed(4)} ${tokenSym}.\n\nTop up first, then set the schedule again — I won't create one that can't actually run.`,
+        });
+    }
+
+    const schedFreq = isOneOffFuture ? 'once' : (intentData.frequency || 'monthly');
+    const schedDow = intentData.day_of_week;
+    const schedDom = intentData.day_of_month;
+    const minutesAway = isOneOffFuture ? Math.max(1, Math.round((new Date(intentData.schedule_run_at).getTime() - Date.now()) / 60_000)) : 0;
+    const when = isOneOffFuture
+        ? `once, in about ${minutesAway} minute${minutesAway === 1 ? '' : 's'}`
+        : schedFreq === 'weekly'
+        ? `every ${['Sunday','Monday','Tuesday','Wednesday','Thursday','Friday','Saturday'][schedDow ?? 0]}`
+        : schedFreq === 'daily' ? 'every day'
+        : `on the ${schedDom}th of each month`;
+
+    intentData.pending_schedule = {
+        service_id: serviceID,
+        service_category: category,
+        provider: intentData.provider,
+        billers_code: intentData.destination_account,
+        amount_ngn: Number(intentData.amount_ngn),
+        meter_type: intentData.meter_type || null,
+        blockchain: schedChain,
+        token_used: tokenSym,
+        frequency: schedFreq,
+        day_of_week: isOneOffFuture ? null : schedDow,
+        day_of_month: isOneOffFuture ? null : schedDom,
+        run_once_at: isOneOffFuture ? intentData.schedule_run_at : null,
+        auto_execute: canAutoPay,
+        when,
+        is_one_off: isOneOffFuture,
+        allowance_remaining: allowance.ok ? allowance.remaining : 0,
+    };
+    await supabase.from('deai_sessions').upsert({
+        chat_id: platform_id, platform, intent_data: intentData,
+        status: 'AWAITING_PIN', expires_at: new Date(Date.now() + 300000).toISOString(),
+    }, { onConflict: 'chat_id' });
+
+    const autoNote = canAutoPay
+        ? `🤖 It'll *pay automatically* from your approved limit (${allowance.remaining.toFixed(2)} ${tokenSym} on ${schedChain}).`
+        : platform === 'TELEGRAM'
+            ? `🔔 I'll *send you a one-tap payment link* here when it's due (you have no auto-pay limit approved).`
+            : `⚠️ You have no approved spend limit, so this can't auto-pay — approve one for ${tokenSym} on ${schedChain} in the app before it's due, or it won't run.`;
+
+    return NextResponse.json({
+        action: 'REPLY',
+        message: [
+            `${isOneOffFuture ? '⏱' : '🔁'} *Confirm this ${isOneOffFuture ? 'scheduled payment' : 'automation'}*`,
+            ``,
+            `*${intentData.provider} ${category}* — ₦${Number(intentData.amount_ngn).toLocaleString()}`,
+            `📱 ${intentData.destination_account}`,
+            `📅 ${when}`,
+            `💳 ${tokenSym} on ${schedChain}`,
+            ``,
+            autoNote,
+            ``,
+            `🔒 Reply with your *PIN* to set it up.`,
+        ].join('\n'),
+    });
+}
+
 // Carries the detected language + the user's message out of handleCore so the POST wrapper
 // can localize the finished reply (see humanizeReply). Purely a decoration channel — the
 // reply's FACTS are already fixed by handleCore; the wrapper only rewrites the prose.
@@ -550,7 +689,7 @@ async function handleCore(req: Request, ctx: HumanizeCtx): Promise<NextResponse>
     const INTERRUPTIBLE_STATES = new Set([
         'AWAITING_DETAILS', 'AWAITING_FIELD', 'AWAITING_PROVIDER', 'AWAITING_CABLE_ACTION',
         'AWAITING_PLAN_CATEGORY', 'AWAITING_VARIATION', 'AWAITING_CHAIN', 'AWAITING_TOKEN',
-        'AWAITING_METER_TYPE', 'AWAITING_EMAIL_CHOICE',
+        'AWAITING_METER_TYPE', 'AWAITING_EMAIL_CHOICE', 'AWAITING_SCHEDULE_ALLOWANCE',
     ]);
     const freshIntentCheck = fallbackIntentMatcher(text);
     if (session && INTERRUPTIBLE_STATES.has(session.status) && freshIntentCheck !== 'UNKNOWN' && freshIntentCheck !== session.intent_data.intent) {
@@ -1243,6 +1382,38 @@ async function handleCore(req: Request, ctx: HumanizeCtx): Promise<NextResponse>
       isContinuingToAI = true;
       prependSystemMsg = `✅ *${picked.label}* — ₦${Number(picked.price || 0).toLocaleString()}\n\n`;
     }
+    // STATE: SCHEDULE ALLOWANCE CHOICE ⚡
+    // The user has more than one funded agent allowance and didn't name one for this
+    // schedule, so we asked which to spend from. Map their numbered reply (or the token
+    // name) to the chosen token/chain and re-enter the schedule build.
+    else if (session?.status === 'AWAITING_SCHEDULE_ALLOWANCE') {
+      const options: { token: string; chain: 'CELO' | 'BASE' }[] = session.intent_data.schedule_allowance_options || [];
+      const idx = parseInt(userInput, 10) - 1;
+      let choice: { token: string; chain: 'CELO' | 'BASE' } | undefined = options[idx];
+
+      // Accept the token name too (e.g. "USDC", "celo usdc") — not just the numbered slot.
+      if (!choice) {
+        const norm = userInput.toLowerCase().replace(/[^a-z0-9]/g, '');
+        const alias: Record<string, string> = { usdc: 'USDC', usdt: 'USD₮', tether: 'USD₮', usd: 'USD₮', usdm: 'USDm', cusd: 'USDm' };
+        const wantToken = alias[norm];
+        const wantChain = norm.includes('base') ? 'BASE' : norm.includes('celo') ? 'CELO' : null;
+        choice = options.find((o) => (wantToken ? o.token === wantToken : true) && (wantChain ? o.chain === wantChain : true));
+      }
+
+      if (!choice) {
+        const list = options.map((o, i) => `*${i + 1}.* ${o.token} on ${o.chain}`).join('\n');
+        return NextResponse.json({ action: 'REPLY', message: `❌ Reply with the number of the balance to use:\n\n${list}` });
+      }
+
+      session.intent_data.selected_token = choice.token;
+      session.intent_data.chain = choice.chain;
+      delete session.intent_data.schedule_allowance_options;
+
+      return await buildScheduleConfirm(
+        session.intent_data, globalUser?.wallet_address || '', platform, platform_id,
+        globalUser?.approved_token, globalUser?.approved_chain,
+      );
+    }
     // STATE: CHAIN SELECTION ⚡
     // Chain was previously hardcoded to CELO, so a user could never pay on Base from chat.
     else if (session?.status === 'AWAITING_CHAIN') {
@@ -1630,7 +1801,23 @@ async function handleCore(req: Request, ctx: HumanizeCtx): Promise<NextResponse>
 
             // Blocked (kill switch, below minimum, above cap) — explain and suggest.
             if (!f.possible) {
-                await supabase.from('deai_sessions').delete().eq('chat_id', platform_id);
+                // A bad AMOUNT is recoverable: the meter/provider/customer are already
+                // verified and the user just needs to name a valid figure. Deleting the
+                // session here was the bug behind "min amount ₦4837 → user says 'recharge
+                // 5k' → bot silently restarts as VEND AIRTIME": with no session, the next
+                // message got re-classified from scratch ("recharge" reads as airtime) and
+                // the whole electricity context was lost. Keep the session in AWAITING_DETAILS,
+                // clear ONLY the rejected amount, and let the next number continue this flow.
+                const recoverable = f.blockCode === 'AMOUNT_TOO_LOW' || f.blockCode === 'AMOUNT_TOO_HIGH';
+                if (recoverable) {
+                    intentData.amount_ngn = null;
+                    await supabase.from('deai_sessions').upsert({
+                        chat_id: platform_id, platform, intent_data: intentData,
+                        status: 'AWAITING_DETAILS', expires_at: new Date(Date.now() + 300000).toISOString(),
+                    }, { onConflict: 'chat_id' });
+                } else {
+                    await supabase.from('deai_sessions').delete().eq('chat_id', platform_id);
+                }
                 return NextResponse.json({
                     action: 'REPLY',
                     message: [`⚠️ ${f.reason}`, ``, ...f.suggestions.map(sug => `• ${sug}`)].join('\n'),
@@ -1732,99 +1919,14 @@ async function handleCore(req: Request, ctx: HumanizeCtx): Promise<NextResponse>
                 return NextResponse.json({ action: 'REPLY', message: [`🔁 Happy to set that up — ${f.reason}`, ``, ...f.suggestions.map(s2 => `• ${s2}`)].join('\n') });
             }
 
-            const serviceID = resolveServiceId(intentData.intent, intentData.provider) || intentData.provider;
-            const category = intentData.intent === 'ELECTRICITY' ? 'ELECTRICITY'
-                           : intentData.intent === 'TV' ? 'CABLE'
-                           : intentData.intent === 'VEND_DATA' ? 'DATA' : 'AIRTIME';
-
-            // Will this actually auto-pay? Only if they've granted an on-chain allowance —
-            // check under whatever token/chain they actually approved, not a hardcoded guess
-            // (same fix as the live-payment path above; see the globalUser comment there).
-            // A chain/token the user explicitly named in conversation wins over the linked
-            // defaults — "buy airtime in 3 minutes ... Celo ... USDC" should schedule
-            // exactly that, not silently fall back to whatever was approved at link time.
-            const tokenSym = intentData.selected_token || globalUser?.approved_token || 'USD₮';
-            const schedChain = (intentData.chain || globalUser?.approved_chain || 'CELO').toUpperCase();
-            const allowance = await getRemainingAllowance(globalUser?.wallet_address || '', tokenSym, schedChain);
-
-            // ⚡ UPFRONT BALANCE CHECK — a scheduled auto-payment needs the tokens to actually
-            // be in the wallet when it runs. Previously the user only found out the balance
-            // was too low when the scheduled run failed later (or worse, waited for a credit
-            // that never came). Check now, and say so immediately.
-            const schedRate = await getExchangeRate();
-            const neededCrypto = Number(intentData.amount_ngn) / schedRate;
-            const schedBalances = await fetchCryptoBalances(globalUser?.wallet_address || '', schedChain);
-            const heldToken = Number(schedBalances[tokenSym] ?? 0);
-            const canAutoPay = allowance.ok && allowance.remaining >= neededCrypto;
-
-            if (canAutoPay && heldToken < neededCrypto) {
-                return NextResponse.json({
-                    action: 'REPLY',
-                    message: `⚠️ *Balance too low for this schedule.*\n\nThis needs about ${neededCrypto.toFixed(4)} ${tokenSym} on ${schedChain}, but your balance is ${heldToken.toFixed(4)} ${tokenSym}.\n\nTop up first, then set the schedule again — I won't create one that can't actually run.`,
-                });
-            }
-
-            const schedFreq = isOneOffFuture ? 'once' : (intentData.frequency || aiParsed.frequency || 'monthly');
-            const schedDow = intentData.day_of_week ?? aiParsed.day_of_week;
-            const schedDom = intentData.day_of_month ?? aiParsed.day_of_month;
-            const minutesAway = isOneOffFuture ? Math.max(1, Math.round((new Date(intentData.schedule_run_at).getTime() - Date.now()) / 60_000)) : 0;
-            const when = isOneOffFuture
-                ? `once, in about ${minutesAway} minute${minutesAway === 1 ? '' : 's'}`
-                : schedFreq === 'weekly'
-                ? `every ${['Sunday','Monday','Tuesday','Wednesday','Thursday','Friday','Saturday'][schedDow ?? 0]}`
-                : schedFreq === 'daily' ? 'every day'
-                : `on the ${schedDom}th of each month`;
-
-            // 🔒 REQUIRE PIN BEFORE CREATING A SCHEDULE — a schedule is a STANDING
-            // authorization to spend from the user's allowance, unattended. Without a PIN
-            // gate, anyone with momentary access to the linked chat could set up a recurring
-            // drain. Stash the fully-resolved schedule and confirm with the PIN, exactly like
-            // an immediate payment. The AWAITING_PIN handler detects pending_schedule and
-            // creates the row instead of paying immediately.
-            intentData.pending_schedule = {
-                service_id: serviceID,
-                service_category: category,
-                provider: intentData.provider,
-                billers_code: intentData.destination_account,
-                amount_ngn: Number(intentData.amount_ngn),
-                meter_type: intentData.meter_type || null,
-                blockchain: schedChain,
-                token_used: tokenSym,
-                frequency: schedFreq,
-                day_of_week: isOneOffFuture ? null : schedDow,
-                day_of_month: isOneOffFuture ? null : schedDom,
-                run_once_at: isOneOffFuture ? intentData.schedule_run_at : null,
-                auto_execute: canAutoPay,
-                when,
-                is_one_off: isOneOffFuture,
-                allowance_remaining: allowance.ok ? allowance.remaining : 0,
-            };
-            await supabase.from('deai_sessions').upsert({
-                chat_id: platform_id, platform, intent_data: intentData,
-                status: 'AWAITING_PIN', expires_at: new Date(Date.now() + 300000).toISOString(),
-            }, { onConflict: 'chat_id' });
-
-            const autoNote = canAutoPay
-                ? `🤖 It'll *pay automatically* from your approved limit (${allowance.remaining.toFixed(2)} ${tokenSym} on ${schedChain}).`
-                : platform === 'TELEGRAM'
-                    ? `🔔 I'll *send you a one-tap payment link* here when it's due (you have no auto-pay limit approved).`
-                    : `⚠️ You have no approved spend limit, so this can't auto-pay — approve one for ${tokenSym} on ${schedChain} in the app before it's due, or it won't run.`;
-
-            return NextResponse.json({
-                action: 'REPLY',
-                message: [
-                    `${isOneOffFuture ? '⏱' : '🔁'} *Confirm this ${isOneOffFuture ? 'scheduled payment' : 'automation'}*`,
-                    ``,
-                    `*${intentData.provider} ${category}* — ₦${Number(intentData.amount_ngn).toLocaleString()}`,
-                    `📱 ${intentData.destination_account}`,
-                    `📅 ${when}`,
-                    `💳 ${tokenSym} on ${schedChain}`,
-                    ``,
-                    autoNote,
-                    ``,
-                    `🔒 Reply with your *PIN* to set it up.`,
-                ].join('\n'),
-            });
+            // Resolve token/chain, run the balance/allowance checks, and either ask which
+            // funded allowance to use (when the user named none and has more than one) or
+            // stash the schedule for PIN confirmation. Extracted so the "which balance?"
+            // reply can re-enter the exact same build — see buildScheduleConfirm.
+            return await buildScheduleConfirm(
+                intentData, globalUser?.wallet_address || '', platform, platform_id,
+                globalUser?.approved_token, globalUser?.approved_chain,
+            );
         }
     }
 

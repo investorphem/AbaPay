@@ -121,6 +121,13 @@ export interface Feasibility {
   /** What we still need from them before we can proceed. */
   missing: string[];
   appUrl?: string;
+  /**
+   * Why a `possible:false` was returned, so the caller can decide whether the block is
+   * RECOVERABLE (the user just needs to supply a different value — keep the in-flight
+   * session and re-ask) or FATAL (nothing to retry — safe to reset). Only 'AMOUNT_*' are
+   * recoverable; everything else means the whole request can't proceed as stated.
+   */
+  blockCode?: 'AMOUNT_TOO_LOW' | 'AMOUNT_TOO_HIGH' | 'DISABLED' | 'UNSUPPORTED' | 'OTHER';
 }
 
 const APP_URL = process.env.NEXT_PUBLIC_APP_URL || 'https://abapays.com';
@@ -270,6 +277,7 @@ export async function assessFeasibility(params: {
         reason: `The minimum for ${spec.label.toLowerCase()} is ₦${min.toLocaleString()} — you asked for ₦${amountNgn.toLocaleString()}.`,
         suggestions: [`Try ₦${min.toLocaleString()} or more.`],
         missing: [],
+        blockCode: 'AMOUNT_TOO_LOW',
       };
     }
     if (amountNgn > 500_000) {
@@ -279,6 +287,7 @@ export async function assessFeasibility(params: {
         reason: `₦${amountNgn.toLocaleString()} is above the ₦500,000 per-transaction limit.`,
         suggestions: ['Split it into smaller payments, or pay in the app.'],
         missing: [],
+        blockCode: 'AMOUNT_TOO_HIGH',
       };
     }
   }
