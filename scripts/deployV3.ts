@@ -48,22 +48,33 @@ async function main() {
   await AbaPay.deploymentTransaction().wait(5);
 
   // ── Token configuration ────────────────────────────────────────────────
-  let usdt, usdc, cusd;
+  // Whitelist per network. Base has NO Mento cUSD/USDm (that's a Celo-only stable-token
+  // family), so Base gets only USDC + USDT — matching what the app/relayer resolve there.
+  let tokens: [string, string, number][];
   if (networkName === "celo") {
-    usdt = "0x48065fbbe25f71c9282ddf5e1cd6d6a887483d5e";
-    usdc = "0xcebA9300f2b948710d2653dD7B07f33A8B32118C";
-    cusd = "0x765DE816845861e75A25fCA122bb6898B8B1282a";
+    tokens = [
+      ["USDT", "0x48065fbbe25f71c9282ddf5e1cd6d6a887483d5e", 6],
+      ["USDC", "0xcebA9300f2b948710d2653dD7B07f33A8B32118C", 6],
+      ["cUSD", "0x765DE816845861e75A25fCA122bb6898B8B1282a", 18],
+    ];
+  } else if (networkName === "base") {
+    tokens = [
+      ["USDC", "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913", 6],
+      ["USDT", "0xfde4C96c8593536E31F229EA8f37b2ADa2699bb2", 6],
+    ];
+  } else if (networkName === "baseSepolia") {
+    // Circle's official Base Sepolia USDC (test).
+    tokens = [
+      ["USDC", "0x036CbD53842c5426634e7929541eC2318f3dCF7e", 6],
+    ];
   } else {
-    usdt = "0xd077A400968890Eacc75cdc901F0356c943e4fDb";
-    usdc = "0x01C5C0122039549AD1493B8220cABEdD739BC44E";
-    cusd = "0xdE9e4C3ce781b4bA68120d6261cbad65ce0aB00b";
+    // Celo Sepolia
+    tokens = [
+      ["USDT", "0xd077A400968890Eacc75cdc901F0356c943e4fDb", 6],
+      ["USDC", "0x01C5C0122039549AD1493B8220cABEdD739BC44E", 6],
+      ["cUSD", "0xdE9e4C3ce781b4bA68120d6261cbad65ce0aB00b", 18],
+    ];
   }
-
-  const tokens: [string, string, number][] = [
-    ["USDT", usdt, 6],
-    ["USDC", usdc, 6],
-    ["cUSD", cusd, 18],
-  ];
 
   if (owner.toLowerCase() !== deployer.address.toLowerCase()) {
     console.log(

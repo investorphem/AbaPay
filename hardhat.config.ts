@@ -19,6 +19,18 @@ const config: HardhatUserConfig = {
       accounts: process.env.CELO_PRIVATE_KEY ? [process.env.CELO_PRIVATE_KEY] : [],
       chainId: 42220,
     },
+    // BASE MAINNET — same deployer key (CELO_PRIVATE_KEY is the generic deployer EOA).
+    base: {
+      url: process.env.BASE_RPC_URL || "https://mainnet.base.org",
+      accounts: process.env.CELO_PRIVATE_KEY ? [process.env.CELO_PRIVATE_KEY] : [],
+      chainId: 8453,
+    },
+    // BASE TESTNET (Sepolia)
+    baseSepolia: {
+      url: process.env.BASE_SEPOLIA_RPC_URL || "https://sepolia.base.org",
+      accounts: process.env.CELO_PRIVATE_KEY ? [process.env.CELO_PRIVATE_KEY] : [],
+      chainId: 84532,
+    },
   },
   // Configuration to verify contracts on Etherscan V2
   etherscan: {
@@ -39,6 +51,22 @@ const config: HardhatUserConfig = {
         urls: {
           apiURL: "https://api.etherscan.io/v2/api", // FIXED: Etherscan V2 Endpoint
           browserURL: "https://celoscan.io/",
+        },
+      },
+      {
+        network: "base",
+        chainId: 8453,
+        urls: {
+          apiURL: "https://api.etherscan.io/v2/api", // Etherscan V2 unified endpoint
+          browserURL: "https://basescan.org/",
+        },
+      },
+      {
+        network: "baseSepolia",
+        chainId: 84532,
+        urls: {
+          apiURL: "https://api.etherscan.io/v2/api",
+          browserURL: "https://sepolia.basescan.org/",
         },
       },
     ],
