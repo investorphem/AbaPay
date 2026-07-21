@@ -536,9 +536,13 @@ export default function AdminDashboard() {
     if (!client || !address) return;
     const key = `${network}-${tokenSymbol}`;
 
+    // ⚠️ 'USD₮'.toLowerCase() === 'usd₮' (Unicode ₮, U+20AE) — NOT the 'usdt' vault key.
+    // Left unmapped, balanceToCheck came back undefined → parseUnits("NaN") threw and got
+    // masked as "Rejected or Insufficient Gas." (USDC/USDm matched by accident). Map explicitly.
+    const vaultKey = tokenSymbol === 'USD₮' ? 'usdt' : tokenSymbol.toLowerCase();
     const balanceToCheck = network === 'CELO'
-        ? celoVaults[tokenSymbol.toLowerCase() as keyof typeof celoVaults]
-        : baseVaults[tokenSymbol.toLowerCase() as keyof typeof baseVaults];
+        ? celoVaults[vaultKey as keyof typeof celoVaults]
+        : baseVaults[vaultKey as keyof typeof baseVaults];
 
     try {
       const targetChain = network === 'BASE' ? (isMainnet ? base : baseSepolia) : (isMainnet ? celo : celoSepolia);
@@ -593,7 +597,10 @@ export default function AdminDashboard() {
       }
 
       setTimeout(() => refreshAllData(), 5000);
-    } catch (error) { setStatus("Rejected or Insufficient Gas."); }
+    } catch (error: any) {
+      const msg = error?.shortMessage || error?.details || error?.message || String(error);
+      setStatus(`Withdrawal failed: ${msg.slice(0, 160)}`);
+    }
     finally { setWithdrawalBusyKey(null); }
   };
 
