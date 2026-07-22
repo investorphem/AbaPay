@@ -144,6 +144,31 @@ export async function runScheduledBills(opts: { scope?: 'recurring' | 'oneoff' |
       const approaching = isApproaching(bill, now);
       if (!due && !approaching) { r.skipped++; continue; }
 
+      // 🔒 ATOMIC CLAIM — THE BUG THIS FIXES: the in-memory `bill.last_run_date === today`
+      // check above only guards against a bill already marked done in the row THIS process
+      // loaded at the top of runScheduledBills(). It does nothing to stop two overlapping
+      // invocations from both loading the same stale row and both proceeding to spend —
+      // every `last_run_date: today` write below happens only AFTER the on-chain relay +
+      // VTpass vend complete (seconds later), far too late to stop a second concurrent run
+      // that already passed the same in-memory check. /api/schedules/run-instant is designed
+      // to be hit every 1-5 minutes by an external cron; a slow tick (multiple due bills, each
+      // needing an on-chain wait) easily overlaps the next one, or a free cron provider simply
+      // double-fires/retries — either way, without this, the SAME bill could be paid twice on
+      // two concurrent runs. Claim the row atomically, before touching money. `.or(...)`
+      // matches a never-run (NULL) row exactly like a stale-date row, so first-ever runs still
+      // claim correctly; only `due` writes last_run_date anywhere below, so only `due` needs
+      // the claim (an `approaching`-only early warning has no spend to protect).
+      if (due) {
+        const { data: claimed } = await supabaseAdmin
+          .from('scheduled_bills')
+          .update({ last_run_date: today })
+          .eq('id', bill.id)
+          .or(`last_run_date.is.null,last_run_date.neq.${today}`)
+          .select()
+          .single();
+        if (!claimed) { r.skipped++; continue; } // a concurrent run already claimed this bill today
+      }
+
       // A one-off has no "next scheduled date" — it gets exactly one attempt, then is
       // deactivated regardless of the outcome, so it can never fire twice.
       const isOneOff = String(bill.frequency || '').toLowerCase() === 'once';
@@ -246,8 +271,25 @@ export async function runScheduledBills(opts: { scope?: 'recurring' | 'oneoff' |
             preflightTxHash = null; // renamed — nothing left to clean up
 
             // Atomic PENDING -> PROCESSING lock, same as every other rail, so a retried
-            // webhook delivery for this same tx can never double-vend.
-            await supabaseAdmin.from('transactions').update({ status: 'PROCESSING' }).eq('tx_hash', txHash).eq('status', 'PENDING').select().single();
+            // webhook delivery for this same tx can never double-vend. 🔴 THE BUG THIS FIXES:
+            // this result was previously discarded — every OTHER rail (Path A in core/route.ts,
+            // the Alchemy webhook) captures it and backs off if the lock wasn't obtained; this
+            // one unconditionally called executeVend regardless. In practice the scheduler
+            // almost always wins that race (the webhook only reaches its own lock attempt after
+            // a mandatory 15s sleep), which is why this hasn't caused visible harm — but nothing
+            // actually enforced it the way the comment claimed.
+            const { data: lockedRecord } = await supabaseAdmin.from('transactions').update({ status: 'PROCESSING' }).eq('tx_hash', txHash).eq('status', 'PENDING').select().single();
+
+            if (!lockedRecord) {
+              // Lost the lock race — something else (the webhook) is already vending this
+              // exact tx. Don't call executeVend a second time; just report success and stop.
+              await supabaseAdmin.from('scheduled_bills').update({
+                last_paid_at: new Date().toISOString(), last_tx_hash: txHash, consecutive_failures: 0, ...doneUpdate,
+              }).eq('id', bill.id);
+              await notify(bill, `✅ *Paid automatically — ${label}*\n\n${amountLabel} (${needed.toFixed(4)} ${token})\n📱 ${bill.billers_code}\n🔗 \`${txHash}\`\n\n_Finishing up in the background — check History shortly._`);
+              r.paid++;
+              continue;
+            }
 
             const left = (allowance.remaining - needed).toFixed(2);
 
