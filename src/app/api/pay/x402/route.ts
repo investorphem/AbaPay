@@ -79,7 +79,7 @@ interface X402ChainConfig {
   chainKey: ChainKey;
   caip2: string;            // signed into the payer's EIP-712 domain via the CAIP-2 string
   settleNetworkName: string; // the network label the facilitator's /supported expects
-  settleX402Version: number; // Celo: 1 (proven combo); Base/Coinbase: 2
+  settleX402Version: number; // both Celo and Base/CDP: 1 (see chainConfigFor('BASE') for why)
   facilitatorSettleUrl: string;
   payTo: string | undefined;
   explorerBase: string;
@@ -97,28 +97,28 @@ async function chainConfigFor(chainKey: ChainKey, isMainnet: boolean): Promise<X
     if (!id || !secret) return null; // Base x402 disabled until CDP creds exist — stays dormant
     const payTo = process.env.NEXT_PUBLIC_ABAPAY_BASE_ADDRESS;
     if (!payTo) return null;
-    // 🔴 THE BUG THIS FIXES: settleNetworkName was 'base' (a bare chain name, matching Celo's
-    // facilitator's OWN convention — see the Celo branch below). CDP's facilitator instead
-    // expects CAIP-2 throughout (its PAYMENT-RESPONSE headers and payment-option `network`
-    // fields are always "eip155:<chainId>", confirmed independently, not a bare chain name).
-    // A live settle call with 'base' came back `{"errorReason":"invalid_network","errorMessage":
-    // "invalid network: "}` — CDP's validator tried to split it as CAIP-2, found no colon, and
-    // was left with nothing to report. Reusing `caip2` here (same value the challenge already
-    // uses) is the fix — no separate "settle name" exists for CDP, unlike Celo.
-    // 🔴 SECOND BUG: settleX402Version was 2. A real settle attempt against a genuine signed
-    // payment came back `'paymentPayload' is invalid: must match one of [x402V2PaymentPayload,
-    // x402V1PaymentPayload]. x402V2PaymentPayload requires 'accepted'` — confirming CDP accepts
-    // EITHER version, but thirdweb's client (the only thing that ever produces `decodedPayload`
-    // here) can only ever emit the older FLAT v1-style shape (x402Version, scheme, network,
-    // payload:{signature,authorization}) — it never includes v2's `accepted`/`resource`/
-    // `extensions` fields. Tagging that flat payload as version 2 made CDP validate it against
-    // the wrong schema and reject it for a field that could never have been there. Version 1 +
-    // a CAIP-2 network (still required — see the invalid_network fix above) is the combination
-    // that actually matches what gets sent.
+    // ⚡ THREE LIVE ATTEMPTS AGAINST REAL SIGNED PAYMENTS GOT THIS RIGHT — trace kept in full
+    // because the middle two look plausible in isolation but are each wrong:
+    //   1. {x402Version:2, network:'base' (bare)}     -> "invalid_network" (empty reason)
+    //   2. {x402Version:2, network:'eip155:8453'}      -> "paymentPayload...x402V2 requires 'accepted'"
+    //   3. {x402Version:1, network:'eip155:8453'}      -> IDENTICAL error to #2, unchanged
+    // #2 -> #3 changing x402Version and getting the EXACT SAME error is the tell: CDP is
+    // inferring "this is a v2 payload" from the network field's SHAPE (CAIP-2, i.e. contains a
+    // colon) regardless of the declared x402Version. thirdweb's client (the only source of
+    // `decodedPayload` here) can only ever produce the older flat v1-style payload — it never
+    // has v2's `accepted`/`resource`/`extensions` fields — so as long as network looks like v2,
+    // CDP validates against v2's schema and rejects it for a field that could never be present.
+    // Confirmed against the bundled `x402` npm package's own type definitions
+    // (node_modules/x402/dist/cjs/x402Specs-*.d.ts): PaymentRequirementsSchema, PaymentPayloadSchema,
+    // AND SettleRequestSchema all type `network` as a bare-name enum (`"base"`, `"base-sepolia"`,
+    // ...) — CAIP-2 never appears in any of them. The CAIP-2 form (`caip2` below) is still
+    // correct for the CHALLENGE's `accepts[].network` — thirdweb's client needs that to resolve
+    // an EIP-712 chainId when signing, and that part already worked (a real signature came back).
+    // It's only the SETTLE-time override that must be the bare name.
     return {
       chainKey,
       caip2: isMainnet ? 'eip155:8453' : 'eip155:84532',
-      settleNetworkName: isMainnet ? 'eip155:8453' : 'eip155:84532',
+      settleNetworkName: isMainnet ? 'base' : 'base-sepolia',
       settleX402Version: 1,
       facilitatorSettleUrl: `https://${CDP_FACILITATOR_HOST}${CDP_FACILITATOR_SETTLE_PATH}`,
       payTo,
