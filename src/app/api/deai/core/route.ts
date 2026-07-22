@@ -66,6 +66,24 @@ const GREETING_RE = /^(hi+|hey+|hell+o+|yo+|sup|howdy|hola|good\s*(morning|after
 // after it, "myself", "recharge me", and "for me".
 const WHATSAPP_SELF_REFERENCE_RE = /\bmy\s*(whatsapp\s*)?(number|account|line)\b|\bmy\s*whatsapp\b|\brecharge\s*me\b|\bmyself\b|\bfor\s*me\b/i;
 
+// 🔗 CHANNEL-AWARE PAYMENT LINK
+//
+// 🔴 THE BUG THIS FIXES: the payment CTA was hardcoded as Markdown — `*[Tap here](url)*` —
+// and sent byte-identical to all three channels. ONLY Telegram parses that: its sendMessage
+// call passes `parse_mode: 'Markdown'`. WhatsApp's Cloud API (see src/lib/whatsapp.ts — plain
+// `text: { body }`, no parse mode; it only understands *bold*/_italic_/`code`) and X DMs have
+// no bracket-link syntax at all, so users on those channels saw the RAW string
+// "*[Tap here to approve & pay](https://abapays.com/?pay=...)*" on the single most important
+// message in the whole flow — the one they're supposed to tap to actually pay.
+//
+// Telegram keeps the clean hyperlink; WhatsApp/X get the bare URL on its own line, which both
+// clients auto-linkify into a tappable link.
+function payLink(label: string, url: string, platform: string): string {
+  return String(platform).toUpperCase() === 'TELEGRAM'
+    ? `👉 *[${label}](${url})*`
+    : `👉 *${label}:*\n${url}`;
+}
+
 // Human-phrased guesses for the "did you mean...?" suggestion below — keeps the bot on-task
 // (always steering back toward an actual bill-pay action) instead of a flat capability dump.
 const INTENT_GUESS_LABELS: Record<string, string> = {
@@ -639,6 +657,43 @@ async function handleCore(req: Request, ctx: HumanizeCtx): Promise<NextResponse>
       return NextResponse.json({ action: 'REPLY', message: "🚫 *Transaction Cancelled.*\n\nType *Start* whenever you are ready to make a new request." });
     }
 
+    // 🔒 EMERGENCY REVOKE — genuinely "before anything else", including mid-PIN.
+    //
+    // A user who suspects their chat is compromised needs to stop the bleeding NOW, not go
+    // hunting for the app. This disables the link instantly so the agent can no longer spend.
+    //
+    // 🔴 THE BUG THIS FIXES: this check used to live ~1300 lines further down, AFTER the
+    // `session.status` if/else chain. That chain's AWAITING_PIN branch returns on every single
+    // path (correct PIN, wrong PIN, locked), so execution never fell through to it while a PIN
+    // was pending — meaning typing "revoke"/"panic"/"stop" at the exact moment a user sees an
+    // unexpected "Reply with your PIN" prompt (precisely when they'd panic) was instead
+    // evaluated as a WRONG PIN GUESS, burning one of their limited attempts and replying
+    // "❌ Incorrect PIN" while agent access stayed fully live. Moving it here — next to
+    // `cancel`, above the status chain — makes the "usable from any channel, before anything
+    // else" promise actually true. Deliberately placed AFTER `cancel` so that exact word keeps
+    // its existing meaning, and it stays anchored (^) so "stop by the shop later" won't fire.
+    //
+    // NOTE: this is the OPERATIONAL kill. The definitive one is on-chain
+    // (setSpendingAllowance(token, 0)) — we tell them to do that too, because it's the only
+    // thing that holds if our backend itself is compromised.
+    if (/^(revoke|stop|disable|lock|panic|freeze)\b/.test(userInput) && identity?._linkId) {
+      await supabase.from('agent_links').update({ is_active: false }).eq('id', identity._linkId);
+      await supabase.from('deai_sessions').delete().eq('chat_id', platform_id);
+
+      try {
+        await sendTelegramAlert(`🚨 *USER REVOKED AGENT ACCESS*\n📲 ${channel}\n👤 \`${String(globalUser?.wallet_address || '').slice(0, 10)}...\`\n\n_User may suspect compromise._`);
+      } catch { /* best-effort */ }
+
+      return NextResponse.json({
+        action: 'REPLY',
+        message:
+          `🔒 *Agent access disabled.*\n\nI can no longer make payments from this chat.\n\n` +
+          `⚠️ *For full protection, also revoke on-chain:*\n` +
+          `Open AbaPay → Agent → set your spend limit to *0*.\n\n` +
+          `_That's the only step that holds even if our servers were compromised — it's enforced by the blockchain, not by us._`,
+      });
+    }
+
     if (userInput === 'start' || userInput === 'help') {
       await supabase.from('deai_sessions').delete().eq('chat_id', platform_id);
       return NextResponse.json({ 
@@ -1074,7 +1129,7 @@ async function handleCore(req: Request, ctx: HumanizeCtx): Promise<NextResponse>
             d.customer_name ? `👤 ${d.customer_name}` : null,
             `📱 ${d.destination_account}`,
             ``,
-            `👉 *[Tap here to pay this one now](${payUrl})*`,
+            payLink('Tap here to pay this one now', payUrl, platform),
             ``,
             `_Or approve a ${tokenSym}/${chain} spend limit in the app's Agent tab so future payments like this go straight through from chat, no link needed. Link expires in 15 minutes._`,
           ].filter(Boolean).join('\n') : [
@@ -1085,7 +1140,7 @@ async function handleCore(req: Request, ctx: HumanizeCtx): Promise<NextResponse>
             `📱 ${d.destination_account}`,
             `💰 ₦${Number(d.amount_ngn).toLocaleString()}`,
             ``,
-            `👉 *[Tap here to approve & pay](${payUrl})*`,
+            payLink('Tap here to approve & pay', payUrl, platform),
             ``,
             `_You'll sign with your own wallet — AbaPay never holds your funds. Link expires in 15 minutes._`,
           ].filter(Boolean).join('\n');
@@ -1949,36 +2004,8 @@ async function handleCore(req: Request, ctx: HumanizeCtx): Promise<NextResponse>
         }
     }
 
-    // 🔒 EMERGENCY REVOKE — usable from any channel, before anything else.
-    //
-    // A user who suspects their chat is compromised needs to stop the bleeding NOW, not go
-    // hunting for the app. This disables the link instantly so the agent can no longer spend.
-    //
-    // NOTE: this is the OPERATIONAL kill. The definitive one is on-chain
-    // (setSpendingAllowance(token, 0)) — we tell them to do that too, because it's the only
-    // thing that holds if our backend itself is compromised.
-    {
-      const t0 = text.trim().toLowerCase();
-      if (/^(revoke|stop|disable|lock|panic|freeze)\b/.test(t0)) {
-        if (identity?._linkId) {
-          await supabase.from('agent_links').update({ is_active: false }).eq('id', identity._linkId);
-          await supabase.from('deai_sessions').delete().eq('chat_id', platform_id);
-
-          try {
-            await sendTelegramAlert(`🚨 *USER REVOKED AGENT ACCESS*\n📲 ${channel}\n👤 \`${String(globalUser?.wallet_address || '').slice(0, 10)}...\`\n\n_User may suspect compromise._`);
-          } catch { /* best-effort */ }
-
-          return NextResponse.json({
-            action: 'REPLY',
-            message:
-              `🔒 *Agent access disabled.*\n\nI can no longer make payments from this chat.\n\n` +
-              `⚠️ *For full protection, also revoke on-chain:*\n` +
-              `Open AbaPay → Agent → set your spend limit to *0*.\n\n` +
-              `_That's the only step that holds even if our servers were compromised — it's enforced by the blockchain, not by us._`,
-          });
-        }
-      }
-    }
+    // (EMERGENCY REVOKE moved to the escape-hatch block near the top, beside `cancel` — it was
+    // unreachable here whenever a PIN was pending. See the comment there.)
 
     // ⚡ 4d. SUPPORT — available from every channel ⚡
     //
@@ -2034,7 +2061,21 @@ async function handleCore(req: Request, ctx: HumanizeCtx): Promise<NextResponse>
         });
       }
 
-      if (wantsSupport) {
+      // 🔴 THE BUG THIS FIXES: `wantsSupport` matches the RAW message text only, so ordinary
+      // phrasings that merely START with one of these words hijacked a real request and wiped
+      // it (`intent_data: {}` below discards everything collected so far):
+      //   "Help me send 500 airtime to 08012345678"  -> ^help me\b   -> support ticket
+      //   "Agent, buy 500 airtime for 08012345678"   -> ^agent\b     -> support ticket
+      //   "Contact: 08012345678" (answering a prompt) -> ^contact\b  -> wipes the payment
+      // Now it only fires when the message ISN'T a usable service request: if the AI resolved a
+      // real payable intent, or we're mid-collection with details already gathered, treat it as
+      // part of that flow. A genuine "support" / "talk to a human" carries no payable intent
+      // and so still routes here exactly as before.
+      const hasRealIntent = !!intentData?.intent && intentData.intent !== 'UNKNOWN' && !!SERVICE_RULES[intentData.intent];
+      const midCollection = session?.status === 'AWAITING_DETAILS' &&
+        !!(session.intent_data?.amount_ngn || session.intent_data?.destination_account);
+
+      if (wantsSupport && !hasRealIntent && !midCollection) {
         await supabase.from('deai_sessions').upsert({
           chat_id: platform_id, platform,
           intent_data: {},
@@ -2060,6 +2101,20 @@ async function handleCore(req: Request, ctx: HumanizeCtx): Promise<NextResponse>
             return NextResponse.json({
                 action: 'REPLY',
                 message: `👋 Hey! What can I help you with — airtime, data, a bill, or your balance?`,
+            });
+        }
+
+        // ⚡ Same for a simple courtesy ("thanks", "ok", "nice"). Guest mode already answers
+        // these warmly in one line, but a LINKED user — an actual paying customer — had no
+        // equivalent path and fell through to the full multi-paragraph capability dump for
+        // saying "thanks", making the bot read as friendlier to strangers than to people it
+        // knows. Mirrors the guest handler's wording and its <25-char guard (so "thanks, but
+        // the meter number was wrong" is still treated as a real message, not a sign-off).
+        const courtesy = text.trim().toLowerCase();
+        if (courtesy.length < 25 && /(thank|thanks|thank you|ok|okay|cool|nice|great|👍|alright)/i.test(courtesy)) {
+            return NextResponse.json({
+                action: 'REPLY',
+                message: `You're welcome! 🙌 Whenever you're ready to pay a bill, just tell me what you need.`,
             });
         }
 
@@ -2550,7 +2605,7 @@ async function handleCore(req: Request, ctx: HumanizeCtx): Promise<NextResponse>
                     `📱 ${intentData.destination_account}`,
                     `💰 ₦${Number(intentData.amount_ngn).toLocaleString()}`,
                     ``,
-                    `👉 *[Tap here to pay in your web3 browser](${payUrl})*`,
+                    payLink('Tap here to pay in your web3 browser', payUrl, platform),
                     ``,
                     `_You'll connect and sign with your own wallet — AbaPay never holds your funds. Link expires in 15 minutes._`,
                     ``,
