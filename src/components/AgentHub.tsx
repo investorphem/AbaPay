@@ -57,13 +57,17 @@ export function AgentHub({ address, selectedToken, activeChainName, onApproveAll
   // string proves nothing, since addresses are public. Signs a short-lived, timestamped
   // message fresh for each action (not a cached session) so a wallet popup only ever appears
   // right when the user deliberately clicks something sensitive. See src/utils/walletAuth.ts.
-  const getAuthHeaders = async (): Promise<Record<string, string> | null> => {
+  //
+  // `action` must be the exact "METHOD:/api/path" string the server verifies against
+  // (walletAuth.ts binds the signature to it) — a signature signed for one action/endpoint is
+  // rejected if replayed against another, so this can't be a generic fixed string anymore.
+  const getAuthHeaders = async (action: string): Promise<Record<string, string> | null> => {
     if (!walletClient || !address) return null;
     try {
       const timestamp = Date.now().toString();
       const signature = await walletClient.signMessage({
         account: address as `0x${string}`,
-        message: `AbaPay Agent Action: ${timestamp}`,
+        message: `AbaPay Agent Action: ${action}: ${timestamp}`,
       });
       return { 'x-wallet-signature': signature, 'x-wallet-timestamp': timestamp };
     } catch {
@@ -143,7 +147,7 @@ export function AgentHub({ address, selectedToken, activeChainName, onApproveAll
 
     setLoading(true); setMsg(''); setLinkCode(null);
     try {
-      const authHeaders = await getAuthHeaders();
+      const authHeaders = await getAuthHeaders('POST:/api/agent/link');
       if (!authHeaders) { setMsg('Signature request was rejected or failed — please try again.'); return; }
 
       const res = await fetch('/api/agent/link', {
@@ -175,7 +179,7 @@ export function AgentHub({ address, selectedToken, activeChainName, onApproveAll
 
   const unlink = async (id: string) => {
     if (!address) return;
-    const authHeaders = await getAuthHeaders();
+    const authHeaders = await getAuthHeaders('DELETE:/api/agent/link');
     if (!authHeaders) { setMsg('Signature request was rejected or failed — please try again.'); return; }
 
     await fetch('/api/agent/link', {
@@ -199,7 +203,7 @@ export function AgentHub({ address, selectedToken, activeChainName, onApproveAll
     if (!/^\d{4,6}$/.test(newPin)) { setPinMsg({ id, text: 'PIN must be 4-6 digits.', ok: false }); return; }
     setSavingPin(true);
     try {
-      const authHeaders = await getAuthHeaders();
+      const authHeaders = await getAuthHeaders('PATCH:/api/agent/link');
       if (!authHeaders) { setPinMsg({ id, text: 'Signature request was rejected or failed — please try again.', ok: false }); return; }
 
       const res = await fetch('/api/agent/link', {

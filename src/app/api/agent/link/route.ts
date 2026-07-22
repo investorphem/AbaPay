@@ -54,7 +54,7 @@ export async function POST(req: Request) {
 
     // 🔐 Prove the caller actually controls this wallet before binding a chat identity + PIN
     // to it — see src/utils/walletAuth.ts for why a bare address string is not enough.
-    const auth = await verifyWalletOwnership(req, wallet);
+    const auth = await verifyWalletOwnership(req, wallet, 'POST:/api/agent/link');
     if (!auth.ok) {
       return NextResponse.json({ success: false, message: auth.message }, { status: 401 });
     }
@@ -121,7 +121,7 @@ export async function PATCH(req: Request) {
     // 🔐 THE FIX — this was the most serious gap: without this, anyone who knew a victim's
     // public wallet address (not a secret) could reset their PIN and take over their linked
     // chat identity outright. The wallet connection alone was never actually verified here.
-    const auth = await verifyWalletOwnership(req, wallet);
+    const auth = await verifyWalletOwnership(req, wallet, 'PATCH:/api/agent/link');
     if (!auth.ok) {
       return NextResponse.json({ success: false, message: auth.message }, { status: 401 });
     }
@@ -166,7 +166,7 @@ export async function DELETE(req: Request) {
       return NextResponse.json({ success: false, message: 'Link id and wallet required' }, { status: 400 });
     }
 
-    const auth = await verifyWalletOwnership(req, wallet);
+    const auth = await verifyWalletOwnership(req, wallet, 'DELETE:/api/agent/link');
     if (!auth.ok) {
       return NextResponse.json({ success: false, message: auth.message }, { status: 401 });
     }

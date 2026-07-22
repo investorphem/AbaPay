@@ -128,9 +128,12 @@ export function AIChat({ onPrefill, onNavigate, walletConnected, onRequireWallet
       const timestamp = Date.now().toString();
       let signature: string;
       try {
+        // Must match exactly what /api/schedules' POST verifies against (walletAuth.ts binds
+        // the signature to "METHOD:/api/path", not the full body — see that file for why: this
+        // one signature deliberately covers every fetch below, one per batch recipient).
         signature = await walletClient.signMessage({
           account: walletAddress as `0x${string}`,
-          message: `AbaPay Agent Action: ${timestamp}`,
+          message: `AbaPay Agent Action: POST:/api/schedules: ${timestamp}`,
         });
       } catch {
         setMsgs(m => [...m, { role: 'assistant', text: '⚠️ Signature request was rejected or failed — please try again.' }]);

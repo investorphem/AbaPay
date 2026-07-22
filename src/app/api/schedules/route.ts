@@ -52,8 +52,10 @@ export async function POST(req: Request) {
 
     // 🔐 Prove the caller controls this wallet before creating anything against it — this is
     // the endpoint that can set auto_execute: true, i.e. authorize the relayer to spend from
-    // the wallet's on-chain allowance unattended. See src/utils/walletAuth.ts.
-    const auth = await verifyWalletOwnership(req, wallet);
+    // the wallet's on-chain allowance unattended. See src/utils/walletAuth.ts. NOT bound to
+    // the request body (only to method+path) — a multi-recipient batch deliberately reuses one
+    // signature across several POSTs with different bodies (see AIChat.tsx's approveSchedule).
+    const auth = await verifyWalletOwnership(req, wallet, 'POST:/api/schedules');
     if (!auth.ok) {
       return NextResponse.json({ success: false, message: auth.message }, { status: 401 });
     }
@@ -169,7 +171,7 @@ export async function DELETE(req: Request) {
       return NextResponse.json({ success: false, message: 'Schedule id and wallet required' }, { status: 400 });
     }
 
-    const auth = await verifyWalletOwnership(req, wallet);
+    const auth = await verifyWalletOwnership(req, wallet, 'DELETE:/api/schedules');
     if (!auth.ok) {
       return NextResponse.json({ success: false, message: auth.message }, { status: 401 });
     }
