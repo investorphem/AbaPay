@@ -16,6 +16,7 @@ import { createClient } from '@supabase/supabase-js';
 import { verifyInternalRequest } from '@/utils/internalAuth';
 import { verifyPin, isHashedPin, hashPin } from '@/utils/pinSecurity';
 import { executeVend, getStrictRequestId } from '@/lib/vend';
+import { checkAutonomousCapacity, groupByChainToken, executeAgentPayment, type BatchItem } from '@/lib/deai/batch';
 
 const supabase = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL as string,
@@ -702,6 +703,55 @@ async function handleCore(req: Request, ctx: HumanizeCtx): Promise<NextResponse>
       });
     }
 
+    // Set by the GO BACK handler below; applied to prependSystemMsg once that's declared.
+    let wentBack = false;
+
+    // ⬅️ GO BACK — step back one menu instead of losing the whole request.
+    //
+    // 🔴 THE BUG THIS FIXES: a user deep in a nested menu ("MTN data" → category → the 12-item
+    // Weekly plan list) who typed "Go back" — an entirely natural thing to say, and the obvious
+    // move when you picked the wrong category — got "❌ I didn't recognise that." followed by
+    // the SAME list again, with no way out except knowing the exact word "cancel" (which throws
+    // the whole request away, including the number they already gave). Neither the numeric
+    // matchers nor the CONTEXT PIVOT below could help: "go back" names no service, so
+    // fallbackIntentMatcher returns UNKNOWN and the pivot never fires.
+    //
+    // Only states with a meaningful previous step are listed. AWAITING_PIN is deliberately
+    // excluded (same reasoning as the pivot: nothing stray may derail a payment one step from
+    // completing) — as is AWAITING_SUPPORT_MESSAGE, whose free text could legitimately contain
+    // these words.
+    if (session && /^(go\s*back|back|previous|prev|return|go back please)\b/i.test(userInput)) {
+      const BACK_TARGETS: Record<string, { status: string; clear: string[] }> = {
+        // Wrong plan category picked → re-show the category menu, not the plan list.
+        AWAITING_VARIATION:  { status: 'AWAITING_PLAN_CATEGORY', clear: ['plan_category', 'variation_code', 'variation_label'] },
+        // Backing out of the category menu means reconsidering the provider.
+        AWAITING_PLAN_CATEGORY: { status: 'AWAITING_PROVIDER', clear: ['plan_category', 'provider', 'provider_label'] },
+        AWAITING_TOKEN:      { status: 'AWAITING_CHAIN', clear: ['selected_token', 'chain'] },
+        AWAITING_CABLE_ACTION: { status: 'AWAITING_PROVIDER', clear: ['cable_action', 'provider', 'provider_label'] },
+      };
+      const target = BACK_TARGETS[session.status];
+      if (target) {
+        for (const f of target.clear) delete session.intent_data[f];
+        await supabase.from('deai_sessions').upsert({
+          chat_id: platform_id, platform, intent_data: session.intent_data,
+          status: target.status, expires_at: new Date(Date.now() + 300000).toISOString(),
+        }, { onConflict: 'chat_id' });
+        // Re-enter the flow so the target state renders its own menu fresh, rather than
+        // duplicating every menu's rendering logic here (which would drift out of sync).
+        // `wentBack` is applied to prependSystemMsg below, once it's declared.
+        session.status = target.status;
+        text = '';
+        wentBack = true;
+      } else {
+        // No sensible previous step (e.g. at the very first question) — say so plainly
+        // instead of "I didn't recognise that", and point at the real escape hatch.
+        return NextResponse.json({
+          action: 'REPLY',
+          message: `⬅️ There's no previous step from here — this is the first thing I need.\n\n_Reply *cancel* to start over._`,
+        });
+      }
+    }
+
     // CONTEXT PIVOT — lets a user escape a stuck menu/selection state by clearly naming a
     // different service, instead of being stuck replying "Invalid selection" forever.
     //
@@ -728,7 +778,7 @@ async function handleCore(req: Request, ctx: HumanizeCtx): Promise<NextResponse>
     }
 
     let isContinuingToAI = false;
-    let prependSystemMsg = "";
+    let prependSystemMsg = wentBack ? '⬅️ *Sure — going back.*\n\n' : "";
 
     // STATE: PIN CONFIRMATION
     if (session?.status === 'AWAITING_PIN') {
@@ -769,6 +819,74 @@ async function handleCore(req: Request, ctx: HumanizeCtx): Promise<NextResponse>
           }
         }
         await supabase.from('deai_sessions').delete().eq('chat_id', platform_id);
+
+        // 🔒 PIN-CONFIRMED BATCH — several recipients in one message. Executes sequentially,
+        // NOT in parallel: each payBillFor decrements the same on-chain allowance, and firing
+        // them concurrently would race the allowance check against itself (the contract would
+        // reject the losers, but with confusing partial results). Sequential also means a
+        // mid-batch failure has a well-defined boundary — everything before it definitely
+        // moved, everything after it definitely didn't.
+        //
+        // Reports PER RECIPIENT rather than one blanket success/failure: with real money for
+        // several people, "3 of 4 went through, here's the one that didn't" is the only honest
+        // summary. Deliberately does NOT abort the rest on a single failure — the remaining
+        // recipients are independent payments the user still asked for, and their capacity was
+        // already verified; stopping would strand them with no clear way to resume just the
+        // missing ones.
+        if (!isGuest && session.intent_data?.pending_batch) {
+          const pb = session.intent_data.pending_batch;
+          const batchRate = await getExchangeRate();
+          const lines: string[] = [];
+          let okCount = 0;
+
+          for (const item of pb.items as BatchItem[]) {
+            const result = await executeAgentPayment({
+              userWallet: globalUser?.wallet_address || '',
+              item,
+              exchangeRate: batchRate,
+              sourceChannel: platform,
+              email: session.intent_data.email || session.intent_data.customer_email || null,
+            });
+
+            const who = `${(item.provider || '').toUpperCase()} ₦${item.amountNgn.toLocaleString()} → ${item.billersCode}`;
+            if (result.success) {
+              okCount++;
+              lines.push(`✅ ${who}`);
+            } else if (result.pending) {
+              lines.push(`⏳ ${who} — sent, still confirming (don't resend this one)`);
+            } else if (result.vendFailed) {
+              lines.push(`⚠️ ${who} — paid, but delivery failed; refund on its way`);
+            } else {
+              lines.push(`❌ ${who} — ${result.message}`);
+            }
+          }
+
+          // One out-of-band alert for the batch as a whole — the owner should hear about a
+          // multi-recipient spend even if someone else is holding the chat.
+          try {
+            await notifySpendOutOfBand(globalUser?.wallet_address || '', {
+              amountNgn: pb.totalNgn,
+              amountCrypto: (pb.totalNgn / batchRate).toFixed(6),
+              token: (pb.items[0] as BatchItem)?.tokenSymbol || 'USD₮',
+              service: `${pb.items.length} payments (batch)`,
+              account: `${pb.items.length} recipients`,
+              channel: platform,
+              txHash: '',
+              remaining: '',
+            });
+          } catch { /* never block on alerting */ }
+
+          return NextResponse.json({
+            action: 'REPLY',
+            message: [
+              okCount === pb.items.length
+                ? `✅ *All ${pb.items.length} payments sent — ₦${pb.totalNgn.toLocaleString()}*`
+                : `👥 *Batch finished — ${okCount} of ${pb.items.length} went through*`,
+              ``,
+              ...lines,
+            ].join('\n'),
+          });
+        }
 
         // 🔒 PIN-CONFIRMED SCHEDULE CREATION — if the pending action is a schedule (not an
         // immediate payment), create the scheduled_bills row now that the PIN is verified.
@@ -1309,9 +1427,10 @@ async function handleCore(req: Request, ctx: HumanizeCtx): Promise<NextResponse>
 
       const picked = matchProvider(text.trim(), spec.options);
       if (!picked) {
+        // See AWAITING_PLAN_CATEGORY: prependSystemMsg is the "going back" lead-in when set.
         return NextResponse.json({
           action: 'REPLY',
-          message: `❌ I didn't recognise that.\n\n${spec.prompt}\n\n${renderOptions(spec.options)}\n\n_Reply with the number, or the name._`,
+          message: `${prependSystemMsg || "❌ I didn't recognise that.\n\n"}${spec.prompt}\n\n${renderOptions(spec.options)}\n\n_Reply with the number, or the name._`,
         });
       }
 
@@ -1368,9 +1487,12 @@ async function handleCore(req: Request, ctx: HumanizeCtx): Promise<NextResponse>
 
       const picked = matchCategory(text.trim(), groups);
       if (!picked) {
+        // prependSystemMsg is set when the user deliberately stepped back here ("go back") —
+        // in that case show the menu with that friendlier lead-in instead of an error they
+        // didn't earn. Empty otherwise, so a genuinely unrecognised reply still says so.
         return NextResponse.json({
           action: 'REPLY',
-          message: `❌ I didn't recognise that.\n\n📦 *What kind of plan?*\n\n${renderCategoryMenu(groups)}\n\n_Reply with the number._`,
+          message: `${prependSystemMsg || "❌ I didn't recognise that.\n\n"}📦 *What kind of plan?*\n\n${renderCategoryMenu(groups)}\n\n_Reply with the number._`,
         });
       }
 
@@ -1471,7 +1593,11 @@ async function handleCore(req: Request, ctx: HumanizeCtx): Promise<NextResponse>
       const picked = chainMap[userInput];
 
       if (!picked) {
-        return NextResponse.json({ action: 'REPLY', message: "❌ Reply with *1* for Celo or *2* for Base." });
+        // See AWAITING_PLAN_CATEGORY: prependSystemMsg is the "going back" lead-in when set.
+        return NextResponse.json({
+          action: 'REPLY',
+          message: `${prependSystemMsg || "❌ "}⛓️ *Which chain?*\n\n*1.* Celo\n*2.* Base\n\n_Reply with the number._`,
+        });
       }
 
       session.intent_data.chain = picked;
@@ -1887,6 +2013,113 @@ async function handleCore(req: Request, ctx: HumanizeCtx): Promise<NextResponse>
             }
             // If details are missing, the existing state machine below collects them.
         }
+    }
+
+    // ⚡ 4b-bis. MULTI-RECIPIENT (BATCH) PAYMENTS ⚡
+    //
+    // 🔴 THE GAP THIS CLOSES: the intent engine has always emitted a fully-resolved
+    // `recipients` array when a user names 2+ people in one message (rule 14) — and the in-app
+    // chat (/api/deai/chat) has always handled it. This route, which serves Telegram/WhatsApp/X,
+    // never read `recipients` at all. Because the engine deliberately leaves the SINGULAR
+    // amount/account fields null in that case, the request didn't just lose the extra
+    // recipients — it collapsed into "I just need the Target Number/Account and the Amount",
+    // asking for details the user had already given, for two people. A real feature, silently
+    // dead on every social channel.
+    //
+    // Runs BEFORE the automations/missing-field engine below, since those assume the singular
+    // fields are populated.
+    if (aiParsed?.recipients && aiParsed.recipients.length >= 2) {
+        const batchIntent = intentData.intent;
+
+        // A batch spends from a pre-approved on-chain allowance — there's no such thing for a
+        // guest, and a deep link can only carry ONE payment, so there's nothing useful to hand
+        // them. Say exactly that rather than failing vaguely.
+        if (isGuest) {
+            return NextResponse.json({
+                action: 'REPLY',
+                message: `👥 *Paying several people at once needs a linked wallet* (it spends from an approved agent limit).\n\nLink once at https://abapays.com — or send them to me one at a time and I'll give you a payment link for each.`,
+            });
+        }
+
+        if (batchIntent !== 'VEND_AIRTIME' && batchIntent !== 'VEND_DATA') {
+            return NextResponse.json({
+                action: 'REPLY',
+                message: `👥 Paying several people in one message works for *airtime* and *data* right now — please send other bills one at a time.`,
+            });
+        }
+
+        // Validate EVERY recipient before proposing anything. All-or-nothing: a batch that's
+        // half-valid is worse than a clear "fix this one and resend".
+        const items: BatchItem[] = [];
+        for (const rec of aiParsed.recipients) {
+            // The number's own prefix is authoritative for the network, exactly as in the
+            // single-payment path — never trust the model's guess over the prefix table.
+            const detected = rec.destination_account ? detectNetwork(rec.destination_account) : null;
+            const provider = detected || rec.provider;
+
+            const feas = await assessFeasibility({
+                intent: batchIntent, provider, amountNgn: rec.amount_ngn, account: rec.destination_account,
+            });
+            if (!feas.possible || feas.missing.length) {
+                return NextResponse.json({
+                    action: 'REPLY',
+                    message: `⚠️ I can't send this batch yet — *${rec.destination_account || 'one recipient'}* has an issue:\n\n${feas.reason || 'missing details'}\n\nFix that one and send me the whole list again.`,
+                });
+            }
+            items.push({
+                serviceCategory: batchIntent === 'VEND_DATA' ? 'DATA' : 'AIRTIME',
+                serviceID: resolveServiceId(batchIntent, provider || null) || provider || '',
+                provider,
+                billersCode: rec.destination_account as string,
+                amountNgn: rec.amount_ngn as number,
+                chain: (rec.chain || intentData.chain || globalUser?.approved_chain || 'CELO').toUpperCase(),
+                tokenSymbol: rec.token || intentData.selected_token || globalUser?.approved_token || 'USD₮',
+            });
+        }
+
+        const totalNgn = items.reduce((s, it) => s + it.amountNgn, 0);
+
+        // Operator gate on the TOTAL — the per-tx cap alone would let a batch slip past the
+        // daily cap by splitting it across recipients.
+        const batchGate = await checkAgentSpendAllowed(supabase, globalUser?.wallet_address || '', totalNgn);
+        if (!batchGate.allowed) {
+            return NextResponse.json({ action: 'REPLY', message: `⚠️ ${batchGate.reason}` });
+        }
+
+        // Capacity per (chain, token) group against that group's own subtotal.
+        const batchRate = await getExchangeRate();
+        const groups = groupByChainToken(items);
+        const groupLines: string[] = [];
+        for (const [key, groupItems] of groups) {
+            const [gChain, gToken] = key.split('|');
+            const gTotal = groupItems.reduce((s, it) => s + it.amountNgn, 0);
+            const capacity = await checkAutonomousCapacity(globalUser?.wallet_address || '', gChain, gToken, gTotal, batchRate);
+            if (!capacity.ok) {
+                return NextResponse.json({ action: 'REPLY', message: `⚠️ ${capacity.reason}` });
+            }
+            groupLines.push(`• *${gToken} on ${gChain}* — ${groupItems.length} payment${groupItems.length === 1 ? '' : 's'}, ₦${gTotal.toLocaleString()} (${capacity.neededCrypto.toFixed(4)} ${gToken})`);
+        }
+
+        // 🔒 PIN-GATED, exactly like a single payment — this moves real money for several
+        // people at once, so it must never execute off a bare message.
+        intentData.pending_batch = { items, totalNgn };
+        await supabase.from('deai_sessions').upsert({
+            chat_id: platform_id, platform, intent_data: intentData,
+            status: 'AWAITING_PIN', expires_at: new Date(Date.now() + 300000).toISOString(),
+        }, { onConflict: 'chat_id' });
+
+        return NextResponse.json({
+            action: 'REPLY',
+            message: [
+                `👥 *Confirm ${items.length} payments — ₦${totalNgn.toLocaleString()} total*`,
+                ``,
+                ...items.map((it, i) => `*${i + 1}.* ${(it.provider || '').toUpperCase()} ${it.serviceCategory === 'DATA' ? 'data' : 'airtime'} — ₦${it.amountNgn.toLocaleString()} → ${it.billersCode}`),
+                ``,
+                ...groupLines,
+                ``,
+                `🔒 Reply with your *PIN* to send all ${items.length}.`,
+            ].join('\n'),
+        });
     }
 
     // ⚡ 4c. AUTOMATIONS — create / list / cancel schedules conversationally ⚡
