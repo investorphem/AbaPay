@@ -3,7 +3,7 @@
   "info": {
     "title": "AbaPay",
     "version": "1.0.0",
-    "description": "AbaPay is a Web3 utility bill payment agent for Nigeria — airtime, data, electricity, cable TV, and more — settled on-chain. This endpoint accepts x402 payments in USDC on Celo to pay a bill on behalf of the caller.",
+    "description": "AbaPay is a Web3 utility bill payment agent covering 170+ countries — airtime, data, electricity, cable TV, education, bank and more — settled on-chain. This endpoint accepts x402 payments in stablecoins on Celo and Base to pay a bill on behalf of the caller.",
     "contact": {
       "email": "support@abapays.com",
       "name": "AbaPay",
@@ -17,8 +17,8 @@
     "/api/pay/x402": {
       "post": {
         "operationId": "payBillViaX402",
-        "summary": "Pay a Nigerian utility bill (airtime, data, electricity, cable) via x402",
-        "description": "Settles a real-world bill payment via the x402 protocol. The caller pays in USDC on Celo; on confirmed settlement, AbaPay vends the underlying service (airtime top-up, data bundle, electricity token, cable subscription) through its provider integration and returns the result. Price is dynamic — it equals the live NGN value of the bill being paid, converted to USDC at the platform's current exchange rate, so there is no fixed catalog price for this resource.",
+        "summary": "Pay a real-world utility bill (airtime, data, electricity, cable) via x402 — 170+ countries",
+        "description": "Settles a real-world bill payment via the x402 protocol. The caller pays in a supported stablecoin on Celo or Base; on confirmed settlement, AbaPay vends the underlying service (airtime top-up, data bundle, electricity token, cable subscription) through its provider integration and returns the result. Price is dynamic — it equals the live value of the bill being paid, converted to the settlement token at the platform's current exchange rate, so there is no fixed catalog price for this resource.",
         "requestBody": {
           "required": true,
           "content": {
@@ -31,9 +31,9 @@
                   "serviceCategory": { "type": "string", "description": "AIRTIME | DATA | ELECTRICITY | CABLE | BANK | EDUCATION" },
                   "network": { "type": "string", "description": "Provider name, e.g. MTN, IKEJA-ELECTRIC, DSTV" },
                   "billersCode": { "type": "string", "description": "Phone number, meter number, or smartcard/IUC number being paid for" },
-                  "nairaAmount": { "type": "number", "description": "Bill amount in Nigerian Naira — the source of truth for pricing this request" },
-                  "token": { "type": "string", "enum": ["USDC", "USD₮"], "description": "USDC and USDT (Tether) are supported for x402 settlement on Celo — both implement EIP-3009 transferWithAuthorization. cUSD and USDm are not supported (no transferWithAuthorization)." },
-                  "blockchain": { "type": "string", "enum": ["CELO"], "description": "Only Celo is supported for x402 settlement at this time" },
+                  "nairaAmount": { "type": "number", "description": "Bill amount denominated in NGN — the source of truth for pricing this request, including for international bills (the local-currency figure travels separately as foreignAmount)" },
+                  "token": { "type": "string", "enum": ["USDC", "USD₮"], "description": "On Celo, both USDC and USDT (Tether) settle via x402 — each implements EIP-3009 transferWithAuthorization. On Base, USDC only (Base USDT has no transferWithAuthorization). cUSD/USDm are never supported (no transferWithAuthorization)." },
+                  "blockchain": { "type": "string", "enum": ["CELO", "BASE"], "description": "Celo settles through Celo's own x402 facilitator; Base settles through Coinbase's CDP facilitator" },
                   "wallet_address": { "type": "string", "description": "The paying wallet's address, for cross-checking against the x402 payment authorization's payer" }
                 }
               }
@@ -85,6 +85,14 @@
               "network": "eip155:42220",
               "asset": "0x48065fbBE25f71C9282ddf5e1cD6D6A887483D5e",
               "payTo": "0x42Fa463798Ed129a9B5Ee51721CB6db1bfCBe3b9"
+            },
+            {
+              "protocol": "x402",
+              "version": 2,
+              "scheme": "exact",
+              "network": "eip155:8453",
+              "asset": "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913",
+              "payTo": "0xC0A4dAA04DEd9c54D1239507B5A5E645761ef488"
             }
           ]
         }
