@@ -105,11 +105,21 @@ async function chainConfigFor(chainKey: ChainKey, isMainnet: boolean): Promise<X
     // "invalid network: "}` — CDP's validator tried to split it as CAIP-2, found no colon, and
     // was left with nothing to report. Reusing `caip2` here (same value the challenge already
     // uses) is the fix — no separate "settle name" exists for CDP, unlike Celo.
+    // 🔴 SECOND BUG: settleX402Version was 2. A real settle attempt against a genuine signed
+    // payment came back `'paymentPayload' is invalid: must match one of [x402V2PaymentPayload,
+    // x402V1PaymentPayload]. x402V2PaymentPayload requires 'accepted'` — confirming CDP accepts
+    // EITHER version, but thirdweb's client (the only thing that ever produces `decodedPayload`
+    // here) can only ever emit the older FLAT v1-style shape (x402Version, scheme, network,
+    // payload:{signature,authorization}) — it never includes v2's `accepted`/`resource`/
+    // `extensions` fields. Tagging that flat payload as version 2 made CDP validate it against
+    // the wrong schema and reject it for a field that could never have been there. Version 1 +
+    // a CAIP-2 network (still required — see the invalid_network fix above) is the combination
+    // that actually matches what gets sent.
     return {
       chainKey,
       caip2: isMainnet ? 'eip155:8453' : 'eip155:84532',
       settleNetworkName: isMainnet ? 'eip155:8453' : 'eip155:84532',
-      settleX402Version: 2,
+      settleX402Version: 1,
       facilitatorSettleUrl: `https://${CDP_FACILITATOR_HOST}${CDP_FACILITATOR_SETTLE_PATH}`,
       payTo,
       explorerBase: isMainnet ? 'https://basescan.org' : 'https://sepolia.basescan.org',
