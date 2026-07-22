@@ -4,7 +4,7 @@ import { privateKeyToAccount } from 'viem/accounts';
 import { resolveChain, getPublicClient, isMainnetEnv } from '@/lib/chain';
 import { resolveTokenOnChain } from '@/constants';
 import { sendTelegramAlert } from '@/lib/telegram';
-import { celoAttributionSuffix } from '@/lib/attribution';
+import { celoAttributionSuffix, baseAttributionSuffix } from '@/lib/attribution';
 
 // ⚡ AGENT RELAYER
 //
@@ -210,8 +210,10 @@ export async function relayPayBillFor(params: {
       ],
       chain,
       account,
-      // Celo Builders attribution — appended only on Celo, undefined (no-op) on Base.
-      dataSuffix: celoAttributionSuffix(chain),
+      // Celo Builders attribution on Celo, Base Builder Code on Base — each helper only
+      // ever returns a value for its own chain (undefined elsewhere), so exactly one of
+      // these is ever non-undefined for a given call; the other is a no-op.
+      dataSuffix: celoAttributionSuffix(chain) || baseAttributionSuffix(chain),
     });
 
     // ⚡ CONFIRM ON-CHAIN — writeContract only means the tx was SUBMITTED, not that it
