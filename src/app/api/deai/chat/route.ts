@@ -7,6 +7,9 @@ import { getServiceRules } from '@/lib/serviceRules';
 import { getRemainingAllowance } from '@/lib/deai/relayer';
 import { humanizeReply } from '@/lib/deai/humanize';
 import { supabaseAdmin } from '@/utils/supabase';
+// Batch capacity/grouping now lives in a shared module so the social channels
+// (/api/deai/core) run the exact same maths rather than a second, drifting copy.
+import { checkAutonomousCapacity, groupByChainToken, type BatchItem } from '@/lib/deai/batch';
 
 // ⚡ IN-APP AI CHAT
 //
@@ -30,52 +33,9 @@ function serviceCategoryForIntent(intent: string): string {
     : 'AIRTIME';
 }
 
-interface ScheduleItem {
-  serviceCategory: string;
-  serviceID: string;
-  provider: string | null;
-  billersCode: string;
-  amountNgn: number;
-  meterType?: string;
-  chain: string;
-  tokenSymbol: string;
-}
-
-async function checkAutonomousCapacity(wallet: string, chain: string, tokenSymbol: string, totalNgn: number, exchangeRate: number) {
-  const neededCrypto = totalNgn / exchangeRate;
-  const [allowance, balances] = await Promise.all([
-    getRemainingAllowance(wallet, tokenSymbol, chain),
-    fetchCryptoBalances(wallet, chain),
-  ]);
-  const balance = Number(balances[tokenSymbol] ?? 0);
-
-  if (!allowance.ok || allowance.remaining < neededCrypto) {
-    return {
-      ok: false as const, neededCrypto, allowanceRemaining: allowance.ok ? allowance.remaining : 0, balance,
-      reason: `You don't have enough approved agent limit for ${tokenSymbol} on ${chain} — need ${neededCrypto.toFixed(4)}, approved: ${allowance.ok ? allowance.remaining.toFixed(2) : '0'}.\n\nApprove a higher limit for ${tokenSymbol} on ${chain} in the Agent Hub tab, then ask me again.`,
-    };
-  }
-  if (balance < neededCrypto) {
-    return {
-      ok: false as const, neededCrypto, allowanceRemaining: allowance.remaining, balance,
-      reason: `Your ${tokenSymbol} balance (${balance.toFixed(2)}) on ${chain} won't cover this — you need about ${neededCrypto.toFixed(4)}. Top up first, then ask me again.`,
-    };
-  }
-  return { ok: true as const, neededCrypto, allowanceRemaining: allowance.remaining, balance };
-}
-
-/** Groups items by (chain, token) — a batch can freely mix chains/tokens per recipient, and
- *  each group needs its own independent allowance/balance check against its own subtotal. */
-function groupByChainToken(items: ScheduleItem[]): Map<string, ScheduleItem[]> {
-  const groups = new Map<string, ScheduleItem[]>();
-  for (const item of items) {
-    const key = `${item.chain}|${item.tokenSymbol}`;
-    const list = groups.get(key) || [];
-    list.push(item);
-    groups.set(key, list);
-  }
-  return groups;
-}
+// ScheduleItem/checkAutonomousCapacity/groupByChainToken moved to @/lib/deai/batch so
+// /api/deai/core (the social channels) uses the identical implementation.
+type ScheduleItem = BatchItem;
 
 const WEEKDAY_NAMES = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
 const WEEKDAY_SHORT = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
