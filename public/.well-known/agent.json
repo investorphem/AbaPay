@@ -1,11 +1,23 @@
 {
-  "type": "Agent",
+  "type": "https://eips.ethereum.org/EIPS/eip-8004#registration-v1",
   "name": "AbaPay",
   "description": "Autonomous bill-payment agent for airtime, data, electricity, cable, education and bank payments across 170+ countries, over Telegram, WhatsApp, X, and a web app, settling on Celo and Base.",
   "image": "https://abapays.com/logo.png",
-  "endpoints": [
-    { "type": "wallet", "address": "0x4f9B9C40345258684cfe23F02FDb2B88F1d2eA62", "chainId": 42220 },
-    { "type": "wallet", "address": "0x4f9B9C40345258684cfe23F02FDb2B88F1d2eA62", "chainId": 8453 }
+  "active": true,
+  "x402Support": true,
+  "services": [
+    {
+      "type": "web",
+      "endpoint": "https://www.abapays.com"
+    },
+    {
+      "type": "x402",
+      "endpoint": "https://www.abapays.com/api/pay/x402"
+    }
+  ],
+  "registrations": [
+    { "agentId": 9687, "agentRegistry": "eip155:42220:0x8004A169FB4a3325136EB29fA0ceB6D2e539a432" },
+    { "agentId": 59561, "agentRegistry": "eip155:8453:0x8004A169FB4a3325136EB29fA0ceB6D2e539a432" }
   ],
   "supportedTrust": ["reputation"]
 }
