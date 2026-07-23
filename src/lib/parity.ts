@@ -28,7 +28,14 @@ export const REQ: Record<string, FieldRequirement> = {
     error: "That doesn't look like a valid email address.",
   },
   phone: {
-    field: 'customer_phone',
+    // 🔴 THE BUG THIS FIXES: this used to be 'customer_phone' — a field name NOTHING else in
+    // the codebase ever read or wrote. Every earlier collection point (extractEntities, the
+    // network-prefix flow, the initial free-text parse) sets `intentData.phone`, so a phone
+    // number given up front was silently invisible to this check — checkParity always saw it
+    // as missing and asked again, even after the user had already provided it. Renamed to
+    // 'phone' to match every other read/write site; grepped the entire codebase first to
+    // confirm 'customer_phone' had no other reference before renaming (safe, no migration).
+    field: 'phone',
     label: 'phone number',
     ask: "What's your phone number? (we send the token/receipt there)",
     validate: (v: string) => String(v || '').replace(/\D/g, '').length >= 10,

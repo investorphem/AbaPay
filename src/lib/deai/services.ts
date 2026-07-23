@@ -36,6 +36,15 @@ export interface VerifiedAccount {
   min_amount?: number;
   max_amount?: number;
   message?: string;
+  // ⚡ CABLE (DStv/GOtv) ONLY. VTpass's merchant-verify genuinely returns these for cable
+  // smartcards/IUC numbers — confirmed from the live web app (src/app/page.tsx's
+  // verifyMerchant(), which hits this SAME endpoint via /api/verify and already reads
+  // `data.content.Current_Bouquet` / `data.content.Renewal_Amount` today) — not guessed.
+  // The chat/agent flow previously discarded both, so it could never offer "renew your
+  // current package" the way the web app does; it could only ask the user to type an
+  // arbitrary renewal amount blind.
+  current_bouquet?: string;
+  renewal_amount?: number;
 }
 
 /**
@@ -75,6 +84,8 @@ export async function verifyAccount(
       customer_address: content.Address || content.Customer_Address || undefined,
       min_amount: content.Min_Purchase_Amount ? Number(content.Min_Purchase_Amount) : undefined,
       max_amount: content.Max_Purchase_Amount ? Number(content.Max_Purchase_Amount) : undefined,
+      current_bouquet: content.Current_Bouquet || undefined,
+      renewal_amount: content.Renewal_Amount ? Number(content.Renewal_Amount) : undefined,
     };
   } catch (err) {
     console.error('[DeAI] verifyAccount failed:', err);

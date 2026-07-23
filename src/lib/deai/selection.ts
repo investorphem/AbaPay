@@ -37,6 +37,78 @@ export function renderOptions(options: Option[], opts: { showPrice?: boolean } =
     .join('\n');
 }
 
+// ─── PAGINATION (for long variation lists — cable packages, data plans) ──────
+//
+// 🔴 THE PROBLEM THIS FIXES: DStv alone has ~40 packages. Dumping every one as a single
+// numbered wall of text in a chat window is unreadable — the user has to scroll through all
+// 40 just to find the one they want. Groups of PAGE_SIZE, with "next" to see more, matches
+// how a real person would want to browse a long list in a chat.
+
+export const VARIATION_PAGE_SIZE = 8;
+
+export interface OptionsPage {
+  text: string;        // the rendered list for THIS page only, numbered 1..N locally
+  hasMore: boolean;     // is there a next page?
+  totalPages: number;
+  page: number;         // the page actually rendered (clamped to a valid range)
+}
+
+/** Renders ONE page of a (possibly long) option list, numbered locally (1..pageSize). */
+export function renderOptionsPage(
+  options: Option[],
+  page: number,
+  opts: { showPrice?: boolean; pageSize?: number } = {},
+): OptionsPage {
+  const pageSize = opts.pageSize || VARIATION_PAGE_SIZE;
+  const totalPages = Math.max(1, Math.ceil(options.length / pageSize));
+  const clampedPage = Math.max(0, Math.min(page, totalPages - 1));
+  const start = clampedPage * pageSize;
+  const slice = options.slice(start, start + pageSize);
+
+  const text = slice
+    .map((o, i) => {
+      const price = opts.showPrice && o.price ? ` — *₦${o.price.toLocaleString()}*` : '';
+      return `*${i + 1}.* ${o.label}${price}`;
+    })
+    .join('\n');
+
+  return { text, hasMore: clampedPage < totalPages - 1, totalPages, page: clampedPage };
+}
+
+/** Does this look like a request to see the next page, rather than an option pick? */
+export function isNextPageRequest(input: string): boolean {
+  return /^(next|more|show\s*more|next\s*page|see\s*more)\b/i.test(String(input || '').trim());
+}
+
+/**
+ * Match a reply against ONE PAGE of a long option list: a local number (1..pageSize) maps to
+ * the correct absolute item on that page; a name/id still matches across the FULL list
+ * regardless of which page is showing, since a user who already knows the exact package name
+ * shouldn't have to page through to find it.
+ */
+export function matchPagedOption(input: string, allOptions: Option[], page: number, pageSize = VARIATION_PAGE_SIZE): Option | null {
+  const q = String(input || '').trim().toLowerCase();
+  if (!q) return null;
+
+  const n = parseInt(q, 10);
+  if (Number.isInteger(n) && n >= 1 && n <= pageSize) {
+    const absoluteIndex = page * pageSize + (n - 1);
+    if (absoluteIndex < allOptions.length) return allOptions[absoluteIndex];
+    return null; // e.g. "8" on the final, partially-filled page — no item there
+  }
+
+  // Not a number this page recognizes — try a full-list name/id match (matchProvider's
+  // fuzzy logic), but WITHOUT its own number-as-index behavior (that would silently pick
+  // the wrong item using the FULL list's absolute numbering instead of this page's local
+  // numbering, which is exactly the ambiguity pagination exists to avoid).
+  return (
+    allOptions.find(o => o.id.toLowerCase() === q) ||
+    allOptions.find(o => o.label.toLowerCase() === q) ||
+    allOptions.find(o => o.label.toLowerCase().includes(q)) ||
+    null
+  );
+}
+
 // ─── PROVIDERS ───────────────────────────────────────────────────────────────
 
 export function electricityDiscos(): Option[] {
