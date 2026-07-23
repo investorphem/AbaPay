@@ -74,7 +74,11 @@ export async function POST(req: Request) {
         // USER sent, so a PIN they typed stays in the DM thread. Telegram auto-deletes it
         // (see the telegram webhook); here we can only advise them to remove it themselves.
         let outgoingMessage = engineData.message as string;
-        if (/^\d{4,6}$/.test(text.trim())) {
+        // See the Telegram/WhatsApp webhooks for the full story: this used to fire on a bare
+        // `/^\d{4,6}$/` test of the raw text (so a bill AMOUNT like "1500" was wrongly flagged
+        // as a PIN). `isPinEntry` is set by the core engine only when this exact turn was
+        // genuinely processed as AWAITING_PIN.
+        if (engineData.isPinEntry) {
           outgoingMessage += '\n\n🔒 For your security, please delete your last message (your PIN) from this chat.';
         }
 

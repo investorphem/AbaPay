@@ -68,19 +68,6 @@ export async function POST(req: Request) {
       text = startMatch[1].trim();
     }
 
-    // 🔒 DELETE THE PIN FROM CHAT HISTORY IMMEDIATELY.
-    //
-    // 🔴 The old check was /^\d{4}$/ — EXACTLY four digits. But PINs are 4-6 digits, so a
-    // 5- or 6-digit PIN was NEVER deleted and sat in the chat forever. Anyone who later got
-    // access to the phone or the Telegram session could read it and transact.
-    if (/^\d{4,6}$/.test(text.trim())) {
-      await fetch(`https://api.telegram.org/bot${DEAI_BOT_TOKEN}/deleteMessage`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ chat_id: chatId, message_id: messageId })
-      });
-    }
-
     // Forward to the Universal Core Engine — platform_id is the SENDER's own id (see the
     // fix above), and chat_type lets the core engine refuse to bind a wallet-link code
     // inside a group (typing a one-time code where the whole group can see it is a real
@@ -99,7 +86,39 @@ export async function POST(req: Request) {
     const engineData = await response.json();
     const isGroupMessage = !!chatType && chatType !== 'private';
 
+    // 🔒 DELETE THE PIN FROM CHAT HISTORY — but only when the core engine confirms this
+    // exact message was actually consumed as a PIN attempt (`isPinEntry`, set by handleCore
+    // only while the session was genuinely AWAITING_PIN — see HumanizeCtx in core/route.ts).
+    //
+    // 🔴 THE BUG THIS FIXES: the old check was a bare `/^\d{4,6}$/` on the raw incoming text,
+    // with zero awareness of conversation state. ANY 4-6 digit message — an amount ("1500"),
+    // a meter-number fragment, part of a smartcard number — got silently deleted via
+    // Telegram's real deleteMessage API, regardless of whether a PIN was ever being asked
+    // for. Now gated on the one thing that actually knows: did the engine just process this
+    // turn as AWAITING_PIN?
+    if (engineData.isPinEntry) {
+      try {
+        await fetch(`https://api.telegram.org/bot${DEAI_BOT_TOKEN}/deleteMessage`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ chat_id: chatId, message_id: messageId })
+        });
+      } catch { /* best-effort — never block the reply on a delete failure */ }
+    }
+
     // Execute the Brain's instructions
+    //
+    // 🔴 THE VISIBILITY GAP THIS FIXES: none of the three outbound Telegram calls below used
+    // to check their HTTP response or log a failure — unlike WhatsApp's webhook, which
+    // already does exactly this (`if (!sendRes.ok) { ...log the Graph API error... }`). If the
+    // bot lacks permission to post in a group (not an admin, group restricts non-admin bots,
+    // or it was removed), or if `engineData.message` trips Telegram's notoriously strict
+    // legacy "Markdown" parser (an unescaped `_`/`*`/`` ` ``/`[` anywhere in the text — a real,
+    // common failure, not hypothetical), Telegram's API returns a 400/403 and this code never
+    // knew: "the bot isn't responding in the group" would look identical whether Telegram
+    // never delivered the update, our gating logic silently dropped it, or the send itself
+    // failed after we'd already done all the work. Every send is now checked and logged, so
+    // the next occurrence is diagnosable in Vercel logs instead of invisible.
     if (engineData.action === 'REPLY' || engineData.action === 'SUCCESS_RECEIPT' || engineData.action === 'REQUIRE_TOKEN_SELECTION') {
       if (isGroupMessage) {
         // ⚡ NEVER post balances, tx hashes, or payment confirmations into a shared group —
@@ -113,7 +132,14 @@ export async function POST(req: Request) {
           body: JSON.stringify({ chat_id: senderId, text: engineData.message, parse_mode: 'Markdown' }),
         });
         const dmData = await dmRes.json();
-        await fetch(`https://api.telegram.org/bot${DEAI_BOT_TOKEN}/sendMessage`, {
+        if (!dmRes.ok || !dmData.ok) {
+          // Not necessarily an error — "can't initiate conversation with a user" is the
+          // EXPECTED response when they've never DM'd the bot, handled below. Log it anyway
+          // at a low level so a genuinely unexpected failure (bad token, rate limit) is
+          // still visible, without alarm-fatigue on the expected case.
+          console.log('[Telegram] Group DM attempt did not succeed (may be expected):', dmRes.status, JSON.stringify(dmData));
+        }
+        const groupRes = await fetch(`https://api.telegram.org/bot${DEAI_BOT_TOKEN}/sendMessage`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
@@ -122,8 +148,12 @@ export async function POST(req: Request) {
             text: dmData.ok ? "✅ Sent you the details in a DM." : `⚠️ I need to DM you privately for this — please start a chat with me first: https://t.me/${BOT_USERNAME}`,
           }),
         });
+        if (!groupRes.ok) {
+          const errBody = await groupRes.text();
+          console.error('[Telegram] Failed to post group fallback message:', groupRes.status, errBody);
+        }
       } else {
-        await fetch(`https://api.telegram.org/bot${DEAI_BOT_TOKEN}/sendMessage`, {
+        const sendRes = await fetch(`https://api.telegram.org/bot${DEAI_BOT_TOKEN}/sendMessage`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
@@ -132,6 +162,10 @@ export async function POST(req: Request) {
               parse_mode: 'Markdown'
             })
         });
+        if (!sendRes.ok) {
+          const errBody = await sendRes.text();
+          console.error('[Telegram] Failed to send reply:', sendRes.status, errBody);
+        }
       }
     }
 

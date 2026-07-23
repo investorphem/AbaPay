@@ -94,7 +94,13 @@ export async function POST(req: Request) {
         //
         // The only thing actually possible: tell them, once, so they can delete it themselves.
         let outgoingMessage = engineData.message as string;
-        if (/^\d{4,6}$/.test(text.trim())) {
+        // 🔴 THE BUG THIS FIXES: this used to fire on a bare `/^\d{4,6}$/` test of the raw
+        // text — so a user typing "1500" as a bill AMOUNT (or any other 4-6 digit value —
+        // a meter-number fragment, part of a smartcard number) got wrongly told "that was
+        // your PIN, delete it", with no idea whether a PIN was ever actually being asked for.
+        // `isPinEntry` is set by the core engine only when the session was genuinely
+        // AWAITING_PIN for this exact turn — see HumanizeCtx in core/route.ts.
+        if (engineData.isPinEntry) {
           outgoingMessage += '\n\n_🔒 For your security, please delete your last message (your PIN) from this chat — WhatsApp doesn\'t let AbaPay do that for you._';
         }
 

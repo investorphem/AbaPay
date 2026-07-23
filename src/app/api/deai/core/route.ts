@@ -11,7 +11,7 @@ import { checkParity, checkAccountNumber, checkAmount as checkAmountParity, isDu
 import { sendTelegramAlert } from '@/lib/telegram';
 import { checkPinAllowed, recordPinFailure, clearPinFailures, notifySpendOutOfBand } from '@/lib/deai/pinSecurity';
 import { SUPPORTED_TOKENS } from '@/constants';
-import { providersFor, renderOptions, matchProvider, needsVariation, variationServiceId, fetchVariations, matchVariation, groupDataPlans, renderCategoryMenu, matchCategory } from '@/lib/deai/selection';
+import { providersFor, renderOptions, matchProvider, needsVariation, variationServiceId, fetchVariations, matchVariation, groupDataPlans, renderCategoryMenu, matchCategory, renderOptionsPage, isNextPageRequest, matchPagedOption, type Option } from '@/lib/deai/selection';
 import { createClient } from '@supabase/supabase-js';
 import { verifyInternalRequest } from '@/utils/internalAuth';
 import { verifyPin, isHashedPin, hashPin } from '@/utils/pinSecurity';
@@ -28,7 +28,15 @@ const SERVICE_RULES: Record<string, any> = {
     VEND_AIRTIME: { min: 100, max: 50000, required: ['amount_ngn', 'destination_account', 'provider'] },
     VEND_DATA: { min: 50, max: 50000, required: ['destination_account', 'provider'] },
     ELECTRICITY: { min: 1000, max: 100000, required: ['amount_ngn', 'destination_account', 'phone', 'email'] },
-    TV: { min: 1500, max: 100000, required: ['amount_ngn', 'destination_account', 'phone', 'email'] },
+    // 🔴 THE BUG THIS FIXES: 'amount_ngn' used to be required here, asked UP FRONT before the
+    // user had even named a provider or picked a package — but cable is fixed-price: the
+    // amount is ALWAYS either the chosen package's price, or the verified renewal amount (see
+    // the CABLE FAST PATH below and buildCablePackageOptions). Asking for it first meant the
+    // user typed an arbitrary number that got silently discarded the moment a real package was
+    // picked, or — worse — rejected against the ₦1500 floor before the user even knew which
+    // provider/package they were paying for. destination_account/phone/email are still listed
+    // as a safety net, though the fast path below collects destination_account earlier.
+    TV: { min: 1500, max: 100000, required: ['destination_account', 'phone', 'email'] },
     BANK_TRANSFER: { min: 500, max: 500000, required: ['amount_ngn', 'destination_account', 'provider'] },
     EDUCATION: { min: 1000, max: 50000, required: ['amount_ngn', 'destination_account', 'phone', 'email'] }
 };
@@ -194,6 +202,35 @@ async function verifyAccount(intent: string, account: string, type?: string, pro
     const serviceID = resolveServiceId(intent, provider || null);
     if (!serviceID) return { success: false, message: "I couldn't work out which provider that is." };
     return await realVerifyAccount(serviceID, account, type);
+}
+
+// ⚡ CABLE PACKAGE LIST — pins the smartcard's CURRENT package as a "Renew" option ⚡
+//
+// VTpass's merchant-verify genuinely returns `Current_Bouquet`/`Renewal_Amount` for DStv/GOtv
+// (confirmed from the live web app, which already reads and displays both — see
+// src/lib/deai/services.ts's VerifiedAccount comment for how this was verified). Previously
+// the chat/agent flow discarded both fields entirely, so a renewal REQUIRED a separate
+// "1. Renew  2. Change" question followed by the user typing an arbitrary amount blind — it
+// had no way to show what the current package even was, let alone its price.
+//
+// Builds ONE combined list — a pinned "Renew: <bouquet>" entry first (when known), then every
+// real package — used identically at render time AND in the reply handler, so the two can
+// never see a different list. Returns null when there's nothing to pin (non-renewable
+// provider, or verify simply didn't return the fields this time) — callers fall back to the
+// existing plain package list / explicit renew-or-change question in that case.
+function buildCablePackageOptions(
+    variations: Option[],
+    provider: string | null | undefined,
+    currentBouquet: string | null | undefined,
+    renewalAmount: number | null | undefined,
+): Option[] | null {
+    if (!supportsRenew(provider) || !renewalAmount || renewalAmount <= 0) return null;
+    const renewOption: Option = {
+        id: '__RENEW__',
+        label: `Renew: ${currentBouquet || 'your current package'}`,
+        price: renewalAmount,
+    };
+    return [renewOption, ...variations];
 }
 
 async function fetchCryptoBalances(walletAddress: string, blockchain = 'CELO') {
@@ -407,26 +444,44 @@ async function buildScheduleConfirm(
 // Carries the detected language + the user's message out of handleCore so the POST wrapper
 // can localize the finished reply (see humanizeReply). Purely a decoration channel — the
 // reply's FACTS are already fixed by handleCore; the wrapper only rewrites the prose.
-interface HumanizeCtx { lang?: string; userText?: string; channel?: string }
+//
+// `isPinEntry` is a SEPARATE signal for the channel webhooks: true whenever this turn's
+// incoming text was actually consumed as a PIN attempt (right, wrong, or locked-out — all
+// three exit the AWAITING_PIN branch below). Telegram/WhatsApp/X previously decided whether
+// to delete/advise-deleting the user's message with a bare `/^\d{4,6}$/` regex on the RAW
+// TEXT, with no idea whether a PIN was actually being asked for — so typing "1500" as an
+// amount, a meter-number fragment, or any other 4-6 digit value got treated as a PIN and
+// (on Telegram, which can actually delete messages) silently removed, or (WhatsApp/X)
+// wrongly advised the user to delete it. This flag lets each webhook ask the one system that
+// actually knows: was AWAITING_PIN the state when this text arrived?
+interface HumanizeCtx { lang?: string; userText?: string; channel?: string; isPinEntry?: boolean }
 
 export async function POST(req: Request) {
   const ctx: HumanizeCtx = {};
   const res = await handleCore(req, ctx);
 
+  // ⚡ STAMP isPinEntry ONTO THE RESPONSE BODY — this is the only way the channel webhooks
+  // (which only ever see the JSON body, never `ctx` itself) can learn whether this turn's
+  // text was actually a PIN attempt. Runs unconditionally (not just on the localization path
+  // below), since English-language replies previously skipped re-serialization entirely and
+  // isPinEntry would never have reached the response.
+  //
   // ⚡ LOCALIZE THE REPLY into the user's language / tone / channel style — safely. Only when
   // a non-English language was detected; the humanizer itself verifies no number, hash, or
   // link is altered and falls back to the original otherwise (see src/lib/deai/humanize.ts).
-  if (ctx.lang && ctx.lang !== 'en') {
-    try {
-      const data = await res.clone().json();
-      if (data?.action === 'REPLY' && typeof data.message === 'string') {
-        const localized = await humanizeReply(data.message, { language: ctx.lang, channel: ctx.channel || '', userText: ctx.userText });
-        if (localized && localized !== data.message) {
-          return NextResponse.json({ ...data, message: localized }, { status: res.status });
-        }
+  try {
+    const data = await res.clone().json();
+    if (data?.action === 'REPLY' && typeof data.message === 'string') {
+      let message = data.message;
+      if (ctx.lang && ctx.lang !== 'en') {
+        try {
+          const localized = await humanizeReply(message, { language: ctx.lang, channel: ctx.channel || '', userText: ctx.userText });
+          if (localized) message = localized;
+        } catch { /* any hiccup: fall back to the original, unlocalized reply */ }
       }
-    } catch { /* any hiccup: fall through to the original, unlocalized reply */ }
-  }
+      return NextResponse.json({ ...data, message, isPinEntry: !!ctx.isPinEntry }, { status: res.status });
+    }
+  } catch { /* any hiccup (e.g. non-JSON body): fall through to the original response untouched */ }
   return res;
 }
 
@@ -782,6 +837,11 @@ async function handleCore(req: Request, ctx: HumanizeCtx): Promise<NextResponse>
 
     // STATE: PIN CONFIRMATION
     if (session?.status === 'AWAITING_PIN') {
+      // Every exit from this branch (locked out, correct PIN, wrong PIN) means the incoming
+      // text WAS a PIN attempt — set once, unconditionally, so the webhooks know to actually
+      // delete/advise-deleting it. See the isPinEntry comment on HumanizeCtx above.
+      ctx.isPinEntry = true;
+
       // 🔒 LOCKOUT GATE — checked BEFORE we even look at the PIN, so a locked identity
       // cannot keep guessing. Survives session resets. Guarded to !isGuest because `identity`
       // is null for a guest — this state should be unreachable for one (guests are forked to
@@ -1522,18 +1582,67 @@ async function handleCore(req: Request, ctx: HumanizeCtx): Promise<NextResponse>
         if (group) options = group.plans;
       }
 
-      const picked = matchVariation(text.trim(), options);
+      // ⚡ CABLE RENEW PIN — rebuilds the SAME combined list (pinned renew + packages) shown
+      // at render time, using buildCablePackageOptions so the two can never disagree. Only
+      // ever non-null for TV with a known current bouquet/renewal amount (see that function).
+      const cableOptions = session.intent_data.intent === 'TV'
+        ? buildCablePackageOptions(options, session.intent_data.provider, session.intent_data.cable_current_bouquet, session.intent_data.cable_renewal_amount)
+        : null;
+      if (cableOptions) options = cableOptions;
+
+      const page = Number(session.intent_data.variation_page) || 0;
+
+      // 🔴 PAGINATION — THE BUG THIS FIXES: a long list (DStv alone has ~40 packages) was
+      // dumped as ONE flat numbered wall of text. Now shown PAGE_SIZE at a time; "next"/"more"
+      // advances without re-litigating the whole list. A name/id typed directly still matches
+      // across the FULL list regardless of page (see matchPagedOption).
+      if (isNextPageRequest(text)) {
+        const nextPage = page + 1;
+        const rendered = renderOptionsPage(options, nextPage, { showPrice: true });
+        session.intent_data.variation_page = rendered.page;
+        await supabase.from('deai_sessions').upsert({
+          chat_id: platform_id, platform, intent_data: session.intent_data,
+          status: 'AWAITING_VARIATION', expires_at: new Date(Date.now() + 300000).toISOString(),
+        }, { onConflict: 'chat_id' });
+        const footer = rendered.hasMore
+          ? `\n\n_Page ${rendered.page + 1}/${rendered.totalPages} — reply *next* to see more, or reply with a number._`
+          : `\n\n_Page ${rendered.page + 1}/${rendered.totalPages} (last page) — reply with a number._`;
+        return NextResponse.json({ action: 'REPLY', message: `📦 *Choose a plan:*\n\n${rendered.text}${footer}` });
+      }
+
+      // Synonyms for the pinned renew slot, kept identical to the old explicit
+      // renew-or-change question so either phrasing still works.
+      const wantsRenewByWord = cableOptions && /(renew|same|current)/i.test(text.trim());
+      const picked = wantsRenewByWord
+        ? cableOptions[0]
+        : matchPagedOption(text.trim(), options, page);
+
       if (!picked) {
+        const rendered = renderOptionsPage(options, page, { showPrice: true });
+        const footer = rendered.hasMore
+          ? `\n\n_Page ${rendered.page + 1}/${rendered.totalPages} — reply *next* to see more, or reply with a number._`
+          : rendered.totalPages > 1 ? `\n\n_Page ${rendered.page + 1}/${rendered.totalPages} (last page) — reply with a number._` : '';
         return NextResponse.json({
           action: 'REPLY',
-          message: `❌ I didn't recognise that.\n\n📦 *Choose a plan:*\n\n${renderOptions(options, { showPrice: true })}\n\n_Reply with the number._`,
+          message: `❌ I didn't recognise that.\n\n📦 *Choose a plan:*\n\n${rendered.text}${footer}`,
         });
       }
 
-      session.intent_data.variation_code = picked.id;
-      session.intent_data.variation_label = picked.label;
-      // The plan price IS the amount for these services.
-      if (picked.price) session.intent_data.amount_ngn = picked.price;
+      delete session.intent_data.variation_page;
+
+      if (picked.id === '__RENEW__') {
+        // The pinned renew slot: no variation_code (VTpass renews whatever's already on the
+        // account — see contracts/vend.ts's subscription_type='renew' handling), the amount
+        // IS the verified renewal amount.
+        session.intent_data.cable_action = 'renew';
+        session.intent_data.amount_ngn = picked.price;
+      } else {
+        session.intent_data.cable_action = session.intent_data.intent === 'TV' ? 'change' : session.intent_data.cable_action;
+        session.intent_data.variation_code = picked.id;
+        session.intent_data.variation_label = picked.label;
+        // The plan price IS the amount for these services.
+        if (picked.price) session.intent_data.amount_ngn = picked.price;
+      }
 
       await supabase.from('deai_sessions').upsert({
         chat_id: platform_id, platform, intent_data: session.intent_data,
@@ -1545,7 +1654,9 @@ async function handleCore(req: Request, ctx: HumanizeCtx): Promise<NextResponse>
       session.status = 'AWAITING_DETAILS';
       text = "";
       isContinuingToAI = true;
-      prependSystemMsg = `✅ *${picked.label}* — ₦${Number(picked.price || 0).toLocaleString()}\n\n`;
+      prependSystemMsg = picked.id === '__RENEW__'
+        ? `✅ *Renewing: ${picked.label.replace(/^Renew:\s*/, '')}* — ₦${Number(picked.price || 0).toLocaleString()}\n\n`
+        : `✅ *${picked.label}* — ₦${Number(picked.price || 0).toLocaleString()}\n\n`;
     }
     // STATE: SCHEDULE ALLOWANCE CHOICE ⚡
     // The user has more than one funded agent allowance and didn't name one for this
@@ -2489,6 +2600,115 @@ async function handleCore(req: Request, ctx: HumanizeCtx): Promise<NextResponse>
         }
     }
 
+    // 🔴 THE "PRODUCT DOES NOT EXIST" BUG: the AI infers a phone network from ANY number in
+    // the message (it's told to), including the CONTACT phone on an electricity request. So
+    // "buy electric for my meter ... 08168811821" came back with provider "MTN" — a telecom
+    // network, never a valid electricity disco or cable provider. That wrong value then
+    // bypassed the disco picker below (which only fires when provider is empty), and the
+    // request failed at VTpass ("PRODUCT DOES NOT EXIST") trying to verify a meter against a
+    // phone-network serviceID. Validate the provider against the ACTUAL option list for this
+    // intent; if it doesn't match (a telecom on ELECTRICITY/TV), drop it so the picker fires.
+    // Moved here (was further below) so the CABLE FAST PATH right after it never mistakes a
+    // bogus telecom-network guess for a real, already-known cable provider.
+    if (intentData.provider && ['ELECTRICITY', 'TV'].includes(intentData.intent)) {
+        const spec = providersFor(intentData.intent);
+        if (spec && !matchProvider(String(intentData.provider), spec.options)) {
+            intentData.provider = null;
+            intentData.provider_label = null;
+        }
+    }
+
+    // ═══════════════════════════════════════════════════════════════════════
+    // ⚡ CABLE FAST PATH (TV) ⚡
+    // ═══════════════════════════════════════════════════════════════════════
+    //
+    // 🔴 THE FULL BUG THIS REDESIGNS (from a real transcript): a user saying "Cable" was
+    // asked for Amount + Target Number/Account + Contact Phone + Email ALL AT ONCE — before
+    // even naming a provider. The provider question came LAST, only after all four fields
+    // were collected. Verification of the smartcard/IUC number didn't happen until AFTER the
+    // user had already picked a package from a flat, unpaginated 40-item list — so a mistyped
+    // number wasted the whole conversation before failing.
+    //
+    // New order, matching how a human would actually ask: provider first -> account number ->
+    // verify IMMEDIATELY -> package list (with the CURRENT package pinned as "Renew", price
+    // included, via buildCablePackageOptions) -> chain/token (existing flow) -> phone/email
+    // (existing REQ system, now fixed to never re-ask for a phone already given — see
+    // REQ.phone's field rename in parity.ts).
+    //
+    // This block ONLY ever intercepts TV; every other intent falls through to the unchanged
+    // generic SERVICE_RULES/PROVIDER/VARIATION machinery immediately below.
+    if (intentData.intent === 'TV') {
+        // 1. Provider first — reuses the existing generic AWAITING_PROVIDER status/handler
+        // (see providersFor/matchProvider), so this needs no new state-handling code.
+        if (!intentData.provider) {
+            const spec = providersFor('TV')!;
+            await supabase.from('deai_sessions').upsert({
+                chat_id: platform_id, platform, intent_data: intentData,
+                status: 'AWAITING_PROVIDER',
+                expires_at: new Date(Date.now() + 300000).toISOString(),
+            }, { onConflict: 'chat_id' });
+            return NextResponse.json({
+                action: 'REPLY',
+                message: `${prependSystemMsg}${spec.prompt}\n\n${renderOptions(spec.options)}\n\n_Reply with the number, or the name._`,
+            });
+        }
+
+        // 2. Account number next — asked ALONE, not bundled with amount/phone/email.
+        if (!intentData.destination_account) {
+            await supabase.from('deai_sessions').upsert({
+                chat_id: platform_id, platform, intent_data: intentData,
+                status: 'AWAITING_DETAILS',
+                expires_at: new Date(Date.now() + 300000).toISOString(),
+            }, { onConflict: 'chat_id' });
+            return NextResponse.json({
+                action: 'REPLY',
+                message: `${prependSystemMsg}📺 *${(intentData.provider_label || intentData.provider).toUpperCase()}*\n\nWhat's the smartcard/IUC number?`,
+            });
+        }
+
+        // 3. Verify IMMEDIATELY — before any package is ever offered, not after.
+        if (!intentData.verified_name) {
+            const acctCheck = checkAccountNumber(intentData.intent, intentData.destination_account, intentData.provider);
+            if (!acctCheck.valid) {
+                intentData.destination_account = null;
+                await supabase.from('deai_sessions').upsert({
+                    chat_id: platform_id, platform, intent_data: intentData,
+                    status: 'AWAITING_DETAILS',
+                    expires_at: new Date(Date.now() + 300000).toISOString(),
+                }, { onConflict: 'chat_id' });
+                return NextResponse.json({ action: 'REPLY', message: `⚠️ ${acctCheck.error}\n\nPlease reply with the correct smartcard/IUC number.` });
+            }
+
+            const verification = await verifyAccount(intentData.intent, intentData.destination_account, undefined, intentData.provider);
+            if (!verification.success) {
+                intentData.destination_account = null;
+                await supabase.from('deai_sessions').upsert({
+                    chat_id: platform_id, platform, intent_data: intentData,
+                    status: 'AWAITING_DETAILS',
+                    expires_at: new Date(Date.now() + 300000).toISOString(),
+                }, { onConflict: 'chat_id' });
+                return NextResponse.json({
+                    action: 'REPLY',
+                    message: `❌ ${verification.message || "That smartcard/IUC number couldn't be verified"} for *${intentData.provider_label || intentData.provider}*.\n\nPlease reply with the correct number.`,
+                });
+            }
+
+            intentData.verified_name = verification.customer_name;
+            intentData.customer_name = verification.customer_name;
+            if (verification.min_amount) intentData.verified_min = verification.min_amount;
+            // The fields that let the package list pin "Renew: <bouquet>" below — see
+            // VerifiedAccount's comment in services.ts for how these were confirmed real.
+            intentData.cable_current_bouquet = verification.current_bouquet || null;
+            intentData.cable_renewal_amount = verification.renewal_amount || null;
+
+            prependSystemMsg += `✅ *Verified*\n👤 ${verification.customer_name}\n\n`;
+        }
+        // Falls through from here into the (now cable_renewal_amount-aware) generic
+        // SERVICE_RULES / VARIATION GATE machinery below — provider, destination_account,
+        // and verified_name are all already set, so those gates simply pass through to the
+        // package list / renew pin.
+    }
+
     const rules = SERVICE_RULES[intentData.intent];
     if (rules) {
         let missing = [];
@@ -2531,8 +2751,12 @@ async function handleCore(req: Request, ctx: HumanizeCtx): Promise<NextResponse>
             return NextResponse.json({ action: 'REPLY', message: `${prependSystemMsg}${echoMsg}To complete your ${intentData.intent.replace('_', ' ')}, please reply with ${missing.join(", ")}.` });
         }
 
+        // A picked variation or a verified cable renewal is a FIXED, already-correct price —
+        // same reasoning as the later AMOUNT LIMITS gate's isFixedPlan check — so it's exempt
+        // from the generic per-service minimum here too.
+        const isFixedAmount = !!intentData.variation_code || intentData.cable_action === 'renew';
         const activeMin = intentData.verified_min || rules.min;
-        if (activeMin && intentData.amount_ngn && intentData.amount_ngn < activeMin) {
+        if (!isFixedAmount && activeMin && intentData.amount_ngn && intentData.amount_ngn < activeMin) {
             intentData.amount_ngn = null; 
             await supabase.from('deai_sessions').upsert({ chat_id: platform_id, platform, intent_data: intentData, status: 'AWAITING_DETAILS', expires_at: new Date(Date.now() + 300000).toISOString() }, { onConflict: 'chat_id' });
             return NextResponse.json({ action: 'REPLY', message: `❌ Minimum amount for this service is ${currencySymbol}${activeMin}. Please reply with a valid amount.` });
@@ -2550,22 +2774,6 @@ async function handleCore(req: Request, ctx: HumanizeCtx): Promise<NextResponse>
     // first. Deleting this is the fix: VEND_DATA now falls through to the real implementation.
 
     intentData.fee = ['ELECTRICITY', 'TV', 'EDUCATION'].includes(intentData.intent) ? 100 : 0;
-
-    // 🔴 THE "PRODUCT DOES NOT EXIST" BUG: the AI infers a phone network from ANY number in
-    // the message (it's told to), including the CONTACT phone on an electricity request. So
-    // "buy electric for my meter ... 08168811821" came back with provider "MTN" — a telecom
-    // network, never a valid electricity disco or cable provider. That wrong value then
-    // bypassed the disco picker below (which only fires when provider is empty), and the
-    // request failed at VTpass ("PRODUCT DOES NOT EXIST") trying to verify a meter against a
-    // phone-network serviceID. Validate the provider against the ACTUAL option list for this
-    // intent; if it doesn't match (a telecom on ELECTRICITY/TV), drop it so the picker fires.
-    if (intentData.provider && ['ELECTRICITY', 'TV'].includes(intentData.intent)) {
-        const spec = providersFor(intentData.intent);
-        if (spec && !matchProvider(String(intentData.provider), spec.options)) {
-            intentData.provider = null;
-            intentData.provider_label = null;
-        }
-    }
 
     // ⚡ PROVIDER GATE — list the options, don't make them guess ⚡
     //
@@ -2589,11 +2797,15 @@ async function handleCore(req: Request, ctx: HumanizeCtx): Promise<NextResponse>
 
     // ⚡ VARIATION GATE — data plans, cable packages, exam products ⚡
     // These were never listed at all, so those flows could not complete in chat.
-    // ⚡ CABLE: RENEW vs CHANGE (DStv/GOtv) ⚡
+    // ⚡ CABLE: RENEW vs CHANGE (DStv/GOtv) — FALLBACK ONLY ⚡
     // The frontend lets DStv/GOtv users RENEW their current package (no plan needed) or
-    // CHANGE to a new one (plan required). The agent ignored this entirely — so it always
-    // demanded a plan, making renewals impossible.
-    if (intentData.intent === 'TV' && supportsRenew(intentData.provider) && !intentData.cable_action) {
+    // CHANGE to a new one (plan required). This explicit question is now a FALLBACK: the
+    // normal path pins "Renew: <bouquet>" directly atop the package list (see
+    // buildCablePackageOptions, wired in below) using the real bouquet name + price VTpass's
+    // merchant-verify returns — so the user never has to answer this generic question at all
+    // in the common case. This still fires only when that pinned option genuinely isn't
+    // available (verify didn't return a renewal amount this time), so renewals keep working.
+    if (intentData.intent === 'TV' && supportsRenew(intentData.provider) && !intentData.cable_action && !(Number(intentData.cable_renewal_amount) > 0)) {
         await supabase.from('deai_sessions').upsert({
             chat_id: platform_id, platform, intent_data: intentData,
             status: 'AWAITING_CABLE_ACTION',
@@ -2606,16 +2818,23 @@ async function handleCore(req: Request, ctx: HumanizeCtx): Promise<NextResponse>
         });
     }
 
-    if (requiresVariation(intentData.intent, intentData.provider, intentData.cable_action) && !intentData.variation_code) {
+    if (requiresVariation(intentData.intent, intentData.provider, intentData.cable_action) && !intentData.variation_code && !(intentData.cable_action === 'renew' && intentData.amount_ngn)) {
         const serviceID = variationServiceId(intentData.intent, intentData.provider);
-        const options = await fetchVariations(serviceID);
+        const rawOptions = await fetchVariations(serviceID);
 
-        if (options.length === 0) {
+        if (rawOptions.length === 0) {
             return NextResponse.json({
                 action: 'REPLY',
                 message: `⚠️ I couldn't load the plans for ${intentData.provider_label || intentData.provider} right now. Please try again shortly, or pay in the app.`,
             });
         }
+
+        // Pin "Renew: <bouquet>" atop the list when we have a real bouquet + renewal amount
+        // for this smartcard (TV/DStv/GOtv only — see buildCablePackageOptions).
+        const cablePinned = intentData.intent === 'TV'
+            ? buildCablePackageOptions(rawOptions, intentData.provider, intentData.cable_current_bouquet, intentData.cable_renewal_amount)
+            : null;
+        const options = cablePinned || rawOptions;
 
         // ⚡ DATA: GROUP BY CATEGORY (frontend parity).
         //
@@ -2623,8 +2842,6 @@ async function handleCore(req: Request, ctx: HumanizeCtx): Promise<NextResponse>
         // window. The web app groups them into tabs (Daily, Weekly, Monthly, SME,
         // Broadband…) — the agent uses the SAME categorizeDataPlan() function, so the two
         // can never group differently.
-        //
-        // Cable/education have few options, so a flat list is fine there.
         if (intentData.intent === 'VEND_DATA' || intentData.intent === 'INTERNET') {
             const groups = groupDataPlans(options);
 
@@ -2641,24 +2858,33 @@ async function handleCore(req: Request, ctx: HumanizeCtx): Promise<NextResponse>
                 });
             }
 
-            // Category already chosen — list the plans inside it.
+            // Category already chosen — list the plans inside it, PAGINATED (some
+            // categories run 30+ plans deep for a busy network).
             const group = groups.find(g => g.category === intentData.plan_category);
             const plans = group?.plans || options;
+            const rendered = renderOptionsPage(plans, 0, { showPrice: true });
 
             await supabase.from('deai_sessions').upsert({
-                chat_id: platform_id, platform, intent_data: intentData,
+                chat_id: platform_id, platform, intent_data: { ...intentData, variation_page: 0 },
                 status: 'AWAITING_VARIATION',
                 expires_at: new Date(Date.now() + 300000).toISOString(),
             }, { onConflict: 'chat_id' });
 
+            const footer = rendered.hasMore
+                ? `\n\n_Page 1/${rendered.totalPages} — reply *next* to see more, or reply with the number._`
+                : `\n\n_Reply with the number._`;
             return NextResponse.json({
                 action: 'REPLY',
-                message: `${prependSystemMsg}📦 *${intentData.plan_category} plans:*\n\n${renderOptions(plans, { showPrice: true })}\n\n_Reply with the number._`,
+                message: `${prependSystemMsg}📦 *${intentData.plan_category} plans:*\n\n${rendered.text}${footer}`,
             });
         }
 
+        // ⚡ CABLE / EDUCATION — PAGINATED (DStv alone runs ~40 packages; was one flat wall
+        // of numbered text before). Groups of VARIATION_PAGE_SIZE, "next" to see more.
+        const rendered = renderOptionsPage(options, 0, { showPrice: true });
+
         await supabase.from('deai_sessions').upsert({
-            chat_id: platform_id, platform, intent_data: intentData,
+            chat_id: platform_id, platform, intent_data: { ...intentData, variation_page: 0 },
             status: 'AWAITING_VARIATION',
             expires_at: new Date(Date.now() + 300000).toISOString(),
         }, { onConflict: 'chat_id' });
@@ -2666,10 +2892,13 @@ async function handleCore(req: Request, ctx: HumanizeCtx): Promise<NextResponse>
         const title = intentData.intent === 'TV' ? '📺 *Choose a package:*'
                     : intentData.intent === 'EDUCATION' ? '🎓 *Choose a product:*'
                     : '📦 *Choose a plan:*';
+        const footer = rendered.hasMore
+            ? `\n\n_Page 1/${rendered.totalPages} — reply *next* to see more, or reply with the number._`
+            : `\n\n_Reply with the number._`;
 
         return NextResponse.json({
             action: 'REPLY',
-            message: `${prependSystemMsg}${title}\n\n${renderOptions(options, { showPrice: true })}\n\n_Reply with the number._`,
+            message: `${prependSystemMsg}${title}\n\n${rendered.text}${footer}`,
         });
     }
 
@@ -2696,9 +2925,11 @@ async function handleCore(req: Request, ctx: HumanizeCtx): Promise<NextResponse>
     //
     // When the user picked a data bundle or cable package, the PLAN PRICE IS THE PRICE — the
     // frontend skips min/max entirely. Without this the agent would reject a legitimate ₦50
-    // data bundle for being "below the ₦100 minimum".
+    // data bundle for being "below the ₦100 minimum". A cable RENEWAL is the same kind of
+    // fixed, non-negotiable price — it's VTpass's own verified renewal_amount, not a number
+    // the user chose — so it must skip min/max too, exactly like a variation pick.
     if (intentData.amount_ngn) {
-        const isFixedPlan = !!intentData.variation_code;
+        const isFixedPlan = !!intentData.variation_code || intentData.cable_action === 'renew';
         const amtCheck = checkAmountParity(intentData.intent, Number(intentData.amount_ngn), {
             isFixedPlan,
             verifiedMin: intentData.verified_min,
