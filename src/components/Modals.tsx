@@ -1,5 +1,5 @@
 import React, { useRef, useState, useEffect } from "react";
-import { CheckCircle2, ExternalLink, Share2, HelpCircle, XCircle, Loader2, Search } from "lucide-react";
+import { CheckCircle2, ExternalLink, Share2, HelpCircle, XCircle, Loader2, Search, Download } from "lucide-react";
 import { SUPPORTED_COUNTRIES, SUPPORTED_TOKENS } from "@/constants";
 
 // ⚡ International transactions store a pre-formatted currency string (e.g. "GHS 2.50").
@@ -55,8 +55,21 @@ export function ReceiptModal({ receipt, isMainnet, onClose, onSupport }: any) {
   if (!receipt) return null;
 
   const [isProcessingShare, setIsProcessingShare] = useState(false);
-  const [saveOptions, setSaveOptions] = useState<{ dataUrl: string; canvas: HTMLCanvasElement } | null>(null);
-  const [previewUrl, setPreviewUrl] = useState<string | null>(null);
+  // Real, tappable download links — see handleShareImage's fallback branch for why these
+  // replaced a JS-synthesized <a>.click(). previewDataUrl backs the "long-press to save"
+  // fallback, which is shown unconditionally alongside these (see the render section below).
+  const [saveOptions, setSaveOptions] = useState<{ imageUrl: string; pdfUrl: string | null; previewDataUrl: string } | null>(null);
+
+  // Object URLs are only ever referenced by `saveOptions` — revoke them the moment it's
+  // replaced or the modal unmounts, instead of leaking a blob for the component's lifetime.
+  useEffect(() => {
+    return () => {
+      if (saveOptions) {
+        URL.revokeObjectURL(saveOptions.imageUrl);
+        if (saveOptions.pdfUrl) URL.revokeObjectURL(saveOptions.pdfUrl);
+      }
+    };
+  }, [saveOptions]);
 
   const hasPin = receipt.status === 'SUCCESS' && receipt.purchased_code && receipt.purchased_code !== "Vended Successfully";
   const isElectricity = receipt.service?.toUpperCase() === 'ELECTRICITY' || receipt.service === 'Electricity';
@@ -129,7 +142,6 @@ export function ReceiptModal({ receipt, isMainnet, onClose, onSupport }: any) {
   const handleShareImage = async () => {
     setIsProcessingShare(true);
     setSaveOptions(null);
-    setPreviewUrl(null);
 
     try {
       const receiptElement = document.getElementById('printable-receipt');
@@ -164,9 +176,27 @@ export function ReceiptModal({ receipt, isMainnet, onClose, onSupport }: any) {
         }
       }
 
-      // No native "share files" support on this browser/wallet webview (e.g. desktop, some in-app browsers)
-      // — let the user explicitly choose how to save the receipt instead of silently copying text.
-      setSaveOptions({ dataUrl, canvas });
+      // No native "share files" support on this browser/wallet webview (e.g. desktop, some
+      // in-app browsers) — build real, tappable download links instead of trying to fake a
+      // click programmatically (see the note by the old triggerDownload/handleSaveAs* helpers
+      // this replaced: a JS-synthesized `<a download>.click()` is exactly what was silently
+      // being treated as a plain navigation in some webviews — dumping the user out of the
+      // whole app onto a bare blob: URL with no save affordance, instead of downloading).
+      // A real anchor the user physically taps doesn't have that problem — browsers reserve
+      // their strictest popup/download suspicion for script-triggered clicks, not genuine ones.
+      const imageUrl = URL.createObjectURL(blob);
+      let pdfUrl: string | null = null;
+      try {
+        const { jsPDF } = await import('jspdf');
+        const widthMm = 100; // Receipt-sized page, scaled to the captured canvas's aspect ratio
+        const heightMm = (canvas.height * widthMm) / canvas.width;
+        const pdf = new jsPDF({ orientation: heightMm >= widthMm ? 'portrait' : 'landscape', unit: 'mm', format: [widthMm, heightMm] });
+        pdf.addImage(dataUrl, 'PNG', 0, 0, widthMm, heightMm);
+        pdfUrl = URL.createObjectURL(pdf.output('blob'));
+      } catch (pdfErr) {
+        console.error('PDF generation failed (image download is still offered):', pdfErr);
+      }
+      setSaveOptions({ imageUrl, pdfUrl, previewDataUrl: dataUrl });
     } catch (error) {
       console.error('Error generating receipt image:', error);
       // Last-resort fallback only if image generation itself fails entirely
@@ -180,78 +210,6 @@ export function ReceiptModal({ receipt, isMainnet, onClose, onSupport }: any) {
     } finally {
       setIsProcessingShare(false);
     }
-  };
-
-  // ⚡ Triggers a real file download. Mobile webviews (MiniPay, Farcaster, in-app browsers)
-  // are inconsistent here: many block programmatic downloads, and several reject `data:`
-  // URLs outright. We therefore (a) use a Blob URL rather than a data: URL, and (b) attach
-  // the anchor to the DOM before clicking — both are required by some engines. Returns
-  // false if the download could not be initiated, so the caller can fall back.
-  const triggerDownload = (blob: Blob, filename: string): boolean => {
-    try {
-      const url = URL.createObjectURL(blob);
-      const link = document.createElement('a');
-      link.href = url;
-      link.download = filename;
-      link.rel = 'noopener';
-      link.style.display = 'none';
-      document.body.appendChild(link);
-      link.click();
-      document.body.removeChild(link);
-      // Revoke a little later — revoking immediately can cancel the download in some browsers.
-      setTimeout(() => URL.revokeObjectURL(url), 10000);
-      return true;
-    } catch (err) {
-      console.error('Download failed:', err);
-      return false;
-    }
-  };
-
-  const dataUrlToBlob = async (dataUrl: string): Promise<Blob> => (await fetch(dataUrl)).blob();
-
-  const handleSaveAsImage = async () => {
-    if (!saveOptions) return;
-    try {
-      const blob = await dataUrlToBlob(saveOptions.dataUrl);
-      const ok = triggerDownload(blob, `AbaPay_Receipt_${receipt.id}.png`);
-      if (!ok) {
-        // Downloads are blocked in this webview — show the image inline so the user can
-        // long-press to save it. This ALWAYS works, unlike a programmatic download.
-        setPreviewUrl(saveOptions.dataUrl);
-        return;
-      }
-    } catch (err) {
-      console.error('Save as image failed:', err);
-      setPreviewUrl(saveOptions.dataUrl);
-      return;
-    }
-    setSaveOptions(null);
-  };
-
-  const handleSaveAsPDF = async () => {
-    if (!saveOptions) return;
-    try {
-      const { jsPDF } = await import('jspdf');
-      const { canvas, dataUrl } = saveOptions;
-      const widthMm = 100; // Receipt-sized page, scaled to the captured canvas's aspect ratio
-      const heightMm = (canvas.height * widthMm) / canvas.width;
-      const pdf = new jsPDF({ orientation: heightMm >= widthMm ? 'portrait' : 'landscape', unit: 'mm', format: [widthMm, heightMm] });
-      pdf.addImage(dataUrl, 'PNG', 0, 0, widthMm, heightMm);
-
-      // Use a Blob + our download helper rather than pdf.save(), which internally relies on
-      // the same anchor-click trick and fails silently in restrictive webviews.
-      const blob = pdf.output('blob');
-      const ok = triggerDownload(blob, `AbaPay_Receipt_${receipt.id}.pdf`);
-      if (!ok) {
-        alert("This app's browser blocked the PDF download. Save the receipt as an image instead — tap 'Image', then long-press the picture to save it.");
-        return;
-      }
-    } catch (error) {
-      console.error('Error generating receipt PDF:', error);
-      alert("Couldn't generate the PDF. Please try saving as an image instead.");
-      return;
-    }
-    setSaveOptions(null);
   };
 
   return (
@@ -358,34 +316,47 @@ export function ReceiptModal({ receipt, isMainnet, onClose, onSupport }: any) {
                  );
              })()}
 
-             {/* ⚡ GUARANTEED FALLBACK: some webviews (MiniPay, Farcaster, in-app browsers)
-                  block programmatic downloads outright. When that happens we render the
-                  receipt image inline — long-pressing an <img> to save it always works. */}
-             {previewUrl && (
-                <div data-html2canvas-ignore="true" className="mb-3 p-3 rounded-2xl bg-slate-50 dark:bg-[#1a1a1f] border border-slate-100 dark:border-slate-800/80">
-                   <p className="text-[10px] font-black uppercase tracking-widest text-emerald-600 dark:text-emerald-400 text-center mb-2">Long-press the image to save it</p>
-                   {/* eslint-disable-next-line @next/next/no-img-element */}
-                   <img src={previewUrl} alt="AbaPay receipt" className="w-full rounded-xl border border-slate-200 dark:border-slate-700" />
-                   <button onClick={() => { setPreviewUrl(null); setSaveOptions(null); }} className="mt-2 w-full py-2 text-[10px] font-black uppercase tracking-widest text-slate-500 dark:text-slate-400">
-                      Done
-                   </button>
-                </div>
-             )}
-
-             {/* ⚡ SAVE FALLBACK: shown when the webview can't open a native file share
-                  sheet (MiniPay / Farcaster / desktop). Without this, Share appeared to do
-                  nothing after generating the image. */}
-             {saveOptions && !previewUrl && (
+             {/* ⚡ SAVE FALLBACK — shown when the webview can't open a native file share sheet
+                  (desktop, MiniPay, Base App, Farcaster, ...). These are REAL <a download>
+                  links the user taps themselves, not a JS-synthesized click: a script-triggered
+                  anchor click is exactly what several mobile webviews were silently treating as
+                  a plain navigation instead of a download — dumping the user out of the whole
+                  app onto a bare blob: URL with no save option. A genuine tap doesn't hit that
+                  restriction. The image preview below is shown unconditionally alongside them
+                  (not gated behind a "download failed" check, which we have no reliable way to
+                  detect) so there's always at least one guaranteed-working path: long-press. */}
+             {saveOptions && (
                 <div data-html2canvas-ignore="true" className="mb-3 p-3 rounded-2xl bg-slate-50 dark:bg-[#1a1a1f] border border-slate-100 dark:border-slate-800/80">
                    <p className="text-[10px] font-black uppercase tracking-widest text-slate-500 dark:text-slate-400 text-center mb-2">Save your receipt</p>
-                   <div className="flex gap-2">
-                      <button onClick={handleSaveAsImage} className="flex-1 py-3 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-black uppercase tracking-widest flex items-center justify-center gap-2 transition-colors active:scale-95">
-                         <Share2 size={14}/> Image
-                      </button>
-                      <button onClick={handleSaveAsPDF} className="flex-1 py-3 bg-slate-800 dark:bg-white hover:bg-slate-700 dark:hover:bg-slate-200 text-white dark:text-slate-900 rounded-xl text-xs font-black uppercase tracking-widest flex items-center justify-center gap-2 transition-colors active:scale-95">
-                         <Share2 size={14}/> PDF
-                      </button>
+                   <div className="flex gap-2 mb-3">
+                      <a
+                        href={saveOptions.imageUrl}
+                        download={`AbaPay_Receipt_${receipt.id}.png`}
+                        target="_blank"
+                        rel="noopener"
+                        className="flex-1 py-3 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-black uppercase tracking-widest flex items-center justify-center gap-2 transition-colors active:scale-95"
+                      >
+                         <Download size={14}/> Image
+                      </a>
+                      {saveOptions.pdfUrl && (
+                        <a
+                          href={saveOptions.pdfUrl}
+                          download={`AbaPay_Receipt_${receipt.id}.pdf`}
+                          target="_blank"
+                          rel="noopener"
+                          className="flex-1 py-3 bg-slate-800 dark:bg-white hover:bg-slate-700 dark:hover:bg-slate-200 text-white dark:text-slate-900 rounded-xl text-xs font-black uppercase tracking-widest flex items-center justify-center gap-2 transition-colors active:scale-95"
+                        >
+                           <Download size={14}/> PDF
+                        </a>
+                      )}
                    </div>
+
+                   <p className="text-[10px] font-black uppercase tracking-widest text-emerald-600 dark:text-emerald-400 text-center mb-2">Or long-press the image to save it</p>
+                   {/* eslint-disable-next-line @next/next/no-img-element */}
+                   <img src={saveOptions.previewDataUrl} alt="AbaPay receipt" className="w-full rounded-xl border border-slate-200 dark:border-slate-700" />
+                   <button onClick={() => setSaveOptions(null)} className="mt-2 w-full py-2 text-[10px] font-black uppercase tracking-widest text-slate-500 dark:text-slate-400">
+                      Done
+                   </button>
                 </div>
              )}
 
