@@ -13,3 +13,5 @@ create table if not exists public.user_onboarding (
   updated_at timestamptz not null default now(),
   primary key (platform, channel_id)
 );
+
+alter table public.user_onboarding enable row level security;
