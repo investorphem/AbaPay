@@ -12,6 +12,7 @@ import {
 import { supabase } from "@/utils/supabase";
 import { celoAttributionSuffix } from "@/lib/attribution";
 import { AdminAgentPanel } from "@/components/AdminAgentPanel";
+import { AdminDiscountsPanel } from "@/components/AdminDiscountsPanel";
 import { AdminOpsPanel } from "@/components/AdminOpsPanel";
 
 import { TELECOM_PROVIDERS, INTERNET_PROVIDERS, CABLE_PROVIDERS_LIST, EDUCATION_PROVIDERS } from "@/constants";
@@ -932,7 +933,7 @@ export default function AdminDashboard() {
 
             <div className="bg-[#111114] p-1.5 rounded-2xl border border-slate-800 flex justify-between items-center max-w-full">
               <div className="flex gap-1 overflow-x-auto no-scrollbar pr-4">
-                  {['analytics', 'system', 'agent', 'ops', 'ledger', 'vault', 'contract', 'identity'].map((t) => (
+                  {['analytics', 'system', 'agent', 'discounts', 'ops', 'ledger', 'vault', 'contract', 'identity'].map((t) => (
                     <button key={t} onClick={() => setActiveTab(t)} className={`px-6 py-2 rounded-xl text-xs font-black uppercase transition-all whitespace-nowrap ${activeTab === t ? 'bg-slate-800 text-emerald-400' : 'text-slate-500 hover:text-slate-300'}`}>
                         {t === 'system' ? 'Controls' : t}
                     </button>
@@ -1035,6 +1036,13 @@ export default function AdminDashboard() {
             {activeTab === 'agent' && (
               <div className="animate-in fade-in">
                 <AdminAgentPanel adminHeaders={adminHeaders} />
+              </div>
+            )}
+
+            {/* DISCOUNT / PROMO CAMPAIGNS */}
+            {activeTab === 'discounts' && (
+              <div className="animate-in fade-in">
+                <AdminDiscountsPanel adminHeaders={adminHeaders} />
               </div>
             )}
 

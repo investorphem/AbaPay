@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server';
 import { supabaseAdmin as supabase } from '@/utils/supabase';
 import { sendTelegramAlert } from '@/lib/telegram';
 import { executeVend, getStrictRequestId } from '@/lib/vend';
+import { getActiveDiscountForService, computeDiscountNgn } from '@/lib/discounts';
 import { createPublicClient, http, decodeFunctionData, parseUnits } from 'viem';
 import { base, baseSepolia, celo, celoSepolia } from 'viem/chains';
 
@@ -46,7 +47,16 @@ export async function POST(req: Request) {
     // 1. RATE VERIFICATION (Security Check)
     const { data: settingsData } = await supabase.from('platform_settings').select('exchange_rate').eq('id', 1).single();
     const baseRate = parseFloat(settingsData?.exchange_rate || "1500");
-    const requiredCrypto = (vendAmount + serviceFee) / baseRate;
+
+    // 1b. DISCOUNT — authoritative, server-computed. serviceCategory here is the web app's
+    // uiCategory (AIRTIME/INTERNET/ELECTRICITY/CABLE/BANK/EDUCATION) — already the same
+    // canonical key set src/lib/discounts.ts matches campaigns against, no mapping needed.
+    // Never trust a client-supplied discount: a tampered client claiming a bigger discount
+    // than actually active just ends up underpaying, rejected below like any other shortfall.
+    const activeDiscount = await getActiveDiscountForService(serviceCategory);
+    const discountNgn = computeDiscountNgn(vendAmount, activeDiscount);
+
+    const requiredCrypto = (vendAmount + serviceFee - discountNgn) / baseRate;
 
     if (parseFloat(amount) < parseFloat(requiredCrypto.toFixed(4))) {
         return NextResponse.json({ success: false, status: 'FAILED_VENDING', message: "Insufficient crypto paid." }, { status: 400 });
@@ -56,7 +66,8 @@ export async function POST(req: Request) {
     const dbPayload = {
       tx_hash: txHash, request_id: vtRequestId, service_category: serviceCategory, service_id: serviceID, variation_code: variation_code, network: network, 
       blockchain: blockchain || "CELO", account_number: billersCode || phone || "N/A", phone: phone || null, amount_usdt: parseFloat(amount), 
-      amount_naira: vendAmount, fee_naira: serviceFee, status: 'PENDING', wallet_address: (wallet_address || "UNKNOWN").toLowerCase(),
+      amount_naira: vendAmount, fee_naira: serviceFee, discount_ngn: discountNgn, discount_campaign_id: activeDiscount?.id || null,
+      status: 'PENDING', wallet_address: (wallet_address || "UNKNOWN").toLowerCase(),
       customer_name: customer_name || null, customer_address: customer_address || null,
       source_channel: source_channel || 'WEB',
       token_used: tokenSymbol, meter_account_type: meter_account_type || null, customer_email: email || null,

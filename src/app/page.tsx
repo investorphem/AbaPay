@@ -269,12 +269,37 @@ export default function Home() {
     return (input * rate).toString();
   }, [isInternational, selectedIntlVariation, intlFlexibleAmount, nairaAmount]);
 
+  // ⚡ DISCOUNT PREVIEW — this is a preview only; /api/pay independently re-derives the same
+  // discount server-side (see src/lib/discounts.ts) and is what actually enforces it. Debounced
+  // so switching services/typing an amount doesn't fire a request per keystroke. Service key
+  // mirrors buildBackendPayload's `uiCategory` (BANK/EDUCATION/AIRTIME/INTERNET/ELECTRICITY/
+  // CABLE) so the preview and the real server-side check are always looking at the same thing.
+  const [activeDiscount, setActiveDiscount] = useState<{ id: string; name: string; type: 'PERCENT' | 'FIXED'; value: number; maxDiscountNgn: number | null } | null>(null);
+  const [discountNgn, setDiscountNgn] = useState(0);
+
+  useEffect(() => {
+    const bill = parseFloat(calculatedNairaAmount) || 0;
+    if (isInternational || bill <= 0) { setActiveDiscount(null); setDiscountNgn(0); return; }
+    const serviceKey = activeTab === "bank" ? "BANK" : activeTab === "education" ? "EDUCATION" : activeService.id;
+
+    const t = setTimeout(() => {
+      fetch(`/api/discounts/active?service=${encodeURIComponent(serviceKey)}&amount=${bill}`)
+        .then((r) => r.json())
+        .then((d) => {
+          if (d?.success) { setActiveDiscount(d.discount || null); setDiscountNgn(Number(d.discountNgn) || 0); }
+        })
+        .catch(() => { setActiveDiscount(null); setDiscountNgn(0); });
+    }, 400);
+
+    return () => clearTimeout(t);
+  }, [calculatedNairaAmount, activeTab, activeService.id, isInternational]);
+
   const { cryptoToCharge, currentFee } = useMemo(() => {
     const bill = parseFloat(calculatedNairaAmount) || 0;
     const fee = (activeTab === "bank" || activeService.id === "ELECTRICITY" || activeService.id === "CABLE" || activeTab === "education") ? 100 : 0;
-    const crypto = (bill + fee) / exchangeRate;
+    const crypto = (bill + fee - discountNgn) / exchangeRate;
     return { cryptoToCharge: crypto.toFixed(4), currentFee: fee };
-  }, [calculatedNairaAmount, exchangeRate, activeService, activeTab]);
+  }, [calculatedNairaAmount, exchangeRate, activeService, activeTab, discountNgn]);
 
   const walletFiatDisplay = useMemo(() => {
     const bal = parseFloat(walletBalance);
@@ -1829,9 +1854,21 @@ export default function Home() {
               <div className="text-center mb-8">
                  <p className="text-[10px] font-black text-slate-400 dark:text-slate-500 uppercase tracking-widest mb-2">Total Payable</p>
 
+                 {!isInternational && discountNgn > 0 && (
+                    <p className="text-sm font-bold text-slate-400 dark:text-slate-500 line-through mb-0.5">
+                       ₦{(parseFloat(calculatedNairaAmount || "0") + currentFee).toLocaleString()}
+                    </p>
+                 )}
+
                  <h2 className="text-4xl font-black text-slate-900 dark:text-white mb-2">
-                    {isInternational ? `${intlCurrency || activeCountry.currency || activeCountry.code} ${displayForeignAmount}` : `₦${(parseFloat(calculatedNairaAmount || "0") + currentFee).toLocaleString()}`}
+                    {isInternational ? `${intlCurrency || activeCountry.currency || activeCountry.code} ${displayForeignAmount}` : `₦${(parseFloat(calculatedNairaAmount || "0") + currentFee - discountNgn).toLocaleString()}`}
                  </h2>
+
+                 {!isInternational && discountNgn > 0 && (
+                    <p className="text-xs font-black text-emerald-600 dark:text-emerald-400 mb-2">
+                       🎉 {activeDiscount?.name || "Discount"} applied: -₦{discountNgn.toLocaleString()}
+                    </p>
+                 )}
 
                  <div className="flex items-center justify-center gap-1.5 text-emerald-600 dark:text-emerald-400 font-bold bg-emerald-50 dark:bg-emerald-900/20 w-max mx-auto px-4 py-1.5 rounded-full text-sm shadow-inner transition-colors">
                     <img src={selectedToken.logo} alt="token" className="w-4 h-4 rounded-full"/>
