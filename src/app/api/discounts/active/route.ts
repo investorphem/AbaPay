@@ -13,7 +13,7 @@ export async function GET(req: Request) {
 
   try {
     const discount = await getActiveDiscountForService(service);
-    const discountNgn = await computeDiscountNgn(amount, discount, wallet, destination);
+    const { discountNgn } = await computeDiscountNgn(amount, discount, wallet, destination);
 
     return NextResponse.json({
       success: true,

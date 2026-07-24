@@ -1089,7 +1089,7 @@ async function handleCore(req: Request, ctx: HumanizeCtx): Promise<NextResponse>
             // fresh here too, since the relayer submits this payment directly with no separate
             // "verify what the user already paid" step to hook a discount into afterward.
             const activeDiscount = await getActiveDiscountForService(serviceCategory);
-            const discountNgn = await computeDiscountNgn(Number(d.amount_ngn), activeDiscount, userWallet, d.destination_account);
+            const { discountNgn, discountPhone } = await computeDiscountNgn(Number(d.amount_ngn), activeDiscount, userWallet, d.destination_account);
             const amountCrypto = ((Number(d.amount_ngn) - discountNgn) / rate).toFixed(6);
 
             if (!allowance.ok || allowance.remaining < Number(amountCrypto)) {
@@ -1124,7 +1124,7 @@ async function handleCore(req: Request, ctx: HumanizeCtx): Promise<NextResponse>
                 variation_code: d.variation_code || null, network: d.provider || null, blockchain: chain,
                 account_number: d.destination_account, phone: d.phone || null,
                 amount_usdt: Number(amountCrypto), amount_naira: Number(d.amount_ngn), fee_naira: Number(d.fee || 0),
-                discount_ngn: discountNgn, discount_campaign_id: activeDiscount?.id || null, status: 'PENDING',
+                discount_ngn: discountNgn, discount_campaign_id: activeDiscount?.id || null, discount_phone: discountPhone, status: 'PENDING',
                 wallet_address: userWallet.toLowerCase(),
                 customer_name: d.customer_name || null, customer_address: d.customer_address || null,
                 source_channel: platform, token_used: tokenSym,

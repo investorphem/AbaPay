@@ -55,7 +55,7 @@ export async function POST(req: Request) {
     // than actually active just ends up underpaying, rejected below like any other shortfall.
     const destinationAccount = billersCode || phone || "N/A";
     const activeDiscount = await getActiveDiscountForService(serviceCategory);
-    const discountNgn = await computeDiscountNgn(vendAmount, activeDiscount, wallet_address, destinationAccount);
+    const { discountNgn, discountPhone } = await computeDiscountNgn(vendAmount, activeDiscount, wallet_address, destinationAccount);
 
     const requiredCrypto = (vendAmount + serviceFee - discountNgn) / baseRate;
 
@@ -75,7 +75,7 @@ export async function POST(req: Request) {
       tx_hash: txHash, request_id: vtRequestId, service_category: serviceCategory, service_id: serviceID, variation_code: variation_code, network: network,
       blockchain: blockchain || "CELO", account_number: destinationAccount, phone: phone || null, amount_usdt: parseFloat(amount),
       amount_naira: vendAmount, fee_naira: serviceFee, discount_ngn: discountNgn, discount_campaign_id: activeDiscount?.id || null,
-      client_ip: clientIp,
+      discount_phone: discountPhone, client_ip: clientIp,
       status: 'PENDING', wallet_address: (wallet_address || "UNKNOWN").toLowerCase(),
       customer_name: customer_name || null, customer_address: customer_address || null,
       source_channel: source_channel || 'WEB',

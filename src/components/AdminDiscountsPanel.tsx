@@ -6,8 +6,10 @@ import { Percent, Loader2, Save, Trash2, Plus, ShieldAlert } from "lucide-react"
 // ⚡ ADMIN — DISCOUNT / PROMO CAMPAIGNS
 //
 // Create, schedule, and toggle discount campaigns; monitor how much has actually been given
-// away. Enforcement is server-side in src/lib/discounts.ts, checked fresh inside /api/pay —
-// a change here is live for the very next transaction, no redeploy.
+// away; and turn each anti-gaming measure on or off per campaign, plus a master switch for the
+// suspicious-cluster detector. Enforcement is server-side in src/lib/discounts.ts, checked
+// fresh inside /api/pay and the chat/agent path — a change here is live for the very next
+// transaction, no redeploy.
 
 // AIRTIME/INTERNET/ELECTRICITY/CABLE/BANK/EDUCATION are the web app's canonical categories
 // (src/constants/index.ts SERVICES + BANK/EDUCATION tabs). DATA is chat-only — the agent path
@@ -15,26 +17,50 @@ import { Percent, Loader2, Save, Trash2, Plus, ShieldAlert } from "lucide-react"
 // equivalent tile in the web app (whose "INTERNET" tile is ISP plans, a different service).
 const SERVICE_OPTIONS = ["AIRTIME", "DATA", "INTERNET", "ELECTRICITY", "CABLE", "BANK", "EDUCATION"];
 
+const EMPTY_FORM = {
+  name: '', type: 'PERCENT', value: '', max_discount_ngn: '',
+  max_discount_per_wallet_ngn: '', max_discount_per_destination_ngn: '', max_discount_per_phone_ngn: '', max_total_discount_ngn: '',
+  services: [] as string[], starts_at: '', ends_at: '',
+};
+
+const EMPTY_CAPS_ON = { wallet: false, destination: false, phone: false, total: false };
+
 interface Props { adminHeaders: Record<string, string>; }
+
+// A tiny toggle switch, matching AdminAgentPanel's pattern — used both for per-cap on/off in
+// the create form and the master fraud-flagging switch.
+function MiniToggle({ value, onChange, disabled }: { value: boolean; onChange: (v: boolean) => void; disabled?: boolean }) {
+  return (
+    <button
+      type="button"
+      onClick={() => onChange(!value)}
+      disabled={disabled}
+      className={`relative w-10 h-5 rounded-full transition-colors shrink-0 ${value ? 'bg-emerald-600' : 'bg-slate-700'} disabled:opacity-50`}
+    >
+      <span className={`absolute top-0.5 w-4 h-4 rounded-full bg-white transition-all ${value ? 'left-5' : 'left-0.5'}`} />
+    </button>
+  );
+}
 
 export function AdminDiscountsPanel({ adminHeaders }: Props) {
   const [campaigns, setCampaigns] = useState<any[] | null>(null);
   const [stats, setStats] = useState<any>(null);
+  const [settings, setSettings] = useState<{ fraudFlaggingEnabled: boolean }>({ fraudFlaggingEnabled: true });
   const [saving, setSaving] = useState(false);
   const [msg, setMsg] = useState('');
   const [showForm, setShowForm] = useState(false);
 
-  const [form, setForm] = useState({
-    name: '', type: 'PERCENT', value: '', max_discount_ngn: '',
-    max_discount_per_wallet_ngn: '', max_discount_per_destination_ngn: '', max_total_discount_ngn: '',
-    services: [] as string[], starts_at: '', ends_at: '',
-  });
+  const [form, setForm] = useState({ ...EMPTY_FORM });
+  // Each optional cap starts OFF — the number field only appears (and only gets sent) once its
+  // toggle is on, so "turning a gaming protection on/off" is an explicit switch, not just an
+  // implicit blank-field convention.
+  const [capsOn, setCapsOn] = useState({ ...EMPTY_CAPS_ON });
 
   const load = useCallback(async () => {
     try {
       const res = await fetch('/api/admin/discounts', { headers: adminHeaders });
       const data = await res.json();
-      if (data.success) { setCampaigns(data.campaigns); setStats(data.stats); }
+      if (data.success) { setCampaigns(data.campaigns); setStats(data.stats); if (data.settings) setSettings(data.settings); }
     } catch { /* non-fatal */ }
   }, [adminHeaders]);
 
@@ -60,6 +86,8 @@ export function AdminDiscountsPanel({ adminHeaders }: Props) {
     }
   };
 
+  const toggleFraudFlagging = (v: boolean) => post({ fraud_flagging_enabled: v });
+
   const createCampaign = async () => {
     if (!form.name.trim() || !form.value) { setMsg('Name and value are required.'); return; }
     const ok = await post({
@@ -67,16 +95,18 @@ export function AdminDiscountsPanel({ adminHeaders }: Props) {
       type: form.type,
       value: Number(form.value),
       max_discount_ngn: form.max_discount_ngn ? Number(form.max_discount_ngn) : null,
-      max_discount_per_wallet_ngn: form.max_discount_per_wallet_ngn ? Number(form.max_discount_per_wallet_ngn) : null,
-      max_discount_per_destination_ngn: form.max_discount_per_destination_ngn ? Number(form.max_discount_per_destination_ngn) : null,
-      max_total_discount_ngn: form.max_total_discount_ngn ? Number(form.max_total_discount_ngn) : null,
+      max_discount_per_wallet_ngn: capsOn.wallet && form.max_discount_per_wallet_ngn ? Number(form.max_discount_per_wallet_ngn) : null,
+      max_discount_per_destination_ngn: capsOn.destination && form.max_discount_per_destination_ngn ? Number(form.max_discount_per_destination_ngn) : null,
+      max_discount_per_phone_ngn: capsOn.phone && form.max_discount_per_phone_ngn ? Number(form.max_discount_per_phone_ngn) : null,
+      max_total_discount_ngn: capsOn.total && form.max_total_discount_ngn ? Number(form.max_total_discount_ngn) : null,
       services: form.services,
       starts_at: form.starts_at || null,
       ends_at: form.ends_at || null,
       is_active: true,
     });
     if (ok) {
-      setForm({ name: '', type: 'PERCENT', value: '', max_discount_ngn: '', max_discount_per_wallet_ngn: '', max_discount_per_destination_ngn: '', max_total_discount_ngn: '', services: [], starts_at: '', ends_at: '' });
+      setForm({ ...EMPTY_FORM });
+      setCapsOn({ ...EMPTY_CAPS_ON });
       setShowForm(false);
     }
   };
@@ -128,27 +158,34 @@ export function AdminDiscountsPanel({ adminHeaders }: Props) {
         </div>
       </div>
 
-      {/* Suspicious clusters — flag only, never auto-blocked */}
-      {stats?.suspiciousClusters && stats.suspiciousClusters.length > 0 && (
-        <div className="bg-[#111114] rounded-2xl border border-orange-900/50 p-5">
-          <div className="flex items-center gap-2 mb-1">
+      {/* Master fraud-flagging switch + suspicious clusters — flag only, never auto-blocked */}
+      <div className="bg-[#111114] rounded-2xl border border-orange-900/50 p-5">
+        <div className="flex items-center justify-between gap-4 mb-1">
+          <div className="flex items-center gap-2">
             <ShieldAlert size={16} className="text-orange-400" />
-            <h3 className="text-xs font-black uppercase tracking-widest text-orange-300">Suspicious activity (last 24h)</h3>
+            <h3 className="text-xs font-black uppercase tracking-widest text-orange-300">Suspicious-activity detector</h3>
           </div>
-          <p className="text-[10px] text-slate-500 mb-3 leading-relaxed">
-            One IP paying from multiple wallets during an active discount — a possible sign of wallet-farming. Nothing here is auto-blocked; review and deactivate the campaign or investigate manually.
-          </p>
-          {stats.suspiciousClusters.map((cl: any) => (
-            <div key={cl.ip} className="flex items-center justify-between py-2 border-b border-slate-800/60 last:border-0">
-              <div>
-                <p className="text-xs font-mono font-bold text-slate-200">{cl.ip}</p>
-                <p className="text-[9px] text-slate-500">{cl.walletCount} wallets · {cl.txCount} discounted transactions</p>
-              </div>
-              <p className="text-xs font-black text-orange-400">₦{Number(cl.discountNgn).toLocaleString()}</p>
-            </div>
-          ))}
+          <MiniToggle value={settings.fraudFlaggingEnabled} onChange={toggleFraudFlagging} disabled={saving} />
         </div>
-      )}
+        <p className="text-[10px] text-slate-500 mb-3 leading-relaxed">
+          One IP paying from multiple wallets during an active discount — a possible sign of wallet-farming. Nothing here is auto-blocked; review and deactivate the campaign or investigate manually. Turn this off to stop tracking/showing it entirely.
+        </p>
+        {!settings.fraudFlaggingEnabled && (
+          <p className="text-[10px] text-slate-600 italic">Detector is off.</p>
+        )}
+        {settings.fraudFlaggingEnabled && (!stats?.suspiciousClusters || stats.suspiciousClusters.length === 0) && (
+          <p className="text-[10px] text-slate-600 italic">Nothing flagged in the last 24h.</p>
+        )}
+        {settings.fraudFlaggingEnabled && stats?.suspiciousClusters?.map((cl: any) => (
+          <div key={cl.ip} className="flex items-center justify-between py-2 border-b border-slate-800/60 last:border-0">
+            <div>
+              <p className="text-xs font-mono font-bold text-slate-200">{cl.ip}</p>
+              <p className="text-[9px] text-slate-500">{cl.walletCount} wallets · {cl.txCount} discounted transactions</p>
+            </div>
+            <p className="text-xs font-black text-orange-400">₦{Number(cl.discountNgn).toLocaleString()}</p>
+          </div>
+        ))}
+      </div>
 
       {/* Campaign list */}
       <div className="bg-[#111114] rounded-2xl border border-slate-800/60 p-5">
@@ -197,42 +234,83 @@ export function AdminDiscountsPanel({ adminHeaders }: Props) {
               />
             )}
 
-            <div className="grid grid-cols-2 gap-3">
-              <div>
-                <label className="text-[10px] uppercase tracking-widest text-slate-500 font-bold">Max ₦ per wallet (optional)</label>
+            <div className="border-t border-slate-800/60 pt-3 mt-1">
+              <p className="text-[10px] uppercase tracking-widest text-slate-400 font-black mb-2">Anti-gaming protections — each is off by default</p>
+
+              {/* Per-wallet lifetime cap */}
+              <div className="flex items-center justify-between gap-3 py-2">
+                <div className="flex-1">
+                  <p className="text-[11px] font-bold text-slate-300">Max ₦ per wallet (lifetime)</p>
+                  <p className="text-[9px] text-slate-600">Stops one wallet address from repeatedly claiming this promo.</p>
+                </div>
+                <MiniToggle value={capsOn.wallet} onChange={(v) => setCapsOn((c) => ({ ...c, wallet: v }))} />
+              </div>
+              {capsOn.wallet && (
                 <input
                   type="number"
-                  placeholder="Lifetime cap per user"
+                  placeholder="e.g. 100000"
                   value={form.max_discount_per_wallet_ngn}
                   onChange={(e) => setForm((f) => ({ ...f, max_discount_per_wallet_ngn: e.target.value }))}
-                  className="w-full mt-1 bg-[#111114] border border-slate-800/80 rounded-xl px-3 py-2 text-sm font-bold text-slate-100 outline-none focus:border-emerald-700"
+                  className="w-full mb-2 bg-[#111114] border border-slate-800/80 rounded-xl px-3 py-2 text-sm font-bold text-slate-100 outline-none focus:border-emerald-700"
                 />
+              )}
+
+              {/* Per-destination 24h cap */}
+              <div className="flex items-center justify-between gap-3 py-2">
+                <div className="flex-1">
+                  <p className="text-[11px] font-bold text-slate-300">Max ₦ per destination number, per 24h</p>
+                  <p className="text-[9px] text-slate-600">Resets daily — same phone/meter can reuse it tomorrow. Closes the "just switch wallets" loophole.</p>
+                </div>
+                <MiniToggle value={capsOn.destination} onChange={(v) => setCapsOn((c) => ({ ...c, destination: v }))} />
               </div>
-              <div>
-                <label className="text-[10px] uppercase tracking-widest text-slate-500 font-bold">Max ₦ total budget (optional)</label>
+              {capsOn.destination && (
                 <input
                   type="number"
-                  placeholder="Campaign stops itself at this"
+                  placeholder="e.g. 1000"
+                  value={form.max_discount_per_destination_ngn}
+                  onChange={(e) => setForm((f) => ({ ...f, max_discount_per_destination_ngn: e.target.value }))}
+                  className="w-full mb-2 bg-[#111114] border border-slate-800/80 rounded-xl px-3 py-2 text-sm font-bold text-slate-100 outline-none focus:border-emerald-700"
+                />
+              )}
+
+              {/* Per-verified-phone lifetime cap */}
+              <div className="flex items-center justify-between gap-3 py-2">
+                <div className="flex-1">
+                  <p className="text-[11px] font-bold text-slate-300">Max ₦ per verified phone (lifetime)</p>
+                  <p className="text-[9px] text-slate-600">Stronger than the wallet cap — a SIM costs money, unlike a free wallet. Wallets with no verified phone won't qualify while this is on.</p>
+                </div>
+                <MiniToggle value={capsOn.phone} onChange={(v) => setCapsOn((c) => ({ ...c, phone: v }))} />
+              </div>
+              {capsOn.phone && (
+                <input
+                  type="number"
+                  placeholder="e.g. 100000"
+                  value={form.max_discount_per_phone_ngn}
+                  onChange={(e) => setForm((f) => ({ ...f, max_discount_per_phone_ngn: e.target.value }))}
+                  className="w-full mb-2 bg-[#111114] border border-slate-800/80 rounded-xl px-3 py-2 text-sm font-bold text-slate-100 outline-none focus:border-emerald-700"
+                />
+              )}
+
+              {/* Total campaign budget cap */}
+              <div className="flex items-center justify-between gap-3 py-2">
+                <div className="flex-1">
+                  <p className="text-[11px] font-bold text-slate-300">Max ₦ total campaign budget</p>
+                  <p className="text-[9px] text-slate-600">Campaign automatically stops applying once this much has been given away — no manual deactivation needed.</p>
+                </div>
+                <MiniToggle value={capsOn.total} onChange={(v) => setCapsOn((c) => ({ ...c, total: v }))} />
+              </div>
+              {capsOn.total && (
+                <input
+                  type="number"
+                  placeholder="e.g. 500000"
                   value={form.max_total_discount_ngn}
                   onChange={(e) => setForm((f) => ({ ...f, max_total_discount_ngn: e.target.value }))}
-                  className="w-full mt-1 bg-[#111114] border border-slate-800/80 rounded-xl px-3 py-2 text-sm font-bold text-slate-100 outline-none focus:border-emerald-700"
+                  className="w-full bg-[#111114] border border-slate-800/80 rounded-xl px-3 py-2 text-sm font-bold text-slate-100 outline-none focus:border-emerald-700"
                 />
-              </div>
+              )}
             </div>
 
-            <div>
-              <label className="text-[10px] uppercase tracking-widest text-slate-500 font-bold">Max ₦ per destination account, per 24h (optional)</label>
-              <input
-                type="number"
-                placeholder="Resets daily — same phone/meter can reuse it tomorrow"
-                value={form.max_discount_per_destination_ngn}
-                onChange={(e) => setForm((f) => ({ ...f, max_discount_per_destination_ngn: e.target.value }))}
-                className="w-full mt-1 bg-[#111114] border border-slate-800/80 rounded-xl px-3 py-2 text-sm font-bold text-slate-100 outline-none focus:border-emerald-700"
-              />
-              <p className="text-[9px] text-slate-600 mt-1">Unlike the per-wallet cap, this rolls off after 24h — closes the "just switch wallets" loophole without punishing a returning legitimate user.</p>
-            </div>
-
-            <div>
+            <div className="border-t border-slate-800/60 pt-3">
               <p className="text-[10px] uppercase tracking-widest text-slate-500 font-bold mb-2">Applies to (leave blank for all services)</p>
               <div className="flex flex-wrap gap-2">
                 {SERVICE_OPTIONS.map((s) => (
@@ -303,6 +381,7 @@ export function AdminDiscountsPanel({ adminHeaders }: Props) {
                 {c.max_discount_ngn ? ` (max ₦${Number(c.max_discount_ngn).toLocaleString()}/tx)` : ''}
                 {c.max_discount_per_wallet_ngn ? ` · max ₦${Number(c.max_discount_per_wallet_ngn).toLocaleString()}/wallet` : ''}
                 {c.max_discount_per_destination_ngn ? ` · max ₦${Number(c.max_discount_per_destination_ngn).toLocaleString()}/number per 24h` : ''}
+                {c.max_discount_per_phone_ngn ? ` · max ₦${Number(c.max_discount_per_phone_ngn).toLocaleString()}/phone` : ''}
                 {' · '}
                 {c.services && c.services.length > 0 ? c.services.join(', ') : 'All services'}
               </p>
@@ -317,13 +396,7 @@ export function AdminDiscountsPanel({ adminHeaders }: Props) {
               )}
             </div>
             <div className="flex items-center gap-2 shrink-0">
-              <button
-                onClick={() => toggleActive(c)}
-                disabled={saving}
-                className={`relative w-12 h-6 rounded-full transition-colors ${c.is_active ? 'bg-emerald-600' : 'bg-slate-700'} disabled:opacity-50`}
-              >
-                <span className={`absolute top-1 w-4 h-4 rounded-full bg-white transition-all ${c.is_active ? 'left-7' : 'left-1'}`} />
-              </button>
+              <MiniToggle value={c.is_active} onChange={() => toggleActive(c)} disabled={saving} />
               <button onClick={() => remove(c.id)} disabled={saving} className="p-1.5 text-slate-500 hover:text-red-400">
                 <Trash2 size={14} />
               </button>

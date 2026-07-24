@@ -15,10 +15,11 @@ export interface ActiveDiscount {
   name: string;
   type: 'PERCENT' | 'FIXED';
   value: number;
-  maxDiscountNgn: number | null;             // per-transaction cap
-  maxDiscountPerWalletNgn: number | null;    // lifetime cap for one wallet under this campaign
+  maxDiscountNgn: number | null;               // per-transaction cap
+  maxDiscountPerWalletNgn: number | null;      // lifetime cap for one wallet under this campaign
   maxDiscountPerDestinationNgn: number | null; // rolling 24h cap for one destination account/meter
-  maxTotalDiscountNgn: number | null;        // lifetime cap across the whole campaign
+  maxDiscountPerPhoneNgn: number | null;       // lifetime cap for one VERIFIED phone number
+  maxTotalDiscountNgn: number | null;          // lifetime cap across the whole campaign
 }
 
 let cache: { rows: any[]; at: number } | null = null;
@@ -79,6 +80,33 @@ async function totalGivenForDestination(campaignId: string, accountNumber: strin
   return (data || []).reduce((sum: number, r: any) => sum + Number(r.discount_ngn || 0), 0);
 }
 
+/** The wallet's VERIFIED phone number, if any (wallet_links.user_id -> abapay_users.verified_phone
+ * — same join src/app/api/user/points/route.ts uses). Null for guests/unlinked wallets — a real
+ * SIM registration is what makes this a meaningfully stronger identity signal than a wallet
+ * address, so a wallet with none here simply doesn't qualify for a phone-capped campaign. */
+async function resolveVerifiedPhone(walletAddress: string): Promise<string | null> {
+  const { data } = await supabaseAdmin
+    .from('wallet_links')
+    .select('abapay_users(verified_phone)')
+    .eq('wallet_address', walletAddress.toLowerCase())
+    .maybeSingle();
+  if (!data) return null;
+  const profile: any = Array.isArray((data as any).abapay_users) ? (data as any).abapay_users[0] : (data as any).abapay_users;
+  return profile?.verified_phone || null;
+}
+
+/** Lifetime, like the wallet cap — a verified phone doesn't reset like a destination number
+ * does, since the point is capping a real human's total take, not a returning customer. */
+async function totalGivenForPhone(campaignId: string, phone: string): Promise<number> {
+  const { data } = await supabaseAdmin
+    .from('transactions')
+    .select('discount_ngn')
+    .eq('discount_campaign_id', campaignId)
+    .eq('discount_phone', phone)
+    .eq('status', 'SUCCESS');
+  return (data || []).reduce((sum: number, r: any) => sum + Number(r.discount_ngn || 0), 0);
+}
+
 /**
  * The single active campaign (if any) that applies to `serviceKey` — one of the canonical
  * keys killSwitchKeyFor() maps intents/tabs to (AIRTIME, DATA, INTERNET, ELECTRICITY, CABLE,
@@ -120,45 +148,67 @@ export async function getActiveDiscountForService(serviceKey: string | null): Pr
       maxDiscountNgn: c.max_discount_ngn != null ? Number(c.max_discount_ngn) : null,
       maxDiscountPerWalletNgn: c.max_discount_per_wallet_ngn != null ? Number(c.max_discount_per_wallet_ngn) : null,
       maxDiscountPerDestinationNgn: c.max_discount_per_destination_ngn != null ? Number(c.max_discount_per_destination_ngn) : null,
+      maxDiscountPerPhoneNgn: c.max_discount_per_phone_ngn != null ? Number(c.max_discount_per_phone_ngn) : null,
       maxTotalDiscountNgn: c.max_total_discount_ngn != null ? Number(c.max_total_discount_ngn) : null,
     };
   }
   return null;
 }
 
+export interface DiscountResult {
+  discountNgn: number;
+  /** The verified phone this discount was attributed to, if the campaign has a phone cap —
+   * callers should record this on the transaction row (see the migration's header comment on
+   * transactions.discount_phone) so later accounting doesn't depend on a phone link that could
+   * change afterward. */
+  discountPhone: string | null;
+}
+
 /**
  * Naira discount for a given bill amount — capped at the campaign's per-transaction ceiling,
  * clamped further by whatever room is left under the per-wallet, per-destination (24h,
- * rolling — see totalGivenForDestination), and total-campaign caps (whichever are set), and
- * never more than the bill itself. `walletAddress`/`destinationAccount` are optional only
- * because a caller may not know them yet (e.g. a guest quote before an account number is
- * entered); a discount with a cap set but the matching identifier unknown is denied outright
- * rather than risk over-granting it.
+ * rolling — see totalGivenForDestination), per-verified-phone, and total-campaign caps
+ * (whichever are set), and never more than the bill itself. `walletAddress`/`destinationAccount`
+ * are optional only because a caller may not know them yet (e.g. a guest quote before an
+ * account number is entered); a discount with a cap set but the matching identifier unknown is
+ * denied outright rather than risk over-granting it — this includes the phone cap, which means
+ * enabling it effectively requires phone verification to participate in that campaign at all.
  */
 export async function computeDiscountNgn(
   baseNgn: number,
   discount: ActiveDiscount | null,
   walletAddress?: string | null,
   destinationAccount?: string | null,
-): Promise<number> {
-  if (!discount || !(baseNgn > 0)) return 0;
+): Promise<DiscountResult> {
+  const deny: DiscountResult = { discountNgn: 0, discountPhone: null };
+  if (!discount || !(baseNgn > 0)) return deny;
 
   let raw = discount.type === 'PERCENT' ? (baseNgn * discount.value) / 100 : discount.value;
   if (discount.maxDiscountNgn != null) raw = Math.min(raw, discount.maxDiscountNgn);
   raw = Math.max(0, Math.min(raw, baseNgn));
-  if (raw === 0) return 0;
+  if (raw === 0) return deny;
 
   if (discount.maxDiscountPerWalletNgn != null) {
-    if (!walletAddress) return 0; // can't verify the wallet cap — don't guess, don't over-grant
+    if (!walletAddress) return deny; // can't verify the wallet cap — don't guess, don't over-grant
     const givenToWallet = await totalGivenForWallet(discount.id, walletAddress);
     const roomLeft = Math.max(0, discount.maxDiscountPerWalletNgn - givenToWallet);
     raw = Math.min(raw, roomLeft);
   }
 
   if (discount.maxDiscountPerDestinationNgn != null && raw > 0) {
-    if (!destinationAccount) return 0;
+    if (!destinationAccount) return deny;
     const givenToDestination = await totalGivenForDestination(discount.id, destinationAccount);
     const roomLeft = Math.max(0, discount.maxDiscountPerDestinationNgn - givenToDestination);
+    raw = Math.min(raw, roomLeft);
+  }
+
+  let discountPhone: string | null = null;
+  if (discount.maxDiscountPerPhoneNgn != null && raw > 0) {
+    if (!walletAddress) return deny;
+    discountPhone = await resolveVerifiedPhone(walletAddress);
+    if (!discountPhone) return deny; // no verified phone — doesn't qualify for a phone-capped campaign
+    const givenToPhone = await totalGivenForPhone(discount.id, discountPhone);
+    const roomLeft = Math.max(0, discount.maxDiscountPerPhoneNgn - givenToPhone);
     raw = Math.min(raw, roomLeft);
   }
 
@@ -168,5 +218,6 @@ export async function computeDiscountNgn(
     raw = Math.min(raw, roomLeft);
   }
 
-  return raw;
+  if (raw === 0) return deny;
+  return { discountNgn: raw, discountPhone };
 }
