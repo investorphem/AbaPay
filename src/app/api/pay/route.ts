@@ -54,7 +54,7 @@ export async function POST(req: Request) {
     // Never trust a client-supplied discount: a tampered client claiming a bigger discount
     // than actually active just ends up underpaying, rejected below like any other shortfall.
     const activeDiscount = await getActiveDiscountForService(serviceCategory);
-    const discountNgn = computeDiscountNgn(vendAmount, activeDiscount);
+    const discountNgn = await computeDiscountNgn(vendAmount, activeDiscount, wallet_address);
 
     const requiredCrypto = (vendAmount + serviceFee - discountNgn) / baseRate;
 

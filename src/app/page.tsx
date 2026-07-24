@@ -283,7 +283,8 @@ export default function Home() {
     const serviceKey = activeTab === "bank" ? "BANK" : activeTab === "education" ? "EDUCATION" : activeService.id;
 
     const t = setTimeout(() => {
-      fetch(`/api/discounts/active?service=${encodeURIComponent(serviceKey)}&amount=${bill}`)
+      const walletParam = address ? `&wallet=${encodeURIComponent(address)}` : '';
+      fetch(`/api/discounts/active?service=${encodeURIComponent(serviceKey)}&amount=${bill}${walletParam}`)
         .then((r) => r.json())
         .then((d) => {
           if (d?.success) { setActiveDiscount(d.discount || null); setDiscountNgn(Number(d.discountNgn) || 0); }
@@ -292,7 +293,7 @@ export default function Home() {
     }, 400);
 
     return () => clearTimeout(t);
-  }, [calculatedNairaAmount, activeTab, activeService.id, isInternational]);
+  }, [calculatedNairaAmount, activeTab, activeService.id, isInternational, address]);
 
   const { cryptoToCharge, currentFee } = useMemo(() => {
     const bill = parseFloat(calculatedNairaAmount) || 0;
@@ -1005,15 +1006,20 @@ export default function Home() {
     const onCelo = activeChain?.id === celo.id || activeChain?.id === celoSepolia.id;
     const onBase = activeChain?.id === base.id || activeChain?.id === baseSepolia.id;
     const baseX402Enabled = process.env.NEXT_PUBLIC_BASE_X402_ENABLED === 'true';
-    if (!onCelo && !(onBase && baseX402Enabled)) return setStatus("x402 is only available on Celo.");
-    if (onCelo && selectedToken.symbol !== "USDC" && selectedToken.symbol !== "USD₮") return setStatus("x402 is only available for USDC and USDT.");
-    if (onBase && selectedToken.symbol !== "USDC") return setStatus("x402 on Base is available for USDC only.");
+    // ⚡ Deliberately generic wording — x402 vs. the normal contract-call rail is an internal
+    // routing decision (see `useX402` below), never something the user chose or should see.
+    // A USDm/USDT transaction on Celo looks identical to the user whichever rail settles it.
+    if (!onCelo && !(onBase && baseX402Enabled)) return setStatus("This network isn't supported for this token yet.");
+    if (onCelo && selectedToken.symbol !== "USDC" && selectedToken.symbol !== "USD₮") return setStatus("This token isn't supported on this network yet.");
+    if (onBase && selectedToken.symbol !== "USDC") return setStatus("This token isn't supported on this network yet.");
     // 🔴 Was missing entirely — x402 payments failed at settlement on a low balance instead
     // of being caught here first.
     if (!(await hasEnoughBalanceOnChain())) return setStatus(`Insufficient ${selectedToken.symbol} balance — you need ${cryptoToCharge} ${selectedToken.symbol}. Top up and try again.`);
 
     setIsProcessing(true);
-    setStatus("Settling payment via x402...");
+    // Same wording the normal contract-call path shows while waiting (line ~944) — the rail
+    // underneath is an implementation detail, not something the user needs surfaced.
+    setStatus("Confirming on blockchain... Please hold.");
 
     const { backendPayload, uiCategory, displayNetwork, payloadBillersCode, currentBlockchainName } = buildBackendPayload();
 
@@ -1038,7 +1044,7 @@ export default function Home() {
       }
     } catch (e: any) {
       setStatus(`Payment failed: ${e.message?.slice(0, 60) || "Unknown error"}`);
-      showToast("Payment Failed", e.message || "The x402 payment could not be completed.", "error");
+      showToast("Payment Failed", e.message || "The payment could not be completed.", "error");
     } finally {
       setIsProcessing(false);
     }

@@ -26,6 +26,7 @@ export function AdminDiscountsPanel({ adminHeaders }: Props) {
 
   const [form, setForm] = useState({
     name: '', type: 'PERCENT', value: '', max_discount_ngn: '',
+    max_discount_per_wallet_ngn: '', max_total_discount_ngn: '',
     services: [] as string[], starts_at: '', ends_at: '',
   });
 
@@ -66,13 +67,15 @@ export function AdminDiscountsPanel({ adminHeaders }: Props) {
       type: form.type,
       value: Number(form.value),
       max_discount_ngn: form.max_discount_ngn ? Number(form.max_discount_ngn) : null,
+      max_discount_per_wallet_ngn: form.max_discount_per_wallet_ngn ? Number(form.max_discount_per_wallet_ngn) : null,
+      max_total_discount_ngn: form.max_total_discount_ngn ? Number(form.max_total_discount_ngn) : null,
       services: form.services,
       starts_at: form.starts_at || null,
       ends_at: form.ends_at || null,
       is_active: true,
     });
     if (ok) {
-      setForm({ name: '', type: 'PERCENT', value: '', max_discount_ngn: '', services: [], starts_at: '', ends_at: '' });
+      setForm({ name: '', type: 'PERCENT', value: '', max_discount_ngn: '', max_discount_per_wallet_ngn: '', max_total_discount_ngn: '', services: [], starts_at: '', ends_at: '' });
       setShowForm(false);
     }
   };
@@ -164,12 +167,35 @@ export function AdminDiscountsPanel({ adminHeaders }: Props) {
             {form.type === 'PERCENT' && (
               <input
                 type="number"
-                placeholder="Max discount in ₦ (optional cap)"
+                placeholder="Max discount per transaction in ₦ (optional cap)"
                 value={form.max_discount_ngn}
                 onChange={(e) => setForm((f) => ({ ...f, max_discount_ngn: e.target.value }))}
                 className="w-full bg-[#111114] border border-slate-800/80 rounded-xl px-3 py-2 text-sm font-bold text-slate-100 outline-none focus:border-emerald-700"
               />
             )}
+
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <label className="text-[10px] uppercase tracking-widest text-slate-500 font-bold">Max ₦ per wallet (optional)</label>
+                <input
+                  type="number"
+                  placeholder="Lifetime cap per user"
+                  value={form.max_discount_per_wallet_ngn}
+                  onChange={(e) => setForm((f) => ({ ...f, max_discount_per_wallet_ngn: e.target.value }))}
+                  className="w-full mt-1 bg-[#111114] border border-slate-800/80 rounded-xl px-3 py-2 text-sm font-bold text-slate-100 outline-none focus:border-emerald-700"
+                />
+              </div>
+              <div>
+                <label className="text-[10px] uppercase tracking-widest text-slate-500 font-bold">Max ₦ total budget (optional)</label>
+                <input
+                  type="number"
+                  placeholder="Campaign stops itself at this"
+                  value={form.max_total_discount_ngn}
+                  onChange={(e) => setForm((f) => ({ ...f, max_total_discount_ngn: e.target.value }))}
+                  className="w-full mt-1 bg-[#111114] border border-slate-800/80 rounded-xl px-3 py-2 text-sm font-bold text-slate-100 outline-none focus:border-emerald-700"
+                />
+              </div>
+            </div>
 
             <div>
               <p className="text-[10px] uppercase tracking-widest text-slate-500 font-bold mb-2">Applies to (leave blank for all services)</p>
@@ -226,15 +252,27 @@ export function AdminDiscountsPanel({ adminHeaders }: Props) {
           <p className="text-xs text-slate-500 py-4 text-center">No discount campaigns yet.</p>
         )}
 
-        {campaigns.map((c) => (
+        {campaigns.map((c) => {
+          const usage = stats?.byCampaign?.[c.id];
+          const usedNgn = usage?.discountNgn ?? 0;
+          const budgetExhausted = c.max_total_discount_ngn && usedNgn >= Number(c.max_total_discount_ngn);
+          return (
           <div key={c.id} className="flex items-start justify-between gap-4 py-4 border-b border-slate-800/60 last:border-0">
             <div className="flex-1 min-w-0">
-              <p className={`text-xs font-black ${c.is_active ? 'text-slate-200' : 'text-slate-500'}`}>{c.name}</p>
+              <p className={`text-xs font-black ${c.is_active ? 'text-slate-200' : 'text-slate-500'}`}>
+                {c.name}
+                {budgetExhausted && <span className="ml-2 text-[9px] font-black uppercase text-orange-400">Budget used up</span>}
+              </p>
               <p className="text-[10px] text-slate-500 mt-1">
                 {c.type === 'PERCENT' ? `${c.value}% off` : `₦${Number(c.value).toLocaleString()} off`}
-                {c.max_discount_ngn ? ` (capped at ₦${Number(c.max_discount_ngn).toLocaleString()})` : ''}
+                {c.max_discount_ngn ? ` (max ₦${Number(c.max_discount_ngn).toLocaleString()}/tx)` : ''}
+                {c.max_discount_per_wallet_ngn ? ` · max ₦${Number(c.max_discount_per_wallet_ngn).toLocaleString()}/wallet` : ''}
                 {' · '}
                 {c.services && c.services.length > 0 ? c.services.join(', ') : 'All services'}
+              </p>
+              <p className="text-[10px] text-emerald-500 mt-1 font-bold">
+                ₦{usedNgn.toLocaleString()}{c.max_total_discount_ngn ? ` / ₦${Number(c.max_total_discount_ngn).toLocaleString()}` : ''} given
+                {usage?.count ? ` · ${usage.count} transaction${usage.count === 1 ? '' : 's'}` : ''}
               </p>
               {(c.starts_at || c.ends_at) && (
                 <p className="text-[9px] text-slate-600 mt-1">
@@ -255,7 +293,8 @@ export function AdminDiscountsPanel({ adminHeaders }: Props) {
               </button>
             </div>
           </div>
-        ))}
+          );
+        })}
       </div>
 
       {msg && (

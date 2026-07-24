@@ -218,7 +218,7 @@ async function handleX402Request(req: Request) {
   const requestedChain: ChainKey = (blockchain || '').toUpperCase().includes('BASE') ? 'BASE' : 'CELO';
   const chainCfg = (await chainConfigFor(requestedChain, isMainnet)) || (await chainConfigFor('CELO', isMainnet));
   if (!chainCfg) {
-    return NextResponse.json({ success: false, status: 'FAILED_VENDING', message: 'x402 is not configured.' }, { status: 500 });
+    return NextResponse.json({ success: false, status: 'FAILED_VENDING', message: 'This payment method is temporarily unavailable.' }, { status: 500 });
   }
   const chainKey = chainCfg.chainKey;
 
@@ -359,7 +359,7 @@ async function handleX402Request(req: Request) {
 
     const authHeaders = await chainCfg.authFor(CDP_FACILITATOR_SETTLE_PATH);
     if (!authHeaders) {
-      return NextResponse.json({ success: false, status: 'FAILED_VENDING', message: 'x402 is not configured for this chain.' }, { status: 500 });
+      return NextResponse.json({ success: false, status: 'FAILED_VENDING', message: 'This payment method is temporarily unavailable on this network.' }, { status: 500 });
     }
 
     const settleRes = await fetch(chainCfg.facilitatorSettleUrl, {
@@ -488,7 +488,7 @@ export async function POST(req: Request) {
     return await handleX402Request(req);
   } catch (error: any) {
     console.error('[Pay/x402] error:', error);
-    return NextResponse.json({ success: false, status: 'SYSTEM_CRASH', message: 'System error settling x402 payment.' }, { status: 500 });
+    return NextResponse.json({ success: false, status: 'SYSTEM_CRASH', message: 'System error settling payment.' }, { status: 500 });
   }
 }
 
@@ -502,6 +502,6 @@ export async function GET(req: Request) {
     return await handleX402Request(req);
   } catch (error: any) {
     console.error('[Pay/x402] error:', error);
-    return NextResponse.json({ success: false, status: 'SYSTEM_CRASH', message: 'System error settling x402 payment.' }, { status: 500 });
+    return NextResponse.json({ success: false, status: 'SYSTEM_CRASH', message: 'System error settling payment.' }, { status: 500 });
   }
 }

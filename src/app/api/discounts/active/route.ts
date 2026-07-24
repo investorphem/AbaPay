@@ -8,10 +8,11 @@ export async function GET(req: Request) {
   const { searchParams } = new URL(req.url);
   const service = searchParams.get('service');
   const amount = Number(searchParams.get('amount') || 0);
+  const wallet = searchParams.get('wallet');
 
   try {
     const discount = await getActiveDiscountForService(service);
-    const discountNgn = computeDiscountNgn(amount, discount);
+    const discountNgn = await computeDiscountNgn(amount, discount, wallet);
 
     return NextResponse.json({
       success: true,

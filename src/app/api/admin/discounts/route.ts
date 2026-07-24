@@ -52,9 +52,10 @@ export async function POST(req: Request) {
 
   try {
     const body = await req.json();
-    const { id, name, type, value, max_discount_ngn, services, starts_at, ends_at, is_active } = body;
+    const { id, name, type, value, max_discount_ngn, max_discount_per_wallet_ngn, max_total_discount_ngn, services, starts_at, ends_at, is_active } = body;
 
     const cleanServices = Array.isArray(services) && services.length > 0 ? services : null;
+    const cleanNum = (v: any) => (v === null || v === undefined || v === '' ? null : Number(v));
 
     if (id) {
       // Partial update — only the provided fields change (mirrors /api/admin/agent's pattern).
@@ -69,7 +70,9 @@ export async function POST(req: Request) {
         if (!Number.isFinite(v) || v <= 0) return NextResponse.json({ success: false, message: 'Invalid value' }, { status: 400 });
         update.value = v;
       }
-      if (max_discount_ngn !== undefined) update.max_discount_ngn = max_discount_ngn === null || max_discount_ngn === '' ? null : Number(max_discount_ngn);
+      if (max_discount_ngn !== undefined) update.max_discount_ngn = cleanNum(max_discount_ngn);
+      if (max_discount_per_wallet_ngn !== undefined) update.max_discount_per_wallet_ngn = cleanNum(max_discount_per_wallet_ngn);
+      if (max_total_discount_ngn !== undefined) update.max_total_discount_ngn = cleanNum(max_total_discount_ngn);
       if (services !== undefined) update.services = cleanServices;
       if (starts_at !== undefined) update.starts_at = starts_at || null;
       if (ends_at !== undefined) update.ends_at = ends_at || null;
@@ -97,7 +100,9 @@ export async function POST(req: Request) {
         name: String(name),
         type,
         value: v,
-        max_discount_ngn: max_discount_ngn === undefined || max_discount_ngn === null || max_discount_ngn === '' ? null : Number(max_discount_ngn),
+        max_discount_ngn: cleanNum(max_discount_ngn),
+        max_discount_per_wallet_ngn: cleanNum(max_discount_per_wallet_ngn),
+        max_total_discount_ngn: cleanNum(max_total_discount_ngn),
         services: cleanServices,
         starts_at: starts_at || null,
         ends_at: ends_at || null,
