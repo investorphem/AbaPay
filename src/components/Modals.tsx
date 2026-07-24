@@ -70,13 +70,36 @@ export function ReceiptModal({ receipt, isMainnet, onClose, onSupport }: any) {
   // opacity-modified color in this receipt (borders, tinted backgrounds, dark-mode variants)
   // actually compiles to. That made html2canvas throw on the FIRST such element it walked,
   // on every device, every time — not a webview quirk, a color-parsing crash before the
-  // download/share logic below ever ran.
+  // download/share logic below ever ran, which is exactly why it failed identically on PC,
+  // MiniPay AND Base App alike (this has nothing to do with mobile download permissions).
   //
-  // Fix: force every element's color-related properties to the browser's OWN resolved value
-  // via getComputedStyle (which always serializes to plain rgb()/rgba(), regardless of the
-  // source syntax) as a temporary inline style override, capture, then restore — so
-  // html2canvas only ever sees colors its parser actually understands.
+  // 🔴 A PREVIOUS FIX HERE just re-read `getComputedStyle(el)[prop]` and wrote that straight
+  // back as an inline style. That doesn't actually help: for a `color-mix()`-sourced value,
+  // Chromium/WebKit's `getComputedStyle` frequently still serializes it back out as a literal
+  // `"color-mix(in oklab, rgb(6, 78, 59) 20%, transparent)"` string — NOT the resolved rgba() —
+  // so we were feeding html2canvas the exact same unparseable syntax it already couldn't read.
+  //
+  // Real fix: force full numeric resolution ourselves via a 1x1 canvas 2D context. Setting
+  // `ctx.fillStyle` to ANY valid CSS color — oklch(), color-mix(), lab(), named colors, all of
+  // it — and reading it back is guaranteed by the Canvas 2D spec to yield a plain `#rrggbb` or
+  // `rgba(r, g, b, a)` string, independent of the getComputedStyle serialization quirk above.
   const COLOR_PROPS = ['color', 'backgroundColor', 'borderTopColor', 'borderRightColor', 'borderBottomColor', 'borderLeftColor'] as const;
+
+  let normalizeCtx: CanvasRenderingContext2D | null = null;
+  function normalizeColor(input: string): string {
+    if (!input) return input;
+    if (!normalizeCtx) {
+      const c = document.createElement('canvas');
+      c.width = 1; c.height = 1;
+      normalizeCtx = c.getContext('2d');
+    }
+    if (!normalizeCtx) return input; // canvas 2D unavailable — fall back to the raw value
+    const SENTINEL = '#010203';
+    normalizeCtx.fillStyle = SENTINEL;
+    normalizeCtx.fillStyle = input; // invalid input is silently ignored per spec, keeping SENTINEL
+    const resolved = normalizeCtx.fillStyle;
+    return resolved === SENTINEL && input.toLowerCase() !== SENTINEL ? input : resolved;
+  }
 
   async function withResolvedColors<T>(root: HTMLElement, fn: () => Promise<T>): Promise<T> {
     const elements: HTMLElement[] = [root, ...Array.from(root.querySelectorAll<HTMLElement>('*'))];
@@ -88,7 +111,7 @@ export function ReceiptModal({ receipt, isMainnet, onClose, onSupport }: any) {
 
     for (const el of elements) {
       const computed = window.getComputedStyle(el);
-      for (const prop of COLOR_PROPS) el.style[prop] = computed[prop];
+      for (const prop of COLOR_PROPS) el.style[prop] = normalizeColor(computed[prop]);
     }
 
     try {
