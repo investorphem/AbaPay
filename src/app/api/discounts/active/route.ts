@@ -9,10 +9,11 @@ export async function GET(req: Request) {
   const service = searchParams.get('service');
   const amount = Number(searchParams.get('amount') || 0);
   const wallet = searchParams.get('wallet');
+  const destination = searchParams.get('destination');
 
   try {
     const discount = await getActiveDiscountForService(service);
-    const discountNgn = await computeDiscountNgn(amount, discount, wallet);
+    const discountNgn = await computeDiscountNgn(amount, discount, wallet, destination);
 
     return NextResponse.json({
       success: true,

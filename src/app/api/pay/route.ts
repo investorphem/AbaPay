@@ -53,8 +53,9 @@ export async function POST(req: Request) {
     // canonical key set src/lib/discounts.ts matches campaigns against, no mapping needed.
     // Never trust a client-supplied discount: a tampered client claiming a bigger discount
     // than actually active just ends up underpaying, rejected below like any other shortfall.
+    const destinationAccount = billersCode || phone || "N/A";
     const activeDiscount = await getActiveDiscountForService(serviceCategory);
-    const discountNgn = await computeDiscountNgn(vendAmount, activeDiscount, wallet_address);
+    const discountNgn = await computeDiscountNgn(vendAmount, activeDiscount, wallet_address, destinationAccount);
 
     const requiredCrypto = (vendAmount + serviceFee - discountNgn) / baseRate;
 
@@ -62,11 +63,19 @@ export async function POST(req: Request) {
         return NextResponse.json({ success: false, status: 'FAILED_VENDING', message: "Insufficient crypto paid." }, { status: 400 });
     }
 
+    // ⚡ Best-effort client IP — captured ONLY when a discount actually applied (never on an
+    // ordinary transaction), purely to let the admin dashboard flag suspicious clusters (one IP,
+    // many wallets, same campaign) for manual review. Never used to block anyone automatically.
+    const clientIp = discountNgn > 0
+      ? (req.headers.get('x-forwarded-for')?.split(',')[0].trim() || req.headers.get('x-real-ip') || null)
+      : null;
+
     // 2. THE SAFETY NET / ATOMIC LOCK
     const dbPayload = {
-      tx_hash: txHash, request_id: vtRequestId, service_category: serviceCategory, service_id: serviceID, variation_code: variation_code, network: network, 
-      blockchain: blockchain || "CELO", account_number: billersCode || phone || "N/A", phone: phone || null, amount_usdt: parseFloat(amount), 
+      tx_hash: txHash, request_id: vtRequestId, service_category: serviceCategory, service_id: serviceID, variation_code: variation_code, network: network,
+      blockchain: blockchain || "CELO", account_number: destinationAccount, phone: phone || null, amount_usdt: parseFloat(amount),
       amount_naira: vendAmount, fee_naira: serviceFee, discount_ngn: discountNgn, discount_campaign_id: activeDiscount?.id || null,
+      client_ip: clientIp,
       status: 'PENDING', wallet_address: (wallet_address || "UNKNOWN").toLowerCase(),
       customer_name: customer_name || null, customer_address: customer_address || null,
       source_channel: source_channel || 'WEB',

@@ -15,9 +15,10 @@ export interface ActiveDiscount {
   name: string;
   type: 'PERCENT' | 'FIXED';
   value: number;
-  maxDiscountNgn: number | null;         // per-transaction cap
-  maxDiscountPerWalletNgn: number | null; // lifetime cap for one wallet under this campaign
-  maxTotalDiscountNgn: number | null;     // lifetime cap across the whole campaign
+  maxDiscountNgn: number | null;             // per-transaction cap
+  maxDiscountPerWalletNgn: number | null;    // lifetime cap for one wallet under this campaign
+  maxDiscountPerDestinationNgn: number | null; // rolling 24h cap for one destination account/meter
+  maxTotalDiscountNgn: number | null;        // lifetime cap across the whole campaign
 }
 
 let cache: { rows: any[]; at: number } | null = null;
@@ -64,6 +65,20 @@ async function totalGivenForWallet(campaignId: string, walletAddress: string): P
   return (data || []).reduce((sum: number, r: any) => sum + Number(r.discount_ngn || 0), 0);
 }
 
+/** Rolling 24h window, not a calendar day — a destination that used its allowance at 11pm can
+ * use it again at 11pm the next day, not at midnight. Resets automatically; nothing to clear. */
+async function totalGivenForDestination(campaignId: string, accountNumber: string): Promise<number> {
+  const sinceIso = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
+  const { data } = await supabaseAdmin
+    .from('transactions')
+    .select('discount_ngn')
+    .eq('discount_campaign_id', campaignId)
+    .eq('account_number', accountNumber)
+    .eq('status', 'SUCCESS')
+    .gte('created_at', sinceIso);
+  return (data || []).reduce((sum: number, r: any) => sum + Number(r.discount_ngn || 0), 0);
+}
+
 /**
  * The single active campaign (if any) that applies to `serviceKey` — one of the canonical
  * keys killSwitchKeyFor() maps intents/tabs to (AIRTIME, DATA, INTERNET, ELECTRICITY, CABLE,
@@ -104,6 +119,7 @@ export async function getActiveDiscountForService(serviceKey: string | null): Pr
       value: Number(c.value),
       maxDiscountNgn: c.max_discount_ngn != null ? Number(c.max_discount_ngn) : null,
       maxDiscountPerWalletNgn: c.max_discount_per_wallet_ngn != null ? Number(c.max_discount_per_wallet_ngn) : null,
+      maxDiscountPerDestinationNgn: c.max_discount_per_destination_ngn != null ? Number(c.max_discount_per_destination_ngn) : null,
       maxTotalDiscountNgn: c.max_total_discount_ngn != null ? Number(c.max_total_discount_ngn) : null,
     };
   }
@@ -112,12 +128,19 @@ export async function getActiveDiscountForService(serviceKey: string | null): Pr
 
 /**
  * Naira discount for a given bill amount — capped at the campaign's per-transaction ceiling,
- * clamped further by whatever room is left under the per-wallet and total-campaign caps (if
- * either is set), and never more than the bill itself. `walletAddress` is optional only
- * because the caller may not know it yet (e.g. a guest quote); a discount with a per-wallet
- * cap but no known wallet is denied outright rather than risk over-granting it.
+ * clamped further by whatever room is left under the per-wallet, per-destination (24h,
+ * rolling — see totalGivenForDestination), and total-campaign caps (whichever are set), and
+ * never more than the bill itself. `walletAddress`/`destinationAccount` are optional only
+ * because a caller may not know them yet (e.g. a guest quote before an account number is
+ * entered); a discount with a cap set but the matching identifier unknown is denied outright
+ * rather than risk over-granting it.
  */
-export async function computeDiscountNgn(baseNgn: number, discount: ActiveDiscount | null, walletAddress?: string | null): Promise<number> {
+export async function computeDiscountNgn(
+  baseNgn: number,
+  discount: ActiveDiscount | null,
+  walletAddress?: string | null,
+  destinationAccount?: string | null,
+): Promise<number> {
   if (!discount || !(baseNgn > 0)) return 0;
 
   let raw = discount.type === 'PERCENT' ? (baseNgn * discount.value) / 100 : discount.value;
@@ -129,6 +152,13 @@ export async function computeDiscountNgn(baseNgn: number, discount: ActiveDiscou
     if (!walletAddress) return 0; // can't verify the wallet cap — don't guess, don't over-grant
     const givenToWallet = await totalGivenForWallet(discount.id, walletAddress);
     const roomLeft = Math.max(0, discount.maxDiscountPerWalletNgn - givenToWallet);
+    raw = Math.min(raw, roomLeft);
+  }
+
+  if (discount.maxDiscountPerDestinationNgn != null && raw > 0) {
+    if (!destinationAccount) return 0;
+    const givenToDestination = await totalGivenForDestination(discount.id, destinationAccount);
+    const roomLeft = Math.max(0, discount.maxDiscountPerDestinationNgn - givenToDestination);
     raw = Math.min(raw, roomLeft);
   }
 

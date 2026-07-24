@@ -284,7 +284,8 @@ export default function Home() {
 
     const t = setTimeout(() => {
       const walletParam = address ? `&wallet=${encodeURIComponent(address)}` : '';
-      fetch(`/api/discounts/active?service=${encodeURIComponent(serviceKey)}&amount=${bill}${walletParam}`)
+      const destinationParam = accountNumber ? `&destination=${encodeURIComponent(accountNumber)}` : '';
+      fetch(`/api/discounts/active?service=${encodeURIComponent(serviceKey)}&amount=${bill}${walletParam}${destinationParam}`)
         .then((r) => r.json())
         .then((d) => {
           if (d?.success) { setActiveDiscount(d.discount || null); setDiscountNgn(Number(d.discountNgn) || 0); }
@@ -293,7 +294,7 @@ export default function Home() {
     }, 400);
 
     return () => clearTimeout(t);
-  }, [calculatedNairaAmount, activeTab, activeService.id, isInternational, address]);
+  }, [calculatedNairaAmount, activeTab, activeService.id, isInternational, address, accountNumber]);
 
   const { cryptoToCharge, currentFee } = useMemo(() => {
     const bill = parseFloat(calculatedNairaAmount) || 0;

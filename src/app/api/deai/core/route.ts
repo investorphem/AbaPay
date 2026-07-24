@@ -1089,7 +1089,7 @@ async function handleCore(req: Request, ctx: HumanizeCtx): Promise<NextResponse>
             // fresh here too, since the relayer submits this payment directly with no separate
             // "verify what the user already paid" step to hook a discount into afterward.
             const activeDiscount = await getActiveDiscountForService(serviceCategory);
-            const discountNgn = await computeDiscountNgn(Number(d.amount_ngn), activeDiscount, userWallet);
+            const discountNgn = await computeDiscountNgn(Number(d.amount_ngn), activeDiscount, userWallet, d.destination_account);
             const amountCrypto = ((Number(d.amount_ngn) - discountNgn) / rate).toFixed(6);
 
             if (!allowance.ok || allowance.remaining < Number(amountCrypto)) {

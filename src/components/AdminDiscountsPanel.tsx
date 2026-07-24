@@ -1,7 +1,7 @@
 "use client";
 
 import React, { useState, useEffect, useCallback } from "react";
-import { Percent, Loader2, Save, Trash2, Plus } from "lucide-react";
+import { Percent, Loader2, Save, Trash2, Plus, ShieldAlert } from "lucide-react";
 
 // ⚡ ADMIN — DISCOUNT / PROMO CAMPAIGNS
 //
@@ -26,7 +26,7 @@ export function AdminDiscountsPanel({ adminHeaders }: Props) {
 
   const [form, setForm] = useState({
     name: '', type: 'PERCENT', value: '', max_discount_ngn: '',
-    max_discount_per_wallet_ngn: '', max_total_discount_ngn: '',
+    max_discount_per_wallet_ngn: '', max_discount_per_destination_ngn: '', max_total_discount_ngn: '',
     services: [] as string[], starts_at: '', ends_at: '',
   });
 
@@ -68,6 +68,7 @@ export function AdminDiscountsPanel({ adminHeaders }: Props) {
       value: Number(form.value),
       max_discount_ngn: form.max_discount_ngn ? Number(form.max_discount_ngn) : null,
       max_discount_per_wallet_ngn: form.max_discount_per_wallet_ngn ? Number(form.max_discount_per_wallet_ngn) : null,
+      max_discount_per_destination_ngn: form.max_discount_per_destination_ngn ? Number(form.max_discount_per_destination_ngn) : null,
       max_total_discount_ngn: form.max_total_discount_ngn ? Number(form.max_total_discount_ngn) : null,
       services: form.services,
       starts_at: form.starts_at || null,
@@ -75,7 +76,7 @@ export function AdminDiscountsPanel({ adminHeaders }: Props) {
       is_active: true,
     });
     if (ok) {
-      setForm({ name: '', type: 'PERCENT', value: '', max_discount_ngn: '', max_discount_per_wallet_ngn: '', max_total_discount_ngn: '', services: [], starts_at: '', ends_at: '' });
+      setForm({ name: '', type: 'PERCENT', value: '', max_discount_ngn: '', max_discount_per_wallet_ngn: '', max_discount_per_destination_ngn: '', max_total_discount_ngn: '', services: [], starts_at: '', ends_at: '' });
       setShowForm(false);
     }
   };
@@ -126,6 +127,28 @@ export function AdminDiscountsPanel({ adminHeaders }: Props) {
           </div>
         </div>
       </div>
+
+      {/* Suspicious clusters — flag only, never auto-blocked */}
+      {stats?.suspiciousClusters && stats.suspiciousClusters.length > 0 && (
+        <div className="bg-[#111114] rounded-2xl border border-orange-900/50 p-5">
+          <div className="flex items-center gap-2 mb-1">
+            <ShieldAlert size={16} className="text-orange-400" />
+            <h3 className="text-xs font-black uppercase tracking-widest text-orange-300">Suspicious activity (last 24h)</h3>
+          </div>
+          <p className="text-[10px] text-slate-500 mb-3 leading-relaxed">
+            One IP paying from multiple wallets during an active discount — a possible sign of wallet-farming. Nothing here is auto-blocked; review and deactivate the campaign or investigate manually.
+          </p>
+          {stats.suspiciousClusters.map((cl: any) => (
+            <div key={cl.ip} className="flex items-center justify-between py-2 border-b border-slate-800/60 last:border-0">
+              <div>
+                <p className="text-xs font-mono font-bold text-slate-200">{cl.ip}</p>
+                <p className="text-[9px] text-slate-500">{cl.walletCount} wallets · {cl.txCount} discounted transactions</p>
+              </div>
+              <p className="text-xs font-black text-orange-400">₦{Number(cl.discountNgn).toLocaleString()}</p>
+            </div>
+          ))}
+        </div>
+      )}
 
       {/* Campaign list */}
       <div className="bg-[#111114] rounded-2xl border border-slate-800/60 p-5">
@@ -198,6 +221,18 @@ export function AdminDiscountsPanel({ adminHeaders }: Props) {
             </div>
 
             <div>
+              <label className="text-[10px] uppercase tracking-widest text-slate-500 font-bold">Max ₦ per destination account, per 24h (optional)</label>
+              <input
+                type="number"
+                placeholder="Resets daily — same phone/meter can reuse it tomorrow"
+                value={form.max_discount_per_destination_ngn}
+                onChange={(e) => setForm((f) => ({ ...f, max_discount_per_destination_ngn: e.target.value }))}
+                className="w-full mt-1 bg-[#111114] border border-slate-800/80 rounded-xl px-3 py-2 text-sm font-bold text-slate-100 outline-none focus:border-emerald-700"
+              />
+              <p className="text-[9px] text-slate-600 mt-1">Unlike the per-wallet cap, this rolls off after 24h — closes the "just switch wallets" loophole without punishing a returning legitimate user.</p>
+            </div>
+
+            <div>
               <p className="text-[10px] uppercase tracking-widest text-slate-500 font-bold mb-2">Applies to (leave blank for all services)</p>
               <div className="flex flex-wrap gap-2">
                 {SERVICE_OPTIONS.map((s) => (
@@ -267,6 +302,7 @@ export function AdminDiscountsPanel({ adminHeaders }: Props) {
                 {c.type === 'PERCENT' ? `${c.value}% off` : `₦${Number(c.value).toLocaleString()} off`}
                 {c.max_discount_ngn ? ` (max ₦${Number(c.max_discount_ngn).toLocaleString()}/tx)` : ''}
                 {c.max_discount_per_wallet_ngn ? ` · max ₦${Number(c.max_discount_per_wallet_ngn).toLocaleString()}/wallet` : ''}
+                {c.max_discount_per_destination_ngn ? ` · max ₦${Number(c.max_discount_per_destination_ngn).toLocaleString()}/number per 24h` : ''}
                 {' · '}
                 {c.services && c.services.length > 0 ? c.services.join(', ') : 'All services'}
               </p>
