@@ -56,20 +56,13 @@ export function ReceiptModal({ receipt, isMainnet, onClose, onSupport }: any) {
 
   const [isProcessingShare, setIsProcessingShare] = useState(false);
   // Real, tappable download links — see handleShareImage's fallback branch for why these
-  // replaced a JS-synthesized <a>.click(). previewDataUrl backs the "long-press to save"
-  // fallback, which is shown unconditionally alongside these (see the render section below).
-  const [saveOptions, setSaveOptions] = useState<{ imageUrl: string; pdfUrl: string | null; previewDataUrl: string } | null>(null);
-
-  // Object URLs are only ever referenced by `saveOptions` — revoke them the moment it's
-  // replaced or the modal unmounts, instead of leaking a blob for the component's lifetime.
-  useEffect(() => {
-    return () => {
-      if (saveOptions) {
-        URL.revokeObjectURL(saveOptions.imageUrl);
-        if (saveOptions.pdfUrl) URL.revokeObjectURL(saveOptions.pdfUrl);
-      }
-    };
-  }, [saveOptions]);
+  // replaced a JS-synthesized <a>.click(). Deliberately `data:` URLs, not blob: — a wallet's
+  // embedded browser (MiniPay, Base App) routes target="_blank"/new-tab navigation through its
+  // OWN native URI dispatcher, and a blob: URL is only ever valid inside the exact document
+  // that created it, so handing it to anything outside that document fails immediately with
+  // "Can not handle uri:: blob:...". A data: URL is fully self-contained, so there's nothing
+  // for an external handler to fail to resolve.
+  const [saveOptions, setSaveOptions] = useState<{ imageUrl: string; pdfUrl: string | null } | null>(null);
 
   const hasPin = receipt.status === 'SUCCESS' && receipt.purchased_code && receipt.purchased_code !== "Vended Successfully";
   const isElectricity = receipt.service?.toUpperCase() === 'ELECTRICITY' || receipt.service === 'Electricity';
@@ -184,7 +177,6 @@ export function ReceiptModal({ receipt, isMainnet, onClose, onSupport }: any) {
       // whole app onto a bare blob: URL with no save affordance, instead of downloading).
       // A real anchor the user physically taps doesn't have that problem — browsers reserve
       // their strictest popup/download suspicion for script-triggered clicks, not genuine ones.
-      const imageUrl = URL.createObjectURL(blob);
       let pdfUrl: string | null = null;
       try {
         const { jsPDF } = await import('jspdf');
@@ -192,11 +184,11 @@ export function ReceiptModal({ receipt, isMainnet, onClose, onSupport }: any) {
         const heightMm = (canvas.height * widthMm) / canvas.width;
         const pdf = new jsPDF({ orientation: heightMm >= widthMm ? 'portrait' : 'landscape', unit: 'mm', format: [widthMm, heightMm] });
         pdf.addImage(dataUrl, 'PNG', 0, 0, widthMm, heightMm);
-        pdfUrl = URL.createObjectURL(pdf.output('blob'));
+        pdfUrl = pdf.output('datauristring'); // a self-contained data: URL — see the state comment above for why not blob:
       } catch (pdfErr) {
         console.error('PDF generation failed (image download is still offered):', pdfErr);
       }
-      setSaveOptions({ imageUrl, pdfUrl, previewDataUrl: dataUrl });
+      setSaveOptions({ imageUrl: dataUrl, pdfUrl });
     } catch (error) {
       console.error('Error generating receipt image:', error);
       // Last-resort fallback only if image generation itself fails entirely
@@ -322,9 +314,15 @@ export function ReceiptModal({ receipt, isMainnet, onClose, onSupport }: any) {
                   anchor click is exactly what several mobile webviews were silently treating as
                   a plain navigation instead of a download — dumping the user out of the whole
                   app onto a bare blob: URL with no save option. A genuine tap doesn't hit that
-                  restriction. The image preview below is shown unconditionally alongside them
-                  (not gated behind a "download failed" check, which we have no reliable way to
-                  detect) so there's always at least one guaranteed-working path: long-press. */}
+                  restriction.
+                  Deliberately no target="_blank": a wallet's embedded browser routes new-tab
+                  navigation through its own native URI dispatcher, which can't resolve these
+                  self-contained data: URLs any better than it could the blob: URLs from the
+                  attempt before this one ("Can not handle uri:: blob:..." / same failure class
+                  for data:) — same-tab keeps the whole thing inside the browser engine itself.
+                  The image preview below is shown unconditionally alongside them (not gated
+                  behind a "download failed" check, which we have no reliable way to detect) so
+                  there's always at least one guaranteed-working path: long-press. */}
              {saveOptions && (
                 <div data-html2canvas-ignore="true" className="mb-3 p-3 rounded-2xl bg-slate-50 dark:bg-[#1a1a1f] border border-slate-100 dark:border-slate-800/80">
                    <p className="text-[10px] font-black uppercase tracking-widest text-slate-500 dark:text-slate-400 text-center mb-2">Save your receipt</p>
@@ -332,7 +330,6 @@ export function ReceiptModal({ receipt, isMainnet, onClose, onSupport }: any) {
                       <a
                         href={saveOptions.imageUrl}
                         download={`AbaPay_Receipt_${receipt.id}.png`}
-                        target="_blank"
                         rel="noopener"
                         className="flex-1 py-3 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-black uppercase tracking-widest flex items-center justify-center gap-2 transition-colors active:scale-95"
                       >
@@ -342,7 +339,6 @@ export function ReceiptModal({ receipt, isMainnet, onClose, onSupport }: any) {
                         <a
                           href={saveOptions.pdfUrl}
                           download={`AbaPay_Receipt_${receipt.id}.pdf`}
-                          target="_blank"
                           rel="noopener"
                           className="flex-1 py-3 bg-slate-800 dark:bg-white hover:bg-slate-700 dark:hover:bg-slate-200 text-white dark:text-slate-900 rounded-xl text-xs font-black uppercase tracking-widest flex items-center justify-center gap-2 transition-colors active:scale-95"
                         >
@@ -353,7 +349,7 @@ export function ReceiptModal({ receipt, isMainnet, onClose, onSupport }: any) {
 
                    <p className="text-[10px] font-black uppercase tracking-widest text-emerald-600 dark:text-emerald-400 text-center mb-2">Or long-press the image to save it</p>
                    {/* eslint-disable-next-line @next/next/no-img-element */}
-                   <img src={saveOptions.previewDataUrl} alt="AbaPay receipt" className="w-full rounded-xl border border-slate-200 dark:border-slate-700" />
+                   <img src={saveOptions.imageUrl} alt="AbaPay receipt" className="w-full rounded-xl border border-slate-200 dark:border-slate-700" />
                    <button onClick={() => setSaveOptions(null)} className="mt-2 w-full py-2 text-[10px] font-black uppercase tracking-widest text-slate-500 dark:text-slate-400">
                       Done
                    </button>
