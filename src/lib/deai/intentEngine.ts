@@ -163,12 +163,25 @@ Rules:
 
 14. MULTIPLE RECIPIENTS — when the user names 2 or more distinct recipients/accounts for
    airtime or data in ONE message, populate "recipients" as an array and leave the singular
-   provider/amount_ngn/destination_account fields null:
-   - "send 500 airtime to 08011111111 and 1000 to 08033333333 (glo)" ->
+   provider/amount_ngn/destination_account fields null. This applies no matter how the list is
+   written — "and"-joined, a bare comma-separated list with no spaces, 2 accounts or 20 — and
+   no matter whether each gets a DIFFERENT amount or the SAME shared amount. Every account
+   named becomes one entry in "recipients"; never drop any of them, however many there are.
+   - Different amounts, joined with "and":
+     "send 500 airtime to 08011111111 and 1000 to 08033333333 (glo)" ->
      recipients: [
        { "provider": null, "amount_ngn": 500, "destination_account": "08011111111", "chain": null, "token": null },
        { "provider": "GLO", "amount_ngn": 1000, "destination_account": "08033333333", "chain": null, "token": null }
      ]
+   - ONE shared amount ("each") applied to a bare comma-separated list — apply the SAME
+     amount_ngn to every account in the list, regardless of list length:
+     "buy 200 naira each airtime to this lines 08011111111,08022222222,08033333333" ->
+     recipients: [
+       { "provider": null, "amount_ngn": 200, "destination_account": "08011111111", "chain": null, "token": null },
+       { "provider": null, "amount_ngn": 200, "destination_account": "08022222222", "chain": null, "token": null },
+       { "provider": null, "amount_ngn": 200, "destination_account": "08033333333", "chain": null, "token": null }
+     ]
+     (a real message may list 8, 10, or more accounts this way — extract every single one.)
    Infer each recipient's network from its own phone prefix same as rule 2, when not stated.
    For a single recipient, leave "recipients" null and use the ordinary singular fields —
    do NOT wrap a single recipient in a one-item array.
@@ -193,6 +206,60 @@ Rules:
 
 Never invent an account number or amount. If it isn't in the message, it's null.`;
 
+// 🔴 THE BUG THIS FIXES: max_tokens was a flat 400 — enough for an ordinary single-recipient
+// message, but a batch of even 6-8 recipients emits a full object per recipient (provider,
+// amount_ngn, destination_account, chain, token) on top of ~15 other top-level schema fields,
+// which realistically exceeds 400 output tokens. Anthropic still returns `res.ok: true` when
+// generation is cut off by the token limit — nothing here checked `stop_reason`, so a truncated
+// response (valid HTTP, invalid/incomplete JSON) just threw inside JSON.parse and silently fell
+// back to fallbackIntent() (intent UNKNOWN, recipients null). Downstream, the keyword-seeded
+// fallback intent + a first-number/first-amount regex sweep (see core/route.ts) then produced a
+// perfectly normal-LOOKING single-recipient checkout — no error, no partial-batch message — for
+// what was actually a multi-recipient request. The user silently lost every recipient but the
+// first. Fix: a real budget for large batches, PLUS a stop_reason check with one retry at a much
+// higher ceiling before ever giving up — truncation should be rare enough that eating the retry
+// cost once is far better than silently dropping money-moving intent.
+const INITIAL_MAX_TOKENS = 1024;
+const RETRY_MAX_TOKENS = 3000;
+
+async function callAnthropic(message: string, maxTokens: number): Promise<{ text: string; truncated: boolean } | null> {
+  const apiKey = process.env.ANTHROPIC_API_KEY as string;
+  const res = await fetch(ANTHROPIC_API_URL, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'x-api-key': apiKey,
+      'anthropic-version': '2023-06-01',
+    },
+    body: JSON.stringify({
+      model: MODEL,
+      max_tokens: maxTokens,
+      temperature: 0,           // deterministic routing
+      system: SYSTEM_PROMPT,
+      messages: [
+        { role: 'user', content: message },
+        // Prefill the assistant turn with "{" so the model is forced straight into JSON
+        // and cannot emit a preamble. We re-add the brace when parsing.
+        { role: 'assistant', content: '{' },
+      ],
+    }),
+  });
+
+  if (!res.ok) {
+    const errText = await res.text();
+    console.error('[DeAI] Anthropic API error:', res.status, errText.slice(0, 300));
+    return null;
+  }
+
+  const data = await res.json();
+  const text = (data?.content ?? [])
+    .filter((b: any) => b.type === 'text')
+    .map((b: any) => b.text)
+    .join('');
+
+  return { text, truncated: data?.stop_reason === 'max_tokens' };
+}
+
 export async function parseIntent(message: string): Promise<ParsedIntent> {
   const apiKey = process.env.ANTHROPIC_API_KEY;
   if (!apiKey) {
@@ -201,41 +268,20 @@ export async function parseIntent(message: string): Promise<ParsedIntent> {
   }
 
   try {
-    const res = await fetch(ANTHROPIC_API_URL, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'x-api-key': apiKey,
-        'anthropic-version': '2023-06-01',
-      },
-      body: JSON.stringify({
-        model: MODEL,
-        max_tokens: 400,
-        temperature: 0,           // deterministic routing
-        system: SYSTEM_PROMPT,
-        messages: [
-          { role: 'user', content: message },
-          // Prefill the assistant turn with "{" so the model is forced straight into JSON
-          // and cannot emit a preamble. We re-add the brace when parsing.
-          { role: 'assistant', content: '{' },
-        ],
-      }),
-    });
+    let result = await callAnthropic(message, INITIAL_MAX_TOKENS);
+    if (!result) return fallbackIntent();
 
-    if (!res.ok) {
-      const errText = await res.text();
-      console.error('[DeAI] Anthropic API error:', res.status, errText.slice(0, 300));
-      return fallbackIntent();
+    if (result.truncated) {
+      console.error('[DeAI] Intent response truncated at', INITIAL_MAX_TOKENS, 'tokens — retrying at', RETRY_MAX_TOKENS);
+      const retry = await callAnthropic(message, RETRY_MAX_TOKENS);
+      if (retry) result = retry;
+      // If the retry ALSO fails/truncates, fall through and try to parse whatever we have —
+      // the slice-to-last-'}' recovery below still has a shot at salvaging a complete prefix
+      // (e.g. every recipient up to the cutoff), which beats a bare fallbackIntent().
     }
 
-    const data = await res.json();
-    const text = (data?.content ?? [])
-      .filter((b: any) => b.type === 'text')
-      .map((b: any) => b.text)
-      .join('');
-
     // Re-attach the prefilled brace and strip any trailing junk.
-    const raw = '{' + text;
+    const raw = '{' + result.text;
     const jsonStr = raw.slice(0, raw.lastIndexOf('}') + 1);
 
     const parsed = JSON.parse(jsonStr);

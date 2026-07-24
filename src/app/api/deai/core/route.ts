@@ -18,6 +18,7 @@ import { verifyPin, isHashedPin, hashPin } from '@/utils/pinSecurity';
 import { executeVend, getStrictRequestId } from '@/lib/vend';
 import { checkAutonomousCapacity, groupByChainToken, executeAgentPayment, type BatchItem } from '@/lib/deai/batch';
 import { getActiveDiscountForService, computeDiscountNgn } from '@/lib/discounts';
+import { randomUUID } from 'crypto';
 
 const supabase = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL as string,
@@ -896,6 +897,50 @@ async function handleCore(req: Request, ctx: HumanizeCtx): Promise<NextResponse>
         // missing ones.
         if (!isGuest && session.intent_data?.pending_batch) {
           const pb = session.intent_data.pending_batch;
+
+          // ⚡ ONE-OFF DELAYED BATCH — PIN here confirms CREATING N independent 'once'
+          // schedules (batch_id is a shared reporting label only, per migration
+          // 011_one_off_schedules.sql), not an immediate spend. No money moves yet;
+          // scheduler.ts picks each row up and vends it independently when due, exactly
+          // like any other schedule.
+          if (pb.scheduleRunAt) {
+            const batchId = randomUUID();
+            const rows = (pb.items as BatchItem[]).map((item) => ({
+              wallet_address: (globalUser?.wallet_address || '').toLowerCase(),
+              service_id: item.serviceID,
+              service_category: item.serviceCategory,
+              provider: item.provider,
+              billers_code: item.billersCode,
+              amount_ngn: item.amountNgn,
+              blockchain: item.chain,
+              token_used: item.tokenSymbol,
+              frequency: 'once',
+              run_once_at: pb.scheduleRunAt,
+              batch_id: batchId,
+              auto_execute: true,
+              notify_channel: platform,
+              notify_channel_id: platform_id,
+              notify_email: session.intent_data.email || session.intent_data.customer_email || null,
+              is_active: true,
+            }));
+
+            const { error: batchSchedErr } = await supabase.from('scheduled_bills').insert(rows);
+            if (batchSchedErr) {
+              console.error('[DeAI] Batch schedule create failed:', batchSchedErr.message);
+              return NextResponse.json({ action: 'REPLY', message: "⚠️ Couldn't save that batch schedule. Please try again." });
+            }
+
+            const minutesAway = Math.max(1, Math.round((new Date(pb.scheduleRunAt).getTime() - Date.now()) / 60_000));
+            return NextResponse.json({
+              action: 'REPLY',
+              message: [
+                `⏱ *Scheduled! ${pb.items.length} payments — ₦${pb.totalNgn.toLocaleString()} total*`,
+                ``,
+                `🤖 I'll pay all ${pb.items.length} automatically in about ${minutesAway} minute${minutesAway === 1 ? '' : 's'} and message you here with the results.`,
+              ].join('\n'),
+            });
+          }
+
           const batchRate = await getExchangeRate();
           const lines: string[] = [];
           let okCount = 0;
@@ -2217,6 +2262,39 @@ async function handleCore(req: Request, ctx: HumanizeCtx): Promise<NextResponse>
                 return NextResponse.json({ action: 'REPLY', message: `⚠️ ${capacity.reason}` });
             }
             groupLines.push(`• *${gToken} on ${gChain}* — ${groupItems.length} payment${groupItems.length === 1 ? '' : 's'}, ₦${gTotal.toLocaleString()} (${capacity.neededCrypto.toFixed(4)} ${gToken})`);
+        }
+
+        // ⚡ ONE-OFF DELAYED BATCH — "buy 200 each to these 8 numbers in the next 20 minutes".
+        // 🔴 THE BUG THIS FIXES: schedule_in_minutes was only ever wired into the SINGLE-
+        // recipient path (buildScheduleConfirm) — a batch request with a delay just executed
+        // immediately, silently dropping the timing the user explicitly asked for. Mirrors the
+        // single-recipient one-off flow exactly: PIN here confirms CREATING the schedule, not
+        // an immediate spend. scheduler.ts then runs and vends each recipient independently
+        // when due — batch_id is purely a reporting label grouping them (see migration
+        // 011_one_off_schedules.sql), identical to how a single one-off schedule already works.
+        if (aiParsed.schedule_in_minutes) {
+            const scheduleRunAt = new Date(Date.now() + aiParsed.schedule_in_minutes * 60_000).toISOString();
+            intentData.pending_batch = { items, totalNgn, scheduleRunAt };
+            await supabase.from('deai_sessions').upsert({
+                chat_id: platform_id, platform, intent_data: intentData,
+                status: 'AWAITING_PIN', expires_at: new Date(Date.now() + 300000).toISOString(),
+            }, { onConflict: 'chat_id' });
+
+            const minutesAway = Math.max(1, Math.round(aiParsed.schedule_in_minutes));
+            return NextResponse.json({
+                action: 'REPLY',
+                message: [
+                    `⏱ *Confirm ${items.length} scheduled payments — ₦${totalNgn.toLocaleString()} total*`,
+                    ``,
+                    ...items.map((it, i) => `*${i + 1}.* ${(it.provider || '').toUpperCase()} ${it.serviceCategory === 'DATA' ? 'data' : 'airtime'} — ₦${it.amountNgn.toLocaleString()} → ${it.billersCode}`),
+                    ``,
+                    ...groupLines,
+                    ``,
+                    `📅 All ${items.length} will run automatically in about ${minutesAway} minute${minutesAway === 1 ? '' : 's'}.`,
+                    ``,
+                    `🔒 Reply with your *PIN* to set it up.`,
+                ].join('\n'),
+            });
         }
 
         // 🔒 PIN-GATED, exactly like a single payment — this moves real money for several
