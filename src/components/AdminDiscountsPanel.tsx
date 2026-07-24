@@ -2,6 +2,7 @@
 
 import React, { useState, useEffect, useCallback } from "react";
 import { Percent, Loader2, Save, Trash2, Plus, ShieldAlert } from "lucide-react";
+import { buildDiscountCreateMessage } from "@/lib/adminActionMessages";
 
 // ⚡ ADMIN — DISCOUNT / PROMO CAMPAIGNS
 //
@@ -25,7 +26,12 @@ const EMPTY_FORM = {
 
 const EMPTY_CAPS_ON = { wallet: false, destination: false, phone: false, total: false };
 
-interface Props { adminHeaders: Record<string, string>; }
+interface Props {
+  adminHeaders: Record<string, string>;
+  /** Requests a FRESH wallet signature over `message` — used to step-up-confirm creating a
+   * campaign, on top of the standard admin session (see admin/page.tsx's signAdminAction). */
+  onSignAdminAction: (message: string) => Promise<string | null>;
+}
 
 // A tiny toggle switch, matching AdminAgentPanel's pattern — used both for per-cap on/off in
 // the create form and the master fraud-flagging switch.
@@ -42,7 +48,7 @@ function MiniToggle({ value, onChange, disabled }: { value: boolean; onChange: (
   );
 }
 
-export function AdminDiscountsPanel({ adminHeaders }: Props) {
+export function AdminDiscountsPanel({ adminHeaders, onSignAdminAction }: Props) {
   const [campaigns, setCampaigns] = useState<any[] | null>(null);
   const [stats, setStats] = useState<any>(null);
   const [exclusions, setExclusions] = useState<any[]>([]);
@@ -91,10 +97,23 @@ export function AdminDiscountsPanel({ adminHeaders }: Props) {
 
   const createCampaign = async () => {
     if (!form.name.trim() || !form.value) { setMsg('Name and value are required.'); return; }
+
+    // 🔒 STEP-UP CONFIRMATION — a fresh wallet signature over these exact parameters, required
+    // in addition to the standard admin session (see src/app/api/admin/discounts/route.ts's
+    // create branch and src/lib/adminActionMessages.ts for why: a hijacked/replayed session
+    // proves nothing about live wallet control). Signing happens BEFORE the network request —
+    // if the admin rejects or the wallet errors, nothing is sent to the server at all.
+    const name = form.name.trim();
+    const value = Number(form.value);
+    const timestamp = Date.now();
+    setMsg('Confirm the signature request in your wallet…');
+    const confirmSignature = await onSignAdminAction(buildDiscountCreateMessage({ name, type: form.type, value, timestamp }));
+    if (!confirmSignature) { setMsg('Cancelled — campaign not created.'); return; }
+
     const ok = await post({
-      name: form.name.trim(),
+      name,
       type: form.type,
-      value: Number(form.value),
+      value,
       max_discount_ngn: form.max_discount_ngn ? Number(form.max_discount_ngn) : null,
       max_discount_per_wallet_ngn: capsOn.wallet && form.max_discount_per_wallet_ngn ? Number(form.max_discount_per_wallet_ngn) : null,
       max_discount_per_destination_ngn: capsOn.destination && form.max_discount_per_destination_ngn ? Number(form.max_discount_per_destination_ngn) : null,
@@ -104,6 +123,8 @@ export function AdminDiscountsPanel({ adminHeaders }: Props) {
       starts_at: form.starts_at || null,
       ends_at: form.ends_at || null,
       is_active: true,
+      confirmSignature,
+      confirmTimestamp: timestamp,
     });
     if (ok) {
       setForm({ ...EMPTY_FORM });
@@ -418,7 +439,7 @@ export function AdminDiscountsPanel({ adminHeaders }: Props) {
               disabled={saving}
               className="w-full py-2.5 bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 text-white rounded-xl text-xs font-black uppercase tracking-widest transition-colors active:scale-95"
             >
-              {saving ? <Loader2 size={14} className="animate-spin mx-auto" /> : 'Create campaign'}
+              {saving ? <Loader2 size={14} className="animate-spin mx-auto" /> : 'Create campaign (signs with your wallet)'}
             </button>
           </div>
         )}

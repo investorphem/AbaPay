@@ -1,6 +1,8 @@
 import { NextResponse } from 'next/server';
+import { verifyMessage } from 'viem';
 import { supabaseAdmin } from '@/utils/supabase';
 import { verifyAdminRequest } from '@/utils/adminAuth';
+import { buildDiscountCreateMessage, CONFIRM_SIGNATURE_MAX_AGE_MS } from '@/lib/adminActionMessages';
 
 // ⚡ ADMIN: discount/promo campaigns — create, edit, activate/deactivate, and monitor how much
 // has actually been given away. Enforcement lives in src/lib/discounts.ts (checked fresh inside
@@ -159,7 +161,7 @@ export async function POST(req: Request) {
       return NextResponse.json({ success: true });
     }
 
-    const { id, name, type, value, max_discount_ngn, max_discount_per_wallet_ngn, max_discount_per_destination_ngn, max_discount_per_phone_ngn, max_total_discount_ngn, services, starts_at, ends_at, is_active } = body;
+    const { id, name, type, value, max_discount_ngn, max_discount_per_wallet_ngn, max_discount_per_destination_ngn, max_discount_per_phone_ngn, max_total_discount_ngn, services, starts_at, ends_at, is_active, confirmSignature, confirmTimestamp } = body;
 
     const cleanServices = Array.isArray(services) && services.length > 0 ? services : null;
     const cleanNum = (v: any) => (v === null || v === undefined || v === '' ? null : Number(v));
@@ -202,6 +204,32 @@ export async function POST(req: Request) {
     const v = Number(value);
     if (!Number.isFinite(v) || v <= 0) return NextResponse.json({ success: false, message: 'Invalid value' }, { status: 400 });
     if (type === 'PERCENT' && v > 100) return NextResponse.json({ success: false, message: 'Percent discount cannot exceed 100' }, { status: 400 });
+
+    // 🔒 STEP-UP CONFIRMATION — creating a campaign is a distinct, high-risk action (it's a
+    // live lever on real revenue), so it requires a FRESH wallet signature over these exact
+    // parameters, not just the standard 12h admin session header (verifyAdminRequest above).
+    // A hijacked/replayed session (stolen headers, a compromised admin browser tab) proves
+    // "someone holds these headers" — it does NOT prove live control of the admin's wallet.
+    // Forcing a brand-new signMessage() prompt here means an attacker without the wallet
+    // extension itself cannot complete this action even with a fully valid session.
+    if (!confirmSignature || !confirmTimestamp) {
+      return NextResponse.json({ success: false, message: 'Missing wallet confirmation — please sign to confirm creating this campaign.' }, { status: 400 });
+    }
+    const confirmTs = Number(confirmTimestamp);
+    if (!Number.isFinite(confirmTs) || Date.now() - confirmTs > CONFIRM_SIGNATURE_MAX_AGE_MS || confirmTs > Date.now() + 60_000) {
+      return NextResponse.json({ success: false, message: 'Confirmation expired — please try creating the campaign again.' }, { status: 401 });
+    }
+    const confirmMessage = buildDiscountCreateMessage({ name: String(name), type, value: v, timestamp: confirmTs });
+    try {
+      const validSig = await verifyMessage({
+        address: auth.address as `0x${string}`,
+        message: confirmMessage,
+        signature: confirmSignature as `0x${string}`,
+      });
+      if (!validSig) return NextResponse.json({ success: false, message: 'Signature does not match — campaign not created.' }, { status: 401 });
+    } catch {
+      return NextResponse.json({ success: false, message: 'Could not verify signature — campaign not created.' }, { status: 401 });
+    }
 
     const { data, error } = await supabaseAdmin
       .from('discount_campaigns')

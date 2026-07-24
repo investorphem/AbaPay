@@ -427,6 +427,23 @@ export default function AdminDashboard() {
     return { targetChain, targetContract };
   };
 
+  // 🔒 STEP-UP CONFIRMATION — a FRESH wallet signature for a specific high-risk admin action,
+  // on top of the standard 12h admin session signature. The session alone only proves "someone
+  // holds these headers"; a hijacked session (XSS, a compromised browser tab) could replay them
+  // for up to 12h with no further proof of wallet control. Forcing a brand-new signMessage()
+  // prompt at the moment of the action means an attacker without live access to the wallet
+  // extension can't complete it, even with a fully valid stolen session. Passed down to panels
+  // (e.g. AdminDiscountsPanel) that need it for specific mutations.
+  const signAdminAction = async (message: string): Promise<string | null> => {
+    if (!client || !address) { alert('Connect your admin wallet first.'); return null; }
+    try {
+      return await client.signMessage({ account: address, message });
+    } catch (e: any) {
+      alert(e?.shortMessage || 'Signature request was rejected or failed — action not confirmed.');
+      return null;
+    }
+  };
+
   const handleSetRelayer = async (network: 'CELO' | 'BASE') => {
     const key = `${network}-relayer`;
     const newRelayer = (ccInputs[key] || '').trim();
@@ -1092,7 +1109,7 @@ export default function AdminDashboard() {
             {/* DISCOUNT / PROMO CAMPAIGNS */}
             {activeTab === 'discounts' && (
               <div className="animate-in fade-in">
-                <AdminDiscountsPanel adminHeaders={adminHeaders} />
+                <AdminDiscountsPanel adminHeaders={adminHeaders} onSignAdminAction={signAdminAction} />
               </div>
             )}
 
