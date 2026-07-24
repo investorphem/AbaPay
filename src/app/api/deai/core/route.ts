@@ -17,7 +17,6 @@ import { verifyInternalRequest } from '@/utils/internalAuth';
 import { verifyPin, isHashedPin, hashPin } from '@/utils/pinSecurity';
 import { executeVend, getStrictRequestId } from '@/lib/vend';
 import { checkAutonomousCapacity, groupByChainToken, executeAgentPayment, type BatchItem } from '@/lib/deai/batch';
-import { ONBOARDING_STEPS, ONBOARDING_TRIGGER_RE, ONBOARDING_NEXT_RE, ONBOARDING_CANCEL_RE, renderOnboardingStep, isLastOnboardingStep } from '@/lib/deai/onboarding';
 
 const supabase = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL as string,
@@ -665,102 +664,6 @@ async function handleCore(req: Request, ctx: HumanizeCtx): Promise<NextResponse>
     // there is no wallet on file for a guest to check any of those against.
     const isGuest = !identity || !identity.is_active;
 
-    // Session load moved up from just below the guest-greeting block (where it used to sit)
-    // so the ONBOARDING GUIDE check below — which needs `session` to know whether a tour is
-    // mid-flight — can run BEFORE that block's early-return on a bare "hi", which would
-    // otherwise swallow a brand-new guest's very first message before onboarding ever saw it.
-    let { data: session } = await supabase.from('deai_sessions').select('*').eq('chat_id', platform_id).single();
-
-    // ⚡ ABANDONED-TRANSACTION DETECTION ⚡
-    //
-    // Every session write sets expires_at (5 min for most steps, 10 for AWAITING_PIN), but
-    // NOTHING ever actually checked it — a user who went quiet mid-flow (network drop, closed
-    // the app, distracted) would have their stale intent resumed days later exactly where
-    // they left off: wrong amount, wrong recipient, a PIN prompt for a bill they've forgotten
-    // about. Enforce it here, once, right after loading: a session past its own expiry is
-    // treated as if it doesn't exist, so the very next message starts a clean intent instead
-    // of silently reviving a long-abandoned one. This does NOT touch pre-flight transaction
-    // rows — those already have their own generic cleanup (see cleanupStalePreflights) that
-    // fires regardless of session state.
-    if (session && session.expires_at && new Date(session.expires_at).getTime() < Date.now()) {
-      await supabase.from('deai_sessions').delete().eq('chat_id', platform_id);
-      session = null;
-    }
-
-    // 🧭 ONBOARDING GUIDE — see src/lib/deai/onboarding.ts.
-    //
-    // Auto-starts exactly once, on a chat's very first-ever message (no `user_onboarding` row
-    // yet) — and never again after that, whether the user finishes it, cancels it, or ignores
-    // it, so a returning user's own earlier decision is remembered instead of the tour
-    // re-interrupting every conversation. Replayable on demand from any state via GUIDE/TOUR.
-    // Runs before the guest-greeting shortcut below so a brand-new guest's opening "hi" still
-    // triggers it instead of being swallowed by that shortcut's own reply.
-    const rawInput = text.trim().toLowerCase();
-
-    if (session?.status === 'AWAITING_ONBOARDING') {
-      const step = session.intent_data?.onboarding_step ?? 0;
-      const pendingText = typeof session.intent_data?.pending_text === 'string' ? session.intent_data.pending_text : '';
-
-      if (ONBOARDING_NEXT_RE.test(rawInput)) {
-        const nextStep = step + 1;
-        if (isLastOnboardingStep(nextStep)) {
-          await supabase.from('deai_sessions').delete().eq('chat_id', platform_id);
-          await supabase.from('user_onboarding').update({ completed: true, current_step: nextStep, updated_at: new Date().toISOString() }).eq('platform', platform).eq('channel_id', platform_id);
-        } else {
-          await supabase.from('deai_sessions').upsert({
-            chat_id: platform_id, platform, intent_data: { onboarding_step: nextStep, pending_text: pendingText },
-            status: 'AWAITING_ONBOARDING', expires_at: new Date(Date.now() + 600000).toISOString(),
-          }, { onConflict: 'chat_id' });
-        }
-        return NextResponse.json({ action: 'REPLY', message: renderOnboardingStep(nextStep) });
-      }
-
-      // Dismissed (CANCEL/SKIP) or the user just typed something else instead of NEXT/CANCEL —
-      // either way, stop showing the tour. If their very first-ever message (before the tour
-      // intercepted it) looked like a real request, re-process THAT text now instead of
-      // silently dropping it — a new user's opening message is often exactly what they came to
-      // do. `session` is nulled so none of the AWAITING_* handling below mistakes it for a
-      // live transaction.
-      await supabase.from('deai_sessions').delete().eq('chat_id', platform_id);
-      await supabase.from('user_onboarding').update({ dismissed: true, updated_at: new Date().toISOString() }).eq('platform', platform).eq('channel_id', platform_id);
-      session = null;
-
-      if (ONBOARDING_CANCEL_RE.test(rawInput) || rawInput.length === 0) {
-        if (pendingText) {
-          text = pendingText;
-        } else {
-          return NextResponse.json({ action: 'REPLY', message: "👍 No problem — tell me what you'd like to do, e.g. \"buy 500 MTN airtime for 08012345678\"." });
-        }
-      }
-      // else: fall through with `text` unchanged — it's already the real message they typed.
-    } else if (ONBOARDING_TRIGGER_RE.test(rawInput)) {
-      await supabase.from('deai_sessions').upsert({
-        chat_id: platform_id, platform, intent_data: { onboarding_step: 0 },
-        status: 'AWAITING_ONBOARDING', expires_at: new Date(Date.now() + 600000).toISOString(),
-      }, { onConflict: 'chat_id' });
-      return NextResponse.json({ action: 'REPLY', message: renderOnboardingStep(0) });
-    } else {
-      const { data: onboardingRecord } = await supabase
-        .from('user_onboarding')
-        .select('platform')
-        .eq('platform', platform)
-        .eq('channel_id', platform_id)
-        .maybeSingle();
-
-      if (!onboardingRecord) {
-        await supabase.from('user_onboarding').insert({ platform, channel_id: platform_id });
-        // Stash the very first message if it looks like a real request (not a bare
-        // greeting/command) so cancelling the tour can re-process it instead of losing it.
-        const looksLikeRealRequest = rawInput.length > 3 && !GREETING_RE.test(rawInput) && !['start', 'help'].includes(rawInput);
-        await supabase.from('deai_sessions').upsert({
-          chat_id: platform_id, platform,
-          intent_data: { onboarding_step: 0, pending_text: looksLikeRealRequest ? text : '' },
-          status: 'AWAITING_ONBOARDING', expires_at: new Date(Date.now() + 600000).toISOString(),
-        }, { onConflict: 'chat_id' });
-        return NextResponse.json({ action: 'REPLY', message: renderOnboardingStep(0) });
-      }
-    }
-
     if (isGuest) {
       const gt = text.trim().toLowerCase();
       if (GREETING_RE.test(gt)) {
@@ -778,6 +681,24 @@ async function handleCore(req: Request, ctx: HumanizeCtx): Promise<NextResponse>
     const currencySymbol = currentCountry === 'NG' ? '₦' : (currentCountry === 'GH' ? 'GH₵' : '$');
     const fiatBalance = globalUser?.fiat_balance_ngn || 0;
     const crypto = await fetchAllChainBalances(globalUser?.wallet_address || "");
+
+    let { data: session } = await supabase.from('deai_sessions').select('*').eq('chat_id', platform_id).single();
+
+    // ⚡ ABANDONED-TRANSACTION DETECTION ⚡
+    //
+    // Every session write sets expires_at (5 min for most steps, 10 for AWAITING_PIN), but
+    // NOTHING ever actually checked it — a user who went quiet mid-flow (network drop, closed
+    // the app, distracted) would have their stale intent resumed days later exactly where
+    // they left off: wrong amount, wrong recipient, a PIN prompt for a bill they've forgotten
+    // about. Enforce it here, once, right after loading: a session past its own expiry is
+    // treated as if it doesn't exist, so the very next message starts a clean intent instead
+    // of silently reviving a long-abandoned one. This does NOT touch pre-flight transaction
+    // rows — those already have their own generic cleanup (see cleanupStalePreflights) that
+    // fires regardless of session state.
+    if (session && session.expires_at && new Date(session.expires_at).getTime() < Date.now()) {
+      await supabase.from('deai_sessions').delete().eq('chat_id', platform_id);
+      session = null;
+    }
 
     // Language baseline: reuse whatever language was detected earlier this conversation (stored
     // on the session), so short follow-ups like "1" or a bare PIN still get replies in the
