@@ -190,6 +190,7 @@ export function AIChat({ onPrefill, onNavigate, walletConnected, onRequireWallet
   if (!open) {
     return (
       <button
+        data-tour="ai-chat"
         onClick={() => walletConnected ? setOpen(true) : onRequireWallet()}
         aria-label="Open AI assistant"
         className="fixed bottom-24 right-4 sm:bottom-6 sm:right-6 z-40 w-14 h-14 rounded-full bg-emerald-600 hover:bg-emerald-700 text-white shadow-2xl shadow-emerald-600/30 flex items-center justify-center transition-all active:scale-95"

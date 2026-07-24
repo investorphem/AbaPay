@@ -9,7 +9,7 @@ import Link from "next/link";
 import {
   ShieldCheck, Zap, AlertTriangle, CheckCircle2, ChevronDown,
   Loader2, Coins, Briefcase, ListPlus, Users, Landmark, XCircle,
-  RefreshCw, Tv, GraduationCap, Send, Globe, Sparkles
+  RefreshCw, Tv, GraduationCap, Send, Globe, Sparkles, Compass
 } from "lucide-react";
 import { supabase } from "@/utils/supabase";
 import { celoAttributionSuffix } from "@/lib/attribution";
@@ -33,6 +33,7 @@ import {
   ELECTRICITY_PROVIDER_IDS, EDUCATION_PROVIDERS
 } from "@/constants";
 import { HistoryTab } from "@/components/HistoryTab";
+import AppTour, { hasSeenTour, type TourTab } from "@/components/AppTour";
 
 export default function Home() {
   const { address: wagmiAddress, isConnected: isWagmiConnected, chain: wagmiChain } = useAccount();
@@ -75,6 +76,15 @@ export default function Home() {
   const [status, setStatus] = useState("");
 
   const [activeTab, setActiveTab] = useState<"pay" | "bank" | "education" | "history" | "agent">("pay");
+
+  // ⚡ IN-APP PRODUCT TOUR — auto-launches once per browser (localStorage-gated, see
+  // AppTour.tsx) for a first-time visitor; replayable anytime via the compass icon in the
+  // header. A returning visitor who already finished or cancelled it is never shown it again.
+  const [tourActive, setTourActive] = useState(false);
+  useEffect(() => {
+    if (!hasSeenTour()) setTourActive(true);
+  }, []);
+
   // ⚡ DeAI agent allowance state
   const [agentAllowance, setAgentAllowance] = useState<string | null>(null);
   const [isApprovingAgent, setIsApprovingAgent] = useState(false);
@@ -1993,7 +2003,7 @@ export default function Home() {
               </span>
             </button>
           </div>
-          <div className="flex items-center flex-wrap justify-end gap-2">
+          <div className="flex items-center flex-wrap justify-end gap-2" data-tour="wallet-connect">
 
             {address && (
                 <button 
@@ -2085,11 +2095,20 @@ export default function Home() {
               <span className="text-[10px] font-black text-slate-700 dark:text-slate-300 uppercase tracking-widest">{activeCountry.code}</span>
               <ChevronDown size={14} className="text-slate-400 dark:text-slate-500" />
             </button>
+
+            <button
+              onClick={() => setTourActive(true)}
+              title="Replay the app tour"
+              aria-label="Replay the app tour"
+              className="bg-slate-50 dark:bg-[#1a1a1f] border border-slate-100 dark:border-slate-800/80 hover:border-emerald-200 dark:hover:border-emerald-700 p-2 rounded-xl flex shrink-0 items-center transition-all shadow-sm active:scale-95"
+            >
+              <Compass size={14} className="text-slate-400 dark:text-slate-500" />
+            </button>
           </div>
         </div>
 
         {/* THE TABS */}
-        <div className="flex gap-2 bg-slate-200/50 dark:bg-[#1a1a1f] p-1.5 rounded-2xl md:rounded-[1.25rem] mb-6 shadow-inner overflow-x-auto no-scrollbar transition-colors">
+        <div data-tour="tabs-bar" className="flex gap-2 bg-slate-200/50 dark:bg-[#1a1a1f] p-1.5 rounded-2xl md:rounded-[1.25rem] mb-6 shadow-inner overflow-x-auto no-scrollbar transition-colors">
             <button onClick={() => handleTabSwitch("pay")} className={`flex-1 min-w-[75px] py-3 rounded-xl text-[10px] sm:text-xs font-black transition-all ${activeTab === 'pay' ? 'bg-white dark:bg-[#111114] text-emerald-600 dark:text-emerald-400 shadow-xl' : 'text-slate-500 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-200'}`}>BILLS</button>
             <button onClick={() => handleTabSwitch("bank")} disabled={isInternational} className={`flex-1 min-w-[75px] py-3 rounded-xl text-[10px] sm:text-xs font-black transition-all ${isInternational ? 'opacity-30 cursor-not-allowed' : activeTab === 'bank' ? 'bg-white dark:bg-[#111114] text-emerald-600 dark:text-emerald-400 shadow-xl' : 'text-slate-500 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-200'}`}>TRANSFER</button>
             <button onClick={() => handleTabSwitch("education")} disabled={isInternational} className={`flex-1 min-w-[75px] py-3 rounded-xl text-[10px] sm:text-xs font-black transition-all ${isInternational ? 'opacity-30 cursor-not-allowed' : activeTab === 'education' ? 'bg-white dark:bg-[#111114] text-emerald-600 dark:text-emerald-400 shadow-xl' : 'text-slate-500 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-200'}`}>EDUCATION</button>
@@ -2101,7 +2120,7 @@ export default function Home() {
         {/* BANK BLOCK */}
         {/* ======================================= */}
         {activeTab === 'bank' && (
-          <div className="bg-white dark:bg-[#111114] border border-slate-100 dark:border-slate-800/60 rounded-[2.5rem] md:rounded-[3rem] p-8 md:p-10 shadow-2xl shadow-emerald-900/10 dark:shadow-black/50 animate-in fade-in zoom-in-95 transition-colors">
+          <div data-tour="bank-tab" className="bg-white dark:bg-[#111114] border border-slate-100 dark:border-slate-800/60 rounded-[2.5rem] md:rounded-[3rem] p-8 md:p-10 shadow-2xl shadow-emerald-900/10 dark:shadow-black/50 animate-in fade-in zoom-in-95 transition-colors">
             <div className="space-y-5">
                 <div className="bg-slate-50 dark:bg-[#1a1a1f] border border-slate-100 dark:border-slate-800/80 p-4 rounded-2xl flex justify-between items-center animate-in fade-in transition-colors">
                   <div 
@@ -2305,7 +2324,7 @@ export default function Home() {
         {/* EDUCATION BLOCK */}
         {/* ======================================= */}
         {activeTab === 'education' && (
-          <div className="bg-white dark:bg-[#111114] border border-slate-100 dark:border-slate-800/60 rounded-[2.5rem] md:rounded-[3rem] p-8 md:p-10 shadow-2xl shadow-emerald-900/10 dark:shadow-black/50 animate-in fade-in zoom-in-95 transition-colors">
+          <div data-tour="education-tab" className="bg-white dark:bg-[#111114] border border-slate-100 dark:border-slate-800/60 rounded-[2.5rem] md:rounded-[3rem] p-8 md:p-10 shadow-2xl shadow-emerald-900/10 dark:shadow-black/50 animate-in fade-in zoom-in-95 transition-colors">
             <div className="space-y-5">
                 <div className="bg-slate-50 dark:bg-[#1a1a1f] border border-slate-100 dark:border-slate-800/80 p-4 rounded-2xl flex justify-between items-center animate-in fade-in transition-colors">
                   <div 
@@ -2501,7 +2520,7 @@ export default function Home() {
           <div className="bg-white dark:bg-[#111114] border border-slate-100 dark:border-slate-800/60 rounded-[2.5rem] md:rounded-[3rem] p-8 md:p-10 shadow-2xl shadow-emerald-900/10 dark:shadow-black/50 animate-in fade-in zoom-in-95 transition-colors">
 
             {!isInternational && (
-                <div className="grid grid-cols-4 gap-2 pb-2 mb-4">
+                <div data-tour="services" className="grid grid-cols-4 gap-2 pb-2 mb-4">
                     {SERVICES.filter(s => s.id !== 'BANK').map(s => (
                         <button 
                             key={s.id} 
@@ -3170,20 +3189,23 @@ export default function Home() {
         {/* HISTORY BLOCK */}
         {/* ======================================= */}
         {activeTab === 'history' && (
-          <HistoryTab 
-            transactions={transactions} 
-            currentTransactions={currentTransactions} 
-            currentPage={currentPage} 
-            totalPages={totalPages} 
-            setCurrentPage={setCurrentPage} 
-            setSelectedReceipt={setSelectedReceipt} 
-          />
+          <div data-tour="history-tab">
+            <HistoryTab
+              transactions={transactions}
+              currentTransactions={currentTransactions}
+              currentPage={currentPage}
+              totalPages={totalPages}
+              setCurrentPage={setCurrentPage}
+              setSelectedReceipt={setSelectedReceipt}
+            />
+          </div>
         )}
 
         {/* ======================================= */}
         {/* DeAI AGENT BLOCK */}
         {/* ======================================= */}
         {activeTab === 'agent' && (
+          <div data-tour="agent-tab">
           <AgentHub
             address={address ?? undefined}
             selectedToken={selectedToken}
@@ -3193,6 +3215,7 @@ export default function Home() {
             currentAllowance={agentAllowance}
             isApproving={isApprovingAgent}
           />
+          </div>
         )}
 
         <AppFooter network={activeNetworkDisplay} />
@@ -3208,6 +3231,12 @@ export default function Home() {
           tokenSymbol={selectedToken.symbol}
         />
       </div>
+
+      <AppTour
+        active={tourActive}
+        onFinish={() => setTourActive(false)}
+        onTabChange={(tab: TourTab) => handleTabSwitch(tab)}
+      />
     </main>
   );
 }
