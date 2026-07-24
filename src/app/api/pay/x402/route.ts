@@ -3,6 +3,7 @@ import { supabaseAdmin as supabase } from '@/utils/supabase';
 import { executeVend, getStrictRequestId } from '@/lib/vend';
 import { resolveTokenOnChain } from '@/constants';
 import { sendTelegramAlert } from '@/lib/telegram';
+import { getServiceRules } from '@/lib/serviceRules';
 
 // ⚡ x402 SETTLEMENT — MAIN APP ONLY. Two rails, resolved by chainConfigFor():
 //   • CELO (default): Celo's own facilitator (api.x402.celo.org — "Built by Celo Core Co."),
@@ -247,12 +248,21 @@ async function handleX402Request(req: Request) {
   // price passed to the facilitator below, so the payer can only pay exactly what we ask.
   // Falls back to a nominal minimum when there's no real bill amount to price (a probe,
   // or a malformed request) — that request just never has enough detail to vend anything.
+  //
+  // ⚡ LATENCY: this challenge must round-trip to our server BEFORE the wallet can even be
+  // prompted to sign (x402 is challenge-response by design — the client has no way to know
+  // the exact amount/domain to sign until we tell it), unlike the contract-call path, which
+  // builds everything client-side and can invoke the wallet immediately with no server call
+  // at all first. That structural gap can't be closed, but the query that dominates THIS
+  // round-trip can be — getServiceRules() (src/lib/serviceRules.ts) is a 30s-cached read of
+  // the exact same platform_settings row every other route already shares, instead of this
+  // route running its own uncached query on every single challenge/settle call.
   let requiredWei: bigint;
   let requiredCrypto: number;
   let baseRate = 1500; // fallback only ever used when vendAmount is null (no real bill to price)
   if (vendAmount !== null) {
-    const { data: settingsData } = await supabase.from('platform_settings').select('exchange_rate').eq('id', 1).single();
-    baseRate = parseFloat(settingsData?.exchange_rate || '1500');
+    const rules = await getServiceRules();
+    baseRate = rules.exchangeRate;
     requiredCrypto = (vendAmount + serviceFee) / baseRate;
     requiredWei = BigInt(Math.round(requiredCrypto * 10 ** usdc.decimals));
   } else {
