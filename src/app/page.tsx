@@ -9,7 +9,7 @@ import Link from "next/link";
 import {
   ShieldCheck, Zap, AlertTriangle, CheckCircle2, ChevronDown,
   Loader2, Coins, Briefcase, ListPlus, Users, Landmark, XCircle,
-  RefreshCw, Tv, GraduationCap, Send, Globe, Sparkles, Compass
+  RefreshCw, Tv, GraduationCap, Send, Globe, Sparkles
 } from "lucide-react";
 import { supabase } from "@/utils/supabase";
 import { celoAttributionSuffix } from "@/lib/attribution";
@@ -2096,14 +2096,6 @@ export default function Home() {
               <ChevronDown size={14} className="text-slate-400 dark:text-slate-500" />
             </button>
 
-            <button
-              onClick={() => setTourActive(true)}
-              title="Replay the app tour"
-              aria-label="Replay the app tour"
-              className="bg-slate-50 dark:bg-[#1a1a1f] border border-slate-100 dark:border-slate-800/80 hover:border-emerald-200 dark:hover:border-emerald-700 p-2 rounded-xl flex shrink-0 items-center transition-all shadow-sm active:scale-95"
-            >
-              <Compass size={14} className="text-slate-400 dark:text-slate-500" />
-            </button>
           </div>
         </div>
 
