@@ -42,6 +42,11 @@ const ABAPAY_ADMIN_ABI = [
   {"inputs":[{"internalType":"address","name":"tokenAddress","type":"address"},{"internalType":"bool","name":"status","type":"bool"}],"name":"setTokenSupport","outputs":[],"stateMutability":"nonpayable","type":"function"},
   {"inputs":[{"internalType":"address","name":"tokenAddress","type":"address"},{"internalType":"uint256","name":"maxAmount","type":"uint256"}],"name":"setMaxAgentPayment","outputs":[],"stateMutability":"nonpayable","type":"function"},
   {"inputs":[{"internalType":"address","name":"tokenAddress","type":"address"},{"internalType":"uint256","name":"maxAmount","type":"uint256"}],"name":"setMaxRefund","outputs":[],"stateMutability":"nonpayable","type":"function"},
+  // ⚡ V4 ONLY — the withdrawal timelock became owner-adjustable (V3 hardcodes it at 24h with
+  // no setter at all; reads/writes here simply revert or are absent on V2/V3, same as every
+  // other V2/V3-only read above — the "supported: false" detection already handles that).
+  {"inputs":[],"name":"withdrawalDelay","outputs":[{"internalType":"uint256","name":"","type":"uint256"}],"stateMutability":"view","type":"function"},
+  {"inputs":[{"internalType":"uint256","name":"newDelay","type":"uint256"}],"name":"setWithdrawalDelay","outputs":[],"stateMutability":"nonpayable","type":"function"},
   {"inputs":[],"name":"pause","outputs":[],"stateMutability":"nonpayable","type":"function"},
   {"inputs":[],"name":"unpause","outputs":[],"stateMutability":"nonpayable","type":"function"}
 ];
@@ -89,6 +94,10 @@ export default function AdminDashboard() {
     relayer?: string;
     paused?: boolean;
     tokens?: Record<string, { supported: boolean; agentCap: string; refundCap: string }>;
+    // V4-only (see ABAPAY_ADMIN_ABI's withdrawalDelay/setWithdrawalDelay). Undefined, not 0,
+    // means "this chain isn't on V4 yet" — read independently below so a revert here can't
+    // take down the rest of a still-V3 chain's controls.
+    withdrawalDelaySeconds?: number;
   }>>({ CELO: { supported: false }, BASE: { supported: false } });
   const [ccBusyKey, setCcBusyKey] = useState<string | null>(null);
   const [ccInputs, setCcInputs] = useState<Record<string, string>>({});
@@ -381,7 +390,15 @@ export default function AdminDashboard() {
           };
         }
 
-        return { supported: true, relayer, paused, tokens };
+        // V4-only — read independently so a revert on a still-V3 chain never breaks the rest
+        // of this chain's (already-successful) controls above.
+        let withdrawalDelaySeconds: number | undefined;
+        try {
+          const delay = await publicClient.readContract({ address: contract, abi: ABAPAY_ADMIN_ABI, functionName: 'withdrawalDelay' }) as bigint;
+          withdrawalDelaySeconds = Number(delay);
+        } catch { /* V2/V3 — no setter exists yet on this chain */ }
+
+        return { supported: true, relayer, paused, tokens, withdrawalDelaySeconds };
       } catch {
         return { supported: false };
       }
@@ -455,6 +472,39 @@ export default function AdminDashboard() {
       setTimeout(() => fetchContractControls(), 3000);
     } catch (e: any) {
       alert(e?.shortMessage || `Failed to ${action}.`);
+    } finally {
+      setCcBusyKey(null);
+    }
+  };
+
+  // ⚡ V4 ONLY — see ABAPAY_ADMIN_ABI's withdrawalDelay/setWithdrawalDelay comment. Setting this
+  // to 0 makes treasury withdrawals instant — an explicit emergency escape valve, not something
+  // to leave at 0 day-to-day, hence the extra-strong confirm wording.
+  const handleSetWithdrawalDelay = async (network: 'CELO' | 'BASE') => {
+    const key = `${network}-withdrawalDelay`;
+    const raw = (ccInputs[key] || '').trim();
+    const seconds = Number(raw);
+    if (!Number.isFinite(seconds) || seconds < 0 || !Number.isInteger(seconds)) return alert('Enter a whole number of seconds.');
+
+    const warning = seconds === 0
+      ? `⚠️ Set the ${network} withdrawal delay to 0 seconds?\n\nThis makes treasury withdrawals INSTANT — no 24h (or current) waiting period. Only do this for genuine emergency recovery; set it back afterward.`
+      : `Set the ${network} withdrawal delay to ${seconds} seconds (~${(seconds / 3600).toFixed(1)}h)?`;
+    if (!confirm(warning)) return;
+
+    setCcBusyKey(key);
+    try {
+      const prep = await prepareContractWrite(network);
+      if (!prep) return;
+      const hash = await client.writeContract({
+        chain: prep.targetChain, account: address, address: prep.targetContract,
+        abi: ABAPAY_ADMIN_ABI, functionName: 'setWithdrawalDelay', args: [BigInt(seconds)],
+        dataSuffix: celoAttributionSuffix(prep.targetChain),
+      });
+      alert(`Withdrawal delay updated! Hash: ${hash.slice(0, 10)}`);
+      setCcInputs(p => ({ ...p, [key]: '' }));
+      setTimeout(() => fetchContractControls(), 3000);
+    } catch (e: any) {
+      alert(e?.shortMessage || 'Failed to update withdrawal delay — this chain may still be on V2/V3.');
     } finally {
       setCcBusyKey(null);
     }
@@ -1358,7 +1408,12 @@ export default function AdminDashboard() {
                   return (
                     <div key={network} className="bg-[#111114] border border-slate-800 rounded-3xl p-8">
                       <h3 className={`text-sm font-black text-${accentColor}-500 uppercase tracking-widest mb-6 border-b border-slate-800 pb-3 flex items-center gap-2`}>
-                        <span className={`w-2 h-2 rounded-full bg-${accentColor}-500`}></span> {network} — AbaPayV3 Contract Controls
+                        <span className={`w-2 h-2 rounded-full bg-${accentColor}-500`}></span> {network} — Contract Controls
+                        {cc?.supported && (
+                          <span className="text-[9px] font-black px-2 py-0.5 rounded-full bg-slate-800 text-slate-400 normal-case tracking-normal">
+                            {cc.withdrawalDelaySeconds !== undefined ? 'V4' : 'V3'}
+                          </span>
+                        )}
                       </h3>
 
                       {!cc?.supported ? (
@@ -1407,6 +1462,40 @@ export default function AdminDashboard() {
                             >
                               {ccBusyKey === `${network}-pause` ? <Loader2 size={12} className="animate-spin inline" /> : (cc.paused ? 'Unpause' : 'Pause')}
                             </button>
+                          </div>
+
+                          {/* WITHDRAWAL DELAY — V4 only */}
+                          <div>
+                            <div className="flex items-center justify-between mb-2">
+                              <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest">Withdrawal Timelock</label>
+                              {cc.withdrawalDelaySeconds !== undefined && (
+                                <span className="text-[10px] font-mono text-slate-500">
+                                  current: {cc.withdrawalDelaySeconds}s (~{(cc.withdrawalDelaySeconds / 3600).toFixed(1)}h)
+                                </span>
+                              )}
+                            </div>
+                            {cc.withdrawalDelaySeconds === undefined ? (
+                              <p className="text-[10px] text-slate-600 italic">Not available — this chain's contract is still on V2/V3 (fixed 24h delay, no setter).</p>
+                            ) : (
+                              <div className="flex gap-2">
+                                <input
+                                  type="number"
+                                  min={0}
+                                  step={1}
+                                  placeholder="New delay in seconds (e.g. 86400 = 24h)"
+                                  value={ccInputs[`${network}-withdrawalDelay`] || ''}
+                                  onChange={(e) => setCcInputs(p => ({ ...p, [`${network}-withdrawalDelay`]: e.target.value }))}
+                                  className="flex-1 bg-slate-950 border border-slate-800 text-white text-xs font-mono py-3 px-4 rounded-xl outline-none focus:border-emerald-600"
+                                />
+                                <button
+                                  onClick={() => handleSetWithdrawalDelay(network)}
+                                  disabled={ccBusyKey === `${network}-withdrawalDelay`}
+                                  className="bg-slate-800 hover:bg-slate-700 text-white text-[10px] font-black uppercase tracking-widest px-5 rounded-xl disabled:opacity-50 flex items-center gap-2"
+                                >
+                                  {ccBusyKey === `${network}-withdrawalDelay` ? <Loader2 size={12} className="animate-spin" /> : <Save size={12} />} Update
+                                </button>
+                              </div>
+                            )}
                           </div>
 
                           {/* PER-TOKEN CONTROLS */}

@@ -7,6 +7,7 @@ import { checkServiceAllowed, getServiceRules, checkAgentSpendAllowed } from '@/
 import { sendTelegramToUser } from '@/lib/telegram';
 import { sendWhatsAppMessage } from '@/lib/whatsapp';
 import { executeVend, getStrictRequestId } from '@/lib/vend';
+import { getActiveDiscountForService, computeDiscountNgn } from '@/lib/discounts';
 import { isMainnetEnv } from '@/lib/chain';
 import { Resend } from 'resend';
 
@@ -196,7 +197,12 @@ export async function runScheduledBills(opts: { scope?: 'recurring' | 'oneoff' |
         continue;
       }
 
-      const needed = amountNgn / rules.exchangeRate;
+      // Same discount engine as every other channel (web, chat, batch) — see src/lib/discounts.ts.
+      // Checked fresh on every run, so a campaign toggled on/off in the admin dashboard takes
+      // effect on the very next scheduled execution.
+      const activeDiscount = await getActiveDiscountForService(bill.service_category);
+      const { discountNgn, discountPhone } = await computeDiscountNgn(amountNgn, activeDiscount, bill.wallet_address, bill.billers_code);
+      const needed = (amountNgn - discountNgn) / rules.exchangeRate;
 
       // ── AUTONOMOUS EXECUTION ─────────────────────────────────────────────
       if (due && bill.auto_execute) {
@@ -246,7 +252,9 @@ export async function runScheduledBills(opts: { scope?: 'recurring' | 'oneoff' |
             tx_hash: preflightTxHash, request_id: vtRequestId, service_category: bill.service_category, service_id: bill.service_id,
             variation_code: bill.variation_code || null, network: bill.provider || null, blockchain: chain,
             account_number: bill.billers_code, phone: null,
-            amount_usdt: needed, amount_naira: amountNgn, fee_naira: 0, status: 'PENDING',
+            amount_usdt: needed, amount_naira: amountNgn, fee_naira: 0,
+            discount_ngn: discountNgn, discount_campaign_id: activeDiscount?.id || null, discount_phone: discountPhone,
+            status: 'PENDING',
             wallet_address: String(bill.wallet_address).toLowerCase(),
             customer_name: bill.customer_name || null, customer_address: bill.customer_address || null,
             source_channel: 'SCHEDULE', token_used: token,

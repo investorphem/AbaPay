@@ -19,6 +19,13 @@ export async function GET(req: Request) {
     return NextResponse.json({ success: false, message: 'Could not load campaigns.' }, { status: 500 });
   }
 
+  // ⚡ Matches src/lib/discounts.ts's COUNTED_STATUSES exactly — SUCCESS, FAILED_VENDING, and
+  // REFUNDED all consume a wallet/destination/phone/total cap (see that file's header comment
+  // on why failed/refunded rows still count), so the numbers shown here must reflect the same
+  // set the enforcement actually uses, or "budget exhausted" would never line up with the
+  // displayed total.
+  const COUNTED_STATUSES = ['SUCCESS', 'FAILED_VENDING', 'REFUNDED'];
+
   // Monitoring: how much has actually been discounted, and by which campaign.
   const { data: discounted } = await supabaseAdmin
     .from('transactions')
@@ -26,9 +33,9 @@ export async function GET(req: Request) {
     .gt('discount_ngn', 0);
 
   const rows = discounted || [];
-  const successfulRows = rows.filter((r: any) => r.status === 'SUCCESS');
+  const countedRows = rows.filter((r: any) => COUNTED_STATUSES.includes(r.status));
   const byCampaign: Record<string, { discountNgn: number; count: number }> = {};
-  for (const r of successfulRows) {
+  for (const r of countedRows) {
     const key = r.discount_campaign_id || 'unknown';
     if (!byCampaign[key]) byCampaign[key] = { discountNgn: 0, count: 0 };
     byCampaign[key].discountNgn += Number(r.discount_ngn || 0);
@@ -50,38 +57,66 @@ export async function GET(req: Request) {
     // discount is the actual tell of wallet-farming (free wallets, but an IP is at least sticky
     // for a session). Flag-only: never auto-blocked, since shared mobile/NAT IPs among genuinely
     // unrelated users are common in Nigeria and would otherwise produce false positives.
+    // Per-wallet breakdown (not just an aggregate count) so the admin can pick exactly which
+    // wallet/destination to exclude, and from which campaign.
     const sinceIso = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
     const { data: recentDiscounted } = await supabaseAdmin
       .from('transactions')
-      .select('client_ip, wallet_address, discount_ngn, discount_campaign_id, created_at')
+      .select('client_ip, wallet_address, account_number, discount_ngn, discount_campaign_id, created_at')
       .gt('discount_ngn', 0)
-      .eq('status', 'SUCCESS')
+      .in('status', COUNTED_STATUSES)
       .not('client_ip', 'is', null)
       .gte('created_at', sinceIso);
 
-    const byIp: Record<string, { wallets: Set<string>; discountNgn: number; count: number; campaignIds: Set<string> }> = {};
+    const byIp: Record<string, {
+      wallets: Map<string, { discountNgn: number; count: number; campaignIds: Set<string>; accounts: Set<string> }>;
+      discountNgn: number; count: number; campaignIds: Set<string>;
+    }> = {};
     for (const r of recentDiscounted || []) {
       const ip = r.client_ip as string;
-      if (!byIp[ip]) byIp[ip] = { wallets: new Set(), discountNgn: 0, count: 0, campaignIds: new Set() };
-      byIp[ip].wallets.add(r.wallet_address);
-      byIp[ip].discountNgn += Number(r.discount_ngn || 0);
-      byIp[ip].count += 1;
-      if (r.discount_campaign_id) byIp[ip].campaignIds.add(r.discount_campaign_id);
+      if (!byIp[ip]) byIp[ip] = { wallets: new Map(), discountNgn: 0, count: 0, campaignIds: new Set() };
+      const bucket = byIp[ip];
+      if (!bucket.wallets.has(r.wallet_address)) bucket.wallets.set(r.wallet_address, { discountNgn: 0, count: 0, campaignIds: new Set(), accounts: new Set() });
+      const w = bucket.wallets.get(r.wallet_address)!;
+      w.discountNgn += Number(r.discount_ngn || 0);
+      w.count += 1;
+      if (r.discount_campaign_id) w.campaignIds.add(r.discount_campaign_id);
+      if (r.account_number) w.accounts.add(r.account_number);
+
+      bucket.discountNgn += Number(r.discount_ngn || 0);
+      bucket.count += 1;
+      if (r.discount_campaign_id) bucket.campaignIds.add(r.discount_campaign_id);
     }
     suspiciousClusters = Object.entries(byIp)
       .filter(([, v]) => v.wallets.size > 1)
-      .map(([ip, v]) => ({ ip, walletCount: v.wallets.size, discountNgn: v.discountNgn, txCount: v.count, campaignIds: Array.from(v.campaignIds) }))
+      .map(([ip, v]) => ({
+        ip,
+        walletCount: v.wallets.size,
+        discountNgn: v.discountNgn,
+        txCount: v.count,
+        campaignIds: Array.from(v.campaignIds),
+        wallets: Array.from(v.wallets.entries()).map(([wallet, w]) => ({
+          wallet, discountNgn: w.discountNgn, txCount: w.count,
+          campaignIds: Array.from(w.campaignIds), accounts: Array.from(w.accounts),
+        })),
+      }))
       .sort((a, b) => b.walletCount - a.walletCount)
       .slice(0, 20);
   }
+
+  const { data: exclusions } = await supabaseAdmin
+    .from('discount_exclusions')
+    .select('*')
+    .order('created_at', { ascending: false });
 
   return NextResponse.json({
     success: true,
     campaigns: campaigns || [],
     settings: { fraudFlaggingEnabled },
+    exclusions: exclusions || [],
     stats: {
-      totalDiscountNgn: successfulRows.reduce((sum: number, r: any) => sum + Number(r.discount_ngn || 0), 0),
-      discountedTxCount: successfulRows.length,
+      totalDiscountNgn: countedRows.reduce((sum: number, r: any) => sum + Number(r.discount_ngn || 0), 0),
+      discountedTxCount: countedRows.length,
       byCampaign,
       suspiciousClusters,
     },
@@ -103,6 +138,24 @@ export async function POST(req: Request) {
         .update({ discount_fraud_flagging_enabled: body.fraud_flagging_enabled })
         .eq('id', 1);
       if (error) return NextResponse.json({ success: false, message: 'Could not save setting.' }, { status: 500 });
+      return NextResponse.json({ success: true });
+    }
+
+    // Exclude a wallet and/or destination account from one campaign — the admin action off the
+    // "Suspicious activity" panel. Enforced in src/lib/discounts.ts's isExcluded().
+    if (body.exclude) {
+      const { campaign_id, wallet_address, account_number, reason } = body.exclude;
+      if (!campaign_id) return NextResponse.json({ success: false, message: 'campaign_id is required' }, { status: 400 });
+      if (!wallet_address && !account_number) return NextResponse.json({ success: false, message: 'wallet_address or account_number is required' }, { status: 400 });
+
+      const { error } = await supabaseAdmin.from('discount_exclusions').insert({
+        campaign_id,
+        wallet_address: wallet_address ? String(wallet_address).toLowerCase() : null,
+        account_number: account_number || null,
+        reason: reason || null,
+        created_by: auth.address,
+      });
+      if (error) return NextResponse.json({ success: false, message: 'Could not save exclusion.' }, { status: 500 });
       return NextResponse.json({ success: true });
     }
 
@@ -183,9 +236,11 @@ export async function DELETE(req: Request) {
 
   const { searchParams } = new URL(req.url);
   const id = searchParams.get('id');
+  const type = searchParams.get('type') || 'campaign';
   if (!id) return NextResponse.json({ success: false, message: 'Missing id' }, { status: 400 });
 
-  const { error } = await supabaseAdmin.from('discount_campaigns').delete().eq('id', id);
-  if (error) return NextResponse.json({ success: false, message: 'Could not delete campaign.' }, { status: 500 });
+  const table = type === 'exclusion' ? 'discount_exclusions' : 'discount_campaigns';
+  const { error } = await supabaseAdmin.from(table).delete().eq('id', id);
+  if (error) return NextResponse.json({ success: false, message: `Could not delete ${type}.` }, { status: 500 });
   return NextResponse.json({ success: true });
 }

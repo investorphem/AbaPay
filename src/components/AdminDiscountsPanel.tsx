@@ -45,6 +45,7 @@ function MiniToggle({ value, onChange, disabled }: { value: boolean; onChange: (
 export function AdminDiscountsPanel({ adminHeaders }: Props) {
   const [campaigns, setCampaigns] = useState<any[] | null>(null);
   const [stats, setStats] = useState<any>(null);
+  const [exclusions, setExclusions] = useState<any[]>([]);
   const [settings, setSettings] = useState<{ fraudFlaggingEnabled: boolean }>({ fraudFlaggingEnabled: true });
   const [saving, setSaving] = useState(false);
   const [msg, setMsg] = useState('');
@@ -60,7 +61,7 @@ export function AdminDiscountsPanel({ adminHeaders }: Props) {
     try {
       const res = await fetch('/api/admin/discounts', { headers: adminHeaders });
       const data = await res.json();
-      if (data.success) { setCampaigns(data.campaigns); setStats(data.stats); if (data.settings) setSettings(data.settings); }
+      if (data.success) { setCampaigns(data.campaigns); setStats(data.stats); setExclusions(data.exclusions || []); if (data.settings) setSettings(data.settings); }
     } catch { /* non-fatal */ }
   }, [adminHeaders]);
 
@@ -130,6 +131,28 @@ export function AdminDiscountsPanel({ adminHeaders }: Props) {
     setForm((f) => ({ ...f, services: f.services.includes(s) ? f.services.filter((x) => x !== s) : [...f.services, s] }));
   };
 
+  // Admin decision off the "Suspicious activity" panel — remove a flagged wallet (and/or the
+  // destination accounts it used) from a specific campaign it was seen using.
+  const excludeWallet = async (campaignId: string, wallet: string, accounts: string[]) => {
+    const label = accounts.length > 0 ? `wallet ${wallet} (and account ${accounts[0]})` : `wallet ${wallet}`;
+    if (!confirm(`Remove ${label} from this campaign? It will get the normal, undiscounted price from now on — this doesn't affect discounts already given.`)) return;
+    await post({ exclude: { campaign_id: campaignId, wallet_address: wallet } });
+  };
+
+  const removeExclusion = async (id: string) => {
+    setSaving(true);
+    try {
+      const res = await fetch(`/api/admin/discounts?id=${id}&type=exclusion`, { method: 'DELETE', headers: adminHeaders });
+      const data = await res.json();
+      if (data.success) await load();
+      else setMsg(data.message || 'Could not remove exclusion.');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const campaignName = (id: string) => campaigns?.find((c) => c.id === id)?.name || id.slice(0, 8);
+
   if (!campaigns) {
     return (
       <div className="p-6 flex items-center gap-2 text-slate-400">
@@ -177,15 +200,54 @@ export function AdminDiscountsPanel({ adminHeaders }: Props) {
           <p className="text-[10px] text-slate-600 italic">Nothing flagged in the last 24h.</p>
         )}
         {settings.fraudFlaggingEnabled && stats?.suspiciousClusters?.map((cl: any) => (
-          <div key={cl.ip} className="flex items-center justify-between py-2 border-b border-slate-800/60 last:border-0">
-            <div>
+          <div key={cl.ip} className="py-3 border-b border-slate-800/60 last:border-0">
+            <div className="flex items-center justify-between mb-2">
               <p className="text-xs font-mono font-bold text-slate-200">{cl.ip}</p>
-              <p className="text-[9px] text-slate-500">{cl.walletCount} wallets · {cl.txCount} discounted transactions</p>
+              <p className="text-xs font-black text-orange-400">₦{Number(cl.discountNgn).toLocaleString()} · {cl.walletCount} wallets</p>
             </div>
-            <p className="text-xs font-black text-orange-400">₦{Number(cl.discountNgn).toLocaleString()}</p>
+            <div className="space-y-1.5 pl-3 border-l-2 border-orange-900/40">
+              {cl.wallets.map((w: any) => (
+                <div key={w.wallet} className="flex items-center justify-between gap-3">
+                  <div className="min-w-0">
+                    <p className="text-[10px] font-mono text-slate-400 truncate">{w.wallet}</p>
+                    <p className="text-[9px] text-slate-600">
+                      ₦{Number(w.discountNgn).toLocaleString()} · {w.txCount} tx{w.accounts.length > 0 ? ` · acct ${w.accounts[0]}${w.accounts.length > 1 ? ` +${w.accounts.length - 1}` : ''}` : ''}
+                    </p>
+                  </div>
+                  {w.campaignIds.map((cid: string) => (
+                    <button
+                      key={cid}
+                      onClick={() => excludeWallet(cid, w.wallet, w.accounts)}
+                      disabled={saving}
+                      className="shrink-0 text-[9px] font-black uppercase tracking-widest text-red-400 hover:text-red-300 disabled:opacity-50"
+                    >
+                      Exclude from {campaignName(cid)}
+                    </button>
+                  ))}
+                </div>
+              ))}
+            </div>
           </div>
         ))}
       </div>
+
+      {/* Currently excluded wallets/accounts */}
+      {exclusions.length > 0 && (
+        <div className="bg-[#111114] rounded-2xl border border-slate-800/60 p-5">
+          <h3 className="text-xs font-black uppercase tracking-widest text-slate-300 mb-3">Excluded from campaigns</h3>
+          {exclusions.map((ex: any) => (
+            <div key={ex.id} className="flex items-center justify-between py-2 border-b border-slate-800/60 last:border-0">
+              <div className="min-w-0">
+                <p className="text-[10px] font-mono text-slate-300 truncate">{ex.wallet_address || ex.account_number}</p>
+                <p className="text-[9px] text-slate-500">{campaignName(ex.campaign_id)}</p>
+              </div>
+              <button onClick={() => removeExclusion(ex.id)} disabled={saving} className="p-1.5 text-slate-500 hover:text-emerald-400 shrink-0">
+                <Trash2 size={13} />
+              </button>
+            </div>
+          ))}
+        </div>
+      )}
 
       {/* Campaign list */}
       <div className="bg-[#111114] rounded-2xl border border-slate-800/60 p-5">

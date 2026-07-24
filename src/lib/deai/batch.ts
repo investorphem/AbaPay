@@ -3,6 +3,7 @@ import { supabaseAdmin as supabase } from '@/utils/supabase';
 import { getRemainingAllowance, relayPayBillFor } from '@/lib/deai/relayer';
 import { fetchCryptoBalances } from '@/lib/deai/services';
 import { executeVend, getStrictRequestId } from '@/lib/vend';
+import { getActiveDiscountForService, computeDiscountNgn } from '@/lib/discounts';
 import { isMainnetEnv } from '@/lib/chain';
 
 // ⚡ MULTI-RECIPIENT (BATCH) PAYMENTS — shared between the in-app chat (/api/deai/chat) and
@@ -99,7 +100,12 @@ export async function executeAgentPayment(params: {
   variationCode?: string | null;
 }): Promise<AgentPaymentResult> {
   const { userWallet, item, exchangeRate, sourceChannel } = params;
-  const amountCrypto = (item.amountNgn / exchangeRate).toFixed(6);
+  // Same discount engine as every other channel (web, chat, scheduled) — see
+  // src/lib/discounts.ts. Each recipient in a batch is checked independently, since each is its
+  // own destination account and may hit its own per-destination cap separately.
+  const activeDiscount = await getActiveDiscountForService(item.serviceCategory);
+  const { discountNgn, discountPhone } = await computeDiscountNgn(item.amountNgn, activeDiscount, userWallet, item.billersCode);
+  const amountCrypto = ((item.amountNgn - discountNgn) / exchangeRate).toFixed(6);
   const vtRequestId = getStrictRequestId();
   const explorerBase = item.chain === 'BASE'
     ? (isMainnetEnv() ? 'https://basescan.org' : 'https://sepolia.basescan.org')
@@ -113,7 +119,9 @@ export async function executeAgentPayment(params: {
       service_category: item.serviceCategory, service_id: item.serviceID,
       variation_code: params.variationCode || null, network: item.provider || null, blockchain: item.chain,
       account_number: item.billersCode, phone: null,
-      amount_usdt: Number(amountCrypto), amount_naira: item.amountNgn, fee_naira: 0, status: 'PENDING',
+      amount_usdt: Number(amountCrypto), amount_naira: item.amountNgn, fee_naira: 0,
+      discount_ngn: discountNgn, discount_campaign_id: activeDiscount?.id || null, discount_phone: discountPhone,
+      status: 'PENDING',
       wallet_address: userWallet.toLowerCase(),
       customer_name: params.customerName || null, customer_address: params.customerAddress || null,
       source_channel: sourceChannel, token_used: item.tokenSymbol,

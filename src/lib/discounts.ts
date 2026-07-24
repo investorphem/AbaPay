@@ -44,15 +44,23 @@ async function loadActiveCampaigns(): Promise<any[]> {
   return cache.rows;
 }
 
-/** Sum of discount_ngn already given under this campaign, successful transactions only — a
- * failed/refunded vend paid back the (already-discounted) crypto in full, so it cost the
- * campaign nothing and shouldn't count against either cap. */
+// ⚡ COUNTED TOWARD EVERY CAP: SUCCESS, FAILED_VENDING, and REFUNDED — deliberately NOT just
+// SUCCESS. The earlier version only counted SUCCESS on the theory that a failed/refunded vend
+// paid the (already-discounted) crypto back in full and so "cost the campaign nothing" — but
+// that let a wallet/destination/phone rack up unlimited discounted attempts for free as long as
+// each one failed, resetting its allowance every time regardless of how many discounted
+// payments it had actually pushed through the system. Counting failed/refunded rows too closes
+// that off: a cap is consumed the moment a discount is GRANTED, not only once it's confirmed
+// delivered. PENDING/PROCESSING (still in-flight) and EXPIRED (payment never actually landed
+// on-chain — see cleanupPreflights.ts) are excluded since no discount was genuinely extended yet.
+const COUNTED_STATUSES = ['SUCCESS', 'FAILED_VENDING', 'REFUNDED'];
+
 async function totalGivenForCampaign(campaignId: string): Promise<number> {
   const { data } = await supabaseAdmin
     .from('transactions')
     .select('discount_ngn')
     .eq('discount_campaign_id', campaignId)
-    .eq('status', 'SUCCESS');
+    .in('status', COUNTED_STATUSES);
   return (data || []).reduce((sum: number, r: any) => sum + Number(r.discount_ngn || 0), 0);
 }
 
@@ -62,7 +70,7 @@ async function totalGivenForWallet(campaignId: string, walletAddress: string): P
     .select('discount_ngn')
     .eq('discount_campaign_id', campaignId)
     .eq('wallet_address', walletAddress.toLowerCase())
-    .eq('status', 'SUCCESS');
+    .in('status', COUNTED_STATUSES);
   return (data || []).reduce((sum: number, r: any) => sum + Number(r.discount_ngn || 0), 0);
 }
 
@@ -75,7 +83,7 @@ async function totalGivenForDestination(campaignId: string, accountNumber: strin
     .select('discount_ngn')
     .eq('discount_campaign_id', campaignId)
     .eq('account_number', accountNumber)
-    .eq('status', 'SUCCESS')
+    .in('status', COUNTED_STATUSES)
     .gte('created_at', sinceIso);
   return (data || []).reduce((sum: number, r: any) => sum + Number(r.discount_ngn || 0), 0);
 }
@@ -103,8 +111,28 @@ async function totalGivenForPhone(campaignId: string, phone: string): Promise<nu
     .select('discount_ngn')
     .eq('discount_campaign_id', campaignId)
     .eq('discount_phone', phone)
-    .eq('status', 'SUCCESS');
+    .in('status', COUNTED_STATUSES);
   return (data || []).reduce((sum: number, r: any) => sum + Number(r.discount_ngn || 0), 0);
+}
+
+/** Manual admin override — set from the "Suspicious activity" panel in the admin Discounts tab
+ * after reviewing a flagged IP/device cluster. Checked before anything else in
+ * computeDiscountNgn(), so an excluded wallet/destination gets the normal, undiscounted price
+ * with no further computation. Scoped per-campaign (matching "remove such from the campaign"),
+ * not a global ban — the same wallet can still use a DIFFERENT campaign. */
+async function isExcluded(campaignId: string, walletAddress?: string | null, destinationAccount?: string | null): Promise<boolean> {
+  if (!walletAddress && !destinationAccount) return false;
+  const orParts: string[] = [];
+  if (walletAddress) orParts.push(`wallet_address.eq.${walletAddress.toLowerCase()}`);
+  if (destinationAccount) orParts.push(`account_number.eq.${destinationAccount}`);
+
+  const { data } = await supabaseAdmin
+    .from('discount_exclusions')
+    .select('id')
+    .eq('campaign_id', campaignId)
+    .or(orParts.join(','))
+    .limit(1);
+  return !!(data && data.length > 0);
 }
 
 /**
@@ -182,6 +210,8 @@ export async function computeDiscountNgn(
 ): Promise<DiscountResult> {
   const deny: DiscountResult = { discountNgn: 0, discountPhone: null };
   if (!discount || !(baseNgn > 0)) return deny;
+
+  if (await isExcluded(discount.id, walletAddress, destinationAccount)) return deny;
 
   let raw = discount.type === 'PERCENT' ? (baseNgn * discount.value) / 100 : discount.value;
   if (discount.maxDiscountNgn != null) raw = Math.min(raw, discount.maxDiscountNgn);
