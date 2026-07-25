@@ -306,11 +306,26 @@ export async function POST(req: Request) {
 }
 
 // GET opens a server-push SSE stream in the Streamable HTTP spec — we never push anything
-// outside of a request/response, so declining it with 405 is the spec-compliant response for
-// a server that doesn't support that half of the transport.
-export async function GET() {
-  return NextResponse.json(
-    { error: 'This MCP server only supports POST (Streamable HTTP, JSON-RPC 2.0).' },
-    { status: 405, headers: { Allow: 'POST' } }
-  );
+// outside of a request/response, so 405 is the spec-compliant reply to a REAL MCP client
+// asking for one (identifiable by `Accept: text/event-stream`, exactly as the spec says a
+// client requesting the stream must send). A bare GET without that header is something else
+// probing liveness — e.g. a scanner's generic health-check — and 405 there just reads as
+// "broken endpoint" to a prober that never intended to open a stream in the first place, so
+// it gets a plain 200 describing the server instead.
+export async function GET(req: Request) {
+  const wantsStream = (req.headers.get('accept') || '').includes('text/event-stream');
+  if (wantsStream) {
+    return NextResponse.json(
+      { error: 'This MCP server does not support the GET/SSE stream half of Streamable HTTP — use POST.' },
+      { status: 405, headers: { Allow: 'POST' } }
+    );
+  }
+  return NextResponse.json({
+    name: SERVER_INFO.name,
+    version: SERVER_INFO.version,
+    protocol: 'mcp',
+    protocolVersion: PROTOCOL_VERSION,
+    transport: 'streamable-http',
+    tools: TOOLS.map((t) => t.name),
+  });
 }
