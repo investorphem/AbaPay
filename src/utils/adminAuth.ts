@@ -1,5 +1,6 @@
-import { verifyMessage, createPublicClient, http } from 'viem';
+import { createPublicClient, http } from 'viem';
 import { base, baseSepolia, celo, celoSepolia } from 'viem/chains';
+import { verifySignatureAcrossChains } from '@/utils/walletAuth';
 
 const OWNER_ABI = [
   { inputs: [], name: 'owner', outputs: [{ internalType: 'address', name: '', type: 'address' }], stateMutability: 'view', type: 'function' },
@@ -68,16 +69,10 @@ export async function verifyAdminRequest(req: Request): Promise<{ authorized: bo
     return { authorized: false, message: 'Unauthorized: not the admin wallet.' };
   }
 
-  try {
-    const valid = await verifyMessage({
-      address: address as `0x${string}`,
-      message: `AbaPay Admin Login: ${timestamp}`,
-      signature: signature as `0x${string}`,
-    });
-    if (!valid) return { authorized: false, message: 'Unauthorized: invalid signature.' };
-  } catch {
-    return { authorized: false, message: 'Unauthorized: signature verification failed.' };
-  }
+  // Smart-wallet-aware (Coinbase Smart Wallet / Base Account, Safe, etc. via ERC-1271/6492,
+  // with a plain ECDSA fast path for ordinary EOAs) — see src/utils/walletAuth.ts.
+  const valid = await verifySignatureAcrossChains(address, `AbaPay Admin Login: ${timestamp}`, signature);
+  if (!valid) return { authorized: false, message: 'Unauthorized: invalid signature.' };
 
   return { authorized: true, message: 'OK', address };
 }

@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server';
-import { verifyMessage } from 'viem';
 import { supabaseAdmin } from '@/utils/supabase';
 import { verifyAdminRequest } from '@/utils/adminAuth';
+import { verifySignatureAcrossChains } from '@/utils/walletAuth';
 import { buildDiscountCreateMessage, CONFIRM_SIGNATURE_MAX_AGE_MS } from '@/lib/adminActionMessages';
 
 // ⚡ ADMIN: discount/promo campaigns — create, edit, activate/deactivate, and monitor how much
@@ -220,16 +220,10 @@ export async function POST(req: Request) {
       return NextResponse.json({ success: false, message: 'Confirmation expired — please try creating the campaign again.' }, { status: 401 });
     }
     const confirmMessage = buildDiscountCreateMessage({ name: String(name), type, value: v, timestamp: confirmTs });
-    try {
-      const validSig = await verifyMessage({
-        address: auth.address as `0x${string}`,
-        message: confirmMessage,
-        signature: confirmSignature as `0x${string}`,
-      });
-      if (!validSig) return NextResponse.json({ success: false, message: 'Signature does not match — campaign not created.' }, { status: 401 });
-    } catch {
-      return NextResponse.json({ success: false, message: 'Could not verify signature — campaign not created.' }, { status: 401 });
-    }
+    // Smart-wallet-aware (Coinbase Smart Wallet / Base Account, Safe, etc. via ERC-1271/6492,
+    // with a plain ECDSA fast path for ordinary EOAs) — see src/utils/walletAuth.ts.
+    const validSig = await verifySignatureAcrossChains(String(auth.address), confirmMessage, String(confirmSignature));
+    if (!validSig) return NextResponse.json({ success: false, message: 'Signature does not match — campaign not created.' }, { status: 401 });
 
     const { data, error } = await supabaseAdmin
       .from('discount_campaigns')
