@@ -234,7 +234,12 @@ Uses the same `CELO_PRIVATE_KEY` Hardhat already has configured — this is iden
 5. Separately, `npx hardhat run scripts/register8004.ts --network base` — mints the *Base* identity (AbaPay's live Base agent ID: **59561**). Same URI, different registry/chain, different agent ID.
 6. Set `NEXT_PUBLIC_ERC8004_AGENT_ID` to the agent ID the script prints. Look up either identity at [8004scan.io](https://8004scan.io).
 
-Because both registrations only ever store the **URL**, not the card's contents, editing `agent.json` itself (e.g. to add a new declared service) updates what both chains' identities resolve to immediately, with no new transaction — that's how the `mcp` service entry below reached both the Celo and Base agent records without a re-registration.
+Both registrations only ever store the **URL**, not the card's contents, so editing `agent.json` (e.g. to add a new declared service) changes what the URL *returns* with no new transaction. But that alone is not enough for a scanner like 8004scan to notice: indexers appear to snapshot the card at registration time rather than polling the URL on a schedule, so there's no on-chain signal telling them anything changed. `scripts/update8004uri.ts` closes that gap — it calls the registry's `setAgentURI(agentId, sameURI)`, re-emitting a fresh `URIUpdated` event (without changing the URI itself) purely to give an indexer something new to react to:
+```
+ERC8004_AGENT_ID=9687  ERC8004_AGENT_URI=https://abapays.com/.well-known/agent.json npx hardhat run scripts/update8004uri.ts --network celo
+ERC8004_AGENT_ID=59561 ERC8004_AGENT_URI=https://abapays.com/.well-known/agent.json npx hardhat run scripts/update8004uri.ts --network base
+```
+Run this any time `agent.json`'s contents change (like the `mcp` service entry above) and you want an already-registered identity to be re-read.
 
 ### x402 Settlement (main app, Celo + USDC)
 ```
@@ -319,6 +324,7 @@ npm run test:contracts       # Run the Solidity test suite
 npx hardhat run scripts/deployV2.ts --network <network>   # Deploy the hardened V2
 npx hardhat run scripts/deployV3.ts --network <network>     # Deploy V3 (agent-initiated payments)
 npx hardhat run scripts/register8004.ts --network <network> # Register the agent identity (ERC-8004)
+npx hardhat run scripts/update8004uri.ts --network <network> # Re-push the agent URI so an indexer (8004scan) re-reads it
 ```
 
 #### `AbaPayV2.sol` — hardened contract (⚠️ NOT YET AUDITED)
