@@ -4,6 +4,7 @@ import { supabaseAdmin } from '@/utils/supabase';
 import { hashPin } from '@/utils/pinSecurity';
 import { enforceRateLimit } from '@/lib/rateLimit';
 import { verifyWalletOwnership } from '@/utils/walletAuth';
+import { generateMcpApiKey, hashMcpApiKey } from '@/lib/deai/mcpAuth';
 
 // ⚡ SOCIAL LINKING — done in the REAL APP, where the user has their wallet.
 //
@@ -28,7 +29,7 @@ export async function GET(req: Request) {
 
   const { data } = await supabaseAdmin
     .from('agent_links')
-    .select('id, channel, channel_user_id, link_verified, approved_token, approved_chain, is_active, created_at')
+    .select('id, channel, channel_user_id, link_verified, approved_token, approved_chain, is_active, created_at, mcp_key_label')
     .ilike('wallet_address', wallet);
 
   return NextResponse.json({ success: true, links: data || [] });
@@ -39,13 +40,13 @@ export async function POST(req: Request) {
   if (limited) return limited;
 
   try {
-    const { wallet_address, channel, pin, approved_token, approved_chain } = await req.json();
+    const { wallet_address, channel, pin, approved_token, approved_chain, mcp_key_label } = await req.json();
     const wallet = String(wallet_address || '').toLowerCase();
 
     if (!/^0x[a-f0-9]{40}$/.test(wallet)) {
       return NextResponse.json({ success: false, message: 'Valid wallet address required' }, { status: 400 });
     }
-    if (!['TELEGRAM', 'WHATSAPP', 'X'].includes(channel)) {
+    if (!['TELEGRAM', 'WHATSAPP', 'X', 'MCP'].includes(channel)) {
       return NextResponse.json({ success: false, message: 'Unsupported channel' }, { status: 400 });
     }
     if (!/^\d{4,6}$/.test(String(pin || ''))) {
@@ -57,6 +58,40 @@ export async function POST(req: Request) {
     const auth = await verifyWalletOwnership(req, wallet, 'POST:/api/agent/link');
     if (!auth.ok) {
       return NextResponse.json({ success: false, message: auth.message }, { status: 401 });
+    }
+
+    // ⚡ MCP — an AI agent (Claude, or any MCP client) is not a chat bot the user can message
+    // to "claim" a code, so there's no PENDING-code-then-claim dance: the credential IS the
+    // API key, minted and shown ONCE right now. We store only its hash (channel_user_id),
+    // never the raw key, and verify immediately since there's nothing left to claim. A
+    // wallet may hold several MCP keys at once (one per agent/tool), unlike the single-row
+    // chat channels, so this is an INSERT, not an upsert keyed on the wallet.
+    if (channel === 'MCP') {
+      const rawKey = generateMcpApiKey();
+      const { error } = await supabaseAdmin.from('agent_links').insert({
+        wallet_address: wallet,
+        channel: 'MCP',
+        channel_user_id: hashMcpApiKey(rawKey),
+        pin_hash: hashPin(String(pin)),
+        mcp_key_label: mcp_key_label ? String(mcp_key_label).slice(0, 60) : null,
+        link_verified: true,
+        approved_token: approved_token || 'USD₮',
+        approved_chain: approved_chain || 'CELO',
+        failed_pin_attempts: 0,
+        locked_until: null,
+        is_active: true,
+      });
+
+      if (error) {
+        console.error('[AgentLink] MCP key create failed:', error.message);
+        return NextResponse.json({ success: false, message: 'Could not create API key.' }, { status: 500 });
+      }
+
+      return NextResponse.json({
+        success: true,
+        api_key: rawKey,
+        instructions: 'Save this API key now — it will not be shown again. Give it to your MCP client (e.g. Claude) as the AbaPay MCP server credential.',
+      });
     }
 
     // One-time, cryptographically random link code (never Math.random).

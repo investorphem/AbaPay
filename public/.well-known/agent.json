@@ -13,6 +13,10 @@
     {
       "type": "x402",
       "endpoint": "https://www.abapays.com/api/pay/x402"
+    },
+    {
+      "type": "mcp",
+      "endpoint": "https://www.abapays.com/api/mcp"
     }
   ],
   "registrations": [

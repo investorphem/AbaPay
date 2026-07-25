@@ -9,6 +9,9 @@ const CHANNELS = [
   { id: 'TELEGRAM', name: 'Telegram', color: 'text-sky-500', bot: 'https://t.me/abapayagentbot' },
   { id: 'WHATSAPP', name: 'WhatsApp', color: 'text-emerald-500', bot: 'https://wa.me/2347075418792' },
   { id: 'X', name: 'X (Twitter)', color: 'text-slate-900 dark:text-white', bot: 'https://x.com/AbaPays' },
+  // No bot to message — an MCP client (Claude, or any MCP-speaking AI agent) authenticates
+  // with an API key instead of a claimed chat identity. See startLink()'s MCP branch below.
+  { id: 'MCP', name: 'MCP (AI Agents)', color: 'text-violet-500', bot: '' },
 ];
 
 const CHAINS: Array<'CELO' | 'BASE'> = ['CELO', 'BASE'];
@@ -80,6 +83,8 @@ export function AgentHub({ address, selectedToken, activeChainName, onApproveAll
   const [channel, setChannel] = useState('TELEGRAM');
   const [pin, setPin] = useState('');
   const [linkCode, setLinkCode] = useState<string | null>(null);
+  const [apiKey, setApiKey] = useState<string | null>(null);
+  const [mcpKeyLabel, setMcpKeyLabel] = useState('');
   const [msg, setMsg] = useState('');
   const [allowanceInput, setAllowanceInput] = useState('10');
   const [approvalResult, setApprovalResult] = useState<{ success: boolean; message: string } | null>(null);
@@ -119,14 +124,15 @@ export function AgentHub({ address, selectedToken, activeChainName, onApproveAll
     if (result) setApprovalResult(result);
   };
 
-  const handleCopy = async () => {
-    if (!linkCode) return;
+  const handleCopy = async (text?: string | null) => {
+    const value = text ?? linkCode;
+    if (!value) return;
     try {
-      await navigator.clipboard.writeText(linkCode);
+      await navigator.clipboard.writeText(value);
       setCopied(true);
       setTimeout(() => setCopied(false), 2000);
     } catch {
-      setMsg('Could not copy — select and copy the code manually.');
+      setMsg('Could not copy — select and copy it manually.');
     }
   };
 
@@ -145,7 +151,7 @@ export function AgentHub({ address, selectedToken, activeChainName, onApproveAll
     if (!address) { setMsg('Connect your wallet first.'); return; }
     if (!/^\d{4,6}$/.test(pin)) { setMsg('PIN must be 4-6 digits.'); return; }
 
-    setLoading(true); setMsg(''); setLinkCode(null);
+    setLoading(true); setMsg(''); setLinkCode(null); setApiKey(null);
     try {
       const authHeaders = await getAuthHeaders('POST:/api/agent/link');
       if (!authHeaders) { setMsg('Signature request was rejected or failed — please try again.'); return; }
@@ -162,12 +168,18 @@ export function AgentHub({ address, selectedToken, activeChainName, onApproveAll
           // token/chain to check an allowance for.
           approved_token: approvalTokenSymbol,
           approved_chain: approvalChain,
+          ...(channel === 'MCP' ? { mcp_key_label: mcpKeyLabel || undefined } : {}),
         }),
       });
       const data = await res.json();
       if (!data.success) { setMsg(data.message || 'Could not start linking.'); return; }
 
-      setLinkCode(data.link_code);
+      if (channel === 'MCP') {
+        setApiKey(data.api_key);
+        setMcpKeyLabel('');
+      } else {
+        setLinkCode(data.link_code);
+      }
       setPin('');
       loadLinks();
     } catch {
@@ -333,13 +345,13 @@ export function AgentHub({ address, selectedToken, activeChainName, onApproveAll
 
       {/* ── STEP 2: LINK A CHANNEL ── */}
       <div className="bg-white dark:bg-[#111114] p-5 rounded-3xl border border-slate-100 dark:border-slate-800/60">
-        <h4 className="text-[11px] font-black uppercase tracking-widest text-slate-700 dark:text-slate-300 mb-3">2. Link a chat app</h4>
+        <h4 className="text-[11px] font-black uppercase tracking-widest text-slate-700 dark:text-slate-300 mb-3">2. Link a chat app or AI agent</h4>
 
-        <div className="grid grid-cols-3 gap-2 mb-3">
+        <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 mb-3">
           {CHANNELS.map((c) => (
             <button
               key={c.id}
-              onClick={() => { setChannel(c.id); setLinkCode(null); }}
+              onClick={() => { setChannel(c.id); setLinkCode(null); setApiKey(null); setMsg(''); }}
               className={`p-3 rounded-2xl border text-[10px] font-black uppercase tracking-widest transition-all ${
                 channel === c.id
                   ? 'border-emerald-400 bg-emerald-50 dark:bg-emerald-900/20 text-emerald-700 dark:text-emerald-400'
@@ -351,8 +363,23 @@ export function AgentHub({ address, selectedToken, activeChainName, onApproveAll
           ))}
         </div>
 
-        {!linkCode ? (
+        {channel === 'MCP' && !apiKey && (
+          <p className="text-[10px] text-slate-400 leading-relaxed mb-2">
+            For AI agents (Claude, or any MCP-speaking client) to check balances and pay bills on your behalf. Same PIN + on-chain limit protection as the chat channels.
+          </p>
+        )}
+
+        {!linkCode && !apiKey ? (
           <>
+            {channel === 'MCP' && (
+              <input
+                type="text"
+                value={mcpKeyLabel}
+                onChange={(e) => setMcpKeyLabel(e.target.value.slice(0, 60))}
+                placeholder="Label (e.g. Claude Desktop) — optional"
+                className="w-full bg-slate-50 dark:bg-[#1a1a1f] border border-slate-100 dark:border-slate-800/80 rounded-2xl px-4 py-3 text-sm text-slate-900 dark:text-white outline-none focus:border-emerald-300 mb-2"
+              />
+            )}
             <input
               type="password"
               inputMode="numeric"
@@ -366,16 +393,37 @@ export function AgentHub({ address, selectedToken, activeChainName, onApproveAll
               disabled={loading || !address}
               className="w-full py-3 bg-slate-900 dark:bg-white hover:bg-slate-800 dark:hover:bg-slate-200 disabled:opacity-50 text-white dark:text-slate-900 rounded-2xl text-xs font-black uppercase tracking-widest transition-colors active:scale-95 flex items-center justify-center gap-2"
             >
-              {loading ? <><Loader2 size={14} className="animate-spin" /> Generating…</> : `Link ${activeChannel.name}`}
+              {loading
+                ? <><Loader2 size={14} className="animate-spin" /> Generating…</>
+                : channel === 'MCP' ? 'Create API Key' : `Link ${activeChannel.name}`}
             </button>
           </>
+        ) : apiKey ? (
+          <div className="p-4 rounded-2xl bg-violet-50 dark:bg-violet-900/20 border border-violet-100 dark:border-violet-900/40">
+            <p className="text-[10px] uppercase tracking-widest font-black text-violet-700 dark:text-violet-400 mb-2">
+              Save this API key now — it won&apos;t be shown again
+            </p>
+            <div className="flex items-center gap-2 mb-3">
+              <code className="flex-1 bg-white dark:bg-[#111114] px-3 py-2 rounded-xl font-mono font-bold text-[11px] text-slate-900 dark:text-white break-all">{apiKey}</code>
+              <button
+                onClick={() => handleCopy(apiKey)}
+                className="p-2.5 bg-white dark:bg-[#111114] rounded-xl border border-violet-100 dark:border-violet-900/40 shrink-0"
+              >
+                {copied ? <Check size={14} className="text-violet-600" /> : <Copy size={14} className="text-violet-600" />}
+              </button>
+            </div>
+            {copied && <p className="text-[10px] text-violet-600 dark:text-violet-400 font-bold -mt-2 mb-3">Copied!</p>}
+            <p className="text-[10px] text-slate-400 leading-relaxed">
+              Give this to your MCP client as the AbaPay server credential, along with your PIN. Revoke it any time from the Linked list below.
+            </p>
+          </div>
         ) : (
           <div className="p-4 rounded-2xl bg-emerald-50 dark:bg-emerald-900/20 border border-emerald-100 dark:border-emerald-900/40">
             <p className="text-[10px] uppercase tracking-widest font-black text-emerald-700 dark:text-emerald-400 mb-2">Send this code to the bot</p>
             <div className="flex items-center gap-2 mb-3">
               <code className="flex-1 bg-white dark:bg-[#111114] px-3 py-2 rounded-xl font-mono font-black text-lg text-slate-900 dark:text-white text-center">{linkCode}</code>
               <button
-                onClick={handleCopy}
+                onClick={() => handleCopy()}
                 className="p-2.5 bg-white dark:bg-[#111114] rounded-xl border border-emerald-100 dark:border-emerald-900/40"
               >
                 {copied ? <Check size={14} className="text-emerald-600" /> : <Copy size={14} className="text-emerald-600" />}
@@ -415,7 +463,9 @@ export function AgentHub({ address, selectedToken, activeChainName, onApproveAll
                     {l.link_verified
                       ? <Check size={14} className="text-emerald-600" />
                       : <Loader2 size={14} className="text-slate-400" />}
-                    <span className="text-xs font-black text-slate-700 dark:text-slate-300">{l.channel}</span>
+                    <span className="text-xs font-black text-slate-700 dark:text-slate-300">
+                      {l.channel}{l.channel === 'MCP' && l.mcp_key_label ? ` · ${l.mcp_key_label}` : ''}
+                    </span>
                     <span className="text-[10px] text-slate-400 uppercase tracking-widest">
                       {l.link_verified ? 'Active' : 'Awaiting code'}
                     </span>
