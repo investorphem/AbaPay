@@ -51,10 +51,20 @@ export async function POST(req: Request) {
     // 1b. DISCOUNT — authoritative, server-computed. serviceCategory here is the web app's
     // uiCategory (AIRTIME/INTERNET/ELECTRICITY/CABLE/BANK/EDUCATION) — already the same
     // canonical key set src/lib/discounts.ts matches campaigns against, no mapping needed.
-    // Never trust a client-supplied discount: a tampered client claiming a bigger discount
-    // than actually active just ends up underpaying, rejected below like any other shortfall.
+    //
+    // 🔴 THE BUG THIS FIXES: international requests send a DYNAMIC serviceCategory
+    // ("INTL AIRTIME", "INTL DATA", ...) that never matched any admin-configured "services"
+    // list — meaning a campaign scoped to specific services correctly excluded international,
+    // but a GLOBAL campaign (no services restriction) still matched it via the "applies to
+    // everything" fallback in getActiveDiscountForService, silently discounting an
+    // international payment that the WEB APP's own preview never showed or accounted for
+    // (it explicitly refused to compute a discount for international at all). Normalizing to
+    // the same stable "INTERNATIONAL" key the client now also previews against means both
+    // sides can only ever agree, and admins can explicitly include/exclude it like any other
+    // service.
+    const discountServiceKey = String(serviceCategory || '').toUpperCase().startsWith('INTL') ? 'INTERNATIONAL' : serviceCategory;
     const destinationAccount = billersCode || phone || "N/A";
-    const activeDiscount = await getActiveDiscountForService(serviceCategory);
+    const activeDiscount = await getActiveDiscountForService(discountServiceKey);
     const { discountNgn, discountPhone } = await computeDiscountNgn(vendAmount, activeDiscount, wallet_address, destinationAccount);
 
     const requiredCrypto = (vendAmount + serviceFee - discountNgn) / baseRate;

@@ -273,14 +273,25 @@ export default function Home() {
   // discount server-side (see src/lib/discounts.ts) and is what actually enforces it. Debounced
   // so switching services/typing an amount doesn't fire a request per keystroke. Service key
   // mirrors buildBackendPayload's `uiCategory` (BANK/EDUCATION/AIRTIME/INTERNET/ELECTRICITY/
-  // CABLE) so the preview and the real server-side check are always looking at the same thing.
+  // CABLE/INTERNATIONAL) so the preview and the real server-side check are always looking at
+  // the same thing.
+  //
+  // 🔴 THE BUG THIS FIXES: this used to bail out entirely for international payments — but
+  // /api/pay's own discount lookup was NEVER told to treat international any differently, so a
+  // "global" (no services restriction) campaign would still silently MATCH an international
+  // transaction server-side and reduce the required crypto, while this client never showed the
+  // discount, never subtracted it from cryptoToCharge, and the user just ended up paying less
+  // than the full displayed price with no explanation. calculatedNairaAmount already holds a
+  // real NGN-equivalent for international requests (see its own useMemo above), so the exact
+  // same discount math genuinely applies — international is now a first-class, matchable
+  // service key ("INTERNATIONAL") instead of being silently excluded on one side only.
   const [activeDiscount, setActiveDiscount] = useState<{ id: string; name: string; type: 'PERCENT' | 'FIXED'; value: number; maxDiscountNgn: number | null } | null>(null);
   const [discountNgn, setDiscountNgn] = useState(0);
 
   useEffect(() => {
     const bill = parseFloat(calculatedNairaAmount) || 0;
-    if (isInternational || bill <= 0) { setActiveDiscount(null); setDiscountNgn(0); return; }
-    const serviceKey = activeTab === "bank" ? "BANK" : activeTab === "education" ? "EDUCATION" : activeService.id;
+    if (bill <= 0) { setActiveDiscount(null); setDiscountNgn(0); return; }
+    const serviceKey = isInternational ? "INTERNATIONAL" : activeTab === "bank" ? "BANK" : activeTab === "education" ? "EDUCATION" : activeService.id;
 
     const t = setTimeout(() => {
       const walletParam = address ? `&wallet=${encodeURIComponent(address)}` : '';
@@ -295,6 +306,21 @@ export default function Home() {
 
     return () => clearTimeout(t);
   }, [calculatedNairaAmount, activeTab, activeService.id, isInternational, address, accountNumber]);
+
+  // Foreign-currency-equivalent of discountNgn, for DISPLAY only — cryptoToCharge/the server
+  // both work entirely in NGN terms already (calculatedNairaAmount IS the NGN-equivalent for an
+  // international request too), so no payment math depends on this. Derived from the ratio of
+  // the two amounts already on screen (calculatedNairaAmount / displayForeignAmount) rather than
+  // re-deriving the plan's own rate/fixed-price logic, so it's automatically correct whichever
+  // of that branching produced the current numbers.
+  const foreignDiscountAmount = useMemo(() => {
+    if (!isInternational || discountNgn <= 0) return null;
+    const ngn = parseFloat(calculatedNairaAmount) || 0;
+    const foreign = parseFloat(String(displayForeignAmount).replace(/,/g, '')) || 0;
+    if (ngn <= 0 || foreign <= 0) return null;
+    const impliedRate = ngn / foreign; // NGN per 1 unit of the foreign currency
+    return discountNgn / impliedRate;
+  }, [isInternational, discountNgn, calculatedNairaAmount, displayForeignAmount]);
 
   const { cryptoToCharge, currentFee } = useMemo(() => {
     const bill = parseFloat(calculatedNairaAmount) || 0;
@@ -1861,19 +1887,25 @@ export default function Home() {
               <div className="text-center mb-8">
                  <p className="text-[10px] font-black text-slate-400 dark:text-slate-500 uppercase tracking-widest mb-2">Total Payable</p>
 
-                 {!isInternational && discountNgn > 0 && (
+                 {discountNgn > 0 && (
                     <p className="text-sm font-bold text-slate-400 dark:text-slate-500 line-through mb-0.5">
-                       ₦{(parseFloat(calculatedNairaAmount || "0") + currentFee).toLocaleString()}
+                       {isInternational
+                         ? `${intlCurrency || activeCountry.currency || activeCountry.code} ${displayForeignAmount}`
+                         : `₦${(parseFloat(calculatedNairaAmount || "0") + currentFee).toLocaleString()}`}
                     </p>
                  )}
 
                  <h2 className="text-4xl font-black text-slate-900 dark:text-white mb-2">
-                    {isInternational ? `${intlCurrency || activeCountry.currency || activeCountry.code} ${displayForeignAmount}` : `₦${(parseFloat(calculatedNairaAmount || "0") + currentFee - discountNgn).toLocaleString()}`}
+                    {isInternational
+                      ? `${intlCurrency || activeCountry.currency || activeCountry.code} ${(Math.max(0, (parseFloat(String(displayForeignAmount).replace(/,/g, '')) || 0) - (foreignDiscountAmount || 0))).toLocaleString()}`
+                      : `₦${(parseFloat(calculatedNairaAmount || "0") + currentFee - discountNgn).toLocaleString()}`}
                  </h2>
 
-                 {!isInternational && discountNgn > 0 && (
+                 {discountNgn > 0 && (
                     <p className="text-xs font-black text-emerald-600 dark:text-emerald-400 mb-2">
-                       🎉 {activeDiscount?.name || "Discount"} applied: -₦{discountNgn.toLocaleString()}
+                       🎉 {activeDiscount?.name || "Discount"} applied: -{isInternational
+                         ? `${intlCurrency || activeCountry.currency || activeCountry.code} ${(foreignDiscountAmount || 0).toLocaleString()}`
+                         : `₦${discountNgn.toLocaleString()}`}
                     </p>
                  )}
 
@@ -3230,15 +3262,19 @@ export default function Home() {
 
                 {/* ⚡ Early discount visibility — shown in the main form as soon as an amount
                      exists, not just at the final confirm modal, so the user sees the saving
-                     before they even reach checkout. discountNgn is already forced to 0 for
-                     international payments (see the discount-preview effect above), so no
-                     extra isInternational guard is needed here. */}
+                     before they even reach checkout. Works for international requests too —
+                     shown in whichever foreign currency the rest of the checkout is already
+                     displaying (see foreignDiscountAmount above), not always ₦. */}
                 {discountNgn > 0 && (
                     <div className="bg-emerald-50 dark:bg-emerald-900/20 border border-emerald-200 dark:border-emerald-800/50 p-4 rounded-2xl flex items-center gap-3 animate-in fade-in transition-colors">
                         <span className="text-2xl">🎉</span>
                         <div>
                             <p className="text-xs font-black text-emerald-700 dark:text-emerald-400">{activeDiscount?.name || 'Discount'} applied</p>
-                            <p className="text-[10px] font-bold text-emerald-600 dark:text-emerald-500">You save ₦{discountNgn.toLocaleString()} on this payment</p>
+                            <p className="text-[10px] font-bold text-emerald-600 dark:text-emerald-500">
+                                You save {isInternational
+                                    ? `${intlCurrency || activeCountry.currency || activeCountry.code} ${(foreignDiscountAmount || 0).toLocaleString()}`
+                                    : `₦${discountNgn.toLocaleString()}`} on this payment
+                            </p>
                         </div>
                     </div>
                 )}

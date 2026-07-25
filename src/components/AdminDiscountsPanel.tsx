@@ -16,7 +16,9 @@ import { buildDiscountCreateMessage } from "@/lib/adminActionMessages";
 // (src/constants/index.ts SERVICES + BANK/EDUCATION tabs). DATA is chat-only — the agent path
 // (src/app/api/deai/core/route.ts) tracks mobile data bundles separately from AIRTIME, with no
 // equivalent tile in the web app (whose "INTERNET" tile is ISP plans, a different service).
-const SERVICE_OPTIONS = ["AIRTIME", "DATA", "INTERNET", "ELECTRICITY", "CABLE", "BANK", "EDUCATION"];
+// INTERNATIONAL covers any cross-border top-up (the web app's country selector) — a single
+// stable key regardless of which foreign product/currency is actually involved.
+const SERVICE_OPTIONS = ["AIRTIME", "DATA", "INTERNET", "ELECTRICITY", "CABLE", "BANK", "EDUCATION", "INTERNATIONAL"];
 
 const EMPTY_FORM = {
   name: '', type: 'PERCENT', value: '', max_discount_ngn: '',
