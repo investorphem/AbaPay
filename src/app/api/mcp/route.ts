@@ -36,8 +36,18 @@ const SERVICE_INTENT: Record<string, string> = {
   CABLE: 'TV',
 };
 
+// 🔴 THE BUG THIS AVOIDS: a blanket `/[*_\`]/g` strip (an earlier version of this function)
+// turned "api_key is required." into "apikey is required." — several reused messages here
+// (e.g. src/lib/deai/pinSecurity.ts's lockout text) wrap a trailing sentence in WhatsApp-style
+// `_italics_`, but our OWN error messages use underscores for snake_case field names
+// (api_key, amount_ngn, account_number), and a bare global strip can't tell those apart.
+// Markdown italics are word-boundary-delimited (space/newline/string-edge on both sides);
+// snake_case underscores always sit between two letters. The lookbehind/lookahead below
+// only matches the former, so "api_key" and friends pass through completely untouched.
 function stripMd(s: string): string {
-  return String(s || '').replace(/[*_`]/g, '');
+  return String(s || '')
+    .replace(/(?<=^|\s)_([^_\n]+)_(?=$|[\s.,!?])/g, '$1')
+    .replace(/[*`]/g, '');
 }
 
 function textResult(text: string) {
