@@ -22,7 +22,8 @@ Designed for low fees, cross-border utility vending (Nigeria + supported interna
 * **Agent-Initiated Payments (AbaPayV3):** Users can grant the DeAI agent a bounded, on-chain, revocable spending allowance (`setSpendingAllowance`) — chosen independently per chain and per stablecoin from the Agent Hub tab — so it can pay bills on their behalf from Telegram/WhatsApp/X with no wallet signature needed at payment time and no custody of user funds. If no allowance is approved for the chain/token a chat payment needs, the agent detects that up front and offers a straight choice: approve it now, or complete this one payment via a signed deep link instead. See [AbaPayV3 — agent allowances](#abapayv3sol--agent-initiated-payments-️-not-audited) below.
 * **Autonomous Scheduling & Autopay Agent:** Beyond one-off chat payments, users can ask the DeAI agent to set up recurring bills (monthly/weekly/daily), a one-time future payment ("pay this in 10 minutes"), or a single request covering **multiple recipients/accounts at once** — the agent groups them by chain/token and settles each leg through the same allowance-bounded relayer, unattended, on schedule, with zero further interaction required from the user.
 * **On-Chain Attribution:** Celo transactions carry an ERC-8021 attribution tag (`src/lib/attribution.ts`) crediting the Celo Builders program; a no-op on Base.
-* **On-Chain Agent Identity (ERC-8004):** AbaPay's DeAI agent is registered as a real on-chain identity on Celo via the ERC-8004 "Trustless Agents" registry, so it's discoverable on 8004scan.io / AgentScan — independent of, and unrelated to, how it moves money. See [ERC-8004 agent identity](#erc-8004-agent-identity) below.
+* **On-Chain Agent Identity (ERC-8004):** AbaPay's DeAI agent is registered as a real on-chain identity on **both Celo and Base** via the ERC-8004 "Trustless Agents" registry, so it's discoverable on 8004scan.io / AgentScan — independent of, and unrelated to, how it moves money. See [ERC-8004 agent identity](#erc-8004-agent-identity) below.
+* **MCP Server (AI Agent Payments):** AbaPay is reachable by any MCP-speaking AI client (Claude, or any other agent that supports the Model Context Protocol) as a real tool server — `describe_capabilities`, `check_balance`, and `pay_bill` — over Streamable HTTP JSON-RPC at `/api/mcp`. This is a fourth channel alongside Telegram/WhatsApp/X, not a new trust boundary: it authenticates with a one-time API key + PIN and runs through the exact same allowance-bounded, kill-switch-gated, discount-aware execution pipeline as the chat channels, on **either Celo or Base** depending on what the linking wallet approved. See [MCP Server](#mcp-server-ai-agent-payments) below.
 * **x402 Settlement (main app, Celo + USDC/USDT):** Payments made directly in the web app — where the user is present and signing — settle automatically via the [x402](https://x402.org) HTTP-payment protocol against Celo's own facilitator whenever the user pays with **USDC or USD₮ on Celo** (no user-facing toggle), so they're genuinely indexed on x402scan, not just relabeled contract calls. Everything else (Base, cUSD/USDm) uses the original on-chain `payBill` flow, including Base's sponsored-gas path, unchanged — and the signature-free agent-initiated flow above is completely untouched, since x402 requires a fresh signature per payment, incompatible with unattended agent payments. See [x402 settlement](#x402-settlement-main-app-only) below.
 * **Dynamic Exchange Engine:** Live market rate conversions with admin-configurable exchange rate and automated profit spread calculation, verified server-side to prevent underpayment exploits.
 * **Executive Admin Dashboard:** Real-time monitoring of VTpass fiat balance, on-chain vault balances per token/chain, transaction analytics, manual refund tools, and CSV export — protected behind admin auth.
@@ -39,7 +40,8 @@ Designed for low fees, cross-border utility vending (Nigeria + supported interna
 * **Backend:** Next.js Route Handlers (serverless functions)
 * **Receipts:** html2canvas (image capture), jsPDF (PDF export)
 * **AI:** Claude (Anthropic API) for the DeAI conversational agent and in-app chat widget
-* **Agent Identity & Payments:** ERC-8004 (on-chain agent identity, Celo) and x402 (`thirdweb` SDK) for HTTP-native, facilitator-settled payments in the main app
+* **Agent Identity & Payments:** ERC-8004 (on-chain agent identity, Celo + Base) and x402 (`thirdweb` SDK) for HTTP-native, facilitator-settled payments in the main app
+* **Agent Tool Access:** MCP (Model Context Protocol) — Streamable HTTP/JSON-RPC server at `/api/mcp` exposing balance-check and bill-pay tools to any MCP client
 * **Utility Provider:** VTpass API (bills, airtime, data, education, international airtime)
 * **Database / Ledger:** Supabase (PostgreSQL) — transactions, platform settings, points, refunds
 * **Email:** Resend (transactional receipt emails)
@@ -67,6 +69,7 @@ src/
 │       ├── admin/                # Admin data, actions, refunds, health
 │       ├── user/points/          # AbaPoints balance
 │       ├── deai/                 # Conversational AI agent
+│       ├── mcp/                  # MCP server (tools: describe_capabilities, check_balance, pay_bill)
 │       ├── webhook/, webhook/vtpass/  # VTpass + on-chain webhooks
 │       ├── telegram/webhook/, whatsapp/webhook/, x/webhook/  # Bot channel webhooks
 │       └── support/              # Support ticket submission
@@ -218,16 +221,20 @@ NEXT_PUBLIC_APP_URL=https://abapays.com   # Used to build agent payment deep lin
 ERC8004_AGENT_URI=https://abapays.com/.well-known/agent.json   # Used only by scripts/register8004.ts
 ERC8004_REGISTRY_CELO_MAINNET=0x8004A169FB4a3325136EB29fA0ceB6D2e539a432   # Optional override
 ERC8004_REGISTRY_CELO_SEPOLIA=0x8004A818BFB912233c491871b3d84c89A494BD9e  # Optional override
+ERC8004_REGISTRY_BASE_MAINNET=0x8004A169FB4a3325136EB29fA0ceB6D2e539a432  # Optional override — same address as Celo mainnet, confirmed byte-identical via eth_getCode
 NEXT_PUBLIC_ERC8004_AGENT_ID=                                  # Optional. Set after registering, for UI display.
 ```
 Uses the same `CELO_PRIVATE_KEY` Hardhat already has configured — this is identity registration only, it never touches payments.
 
-**How to register:**
+**How to register:** identity is **per-chain** — there's no cross-chain agent record, so this is run once per chain, and both registrations point at the *same* `agent.json` URL.
 1. Deploy `public/.well-known/agent.json` (edit its `wallet.address` to your real `RELAYER_ADDRESS` first) so it's reachable at `https://<your-domain>/.well-known/agent.json`.
 2. Set `ERC8004_AGENT_URI` above to that URL.
 3. `npx hardhat run scripts/register8004.ts --network sepolia` first — confirm the tx on [Celo Sepolia Celoscan](https://sepolia.celoscan.io) and check the `Registered` event for the correct URI and agent ID.
-4. Only after that passes: `npx hardhat run scripts/register8004.ts --network celo` — spends real gas, mints the identity permanently.
-5. Set `NEXT_PUBLIC_ERC8004_AGENT_ID` to the agent ID the script prints. Look it up at [8004scan.io](https://8004scan.io).
+4. Only after that passes: `npx hardhat run scripts/register8004.ts --network celo` — spends real gas, mints the Celo identity permanently (AbaPay's live Celo agent ID: **9687**).
+5. Separately, `npx hardhat run scripts/register8004.ts --network base` — mints the *Base* identity (AbaPay's live Base agent ID: **59561**). Same URI, different registry/chain, different agent ID.
+6. Set `NEXT_PUBLIC_ERC8004_AGENT_ID` to the agent ID the script prints. Look up either identity at [8004scan.io](https://8004scan.io).
+
+Because both registrations only ever store the **URL**, not the card's contents, editing `agent.json` itself (e.g. to add a new declared service) updates what both chains' identities resolve to immediately, with no new transaction — that's how the `mcp` service entry below reached both the Celo and Base agent records without a re-registration.
 
 ### x402 Settlement (main app, Celo + USDC)
 ```
@@ -383,6 +390,67 @@ that names the operational relayer wallet as the agent's on-chain address.
 `payBillFor` flow above is completely unaffected; registering (or not) has zero effect on how
 bills get paid. Before running on mainnet, verify the `register(string)` selector against the
 registry's verified source on Celoscan — see the script's header comment.
+
+#### MCP Server (AI Agent Payments)
+
+`src/app/api/mcp/route.ts` implements a real [MCP](https://modelcontextprotocol.io) (Model
+Context Protocol) server — the same open standard Claude and other AI agents use to call
+tools — over **Streamable HTTP** (JSON-RPC 2.0: `initialize`, `tools/list`, `tools/call`), no
+extra dependency required. It's a **fourth channel into the same execution engine** that
+already backs Telegram/WhatsApp/X, not a parallel system with its own rules:
+
+| Tool | What it does | Needs |
+|---|---|---|
+| `describe_capabilities` | Human-readable menu of what AbaPay can pay and what's currently paused | Nothing — public |
+| `check_balance` | Reads the linked wallet's live stablecoin balances + remaining agent allowance | `api_key` |
+| `pay_bill` | Pays a real bill (airtime, data, electricity, cable) end-to-end, on-chain | `api_key` + `pin` |
+
+**Why this exists:** third-party agent scanners like [8004scan.io](https://8004scan.io) only run
+a health check against a declared `a2a` or `mcp` service (AbaPay's ERC-8004 card previously only
+declared `web` and `x402`, neither of which they probe) — see `public/.well-known/agent.json`'s
+`services` array. Building a real, working MCP server was the actual fix, not a stub added just
+to satisfy the scanner.
+
+**Same trust model as chat, not a new one.** `pay_bill` doesn't reimplement any security logic —
+it calls straight into the functions already backing Telegram/WhatsApp/X and the multi-recipient
+batch flow: `checkPinAllowed`/`verifyPin`/`recordPinFailure` (same escalating lockout),
+`checkServiceAllowed` (kill switches), `checkAccountNumber`/`checkAmount` (parity validation),
+`checkAgentSpendAllowed` (operator per-tx/daily caps), `checkAutonomousCapacity` +
+`executeAgentPayment` (on-chain allowance check, the shared discount engine, and vend), and
+`notifySpendOutOfBand` (email + every other linked channel is told the instant money moves, so a
+leaked API key is caught exactly like a stolen chat session would be).
+
+**Chain-agnostic — Celo or Base, whichever the linking wallet approved.** An MCP key inherits the
+`approved_chain`/`approved_token` recorded when it was created (same fields Telegram/WhatsApp/X
+already use), and `check_balance` accepts an explicit `chain` override. There is nothing
+Celo-specific or Base-specific in the MCP layer itself — it's the same multi-chain relayer
+(`src/lib/deai/relayer.ts`) and balance reader (`src/lib/deai/services.ts`) every other channel
+shares.
+
+**Linking (no new env vars, no new table):** `agent_links.channel` gained an `'MCP'` value
+(`supabase/migrations/019_mcp_channel.sql`) alongside `TELEGRAM`/`WHATSAPP`/`X`. Unlike those,
+there's no bot to "claim" a link code with — from the app's **Agent Hub** tab, pick the **MCP (AI
+Agents)** tile, set a PIN, and it mints a 256-bit API key shown **exactly once** (only its
+SHA-256 hash is ever stored). A wallet can hold several MCP keys at once — one per agent/tool —
+each with its own label.
+
+**Connecting an AI agent (end users):**
+1. In the AbaPay app, approve an on-chain spend limit for whichever chain/token you want the
+   agent to use (Agent Hub → step 1) — this is the real ceiling; nothing below can exceed it.
+2. Still in Agent Hub, pick **MCP (AI Agents)**, optionally label the key (e.g. "Claude"), set a
+   PIN, and save the API key it shows you — it will not be shown again.
+3. Point your MCP client at `https://www.abapays.com/api/mcp` as a remote (Streamable HTTP)
+   server. For clients that accept a JSON config for remote servers, that typically looks like:
+   ```json
+   {
+     "mcpServers": {
+       "abapay": { "url": "https://www.abapays.com/api/mcp" }
+     }
+   }
+   ```
+4. Give the API key and PIN to the agent in conversation (or however your client supports
+   passing tool arguments) — they're arguments to `check_balance`/`pay_bill`, not an HTTP header,
+   so no separate app-level auth step is needed.
 
 #### x402 Settlement (main app only)
 
