@@ -120,8 +120,16 @@ export function AdminDiscountsPanel({ adminHeaders, onSignAdminAction }: Props) 
       max_discount_per_phone_ngn: capsOn.phone && form.max_discount_per_phone_ngn ? Number(form.max_discount_per_phone_ngn) : null,
       max_total_discount_ngn: capsOn.total && form.max_total_discount_ngn ? Number(form.max_total_discount_ngn) : null,
       services: form.services,
-      starts_at: form.starts_at || null,
-      ends_at: form.ends_at || null,
+      // 🔴 THE BUG THIS FIXES: a <input type="datetime-local"> value ("2026-07-25T07:44") has
+      // NO timezone marker. Sending it to the server as-is and inserting it into a timestamptz
+      // column means Postgres reads it as literal UTC — so an admin in any timezone AHEAD of
+      // UTC (e.g. WAT, UTC+1) would have their campaign start/end silently shifted LATER than
+      // they typed, and it simply wasn't "active" yet when tested shortly after creating it.
+      // `new Date(...)` on a date-TIME string (has a "T") is specified to parse as the
+      // BROWSER's local time — exactly what the admin meant — so converting via .toISOString()
+      // here sends the correct UTC instant regardless of which timezone the admin is in.
+      starts_at: form.starts_at ? new Date(form.starts_at).toISOString() : null,
+      ends_at: form.ends_at ? new Date(form.ends_at).toISOString() : null,
       is_active: true,
       confirmSignature,
       confirmTimestamp: timestamp,
