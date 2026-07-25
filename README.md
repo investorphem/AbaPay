@@ -408,8 +408,17 @@ already backs Telegram/WhatsApp/X, not a parallel system with its own rules:
 | Tool | What it does | Needs |
 |---|---|---|
 | `describe_capabilities` | Human-readable menu of what AbaPay can pay and what's currently paused | Nothing — public |
-| `check_balance` | Reads the linked wallet's live stablecoin balances + remaining agent allowance | `api_key` |
+| `check_balance` | Reads the linked wallet's live balance + approved agent limit, **per token**, on a chain | `api_key` |
 | `pay_bill` | Pays a real bill (airtime, data, electricity, cable) end-to-end, on-chain | `api_key` + `pin` |
+
+Both accept optional `chain`/`token` overrides — they default to whatever was approved when the
+API key was created, but a caller isn't stuck with that default if it comes up short. `check_balance`
+returns balance + approved limit for **every** stablecoin on the chain (not just the default one),
+so an agent can see upfront whether an alternative is even viable. If `pay_bill` is attempted with
+the default and it's short on balance or on-chain allowance, the error itself checks whether
+another token on that same chain already has enough of both and says so by name — e.g. *"USD₮ is
+short, but USDC already has enough balance and an approved limit — retry with token: 'USDC'"* —
+rather than a dead-end message naming only the token that failed.
 
 **Why this exists:** third-party agent scanners like [8004scan.io](https://8004scan.io) only run
 a health check against a declared `a2a` or `mcp` service (AbaPay's ERC-8004 card previously only

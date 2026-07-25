@@ -6,6 +6,7 @@ import { getServiceRules, checkServiceAllowed, checkAgentSpendAllowed } from '@/
 import { describeCapabilities, capabilityForIntent, getCapability } from '@/lib/deai/capabilities';
 import { resolveServiceId, fetchCryptoBalances, verifyAccount } from '@/lib/deai/services';
 import { getRemainingAllowance } from '@/lib/deai/relayer';
+import { SUPPORTED_TOKENS } from '@/constants';
 import { checkAccountNumber, checkAmount as checkAmountParity } from '@/lib/parity';
 import { checkAutonomousCapacity, executeAgentPayment, type BatchItem } from '@/lib/deai/batch';
 import { resolveMcpIdentity } from '@/lib/deai/mcpAuth';
@@ -47,6 +48,16 @@ function errorResult(text: string) {
   return { content: [{ type: 'text', text: stripMd(text) }], isError: true };
 }
 
+// Which stablecoins actually exist on a given chain — same source (SUPPORTED_TOKENS) every
+// other channel already filters against, so this can never offer a token that doesn't exist
+// there (e.g. USDm is Celo-only).
+function tokensForChain(chain: string): string[] {
+  const key = chain.toLowerCase();
+  return (SUPPORTED_TOKENS as any[])
+    .filter((t) => !t.supportedNetworks || t.supportedNetworks.includes(key))
+    .map((t) => t.symbol);
+}
+
 const TOOLS = [
   {
     name: 'describe_capabilities',
@@ -85,6 +96,8 @@ const TOOLS = [
         provider: { type: 'string', description: 'e.g. mtn, airtel, glo, ikeja-electric, dstv, gotv, startimes' },
         account_number: { type: 'string', description: 'Phone number (airtime/data), meter number (electricity), or smartcard/IUC number (cable)' },
         amount_ngn: { type: 'number', description: 'Amount in Naira' },
+        chain: { type: 'string', enum: ['CELO', 'BASE'], description: 'Defaults to the chain approved when the API key was created. Only override this if the default chain lacks balance/allowance and check_balance shows funds on the other one.' },
+        token: { type: 'string', enum: ['USD₮', 'USDC', 'USDm'], description: 'Which stablecoin to pay with. Defaults to the token approved when the API key was created. If that one is short on balance or on-chain allowance, call check_balance first to see what else is available on this chain, then retry with this field set — e.g. if USD₮ is short but the wallet holds USDC with its own approved limit, pass token: "USDC".' },
         variation_code: { type: 'string', description: 'Plan/bundle code — required for DATA, and for CABLE when changing package (not needed to renew the current one)' },
         meter_type: { type: 'string', enum: ['prepaid', 'postpaid'], description: 'Required for ELECTRICITY' },
         customer_name: { type: 'string', description: 'Optional — used for the receipt if known' },
@@ -110,19 +123,27 @@ async function callCheckBalance(args: any) {
   if (!identity) return errorResult('Invalid or revoked API key. Create a new one in the AbaPay app under Agent Hub → MCP.');
 
   const chain = args?.chain === 'BASE' || args?.chain === 'CELO' ? args.chain : identity.approved_chain || 'CELO';
-  const [balances, allowance] = await Promise.all([
+  const tokens = tokensForChain(chain);
+  const [balances, allowances] = await Promise.all([
     fetchCryptoBalances(identity.wallet_address, chain),
-    getRemainingAllowance(identity.wallet_address, identity.approved_token || 'USD₮', chain),
+    Promise.all(tokens.map((sym) => getRemainingAllowance(identity.wallet_address, sym, chain))),
   ]);
 
+  // Every token on this chain, not just the one the API key defaults to — pay_bill accepts a
+  // token override (see its description), so the agent needs the full picture up front to
+  // know a fallback is even worth trying, rather than discovering it only after a failure.
   const lines = [
     `Wallet: ${identity.wallet_address}`,
     `Chain: ${chain}`,
+    `Default token for pay_bill (set when this API key was created): ${identity.approved_token || 'USD₮'}`,
     '',
-    'Balances:',
-    ...Object.entries(balances).map(([sym, amt]) => `  ${sym}: ${amt}`),
-    '',
-    `Agent spending allowance (${identity.approved_token || 'USD₮'}): ${allowance.ok ? allowance.remaining.toFixed(4) : 'unavailable'}`,
+    'Per-token balance and approved agent spending limit:',
+    ...tokens.map((sym, i) => {
+      const bal = balances[sym] ?? '0.0000';
+      const a = allowances[i];
+      const lim = a.ok ? a.remaining.toFixed(4) : 'unavailable';
+      return `  ${sym}: balance ${bal}, approved limit ${lim}`;
+    }),
   ];
   return textResult(lines.join('\n'));
 }
@@ -138,6 +159,8 @@ async function callPayBill(args: any) {
   const meterType = args?.meter_type ? String(args.meter_type) : null;
   const customerName = args?.customer_name ? String(args.customer_name) : null;
   const customerEmail = args?.customer_email ? String(args.customer_email) : null;
+  const chainOverride = args?.chain === 'BASE' || args?.chain === 'CELO' ? args.chain : null;
+  const tokenOverride = args?.token ? String(args.token) : null;
 
   if (!apiKey) return errorResult('api_key is required.');
   if (!/^\d{4,6}$/.test(pin)) return errorResult('pin must be 4-6 digits.');
@@ -193,13 +216,32 @@ async function callPayBill(args: any) {
 
   const rules = await getServiceRules();
   const rate = rules.exchangeRate;
-  const chain = identity.approved_chain || 'CELO';
-  const tokenSymbol = identity.approved_token || 'USD₮';
+  const chain = chainOverride || identity.approved_chain || 'CELO';
+  const chainTokens = tokensForChain(chain);
+  // Defaults to whatever was approved when the API key was created — same as every other
+  // channel — but callers can pass `token` to retry with a different one on the same chain
+  // (e.g. after check_balance shows USD₮ is short but USDC has both balance and an approved
+  // limit). Falls back to the default if an invalid/unsupported symbol is passed.
+  const tokenSymbol = tokenOverride && chainTokens.includes(tokenOverride) ? tokenOverride : (identity.approved_token || 'USD₮');
 
   // The allowance is enforced BY THE CONTRACT regardless — checked here first so a shortfall
   // fails with a clear message instead of a wasted on-chain revert.
   const capacity = await checkAutonomousCapacity(identity.wallet_address, chain, tokenSymbol, amountNgn, rate);
-  if (!capacity.ok) return errorResult(capacity.reason);
+  if (!capacity.ok) {
+    // Don't just report the shortfall — check whether ANOTHER token on this same chain
+    // already has both the balance and the approved allowance to cover it, and say so. This
+    // is what actually lets a caller act on "use USDC instead" rather than hitting a dead end
+    // that only names the one token that came up short.
+    const otherTokens = chainTokens.filter((t) => t !== tokenSymbol);
+    const otherChecks = await Promise.all(
+      otherTokens.map((t) => checkAutonomousCapacity(identity.wallet_address, chain, t, amountNgn, rate))
+    );
+    const viable = otherTokens.find((_, i) => otherChecks[i].ok);
+    if (viable) {
+      return errorResult(`${capacity.reason}\n\nHowever, ${viable} on ${chain} already has enough balance and an approved agent limit to cover this. Retry pay_bill with token: "${viable}" to use it instead.`);
+    }
+    return errorResult(capacity.reason);
+  }
 
   const item: BatchItem = {
     serviceCategory: service,
