@@ -2337,6 +2337,19 @@ export default function Home() {
                     />
                 </div>
 
+                {/* ⚡ Early discount visibility — shown in the main form as soon as an amount
+                     exists, not just at the final confirm modal, so the user sees the saving
+                     before they even reach checkout. */}
+                {discountNgn > 0 && (
+                    <div className="bg-emerald-50 dark:bg-emerald-900/20 border border-emerald-200 dark:border-emerald-800/50 p-4 rounded-2xl flex items-center gap-3 animate-in fade-in transition-colors">
+                        <span className="text-2xl">🎉</span>
+                        <div>
+                            <p className="text-xs font-black text-emerald-700 dark:text-emerald-400">{activeDiscount?.name || 'Discount'} applied</p>
+                            <p className="text-[10px] font-bold text-emerald-600 dark:text-emerald-500">You save ₦{discountNgn.toLocaleString()} on this payment</p>
+                        </div>
+                    </div>
+                )}
+
                 {status && (
                     <div className={`p-5 rounded-2xl border flex items-center gap-4 animate-in fade-in transition-colors ${status.includes('Success') ? 'bg-emerald-50 dark:bg-emerald-900/20 border-emerald-100 dark:border-emerald-800/50 text-emerald-800 dark:text-emerald-400' : 'bg-blue-50 dark:bg-blue-900/20 border-blue-100 dark:border-blue-800/50 text-blue-800 dark:text-blue-400'}`}>
                         {status.includes('Success') ? <CheckCircle2 size={24}/> : <Loader2 size={24} className="animate-spin"/>}
@@ -2344,7 +2357,7 @@ export default function Home() {
                     </div>
                 )}
 
-                <button 
+                <button
                     onClick={() => setIsConfirmModalOpen(true)}
                     disabled={isVerifying || !isFormValid || isProcessing}
                     className="w-full bg-slate-900 dark:bg-white hover:bg-black dark:hover:bg-slate-200 text-white dark:text-slate-900 font-black py-6 rounded-3xl flex items-center justify-center gap-3.5 transition-all active:scale-95 disabled:bg-slate-300 dark:disabled:bg-slate-800 disabled:text-slate-500 dark:disabled:text-slate-500 shadow-xl shadow-slate-900/20 dark:shadow-white/10 text-lg tracking-tight"
@@ -2530,6 +2543,19 @@ export default function Home() {
                     />
                 </div>
 
+                {/* ⚡ Early discount visibility — shown in the main form as soon as an amount
+                     exists, not just at the final confirm modal, so the user sees the saving
+                     before they even reach checkout. */}
+                {discountNgn > 0 && (
+                    <div className="bg-emerald-50 dark:bg-emerald-900/20 border border-emerald-200 dark:border-emerald-800/50 p-4 rounded-2xl flex items-center gap-3 animate-in fade-in transition-colors">
+                        <span className="text-2xl">🎉</span>
+                        <div>
+                            <p className="text-xs font-black text-emerald-700 dark:text-emerald-400">{activeDiscount?.name || 'Discount'} applied</p>
+                            <p className="text-[10px] font-bold text-emerald-600 dark:text-emerald-500">You save ₦{discountNgn.toLocaleString()} on this payment</p>
+                        </div>
+                    </div>
+                )}
+
                 {status && (
                     <div className={`p-5 rounded-2xl border flex items-center gap-4 animate-in fade-in shadow-sm transition-colors ${status.includes('Success') || status.includes('Secured') || status.includes('Initiating') ? 'bg-emerald-50 dark:bg-emerald-900/20 border-emerald-100 dark:border-emerald-800/50 text-emerald-800 dark:text-emerald-400' : 'bg-blue-50 dark:bg-blue-900/20 border-blue-100 dark:border-blue-800/50 text-blue-800 dark:text-blue-400'}`}>
                         {status.includes('Success') ? <CheckCircle2 size={24}/> : <Loader2 size={24} className="animate-spin"/>}
@@ -2537,7 +2563,7 @@ export default function Home() {
                     </div>
                 )}
 
-                <button 
+                <button
                     onClick={() => setIsConfirmModalOpen(true)}
                     disabled={!isFormValid || isProcessing || isCurrentServiceDisabled}
                     className={`w-full text-white dark:text-slate-900 font-black py-6 rounded-3xl flex items-center justify-center gap-3.5 transition-all active:scale-95 shadow-xl text-lg tracking-tight ${isCurrentServiceDisabled ? 'bg-slate-300 dark:bg-slate-800 opacity-50 cursor-not-allowed text-slate-500 dark:text-slate-500 shadow-none' : 'bg-slate-900 dark:bg-white hover:bg-black dark:hover:bg-slate-200 disabled:opacity-30 shadow-slate-900/20 dark:shadow-white/10'}`}
@@ -3202,6 +3228,21 @@ export default function Home() {
                     )}
                 </div>
 
+                {/* ⚡ Early discount visibility — shown in the main form as soon as an amount
+                     exists, not just at the final confirm modal, so the user sees the saving
+                     before they even reach checkout. discountNgn is already forced to 0 for
+                     international payments (see the discount-preview effect above), so no
+                     extra isInternational guard is needed here. */}
+                {discountNgn > 0 && (
+                    <div className="bg-emerald-50 dark:bg-emerald-900/20 border border-emerald-200 dark:border-emerald-800/50 p-4 rounded-2xl flex items-center gap-3 animate-in fade-in transition-colors">
+                        <span className="text-2xl">🎉</span>
+                        <div>
+                            <p className="text-xs font-black text-emerald-700 dark:text-emerald-400">{activeDiscount?.name || 'Discount'} applied</p>
+                            <p className="text-[10px] font-bold text-emerald-600 dark:text-emerald-500">You save ₦{discountNgn.toLocaleString()} on this payment</p>
+                        </div>
+                    </div>
+                )}
+
                 {status && (
                     <div className={`p-5 rounded-2xl border flex items-center gap-4 animate-in fade-in shadow-sm transition-colors ${status.includes('Success') || status.includes('Secured') || status.includes('Initiating') ? 'bg-emerald-50 dark:bg-emerald-900/20 border-emerald-100 dark:border-emerald-800/50 text-emerald-800 dark:text-emerald-400' : status.includes('Processing') ? 'bg-orange-50 dark:bg-orange-900/20 border-orange-100 dark:border-orange-800/50 text-orange-800 dark:text-orange-400' : 'bg-blue-50 dark:bg-blue-900/20 border-blue-100 dark:border-blue-800/50 text-blue-800 dark:text-blue-400'}`}>
                         {status.includes('Success') ? <CheckCircle2 size={24}/> : <Loader2 size={24} className="animate-spin"/>}
@@ -3209,7 +3250,7 @@ export default function Home() {
                     </div>
                 )}
 
-                <button 
+                <button
                     onClick={() => setIsConfirmModalOpen(true)}
                     disabled={isVerifying || !isFormValid || isProcessing || isCurrentServiceDisabled}
                     className={`w-full text-white dark:text-slate-900 font-black py-6 rounded-3xl flex items-center justify-center gap-3.5 transition-all active:scale-95 shadow-xl text-lg tracking-tight ${(!isFormValid || isCurrentServiceDisabled) ? 'bg-slate-300 dark:bg-slate-800 opacity-50 cursor-not-allowed text-slate-500 dark:text-slate-500 shadow-none' : 'bg-slate-900 dark:bg-white hover:bg-black dark:hover:bg-slate-200 disabled:opacity-30 shadow-slate-900/20 dark:shadow-white/10'}`}
