@@ -446,17 +446,50 @@ each with its own label.
 2. Still in Agent Hub, pick **MCP (AI Agents)**, optionally label the key (e.g. "Claude"), set a
    PIN, and save the API key it shows you — it will not be shown again.
 3. Point your MCP client at `https://www.abapays.com/api/mcp` as a remote (Streamable HTTP)
-   server. For clients that accept a JSON config for remote servers, that typically looks like:
-   ```json
-   {
-     "mcpServers": {
-       "abapay": { "url": "https://www.abapays.com/api/mcp" }
+   server:
+   - **Easiest — claude.ai (web), no file editing:** Settings → Connectors ("Integrations" on
+     some accounts) → **Add custom connector** → paste `https://www.abapays.com/api/mcp` → Save.
+     It's now available as a tool source in any new chat.
+   - **Claude Desktop (local config file)** — merge this into
+     `%APPDATA%\Claude\claude_desktop_config.json` (don't overwrite the whole file if you already
+     have other servers configured there):
+     ```json
+     {
+       "mcpServers": {
+         "abapay": { "url": "https://www.abapays.com/api/mcp" }
+       }
      }
-   }
-   ```
+     ```
+   - **Any other MCP client:** the same URL, Streamable HTTP transport — no API key or auth
+     header at the connection level; see step 4.
 4. Give the API key and PIN to the agent in conversation (or however your client supports
    passing tool arguments) — they're arguments to `check_balance`/`pay_bill`, not an HTTP header,
    so no separate app-level auth step is needed.
+
+Every tool declares `annotations` (`title`, `readOnlyHint`/`destructiveHint`, `idempotentHint`,
+`openWorldHint`) — `pay_bill` is correctly flagged destructive/non-idempotent (it moves real
+money and calling it twice pays twice), while `describe_capabilities`/`check_balance` are
+read-only — so a client can warn a user appropriately before letting an agent invoke it.
+
+**Getting listed in claude.ai's Connectors Directory** (so users can find AbaPay by browsing/
+searching instead of pasting the URL) is a separate step from what's built here — it's an
+organizational submission through Anthropic, not a code change:
+- Requires a Team or Enterprise claude.ai organization (submission happens in
+  **admin settings → Directory → New submission**); only Owners (or a delegated role on
+  Enterprise) can submit.
+- Requirements confirmed against Anthropic's own submission docs: tool `title` +
+  `readOnlyHint`/`destructiveHint` annotations (✅ done above), a public documentation URL
+  (`https://abapays.com/docs` — live), a privacy policy URL (`https://abapays.com/privacy` —
+  live), an icon, and reviewer test-account credentials.
+- **The real gap: OAuth 2.0.** The directory requires OAuth for authenticated connectors;
+  `pay_bill`/`check_balance` currently authenticate via an `api_key` **tool argument** (the same
+  model as every other channel here), not an OAuth handshake at the connection level. Anthropic's
+  submission flow does also support "a custom connection where users supply their own
+  credentials at connection time" as an alternative to full OAuth — worth confirming against
+  the current review criteria before assuming a full OAuth authorization server needs to be
+  built. Either way, this needs its own scoped change; it hasn't been attempted here.
+- Until submitted/approved, "Add custom connector" with the URL (above) is a fully working,
+  unrestricted way to use it today — the directory only adds discoverability, not capability.
 
 #### x402 Settlement (main app only)
 

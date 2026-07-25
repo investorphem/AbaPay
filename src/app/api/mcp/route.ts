@@ -50,11 +50,15 @@ function errorResult(text: string) {
 const TOOLS = [
   {
     name: 'describe_capabilities',
+    title: 'Describe Capabilities',
     description: 'List what AbaPay can pay (airtime, data, electricity, cable, etc.), any services currently paused, and example requests. Call this first if unsure what is supported.',
     inputSchema: { type: 'object', properties: {}, additionalProperties: false },
+    // Static text, no wallet/network access, safe to call repeatedly.
+    annotations: { title: 'Describe Capabilities', readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
   },
   {
     name: 'check_balance',
+    title: 'Check Balance',
     description: "Check a linked wallet's stablecoin balances and remaining agent spending allowance. Requires the api_key created in the AbaPay app's Agent Hub (MCP).",
     inputSchema: {
       type: 'object',
@@ -65,9 +69,12 @@ const TOOLS = [
       required: ['api_key'],
       additionalProperties: false,
     },
+    // Reads on-chain state — never writes, never spends.
+    annotations: { title: 'Check Balance', readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: true },
   },
   {
     name: 'pay_bill',
+    title: 'Pay Bill',
     description: 'Pay a real Nigerian bill (airtime, data, electricity, or cable TV) from the linked wallet, settled on-chain and delivered via the same pipeline as the AbaPay app. Requires the api_key and the PIN set when the key was created. Money moves for real — only call this once the human has clearly confirmed the exact amount, provider, and account.',
     inputSchema: {
       type: 'object',
@@ -86,6 +93,8 @@ const TOOLS = [
       required: ['api_key', 'pin', 'service', 'provider', 'account_number', 'amount_ngn'],
       additionalProperties: false,
     },
+    // Moves real money on-chain — irreversible, and calling it twice pays twice.
+    annotations: { title: 'Pay Bill', readOnlyHint: false, destructiveHint: true, idempotentHint: false, openWorldHint: true },
   },
 ];
 
