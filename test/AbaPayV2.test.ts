@@ -29,7 +29,7 @@ describe("AbaPayV2", function () {
 
     // Fund the user and approve the vault.
     await token.mint(user.address, ethers.parseUnits("1000", 6));
-    await tokerove(await aba ethers.MaxUint256);
+    await tokerove(await aba t256);
 
     await abapay.setTokenSupport(await token.getAddress(), true);
 
