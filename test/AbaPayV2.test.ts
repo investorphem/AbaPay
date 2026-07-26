@@ -183,7 +183,7 @@ describe("AbaPayV2", function () {
 
       await abapay.queueWithdrawal(await token.getAddress(), treasury.address, amount);
       await expect(abapay.cancelWithdrawal(await token.getAddress()))
-        .to.emit(abapay, "WithdrawalCancelled");
+        .to.emit(abapay, "WithdrawalCan
 
       await time.increase(ONE_DAY + 1);
       await expect(
