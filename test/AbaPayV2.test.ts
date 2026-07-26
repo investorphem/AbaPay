@@ -196,7 +196,7 @@ describe("AbaPayV2", function () {
       await abapay.queueWithdrawal(await token.getAddress(), treasury.address, ethers.parseUnits("1", 6));
       await expect(
         abapay.queueWithdrawal(await token.getAddress(), treasury.address, ethers.parseUnits("2", 6))
-      ).to.be.revertedWithCustomError(abapay, "WithdrawalAlreadyQueued");
+      ).to.be.revertedWithError(abapay, "WithdrawalAlreadyQueued");
     });
 
     it("cannot queue more than the vault holds", async function () {
