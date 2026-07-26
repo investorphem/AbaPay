@@ -21,7 +21,7 @@ export function resolveChain(blockchain: string | null | undefined) {
   return { chain, isMainnet, isBase };
 
 
-// Primary + backup RPC URLs per chain. Primary matches what the app used b
+// Primary + backup RPC URLsper chain. Primary matches what the app used b
 // backups are well-knownoutage doesn't halt verif
 function rpcUrlsFor(ch: numstring[] {
   switch (chainId) {
