@@ -19,8 +19,7 @@ describe("AbaPayV2", function () {
   const ONE_DAY = 24 * 60 * 60;
 
   async function deploy() {
-    const [owner, user, attacker, treasury] = await ethers.getSigners();
-
+    const [owner, user, attacker, treasury] = await ethers.get
     const Token = await ethers.getContractFactory("MockERC20");
     const token = await Token.deploy("Mock USD", "mUSD", 6);
 
