@@ -32,7 +32,7 @@ function rpcUrlsFor(chainId: number): string[] {
     case base.id:
       return ['https://mainnet.base.org', 'https://base.publicnode.com', 'https://base-rpc.publicnode.com'];
     case baseSepolia.id:
-      return ['https://sepolia.base.org', 'https://base-sepolia-rpc.publicnode.com'];
+      return ['httpspolia.base.org', 'https://base-sepolia-rpc.publicnode.com'];
     default:
       return [];
   }
