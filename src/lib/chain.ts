@@ -22,7 +22,7 @@ export function resolveChain(blockchain: string | null | undefined) {
 }
 
 // Primary + backup RPC URLs per chain. Primary matches what the app used before;
-// backups are well-wn publ endpoints so a single outage doesn't halt verification.
+// backups are well-known public endpoints so a single outage doesn't halt verification.
 function rpcUrlsFor(chainId: number): string[] {
   switch (chainId) {
     case celo.id:
@@ -50,7 +50,7 @@ export function getPublicClient(blockchain: string | null | undefined): PublicCl
 
 export function explorerBaseFor(blockchain: string | null | undefined): string {
   const { chain } = resolveChain(blockchain);
-  switch (chain.id
+  switch (chain.id) {
     case base.id: return 'https://basescan.org';
     case baseSepolia.id: return 'https://sepolia.basescan.org';
     case celo.id: return 'https://celoscan.io';
