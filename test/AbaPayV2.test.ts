@@ -261,7 +261,7 @@ describe("AbaPayV2", function () {
 
       // Owner whitelists a malicious hook-bearing token (the realistic mistake scenario).
       await abapay.connect(owner).setTokenSupport(await evil.getAddress(), true);
-      await evil.mint(owner.address, ethers.parseUnits("100",
+      await evil.mint(owner.addreers.parseUnits("100",
       // The reentrant callback must be rejected by nonReentrant.
       await expect(
         evil.attack(ethers.parseUnits("10", 18))
