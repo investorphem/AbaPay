@@ -25,8 +25,7 @@ describe("AbaPayV2", function () {
     const token = aw
 
     const AbaPay = await ethers.getContractFactory("AbaPayV2");
-    const abapay = await Abwner.address);
-
+    const abapay = await 
     // Fund the user and approve the vault.
     await token.mint(user.address, ethers.parseUnits("1000", 6));
     await tokerove(await aba t256);
