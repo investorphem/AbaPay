@@ -16,17 +16,19 @@ const { ethers } = hre as any;
  * reentrancy resistance.
  */
 describe("AbaPayV2", function () {
-  cons
+  const ONE_DAY = 24 * 60 * 60;
 
   async function deploy() {
-    const [owner, user, attacker, treasury] = await ethers.get
-    const Token = await ethersactFactory("MockERC20");
-    co
+    const [owner, user, attacker, treasury] = await ethers.getSigners();
 
-    const AbaPay = away("AbaPayV2");
-    const abapay = aw
-    // Fund the user a
-    await token.mint(useethers.parseUnits("1000", 6));
+    const Token = await ethers.getContractFactory("MockERC20");
+    const token = await Token.deploy("Mock USD", "mUSD", 6);
+
+    const AbaPay = await ethers.getContractFactory("AbaPayV2");
+    const abapay = await AbaPay.deploy(owner.address);
+
+    // Fund the user and approve the vault.
+    await token.mint(user.address, ethers.parseUnits("1000", 6));
     await token.connect(user).approve(await abapay.getAddress(), ethers.MaxUint256);
 
     await abapay.setTokenSupport(await token.getAddress(), true);
@@ -35,7 +37,7 @@ describe("AbaPayV2", function () {
   }
 
   describe("payBill", function () {
-    it("accepts payment ited token and emits PaymentReceived", async function () {
+    it("accepts payment in a supported token and emits PaymentReceived", async function () {
       const { abapay, token, user } = await deploy();
       const amount = ethers.parseUnits("10", 6);
 
@@ -124,7 +126,7 @@ describe("AbaPayV2", function () {
       ).to.be.revertedWithCustomError(abapay, "OwnableUnauthorizedAccount");
     });
 
-    it("only the owner can refund", async
+    it("only the owner can refund", async function () {
       const { abapay, token, attacker } = await deploy();
       await expect(
         abapay.connect(attacker).refundUser(await token.getAddress(), attacker.address, 1, "theft")
@@ -136,7 +138,8 @@ describe("AbaPayV2", function () {
 
       await abapay.connect(owner).transferOwnership(user.address);
       // Still the old owner until accepted — this is what prevents bricking on a typo.
-      expect(await abapay.owner()).to.equal(owner.ad
+      expect(await abapay.owner()).to.equal(owner.address);
+
       await abapay.connect(user).acceptOwnership();
       expect(await abapay.owner()).to.equal(user.address);
     });
@@ -154,7 +157,7 @@ describe("AbaPayV2", function () {
     it("CANNOT withdraw instantly — the timelock must elapse", async function () {
       // This is the core protection against a compromised owner key draining the vault.
       const { abapay, token, treasury } = await withFunds();
-      const amount = ethers.parseUnits("
+      const amount = ethers.parseUnits("500", 6);
 
       await abapay.queueWithdrawal(await token.getAddress(), treasury.address, amount);
 
@@ -164,7 +167,7 @@ describe("AbaPayV2", function () {
     });
 
     it("allows withdrawal after the delay elapses", async function () {
-      const { abapay, token, treasury } = aithFunds();
+      const { abapay, token, treasury } = await withFunds();
       const amount = ethers.parseUnits("500", 6);
 
       await abapay.queueWithdrawal(await token.getAddress(), treasury.address, amount);
@@ -183,20 +186,20 @@ describe("AbaPayV2", function () {
 
       await abapay.queueWithdrawal(await token.getAddress(), treasury.address, amount);
       await expect(abapay.cancelWithdrawal(await token.getAddress()))
-        .to.emit(abapay, "WithdrawalCan
+        .to.emit(abapay, "WithdrawalCancelled");
 
-      await time.increase(ON
-      await 
+      await time.increase(ONE_DAY + 1);
+      await expect(
         abapay.executeWithdrawal(await token.getAddress())
       ).to.be.revertedWithCustomError(abapay, "NoPendingWithdrawal");
     });
 
     it("cannot queue two withdrawals for the same token at once", async function () {
-      const { abapay, token, tre = await withFunds();
+      const { abapay, token, treasury } = await withFunds();
       await abapay.queueWithdrawal(await token.getAddress(), treasury.address, ethers.parseUnits("1", 6));
       await expect(
         abapay.queueWithdrawal(await token.getAddress(), treasury.address, ethers.parseUnits("2", 6))
-      ).to.be.revertedWithError(abapay, "WithdrawalAlreadyQueued");
+      ).to.be.revertedWithCustomError(abapay, "WithdrawalAlreadyQueued");
     });
 
     it("cannot queue more than the vault holds", async function () {
@@ -212,29 +215,29 @@ describe("AbaPayV2", function () {
       const ctx = await deploy();
       await ctx.abapay
         .connect(ctx.user)
-        .payBill(await ctx.token.getAddress(), "mt, ethers.parseUnits("500", 6));
+        .payBill(await ctx.token.getAddress(), "mtn", "080", ethers.parseUnits("500", 6));
       return ctx;
     }
 
     it("REJECTS a refund when no cap has been configured (fails closed)", async function () {
       const { abapay, token, user } = await withFunds();
-      a
+      await expect(
         abapay.refundUser(await token.getAddress(), user.address, ethers.parseUnits("10", 6), "vend failed")
       ).to.be.revertedWithCustomError(abapay, "RefundExceedsCap");
     });
 
     it("refunds within the cap", async function () {
       const { abapay, token, user } = await withFunds();
-      await abapay.setMaxRefund(await tokeress(), ethers.parseUnits("50", 6));
+      await abapay.setMaxRefund(await token.getAddress(), ethers.parseUnits("50", 6));
 
       await expect(
         abapay.refundUser(await token.getAddress(), user.address, ethers.parseUnits("10", 6), "vend failed")
-      ).to.emit(abapay, "UserRef
+      ).to.emit(abapay, "UserRefunded");
     });
 
     it("REJECTS a refund above the cap — refunds cannot be used to bypass the withdrawal timelock", async function () {
       const { abapay, token, attacker } = await withFunds();
-      await abapay.setMaxRefund(await token.getAd ethers.parseUnits("50", 6));
+      await abapay.setMaxRefund(await token.getAddress(), ethers.parseUnits("50", 6));
 
       await expect(
         abapay.refundUser(await token.getAddress(), attacker.address, ethers.parseUnits("500", 6), "drain")
@@ -261,8 +264,9 @@ describe("AbaPayV2", function () {
 
       // Owner whitelists a malicious hook-bearing token (the realistic mistake scenario).
       await abapay.connect(owner).setTokenSupport(await evil.getAddress(), true);
-      await evil.mint(owner.rs.parseUnits("100",
-      // The reentrant callback must beejected by nonReentrant.
+      await evil.mint(owner.address, ethers.parseUnits("100", 18));
+
+      // The reentrant callback must be rejected by nonReentrant.
       await expect(
         evil.attack(ethers.parseUnits("10", 18))
       ).to.be.reverted;
