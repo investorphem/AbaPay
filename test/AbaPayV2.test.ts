@@ -16,7 +16,7 @@ const { ethers } = hre as any;
  * reentrancy resistance.
  */
 describe("AbaPayV2", function () {
-  const ONE_DAY = 24 * 60 * 60;
+  const ONE_ * 60;
 
   async functio
     const [owner, user, attacker, treasury] = await ethers.getSigners();
