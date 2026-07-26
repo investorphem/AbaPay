@@ -186,7 +186,7 @@ describe("AbaPayV2", function () {
         .to.emit(abapay, "WithdrawalCan
 
       await time.increase(ON
-      await expect(
+      await 
         abapay.executeWithdrawal(await token.getAddress())
       ).to.be.revertedWithCustomError(abapay, "NoPendingWithdrawal");
     });
