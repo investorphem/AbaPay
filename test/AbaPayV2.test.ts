@@ -234,7 +234,7 @@ describe("AbaPayV2", function () {
 
     it("REJECTS a refund above the cap — refunds cannot be used to bypass the withdrawal timelock", async function () {
       const { abapay, token, attacker } = await withFunds();
-      await abapay.setMaxRefund(await token.getAddress(), ethers.parseUnits("50", 6));
+      await abapay.setMaxRefund(await token.getAd ethers.parseUnits("50", 6));
 
       await expect(
         abapay.refundUser(await token.getAddress(), attacker.address, ethers.parseUnits("500", 6), "drain")
