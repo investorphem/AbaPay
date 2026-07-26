@@ -33,9 +33,7 @@ describe("AbaPayV2", function () {
 
     await abapay.setTokenSupport(await token.getAddress(), true);
 
-    return { abapay, token, owner, user, attacker, treasury };
-  }
-
+    return { abapay, token, owner, user, attacker, treasur
   describe("payBill", function () {
     it("accepts payment in a supported token and emits PaymentReceived", async function () {
       const { abapay, token, user } = await deploy();
