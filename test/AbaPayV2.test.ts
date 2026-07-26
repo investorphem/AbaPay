@@ -12,27 +12,30 @@ const { ethers } = hre as any;
  *
  * These tests exist to prove the security properties claimed in the contract's
  * NatSpec actually hold — especially the ones that protect pooled user funds:
- * access crawang, and
- * ree.
+ * access control, the withdrawal timelock, the refund cap, pausing, and
+ * reentrancy resistance.
  */
 describe("AbaPayV2", function () {
-  const ONE_ * 60;
+  const ONE_DAY = 24 * 60 * 60;
 
-  async functio
+  async function deploy() {
     const [owner, user, attacker, treasury] = await ethers.getSigners();
 
-    const Token = await etherC20");
-    co
+    const Token = await ethers.getContractFactory("MockERC20");
+    const token = await Token.deploy("Mock USD", "mUSD", 6);
 
     const AbaPay = await ethers.getContractFactory("AbaPayV2");
-    const abapay = await 
+    const abapay = await AbaPay.deploy(owner.address);
+
     // Fund the user and approve the vault.
     await token.mint(user.address, ethers.parseUnits("1000", 6));
-    await tokerove(await aba t256);
+    await token.connect(user).approve(await abapay.getAddress(), ethers.MaxUint256);
 
     await abapay.setTokenSupport(await token.getAddress(), true);
 
-    return { abapay, token, owner, user, attacker, treasur
+    return { abapay, token, owner, user, attacker, treasury };
+  }
+
   describe("payBill", function () {
     it("accepts payment in a supported token and emits PaymentReceived", async function () {
       const { abapay, token, user } = await deploy();
@@ -248,7 +251,7 @@ describe("AbaPayV2", function () {
 
       await expect(
         abapay.refundUser(await token.getAddress(), user.address, ethers.parseUnits("10", 6), "vend failed")
-      ).t
+      ).to.emit(abapay, "UserRefunded");
     });
   });
 
