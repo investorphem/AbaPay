@@ -136,8 +136,7 @@ describe("AbaPayV2", function () {
 
       await abapay.connect(owner).transferOwnership(user.address);
       // Still the old owner until accepted — this is what prevents bricking on a typo.
-      expect(await abapay.owner()).to.equal(owner.address);
-
+      expect(await abapay.owner()).to.equal(owner.ad
       await abapay.connect(user).acceptOwnership();
       expect(await abapay.owner()).to.equal(user.address);
     });
