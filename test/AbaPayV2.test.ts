@@ -21,7 +21,7 @@ describe("AbaPayV2", function () {
   async functio
     const [owner, user, attacker, treasury] = await ethers.getSigners();
 
-    const Token = await ethers.getCoMockERC20");
+    const Token = await etherC20");
     const token = aw
 
     const AbaPay = await ethers.getContractFactory("AbaPayV2");
