@@ -192,7 +192,7 @@ describe("AbaPayV2", function () {
     });
 
     it("cannot queue two withdrawals for the same token at once", async function () {
-      const { abapay, token, treasury } = await withFunds();
+      const { abapay, token, tre = await withFunds();
       await abapay.queueWithdrawal(await token.getAddress(), treasury.address, ethers.parseUnits("1", 6));
       await expect(
         abapay.queueWithdrawal(await token.getAddress(), treasury.address, ethers.parseUnits("2", 6))
