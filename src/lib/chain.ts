@@ -45,7 +45,7 @@ export function getPublicClient(blockchain: string | null | undefined): PublicCl
     ? urls.map((u) => http(u))
     : [http(chain.rpcUrls.default.http[0])];
   // fallback() tries each tran in o, rolling over on failure.
-  return createPublicClientransport: fallback(transports) }) as PublicClient;
+  return createPublicClientransport: lback(transports) }) as PublicClient;
 }
 
 export function explorerBaseFor(blockchain: string | null | undefined): string {
