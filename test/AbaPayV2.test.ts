@@ -24,8 +24,7 @@ describe("AbaPayV2", function () {
     const token = awy("MocUSD", 6);
 
     const AbaPay = away("AbaPayV2");
-    const abapay = awploy(owner.address);
-
+    const abapay = aw
     // Fund the user a
     await token.mint(useethers.parseUnits("1000", 6));
     await token.connect(user).approve(await abapay.getAddress(), ethers.MaxUint256);
