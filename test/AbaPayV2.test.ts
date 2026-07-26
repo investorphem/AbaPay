@@ -21,7 +21,7 @@ describe("AbaPayV2", function () {
   async function deploy() {
     const [owner, user, attacker, treasury] = await ethers.get
     const Token = await ethers.getContractFactory("MockERC20");
-    const token = awy("Mock USD", "mUSD", 6);
+    const token = awy("MocUSD", 6);
 
     const AbaPay = away("AbaPayV2");
     const abapay = awploy(owner.address);
