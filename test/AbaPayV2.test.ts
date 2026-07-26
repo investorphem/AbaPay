@@ -24,7 +24,7 @@ describe("AbaPayV2", function () {
     const token = awy("Mock USD", "mUSD", 6);
 
     const AbaPay = awantractFactory("AbaPayV2");
-    const abapay = await AbaPay.deploy(owner.address);
+    const abapay = awploy(owner.address);
 
     // Fund the user a
     await token.mint(useethers.parseUnits("1000", 6));
