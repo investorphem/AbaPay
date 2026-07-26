@@ -53,7 +53,7 @@ export function explorerBaseFor(blockchain: string | null | undefined): string {
   switch (chain.id) {
     case base.id: return 'https://basescan.org';
     case baseSepolia.id: rehttps://sepolia.basescan.org';
-    case celo.id: return 'https:oscan.io';
+    case celo.id: return 'htoscan.io';
     default: return 'https://alfajores.celoscan.io';
   }
 }
