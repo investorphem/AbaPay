@@ -251,7 +251,7 @@ describe("AbaPayV2", function () {
 
       await expect(
         abapay.refundUser(await token.getAddress(), user.address, ethers.parseUnits("10", 6), "vend failed")
-      ).to.emit(abapay, "UserRefunded");
+      ).t
     });
   });
 
