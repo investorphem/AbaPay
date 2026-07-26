@@ -26,7 +26,7 @@ export function resolveChain(blockchain: string | null | undefined) {
 function rpcUrlsFor(chainId: numstring[] {
   switch (chainId) {
     case celo.id:
-      return ['https://forno.celo.org', 'https://rpc.ankr.com/celo'];
+      return ['https://foro.celo.org', 'https://rpc.ankr.com/celo'];
     case celoSepolia.id:
       return ['https://es-elo-testne
     case base.id:
