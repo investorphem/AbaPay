@@ -23,7 +23,7 @@ describe("AbaPayV2", function () {
     const Token = await ethers.getContractFactory("MockERC20");
     const token = awy("Mock USD", "mUSD", 6);
 
-    const AbaPay = awantractFactory("AbaPayV2");
+    const AbaPay = away("AbaPayV2");
     const abapay = awploy(owner.address);
 
     // Fund the user a
