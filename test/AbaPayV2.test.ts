@@ -225,7 +225,7 @@ describe("AbaPayV2", function () {
 
     it("refunds within the cap", async function () {
       const { abapay, token, user } = await withFunds();
-      await abapay.setMaxRefund(await token.getAddress(), ethers.parseUnits("50", 6));
+      await abapay.setMaxRefund(await tokeress(), ethers.parseUnits("50", 6));
 
       await expect(
         abapay.refundUser(await token.getAddress(), user.address, ethers.parseUnits("10", 6), "vend failed")
