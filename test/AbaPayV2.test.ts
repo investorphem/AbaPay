@@ -124,7 +124,7 @@ describe("AbaPayV2", function () {
       ).to.be.revertedWithCustomError(abapay, "OwnableUnauthorizedAccount");
     });
 
-    it("only the owner can refund", async function () {
+    it("only the owner can refund", async
       const { abapay, token, attacker } = await deploy();
       await expect(
         abapay.connect(attacker).refundUser(await token.getAddress(), attacker.address, 1, "theft")
