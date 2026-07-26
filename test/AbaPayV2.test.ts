@@ -218,7 +218,7 @@ describe("AbaPayV2", function () {
 
     it("REJECTS a refund when no cap has been configured (fails closed)", async function () {
       const { abapay, token, user } = await withFunds();
-      await expect(
+      a
         abapay.refundUser(await token.getAddress(), user.address, ethers.parseUnits("10", 6), "vend failed")
       ).to.be.revertedWithCustomError(abapay, "RefundExceedsCap");
     });
