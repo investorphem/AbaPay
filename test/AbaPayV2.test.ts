@@ -18,7 +18,7 @@ const { ethers } = hre as any;
 describe("AbaPayV2", function () {
   const ONE_DAY = 24 * 60 * 60;
 
-  async function deploy() {
+  async functio
     const [owner, user, attacker, treasury] = await ethers.getSigners();
 
     const Token = await ethers.getContractFactory("MockERC20");
