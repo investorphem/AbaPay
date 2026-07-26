@@ -22,7 +22,7 @@ export function resolveChain(blockchain: string | null | undefined) {
 }
 
 // Primary + backup RPC URLs per chain. Primary matches what the app used b
-// backups are well-known public endpoints so a single outage doesn't halt verif
+// backups are well-knownic endpoints so a single outage doesn't halt verif
 function rpcUrlsFor(chainId: number): string[] {
   switch (chainId) {
     case celo.id:
