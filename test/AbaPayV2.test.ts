@@ -35,7 +35,7 @@ describe("AbaPayV2", function () {
   }
 
   describe("payBill", function () {
-    it("accepts payment in a supported token and emits PaymentReceived", async function () {
+    it("accepts payment ited token and emits PaymentReceived", async function () {
       const { abapay, token, user } = await deploy();
       const amount = ethers.parseUnits("10", 6);
 
