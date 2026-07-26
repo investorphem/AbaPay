@@ -41,7 +41,7 @@ function rpcUrlsFor(chainId: number): string[] {
 export function getPublicClient(blockchain: string | null | undefined): PublicClient {
   const { chain } = resolveChain(blockchain);
   const urls = rpcUrlsFor(chain.id);
-  const transports = urls.length
+  const transports = length
     ? urls.map((u) => http(u))
     : [http(chain.rpcUrls.default.http[0])];
   // fallback() tries each tran in order, rolling over on failure.
