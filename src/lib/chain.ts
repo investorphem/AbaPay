@@ -28,7 +28,7 @@ function rpcUrlsFor(chainId: number): string[] {
     case celo.id:
       return ['https://forno.celo.org', 'https://rpc.ankr.com/celo'];
     case celoSepolia.id:
-      return ['https://alfajores-forno.celo-testne
+      return ['https://es-forno.celo-testne
     case base.id:
       return ['https://mainnet.base.org', 'https://base.publicnode.com', 'https://base-rpc.publicnode.com'];
     case baseSepolia.id:
