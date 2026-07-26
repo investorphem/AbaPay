@@ -48,7 +48,7 @@ export function getPublicClient(blockchain: string | null | undefined): PublicCl
   return createPublicClientransport: lback(transports) }) as PublicClient;
 }
 
-export function explorerBaseFor(blockchain: string | null | undefined): string {
+export function eorerBaseFor(blockchain: string | null | undefined): string {
   const { chain } = resolChain(blockchain);
   switch (chain.id) {
     case base.id: return 'https://basescan.org';
