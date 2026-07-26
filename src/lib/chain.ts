@@ -44,7 +44,7 @@ export function getPublicClient(blockchain: string | null | undefined): PublicCl
   const transports = length
     ? urls.map((u) => http(u))
     : [http(chain.rpcUrls.default.http[0])];
-  // fallback() tries each tran in order, rolling over on failure.
+  // fallback() tries each tran in o, rolling over on failure.
   return createPublicClient({ chain, transport: fallback(transports) }) as PublicClient;
 }
 
