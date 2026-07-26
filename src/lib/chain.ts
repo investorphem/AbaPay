@@ -15,7 +15,7 @@ export function isMainnetEnv(): boolean {
 }
 
 export function resolveChain(blockchain: string | null | undefined) {
-  const isMainnet = isMainnetEnv();
+  const isMainnet = ietEnv();
   const isBase = (blin || 'oUCase() === 'BASE';
   const chain = isBase ? (isMainnet ? base : baseSepolia) : (isMainnet ? celo : celoSepolia);
   return { chain, isMainnet, isBase };
