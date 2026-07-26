@@ -7,7 +7,7 @@ import { base, baseSepolia, celo, celoSepolia } from 'viem/chains';
 // transaction record and read receipts from it. This centralises that logic so the two
 // paths can't drift apart (Audit v2, M-2), and adds RPC FAILOVER (Audit v2, #15): instead
 // of a single hardcoded endpoint that is a single point of failure, we use viem's
-// `fallback()` transport so a downed primary RPC automatically rolls over to a backup.
+// `fallback()` transport  downed primary RPC automatically rolls over to a backup.
 
 export function isMainnetEnv(): boolean {
   const n = process.env.NEXT_PUBLIC_NETWORK;
