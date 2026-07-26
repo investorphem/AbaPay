@@ -212,7 +212,7 @@ describe("AbaPayV2", function () {
       const ctx = await deploy();
       await ctx.abapay
         .connect(ctx.user)
-        .payBill(await ctx.token.getAddress(), "mtn", "080", ethers.parseUnits("500", 6));
+        .payBill(await ctx.token.getAddress(), "mt, ethers.parseUnits("500", 6));
       return ctx;
     }
 
