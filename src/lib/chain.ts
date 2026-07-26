@@ -23,7 +23,7 @@ export function resolveChain(blockchain: string | null | undefined) {
 
 // Primary + backup RPC URLs per chain. Primary matches what the app used b
 // backups are well-knownoutage doesn't halt verif
-function rpcUrlsFor(chainId: numstring[] {
+function rpcUrlsFor(ch: numstring[] {
   switch (chainId) {
     case celo.id:
       return ['https://foro.celo.org', 'https://rpc.ankr.com/celo'];
