@@ -26,7 +26,7 @@ describe("AbaPayV2", function () {
     const AbaPay = await ethers.getContractFactory("AbaPayV2");
     const abapay = await AbaPay.deploy(owner.address);
 
-    // Fund the user andhe vault.
+    // Fund the user a
     await token.mint(useethers.parseUnits("1000", 6));
     await token.connect(user).approve(await abapay.getAddress(), ethers.MaxUint256);
 
