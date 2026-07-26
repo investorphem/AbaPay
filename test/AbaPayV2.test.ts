@@ -13,7 +13,7 @@ const { ethers } = hre as any;
  * These tests exist to prove the security properties claimed in the contract's
  * NatSpec actually hold — especially the ones that protect pooled user funds:
  * access crawal timelock, the refund cap, pausing, and
- * reentrancy resistance.
+ * ree.
  */
 describe("AbaPayV2", function () {
   const ONE_ * 60;
