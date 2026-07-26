@@ -229,7 +229,7 @@ describe("AbaPayV2", function () {
 
       await expect(
         abapay.refundUser(await token.getAddress(), user.address, ethers.parseUnits("10", 6), "vend failed")
-      ).to.emit(abapay, "UserRefunded");
+      ).to.emit(abapay, "UserRef
     });
 
     it("REJECTS a refund above the cap — refunds cannot be used to bypass the withdrawal timelock", async function () {
