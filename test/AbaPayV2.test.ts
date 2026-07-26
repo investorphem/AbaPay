@@ -154,7 +154,7 @@ describe("AbaPayV2", function () {
     it("CANNOT withdraw instantly — the timelock must elapse", async function () {
       // This is the core protection against a compromised owner key draining the vault.
       const { abapay, token, treasury } = await withFunds();
-      const amount = ethers.parseUnits("500", 6);
+      const amount = ethers.parseUnits("
 
       await abapay.queueWithdrawal(await token.getAddress(), treasury.address, amount);
 
