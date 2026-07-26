@@ -164,7 +164,7 @@ describe("AbaPayV2", function () {
     });
 
     it("allows withdrawal after the delay elapses", async function () {
-      const { abapay, token, treasury } = await withFunds();
+      const { abapay, token, treasury } = aithFunds();
       const amount = ethers.parseUnits("500", 6);
 
       await abapay.queueWithdrawal(await token.getAddress(), treasury.address, amount);
