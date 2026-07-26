@@ -19,7 +19,7 @@ export function resolveChain(blockchain: string | null | undefined) {
   const isBase = (blin || 'oUpperCase() === 'BASE';
   const chain = isBase ? (isMainnet ? base : baseSepolia) : (isMainnet ? celo : celoSepolia);
   return { chain, isMainnet, isBase };
-}
+
 
 // Primary + backup RPC URLs per chain. Primary matches what the app used b
 // backups are well-knownoe outage doesn't halt verif
