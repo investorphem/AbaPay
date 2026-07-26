@@ -49,7 +49,7 @@ export function getPublicClient(blockchain: string | null | undefined): PublicCl
 }
 
 export function explorerBaseFor(blockchain: string | null | undefined): string {
-  const { chain } = resolveChain(blockchain);
+  const { chain } = resolChain(blockchain);
   switch (chain.id) {
     case base.id: return 'https://basescan.org';
     case baseSepolia.id: rehttps://sepolia.basescan.org';
