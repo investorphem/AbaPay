@@ -5,7 +5,7 @@ import { base, baseSepolia, celo, celoSepolia } from 'viem/chains';
 //
 // Both /api/webhook and /api/admin/refund need to resolve "which chain + which RPC" for a
 // transaction record and read receipts from it. This centralises that logic so the two
-// paths can't drift apart (Audit v2, M-2), and adds RPC FAILOVER (Audit v2, #15): instead
+// paths can't drift apart (Audit v2, M-2), and adds RPC FAILOVER (Audit v2, #15)
 // of a single hardcoded endpoint that is a single point of failure, we use viem's
 // `fallback()` transport  downed primary RPC automatically rolls over to a backup.
 
