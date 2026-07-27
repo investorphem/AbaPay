@@ -607,6 +607,13 @@ async function buildScheduleConfirm(
         billers_code: intentData.destination_account,
         amount_ngn: Number(intentData.amount_ngn),
         meter_type: intentData.meter_type || null,
+        // 🔴 THE BUG THIS FIXES: a recurring/one-off DATA schedule silently dropped the picked
+        // plan here — the column has existed on scheduled_bills since migration 003, but
+        // nothing ever wrote to it, so scheduler.ts's later `bill.variation_code` read was
+        // always null. The user picks a plan, confirms the schedule, and every future run
+        // would vend with no plan code at all. Electricity/TV/airtime are unaffected — this is
+        // only ever set for services requiringVariation (data plans, cable packages).
+        variation_code: intentData.variation_code || null,
         blockchain: schedChain,
         token_used: tokenSym,
         frequency: schedFreq,
@@ -1223,6 +1230,7 @@ async function handleCore(req: Request, ctx: HumanizeCtx): Promise<NextResponse>
             billers_code: ps.billers_code,
             amount_ngn: ps.amount_ngn,
             meter_type: ps.meter_type,
+            variation_code: ps.variation_code,
             blockchain: ps.blockchain,
             token_used: ps.token_used,
             frequency: ps.frequency,
