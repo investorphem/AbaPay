@@ -1,6 +1,6 @@
 // src/app/api/deai/core/route.ts
 import { NextResponse } from 'next/server';
-import { parseIntent } from '@/lib/deai/intentEngine';
+import { parseIntent, classifyPivot } from '@/lib/deai/intentEngine';
 import { humanizeReply } from '@/lib/deai/humanize';
 import { verifyAccount as realVerifyAccount, fetchCryptoBalances as realFetchCryptoBalances, resolveServiceId } from '@/lib/deai/services';
 import { createDeepLink } from '@/lib/deai/deeplink';
@@ -128,6 +128,25 @@ async function appOnlyRedirect(intent: string): Promise<NextResponse> {
     });
 }
 
+// Maps the intent engine's own intent names onto the core's SERVICE_RULES keys. Module-level
+// because BOTH the master sweep (which routes on it) and the CONTEXT PIVOT gate (which
+// compares the AI's verdict against the in-progress intent) need the exact same mapping —
+// two private copies could drift and disagree about what "the same intent" even means.
+const ENGINE_TO_CORE_INTENT: Record<string, string> = {
+    VEND_AIRTIME: 'VEND_AIRTIME',
+    VEND_DATA: 'VEND_DATA',
+    PAY_ELECTRICITY: 'ELECTRICITY',
+    PAY_CABLE: 'TV',
+    TRANSACTION_HISTORY: 'TRANSACTION_HISTORY',
+    CHECK_BALANCE: 'CHECK_BALANCE',
+    LIST_SCHEDULES: 'LIST_SCHEDULES',
+    CANCEL_SCHEDULE: 'CANCEL_SCHEDULE',
+    BANK_TRANSFER: 'BANK_TRANSFER',
+    EDUCATION: 'EDUCATION',
+    INTERNATIONAL: 'INTERNATIONAL',
+    HELP: 'HELP',
+};
+
 // 🔴 THE "number" BUG: `t.includes('mb')` matched ANY word containing that substring —
 // "number", "member", "remember", "November", "December", "combination"... all silently
 // misclassified as a data-bundle request. Since this feeds the CONTEXT PIVOT below (which
@@ -163,6 +182,68 @@ const fallbackIntentMatcher = (text: string) => {
     if (t.includes('balance') || t.includes('how much do i have')) return 'CHECK_BALANCE';
     return 'UNKNOWN';
 };
+
+// ⚡ CONTEXT PIVOT GATE ⚡ — see the CONTEXT PIVOT block further down for where this is used.
+//
+// 🔴 THE BUG THIS FIXES: the pivot DELETED a user's entire in-progress session whenever
+// fallbackIntentMatcher() — the crude substring matcher above — guessed an intent different
+// from the live one. That matcher is fine as a SEED for a brand-new request (a wrong guess
+// there costs nothing; the AI parse ~1200 lines later corrects it). It is completely
+// unsuitable as the sole and final authority on DESTROYING a session, which is what it had
+// become: the deletion happens long before parseIntent() runs, so the AI can never rescue it.
+// Confirmed live, all four mid-flow on an unrelated request, all four wiping the session:
+//   "what's the status?"         -> 'status'   -> TRANSACTION_HISTORY
+//   "I'll transfer the money"    -> 'transfer' -> BANK_TRANSFER
+//   "my kid is in school"        -> 'school'   -> EDUCATION
+//   "how much balance do I need" -> 'balance'  -> CHECK_BALANCE
+//
+// The fix is structural, not another keyword patch (a keyword patch is what failed twice
+// before — first "mb" matching "number", then "recharge" meaning data): the bar for
+// DESTROYING an in-progress session is now genuinely higher than the bar for SEEDING a fresh
+// one. The keyword match is demoted to a cheap TRIGGER — it decides only whether the question
+// is worth asking at all — and a context-aware AI call (classifyPivot, which unlike
+// parseIntent is told what the user is mid-way through and what the bot just asked for) is
+// the authority on the answer.
+const PIVOT_STATE_LABELS: Record<string, string> = {
+    AWAITING_DETAILS: 'the remaining details for that payment',
+    AWAITING_FIELD: 'a required detail (a phone number or email address)',
+    AWAITING_PROVIDER: 'which provider/network, picked from a numbered list',
+    AWAITING_CABLE_ACTION: 'whether to renew or change their cable package',
+    AWAITING_PLAN_CATEGORY: 'which kind of data plan, picked from a numbered list',
+    AWAITING_VARIATION: 'which exact plan/package, picked from a numbered list',
+    AWAITING_CHAIN: 'which blockchain to pay from, picked from a numbered list',
+    AWAITING_TOKEN: 'which token to pay with, picked from a numbered list',
+    AWAITING_METER_TYPE: 'whether their electricity meter is prepaid or postpaid',
+    AWAITING_EMAIL_CHOICE: 'an email address for a receipt, or "skip"',
+    AWAITING_SCHEDULE_ALLOWANCE: 'which funded allowance to spend from',
+};
+
+// The narrow set of phrasings that mean "no, not that — this instead" unambiguously enough
+// to act on WITHOUT the AI. Only consulted when classifyPivot returns no opinion at all
+// (Anthropic unreachable / key missing), so the escape hatch still exists when the AI is
+// down — but with a bar none of the four false positives above can clear.
+const EXPLICIT_SWITCH_RE = /\b(actually|instead|rather|nevermind|never mind|forget (?:that|it|the)|scratch that|changed my mind|change of mind|i meant|no wait|wait no)\b/i;
+
+async function pivotIsGenuine(text: string, currentIntent: string | undefined, status: string): Promise<boolean> {
+    const verdict = await classifyPivot({
+        message: text,
+        inProgress: currentIntent ? (INTENT_GUESS_LABELS[currentIntent] || currentIntent) : 'a bill payment',
+        waitingFor: PIVOT_STATE_LABELS[status] || 'a reply to its last question',
+    });
+
+    // No opinion (AI unreachable) — keep the session unless the user said something
+    // unmistakable. Failing CLOSED here is the safe direction: worst case the user repeats
+    // themselves or types "cancel", versus silently losing everything they've entered.
+    if (!verdict) return EXPLICIT_SWITCH_RE.test(text);
+
+    if (!verdict.switching) return false;
+
+    // The model must also NAME the service it thinks they switched to, and that service must
+    // actually differ from the one in progress — "switching: true" pointing at the same
+    // intent is self-contradictory, and is not grounds for a reset.
+    const target = verdict.intent ? ENGINE_TO_CORE_INTENT[verdict.intent] : null;
+    return !!target && target !== currentIntent;
+}
 
 // ⚡ INDESTRUCTIBLE REGEX SWEEP ⚡
 function extractEntities(text: string, currentData: any = {}) {
@@ -897,10 +978,18 @@ async function handleCore(req: Request, ctx: HumanizeCtx): Promise<NextResponse>
         'AWAITING_PLAN_CATEGORY', 'AWAITING_VARIATION', 'AWAITING_CHAIN', 'AWAITING_TOKEN',
         'AWAITING_METER_TYPE', 'AWAITING_EMAIL_CHOICE', 'AWAITING_SCHEDULE_ALLOWANCE',
     ]);
+    //
+    // 🔴 The keyword match below is now only the TRIGGER for asking the question — never the
+    // answer. See pivotIsGenuine (up top) for the four confirmed false positives that made
+    // this necessary and for what actually decides it now. The trigger is kept deliberately:
+    // it costs nothing, and it means the extra AI call only ever happens on the handful of
+    // turns where a switch is even plausible, not on every menu reply.
     const freshIntentCheck = fallbackIntentMatcher(text);
     if (session && INTERRUPTIBLE_STATES.has(session.status) && freshIntentCheck !== 'UNKNOWN' && freshIntentCheck !== session.intent_data.intent) {
-        await supabase.from('deai_sessions').delete().eq('chat_id', platform_id);
-        session = null;
+        if (await pivotIsGenuine(text, session.intent_data.intent, session.status)) {
+            await supabase.from('deai_sessions').delete().eq('chat_id', platform_id);
+            session = null;
+        }
     }
 
     let isContinuingToAI = false;
@@ -2085,23 +2174,7 @@ async function handleCore(req: Request, ctx: HumanizeCtx): Promise<NextResponse>
             // reply parses as "en" and must not wipe a Yoruba/Pidgin user's remembered language.
             if (aiParsed?.language && aiParsed.language !== 'en') ctx.lang = aiParsed.language;
 
-            // Map the engine's intent names onto the core's SERVICE_RULES keys.
-            const intentMap: Record<string, string> = {
-                VEND_AIRTIME: 'VEND_AIRTIME',
-                VEND_DATA: 'VEND_DATA',
-                PAY_ELECTRICITY: 'ELECTRICITY',
-                PAY_CABLE: 'TV',
-                TRANSACTION_HISTORY: 'TRANSACTION_HISTORY',
-                CHECK_BALANCE: 'CHECK_BALANCE',
-                LIST_SCHEDULES: 'LIST_SCHEDULES',
-                CANCEL_SCHEDULE: 'CANCEL_SCHEDULE',
-                BANK_TRANSFER: 'BANK_TRANSFER',
-                EDUCATION: 'EDUCATION',
-                INTERNATIONAL: 'INTERNATIONAL',
-                HELP: 'HELP',
-            };
-
-            const mapped = intentMap[aiParsed.intent];
+            const mapped = ENGINE_TO_CORE_INTENT[aiParsed.intent];
 
             // 🔴 THE BUG THIS FIXES: parseIntent() re-parses each message in complete
             // isolation, with zero memory of the conversation. Mid-flow (session status

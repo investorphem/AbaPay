@@ -394,3 +394,121 @@ function normalize(p: any): ParsedIntent {
     language: typeof p?.language === 'string' && /^[a-z]{2,3}$/i.test(p.language.trim()) ? p.language.trim().toLowerCase() : null,
   };
 }
+
+// ⚡ PIVOT CLASSIFIER — "has this user ABANDONED the flow they're in?" ⚡
+//
+// 🔴 THE BUG THIS EXISTS FOR: core/route.ts's CONTEXT PIVOT decided whether to DELETE a
+// user's whole in-progress session using nothing but fallbackIntentMatcher() — a crude
+// substring matcher — and that decision runs ~1200 lines BEFORE parseIntent() is ever
+// called, so the AI could never overrule it. Confirmed live: mid-data-flow,
+//   "what's the status?"          -> matched TRANSACTION_HISTORY -> session destroyed
+//   "I'll transfer the money"     -> matched BANK_TRANSFER       -> session destroyed
+//   "my kid is in school"         -> matched EDUCATION           -> session destroyed
+//   "how much balance do I need"  -> matched CHECK_BALANCE       -> session destroyed
+// Every one of those is an ordinary aside or an in-flow question, and the user silently
+// lost the network/number/plan they had already given.
+//
+// parseIntent() on its own CANNOT fix this: it reads each message in total isolation, so
+// "what's the status?" genuinely IS a history request when you can't see the conversation.
+// The missing ingredient is context, so this is a separate, deliberately tiny call that
+// gets it — what the user is mid-way through, and what the bot just asked them for — and
+// answers exactly one question. It is asymmetric ON PURPOSE: seeding a fresh intent costs
+// the user nothing if it's wrong, destroying an in-progress one costs them everything they
+// have typed so far, so the bar for "true" is set much higher than a keyword match.
+const PIVOT_SYSTEM_PROMPT = `You decide ONE thing about a user of a Nigerian bill-payment chatbot: have they ABANDONED the request they are in the middle of, in order to ask for a completely different service instead?
+
+You are given:
+IN_PROGRESS — the service the user already asked for and is part-way through.
+WAITING_FOR — what the bot just asked them to reply with.
+MESSAGE — what the user just said.
+
+Reply with a single valid JSON object and NOTHING else — no prose, no markdown, no code fences:
+{"switching": true | false, "intent": "VEND_AIRTIME" | "VEND_DATA" | "PAY_ELECTRICITY" | "PAY_CABLE" | "BANK_TRANSFER" | "EDUCATION" | "CHECK_BALANCE" | "TRANSACTION_HISTORY" | null}
+
+"switching" is true ONLY when the user unmistakably wants a DIFFERENT service now and no longer wants IN_PROGRESS. Then "intent" is the service they switched TO. Examples of true:
+- "actually I want electricity instead"
+- "no wait, top up my DStv"
+- "forget the data, buy airtime"
+- "cancel that, I need to pay my meter"
+
+"switching" is false — and "intent" is null — for EVERYTHING else, including:
+- any answer to WAITING_FOR, even a clumsy, partial or oddly-worded one
+- a question ABOUT the request in progress: "what's the status?", "how much balance do I need", "is it done?", "how long does it take?"
+- another service, a bank, a school, money or a balance merely MENTIONED in passing while still doing IN_PROGRESS: "my kid is in school", "I'll transfer the money", "I'll pay you back"
+- confusion, complaints, greetings, small talk, or anything you are not sure about
+
+Saying true throws away everything the user has already told us and restarts them from nothing. If the message could reasonably be part of IN_PROGRESS, answer false. When in doubt, answer false.`;
+
+export interface PivotVerdict {
+  switching: boolean;
+  intent: DeAIIntent | null;
+}
+
+/**
+ * Returns the verdict, or `null` if the model could not be reached / gave unusable output.
+ * `null` explicitly means "no opinion" — callers must NOT treat it as either answer; the
+ * caller decides what a missing opinion means (core/route.ts keeps the session).
+ */
+export async function classifyPivot(args: {
+  message: string;
+  inProgress: string;
+  waitingFor: string;
+}): Promise<PivotVerdict | null> {
+  const apiKey = process.env.ANTHROPIC_API_KEY;
+  if (!apiKey) return null;
+
+  const user = `IN_PROGRESS: ${args.inProgress}\nWAITING_FOR: ${args.waitingFor}\nMESSAGE: ${args.message}`;
+
+  try {
+    const res = await fetch(ANTHROPIC_API_URL, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'x-api-key': apiKey,
+        'anthropic-version': '2023-06-01',
+      },
+      body: JSON.stringify({
+        model: MODEL,
+        // One tiny object — nothing legitimate needs more, and a low ceiling keeps this
+        // extra call cheap enough to sit on a hot path.
+        max_tokens: 64,
+        temperature: 0,
+        system: PIVOT_SYSTEM_PROMPT,
+        messages: [
+          { role: 'user', content: user },
+          { role: 'assistant', content: '{' },
+        ],
+      }),
+    });
+
+    if (!res.ok) {
+      console.error('[DeAI] Pivot classifier API error:', res.status);
+      return null;
+    }
+
+    const data = await res.json();
+    const raw = '{' + (data?.content ?? [])
+      .filter((b: any) => b.type === 'text')
+      .map((b: any) => b.text)
+      .join('');
+    const parsed = JSON.parse(raw.slice(0, raw.lastIndexOf('}') + 1));
+
+    // Only a LITERAL true counts. Any other shape (missing field, "maybe", a string) means
+    // the model did not clearly say "switching", which is the same as saying it isn't.
+    const switching = parsed?.switching === true;
+    const intent: DeAIIntent | null =
+      typeof parsed?.intent === 'string' && parsed.intent in PIVOT_TARGETS ? (parsed.intent as DeAIIntent) : null;
+    return { switching, intent };
+  } catch (err) {
+    console.error('[DeAI] Pivot classification failed:', err);
+    return null;
+  }
+}
+
+// The only intents a pivot may switch TO. Deliberately excludes HELP/UNKNOWN/SCHEDULE_* —
+// none of those are "I want a different service instead", and letting them through would
+// re-open the same "destroy the session on a weak signal" hole from the other side.
+const PIVOT_TARGETS: Record<string, true> = {
+  VEND_AIRTIME: true, VEND_DATA: true, PAY_ELECTRICITY: true, PAY_CABLE: true,
+  BANK_TRANSFER: true, EDUCATION: true, CHECK_BALANCE: true, TRANSACTION_HISTORY: true,
+};
