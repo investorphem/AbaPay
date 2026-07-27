@@ -7,7 +7,7 @@ import { describeCapabilities, capabilityForIntent, getCapability } from '@/lib/
 import { resolveServiceId, fetchCryptoBalances, verifyAccount } from '@/lib/deai/services';
 import { getRemainingAllowance } from '@/lib/deai/relayer';
 import { SUPPORTED_TOKENS } from '@/constants';
-import { checkAccountNumber, checkAmount as checkAmountParity } from '@/lib/parity';
+import { checkAccountNumber, checkAmount as checkAmountParity, requiresVariation } from '@/lib/parity';
 import { checkAutonomousCapacity, executeAgentPayment, type BatchItem } from '@/lib/deai/batch';
 import { resolveMcpIdentity } from '@/lib/deai/mcpAuth';
 import { checkPinAllowed, recordPinFailure, clearPinFailures, notifySpendOutOfBand } from '@/lib/deai/pinSecurity';
@@ -175,10 +175,40 @@ async function callPayBill(args: any) {
   if (!apiKey) return errorResult('api_key is required.');
   if (!/^\d{4,6}$/.test(pin)) return errorResult('pin must be 4-6 digits.');
   const intent = SERVICE_INTENT[service];
-  if (!intent) return errorResult('service must be one of AIRTIME, DATA, ELECTRICITY, CABLE.');
+  if (!intent) {
+    // EDUCATION and BANK_TRANSFER are real AbaPay capabilities that deliberately aren't
+    // agent-payable (see capabilities.ts — supportedInChat: false). A bare "must be one of…"
+    // told a calling agent nothing about WHY, so it had no way to give the human a useful
+    // answer beyond "not supported"; it would either keep retrying or report it as missing.
+    const appOnly = capabilityForIntent(service === 'EDUCATION' ? 'EDUCATION' : service === 'BANK_TRANSFER' ? 'BANK_TRANSFER' : '');
+    const appOnlySpec = appOnly ? getCapability(appOnly) : undefined;
+    if (appOnlySpec) {
+      return errorResult(`${appOnlySpec.label} can't be paid through this API — ${appOnlySpec.notes || 'it must be completed in the AbaPay app.'} Tell the user to open ${process.env.NEXT_PUBLIC_APP_URL || 'https://abapays.com'}. pay_bill supports AIRTIME, DATA, ELECTRICITY and CABLE.`);
+    }
+    return errorResult('service must be one of AIRTIME, DATA, ELECTRICITY, CABLE.');
+  }
   if (!provider) return errorResult('provider is required — e.g. mtn, ikeja-electric, dstv.');
   if (!accountNumber) return errorResult('account_number is required.');
   if (!Number.isFinite(amountNgn) || amountNgn <= 0) return errorResult('amount_ngn must be a positive number.');
+
+  // 🔴 THE BUG THIS FIXES: both of these were described as required in the tool's inputSchema
+  // but NOTHING enforced them, and neither is recoverable once the money has moved. The chat
+  // channel gates both (requiresVariation() blocks a data purchase until a plan is picked; the
+  // AWAITING_METER_TYPE step blocks electricity until prepaid/postpaid is known) — MCP simply
+  // skipped straight to settlement:
+  //   • DATA with no variation_code: the on-chain payment settles, then VTpass is asked to
+  //     vend a bundle that was never named — FAILED_VENDING and a refund round-trip, for a
+  //     mistake that costs nothing to catch here.
+  //   • ELECTRICITY with no meter_type: merchant-verify is called without a type and the vend
+  //     goes out with no prepaid/postpaid at all.
+  // Reuses parity.ts's requiresVariation — the same function the chat gate calls — rather
+  // than a second copy of the rule that could drift away from it.
+  if (requiresVariation(intent, provider) && !variationCode) {
+    return errorResult(`variation_code is required for ${service} — it names the exact bundle/package to buy. Call describe_capabilities, or pick the plan in the AbaPay app, to get a valid code.`);
+  }
+  if (intent === 'ELECTRICITY' && meterType !== 'prepaid' && meterType !== 'postpaid') {
+    return errorResult('meter_type is required for ELECTRICITY and must be exactly "prepaid" or "postpaid".');
+  }
 
   // 🔐 Same identity + PIN gate as every other channel — see src/lib/deai/pinSecurity.ts.
   // The counter lives on the agent_links row itself, so it survives across separate MCP
