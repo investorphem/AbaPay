@@ -1452,7 +1452,11 @@ async function handleCore(req: Request, ctx: HumanizeCtx): Promise<NextResponse>
 
       const d2 = session.intent_data;
       let detailsRow2 = "";
-      if (d2.intent === 'VEND_DATA') detailsRow2 = `Plan: ${d2.variation_name}\nNetwork: ${d2.provider?.toUpperCase()}`;
+      // 🔴 `variation_name` is a field NOTHING in this codebase ever writes — the variation
+      // handler stores the chosen plan as `variation_label`. So every data checkout printed a
+      // literal "Plan: undefined" on the LAST screen before the user types their PIN to spend
+      // real money. See the identical read in the AWAITING_TOKEN checkout below.
+      if (d2.intent === 'VEND_DATA') detailsRow2 = `Plan: ${d2.variation_label || d2.variation_name || 'selected plan'}\nNetwork: ${d2.provider?.toUpperCase()}`;
       else if (d2.intent === 'VEND_AIRTIME') detailsRow2 = `Network: ${d2.provider?.toUpperCase()}`;
       else if (d2.intent === 'BANK_TRANSFER') detailsRow2 = `Bank: ${d2.provider?.toUpperCase()}`;
       else detailsRow2 = `Name: ${d2.verified_name || 'N/A'}`;
@@ -1903,7 +1907,9 @@ async function handleCore(req: Request, ctx: HumanizeCtx): Promise<NextResponse>
       await supabase.from('deai_sessions').upsert({ chat_id: platform_id, platform, intent_data: session.intent_data, status: 'AWAITING_PIN', expires_at: new Date(Date.now() + 300000).toISOString() }, { onConflict: 'chat_id' });
 
       let detailsRow = "";
-      if (session.intent_data.intent === 'VEND_DATA') detailsRow = `Plan: ${session.intent_data.variation_name}\nNetwork: ${session.intent_data.provider?.toUpperCase()}`;
+      // See the AWAITING_EMAIL_CHOICE checkout above: `variation_name` is never written
+      // anywhere — the chosen plan is stored as `variation_label`.
+      if (session.intent_data.intent === 'VEND_DATA') detailsRow = `Plan: ${session.intent_data.variation_label || session.intent_data.variation_name || 'selected plan'}\nNetwork: ${session.intent_data.provider?.toUpperCase()}`;
       else if (session.intent_data.intent === 'VEND_AIRTIME') detailsRow = `Network: ${session.intent_data.provider?.toUpperCase()}`;
       else if (session.intent_data.intent === 'BANK_TRANSFER') detailsRow = `Bank: ${session.intent_data.provider?.toUpperCase()}`;
       else detailsRow = `Name: ${session.intent_data.verified_name || 'N/A'}`;
