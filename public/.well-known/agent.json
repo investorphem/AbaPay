@@ -18,6 +18,23 @@
       "name": "MCP",
       "endpoint": "https://www.abapays.com/api/mcp",
       "version": "2025-06-18"
+    },
+    {
+      "name": "OASF",
+      "endpoint": "https://github.com/agntcy/oasf/",
+      "version": "1.1.0",
+      "skills": [
+        "language_processing/language_understanding/contextual_comprehension",
+        "language_processing/language_generation/dialogue_generation",
+        "tool_use_automation/api_schema_understanding",
+        "tool_use_automation/workflow_automation",
+        "business_professional/investment_trading/payments_integration",
+        "science_specialized/blockchain_web3/crypto_wallet_operations"
+      ],
+      "domains": [
+        "finance_and_business/payments",
+        "technology/blockchain/cryptocurrency"
+      ]
     }
   ],
   "registrations": [

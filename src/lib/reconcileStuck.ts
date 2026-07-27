@@ -9,7 +9,7 @@ import { Resend } from 'resend';
 
 const resend = new Resend(process.env.RESEND_API_KEY || 're_dummy_key_for_build');
 
-// ⚡ STUCK-PROCESSING RECONCILIATION ⚡
+// ⚡ STUCK-PROCESSING / STUCK-PENDING RECONCILIATION ⚡
 //
 // Every money route (contract-call /api/pay, x402 /api/pay/x402, the DeAI agent's direct
 // relayer payment, and the scheduler's autonomous relayer payment) follows the same pattern:
@@ -19,9 +19,15 @@ const resend = new Resend(process.env.RESEND_API_KEY || 're_dummy_key_for_build'
 // — with the user's crypto already moved (on-chain success already confirmed before the lock
 // in every one of those routes) and VTpass possibly never even contacted.
 //
+// executeVend() can also reset a row back down to PENDING: if the fetch to VTpass /pay
+// itself throws (network error), it writes `status: 'PENDING'` on a row that was already
+// locked to PROCESSING with a real tx_hash and request_id — i.e. crypto already moved. So a
+// real (non-preflight) PENDING row that's been sitting for a while is exactly as stuck as a
+// PROCESSING one and needs the same treatment.
+//
 // Nothing else in the codebase catches this:
 //   - cleanupStalePreflights only ever touches PENDING rows with a `preflight_` tx_hash —
-//     it explicitly never touches PROCESSING or a real tx_hash.
+//     it explicitly never touches PROCESSING, or a PENDING row with a real tx_hash.
 //   - The Alchemy webhook's fast pre-check treats ANY non-PENDING status (including a
 //     stuck PROCESSING) as "already handled" and does nothing further.
 //   - The VTpass status webhook only fires if VTpass itself calls back — if our server
@@ -55,7 +61,7 @@ export async function reconcileStuckProcessing(opts: { force?: boolean } = {}) {
   const { data: stuck, error } = await supabase
     .from('transactions')
     .select('*')
-    .eq('status', 'PROCESSING')
+    .in('status', ['PROCESSING', 'PENDING'])
     .not('tx_hash', 'like', 'preflight_%')
     .lt('created_at', cutoff)
     .limit(25); // bounded — a real backlog this size means something else is badly wrong
@@ -76,7 +82,7 @@ export async function reconcileStuckProcessing(opts: { force?: boolean } = {}) {
     try {
       if (!record.request_id) {
         await sendTelegramAlert(
-          `🚨 *STUCK PAYMENT — NO REQUEST ID*\n\nTx \`${record.tx_hash}\` has been PROCESSING for over ${STUCK_MINUTES} min with no request_id to requery. Funds are on-chain; nothing was ever sent to VTpass. Needs manual review in the admin dashboard.\n\n👤 Wallet: \`${record.wallet_address || 'unknown'}\`\n💰 ${record.amount_usdt} ${record.token_used || 'USD₮'} (₦${record.amount_naira})`
+          `🚨 *STUCK PAYMENT — NO REQUEST ID*\n\nTx \`${record.tx_hash}\` has been ${record.status} for over ${STUCK_MINUTES} min with no request_id to requery. Funds are on-chain; nothing was ever sent to VTpass. Needs manual review in the admin dashboard.\n\n👤 Wallet: \`${record.wallet_address || 'unknown'}\`\n💰 ${record.amount_usdt} ${record.token_used || 'USD₮'} (₦${record.amount_naira})`
         );
         alerted++;
         continue;
@@ -114,7 +120,7 @@ export async function reconcileStuckProcessing(opts: { force?: boolean } = {}) {
           .from('transactions')
           .update({ status: 'SUCCESS', purchased_code: dbPurchasedCode, units: vendedUnits?.toString() })
           .eq('id', record.id)
-          .eq('status', 'PROCESSING')
+          .eq('status', record.status)
           .select();
 
         if (!claimed || claimed.length === 0) continue; // already resolved elsewhere
@@ -124,7 +130,7 @@ export async function reconcileStuckProcessing(opts: { force?: boolean } = {}) {
 
         notifications.push(
           sendTelegramAlert(
-            `✅ *RECOVERED STUCK PAYMENT*\n\nThis was PROCESSING for >${STUCK_MINUTES} min (server likely crashed mid-vend) — VTpass confirms it actually delivered. Completed now via reconciliation.\n\n🛒 *Product:* ${record.network} ${record.service_category}\n💰 ₦${record.amount_naira} (${record.amount_usdt} ${record.token_used || 'USD₮'})\n👤 *User:* ${record.account_number}\n🧾 *Ref:* ${alertTokenRef}\n🔗 \`${record.tx_hash}\``
+            `✅ *RECOVERED STUCK PAYMENT*\n\nThis was ${record.status} for >${STUCK_MINUTES} min (server likely crashed mid-vend) — VTpass confirms it actually delivered. Completed now via reconciliation.\n\n🛒 *Product:* ${record.network} ${record.service_category}\n💰 ₦${record.amount_naira} (${record.amount_usdt} ${record.token_used || 'USD₮'})\n👤 *User:* ${record.account_number}\n🧾 *Ref:* ${alertTokenRef}\n🔗 \`${record.tx_hash}\``
           )
         );
 
@@ -169,7 +175,7 @@ export async function reconcileStuckProcessing(opts: { force?: boolean } = {}) {
           .from('transactions')
           .update({ status: 'FAILED_VENDING', error_code: 'RECONCILED_FAILED', api_response: 'VTpass confirmed failure via reconciliation requery' })
           .eq('id', record.id)
-          .eq('status', 'PROCESSING')
+          .eq('status', record.status)
           .select();
 
         if (!claimed || claimed.length === 0) continue;
@@ -183,7 +189,7 @@ export async function reconcileStuckProcessing(opts: { force?: boolean } = {}) {
             amountCrypto: Number(record.amount_usdt),
             amountNaira: Number(record.amount_naira),
             blockchain: record.blockchain || 'CELO',
-            reason: 'Stuck PROCESSING row reconciled — VTpass confirmed the vend failed',
+            reason: `Stuck ${record.status} row reconciled — VTpass confirmed the vend failed`,
             vtpassError: JSON.stringify(requeryData).slice(0, 300),
             serviceCategory: record.service_category,
             sourceChannel: record.source_channel || 'WEB',
@@ -193,7 +199,7 @@ export async function reconcileStuckProcessing(opts: { force?: boolean } = {}) {
         }
 
         await sendTelegramAlert(
-          `❌ *RECOVERED STUCK PAYMENT — VEND FAILED*\n\nThis was PROCESSING for >${STUCK_MINUTES} min. VTpass confirms it never delivered — refund auto-queued.\n\n🛒 *Product:* ${record.network} ${record.service_category}\n👤 *User:* ${record.account_number}\n🔗 \`${record.tx_hash}\``
+          `❌ *RECOVERED STUCK PAYMENT — VEND FAILED*\n\nThis was ${record.status} for >${STUCK_MINUTES} min. VTpass confirms it never delivered — refund auto-queued.\n\n🛒 *Product:* ${record.network} ${record.service_category}\n👤 *User:* ${record.account_number}\n🔗 \`${record.tx_hash}\``
         );
         reconciled++;
       } else {
@@ -204,7 +210,7 @@ export async function reconcileStuckProcessing(opts: { force?: boolean } = {}) {
         const vtpassKnowsNothing = !requeryData?.content && !requeryData?.response_description;
         if (vtpassKnowsNothing) {
           await sendTelegramAlert(
-            `🚨 *STUCK PAYMENT — VTPASS HAS NO RECORD*\n\nTx \`${record.tx_hash}\` has been PROCESSING for over ${STUCK_MINUTES} min. Funds are already on-chain, but VTpass's requery shows no record of request_id \`${record.request_id}\` — our server likely crashed BEFORE ever calling VTpass. This needs a manual decision in the admin dashboard: retry the vend, or refund.\n\n👤 Wallet: \`${record.wallet_address || 'unknown'}\`\n💰 ${record.amount_usdt} ${record.token_used || 'USD₮'} (₦${record.amount_naira})\n🛒 ${record.network} ${record.service_category}`
+            `🚨 *STUCK PAYMENT — VTPASS HAS NO RECORD*\n\nTx \`${record.tx_hash}\` has been ${record.status} for over ${STUCK_MINUTES} min. Funds are already on-chain, but VTpass's requery shows no record of request_id \`${record.request_id}\` — our server likely crashed BEFORE ever calling VTpass. This needs a manual decision in the admin dashboard: retry the vend, or refund.\n\n👤 Wallet: \`${record.wallet_address || 'unknown'}\`\n💰 ${record.amount_usdt} ${record.token_used || 'USD₮'} (₦${record.amount_naira})\n🛒 ${record.network} ${record.service_category}`
           );
           alerted++;
         }

@@ -317,16 +317,26 @@ export async function isDuplicateElectricity(
 
     const { data } = await supabase
       .from('transactions')
-      .select('id')
+      .select('id, status, created_at')
       .ilike('wallet_address', walletAddress)
       .eq('account_number', meterNumber)
       .eq('amount_naira', amountNgn)
       .eq('service_category', 'ELECTRICITY')
       .in('status', ['SUCCESS', 'PENDING', 'PROCESSING'])
       .gte('created_at', startOfDay.toISOString())
-      .limit(1);
+      .limit(5);
 
-    return Array.isArray(data) && data.length > 0;
+    if (!Array.isArray(data) || data.length === 0) return false;
+
+    // A completed sale always blocks a same-day repeat — that's a real double-vend risk.
+    if (data.some((row: any) => row.status === 'SUCCESS')) return true;
+
+    // PENDING/PROCESSING only blocks while genuinely in flight (executeVend normally
+    // finishes in seconds). Anything older is an orphaned row — an abandoned pre-flight
+    // intent or a crashed vend — that reconciliation cleans up separately; it must not
+    // trap a legitimate retry into a false "already paid" error indefinitely.
+    const recentCutoff = Date.now() - 10 * 60 * 1000;
+    return data.some((row: any) => new Date(row.created_at).getTime() > recentCutoff);
   } catch {
     return false;   // never block a legitimate payment because of a lookup failure
   }
