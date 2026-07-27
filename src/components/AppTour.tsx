@@ -60,7 +60,7 @@ const TOUR_STEPS: TourStep[] = [
   {
     target: null,
     title: "🎉 You're all set!",
-    body: "That's the tour. Replay it anytime from the compass icon next to your region.",
+    body: "That's the tour.",
   },
 ];
 
