@@ -107,10 +107,20 @@ const INTENT_GUESS_LABELS: Record<string, string> = {
     TRANSACTION_HISTORY: 'check your transaction history',
 };
 
+// 🔴 THE "number" BUG: `t.includes('mb')` matched ANY word containing that substring —
+// "number", "member", "remember", "November", "December", "combination"... all silently
+// misclassified as a data-bundle request. Since this feeds the CONTEXT PIVOT below (which
+// WIPES the current session the moment the fresh guess differs from the in-progress intent),
+// a mid-AIRTIME-flow reply as ordinary as "to my WhatsApp number" nuked the whole session and
+// restarted fresh as VEND_DATA — the user never even got asked which network. Word-boundary
+// matching (no letters immediately before/after) still catches "500mb"/"1gb"/standalone
+// "mb"/"gb", but rejects "number"/"climb"/"comb"/"lamb" etc., where the letters are part of a
+// larger word.
+const DATA_UNIT_RE = /(?<![a-z])(mb|gb)(?![a-z])/i;
 const fallbackIntentMatcher = (text: string) => {
     const t = text.toLowerCase();
     if (t.includes('airtime') || t.includes('recharge')) return 'VEND_AIRTIME';
-    if (t.includes('data') || t.includes('mb') || t.includes('gb')) return 'VEND_DATA';
+    if (t.includes('data') || DATA_UNIT_RE.test(t)) return 'VEND_DATA';
     if (t.includes('electric') || t.includes('meter') || t.includes('nepa')) return 'ELECTRICITY';
     if (t.includes('tv') || t.includes('dstv') || t.includes('gotv') || t.includes('cable')) return 'TV';
     if (t.includes('transfer') || t.includes('send money') || t.includes('bank')) return 'BANK_TRANSFER';
