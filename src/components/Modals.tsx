@@ -152,7 +152,12 @@ export function ReceiptModal({ receipt, isMainnet, onClose, onSupport }: any) {
       }));
 
       const dataUrl = canvas.toDataURL('image/png');
-      const blob = await (await fetch(dataUrl)).blob();
+      // toBlob() rather than fetch(dataUrl) — fetching a base64 data: URI means holding the
+      // whole receipt image twice in memory (once as a giant base64 string, once as the
+      // decoded blob), which is a known source of silent failures on memory-constrained
+      // Android WebViews at scale:2. toBlob() goes straight from canvas to binary.
+      const blob: Blob | null = await new Promise((resolve) => canvas.toBlob(resolve, 'image/png'));
+      if (!blob) throw new Error('canvas.toBlob returned null — image encoding failed');
       const file = new File([blob], `AbaPay_Receipt_${receipt.id}.png`, { type: 'image/png' });
 
       if (navigator.share && navigator.canShare && navigator.canShare({ files: [file] })) {
@@ -189,15 +194,36 @@ export function ReceiptModal({ receipt, isMainnet, onClose, onSupport }: any) {
         console.error('PDF generation failed (image download is still offered):', pdfErr);
       }
       setSaveOptions({ imageUrl: dataUrl, pdfUrl });
-    } catch (error) {
-      console.error('Error generating receipt image:', error);
-      // Last-resort fallback only if image generation itself fails entirely
-      try {
-        const fallbackText = buildFallbackText();
-        if (navigator.share) await navigator.share({ title: 'AbaPay Receipt', text: fallbackText });
-        else { await navigator.clipboard.writeText(fallbackText); alert("Couldn't generate a receipt image, so the details were copied to your clipboard instead."); }
-      } catch (fallbackErr) {
-        console.log("Fallback share failed.");
+    } catch (error: any) {
+      console.error('Error generating receipt image:', error?.name, error?.message, error);
+      // Last-resort fallback only if image generation itself fails entirely. This used to be
+      // able to fail SILENTLY end-to-end: navigator.share(text) or clipboard.writeText() could
+      // itself throw (e.g. both APIs blocked inside a wallet's embedded webview) and land in a
+      // catch that did nothing but console.log — the button would flash "PREPARING…" and then
+      // visibly do nothing at all, indistinguishable from the button being broken. Every branch
+      // below now guarantees SOME visible outcome. (Deliberately no alert() BEFORE the
+      // navigator.share() call: a blocking dialog can consume the user-gesture/transient
+      // activation the Share API requires, which would silently break a share that otherwise
+      // would have worked.)
+      const fallbackText = buildFallbackText();
+      let shared = false;
+      if (navigator.share) {
+        try {
+          await navigator.share({ title: 'AbaPay Receipt', text: fallbackText });
+          shared = true; // the OS share sheet opening is itself the visible confirmation
+        } catch (shareErr: any) {
+          if (shareErr?.name === 'AbortError') return; // user closed the sheet themselves
+        }
+      }
+      if (!shared) {
+        try {
+          await navigator.clipboard.writeText(fallbackText);
+          alert("Couldn't generate a receipt image, so the details were copied to your clipboard instead.");
+        } catch (clipboardErr) {
+          // Absolute last resort — neither Share nor Clipboard worked. Guarantee something
+          // visible rather than the silent nothing this used to end in.
+          alert(`Couldn't generate or share a receipt image.\n\n${fallbackText}`);
+        }
       }
     } finally {
       setIsProcessingShare(false);
