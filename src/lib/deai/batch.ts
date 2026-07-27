@@ -173,10 +173,22 @@ export async function executeAgentPayment(params: {
         return { success: true, txHash, message: 'Paid — finishing up in the background.' };
       }
 
+      // 🔴 THE BUG THIS FIXES: for ELECTRICITY, VTpass takes prepaid/postpaid in
+      // `variation_code` — that is exactly what the web app sends (page.tsx's
+      // buildBackendPayload sets `finalVariationCode = meterType` for ELECTRICITY). This
+      // path only ever recorded the meter type on the transaction ROW (meter_account_type
+      // above) and passed `variation_code: params.variationCode`, which is null for
+      // electricity — so every MCP/scheduled electricity vend reached VTpass with no meter
+      // type, AFTER the on-chain payment had already settled. Only electricity falls back;
+      // data/cable/international all populate params.variationCode themselves.
+      const vendVariationCode = params.variationCode
+        || (item.serviceCategory === 'ELECTRICITY' ? item.meterType : undefined)
+        || undefined;
+
       const vendResult = await executeVend({
         vtRequestId, txHash, serviceID: item.serviceID, serviceCategory: item.serviceCategory,
         network: item.provider || '', billersCode: item.billersCode, phone: null,
-        variation_code: params.variationCode || undefined, subscription_type: undefined,
+        variation_code: vendVariationCode, subscription_type: undefined,
         amount: amountCrypto, tokenSymbol: item.tokenSymbol, vendAmount: item.amountNgn, isForeign: false,
         email: params.email || null, wallet_address: userWallet, blockchain: item.chain,
         source_channel: sourceChannel, customer_name: params.customerName || null,

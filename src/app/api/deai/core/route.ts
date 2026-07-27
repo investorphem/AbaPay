@@ -1258,9 +1258,24 @@ async function handleCore(req: Request, ctx: HumanizeCtx): Promise<NextResponse>
                   });
                 }
 
+                // 🔴 THE BUG THIS FIXES: for ELECTRICITY, VTpass takes prepaid/postpaid in
+                // `variation_code` — that is exactly what the web app sends (page.tsx's
+                // buildBackendPayload: `finalVariationCode = meterType` for ELECTRICITY).
+                // Chat, however, only ever stored it as `meter_type` and passed
+                // `variation_code: d.variation_code`, which NOTHING sets for electricity
+                // (requiresVariation() is false for it) — so every chat electricity vend went
+                // to VTpass with no meter type at all, after the money had already moved
+                // on-chain. The chat flow asks the user prepaid-or-postpaid, verifies the
+                // meter with it, prints it back — and then dropped it at the one step that
+                // mattered. Airtime/data/cable are untouched: d.variation_code is populated
+                // for those, so the fallback never applies.
+                const vendVariationCode = d.variation_code
+                  || (serviceCategory === 'ELECTRICITY' ? d.meter_type : undefined)
+                  || undefined;
+
                 const vendResult = await executeVend({
                   vtRequestId, txHash, serviceID, serviceCategory, network: d.provider || '', billersCode: d.destination_account,
-                  phone: d.phone || null, variation_code: d.variation_code, subscription_type: d.cable_action,
+                  phone: d.phone || null, variation_code: vendVariationCode, subscription_type: d.cable_action,
                   amount: amountCrypto, tokenSymbol: tokenSym, vendAmount: Number(d.amount_ngn), displayAmount: undefined,
                   foreignAmount: undefined, isForeign: false, operator_id: d.operator_id, country_code: d.country_code,
                   product_type_id: d.product_type_id, email: d.email || d.customer_email || null,
