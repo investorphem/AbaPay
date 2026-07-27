@@ -119,8 +119,18 @@ const INTENT_GUESS_LABELS: Record<string, string> = {
 const DATA_UNIT_RE = /(?<![a-z])(mb|gb)(?![a-z])/i;
 const fallbackIntentMatcher = (text: string) => {
     const t = text.toLowerCase();
-    if (t.includes('airtime') || t.includes('recharge')) return 'VEND_AIRTIME';
+    // 🔴 THE "recharge" BUG: 'recharge' used to be tested alongside 'airtime', BEFORE the data
+    // check — but in Nigerian usage "recharge" means top up ANYTHING, data very much included.
+    // So "recharge 500mb", "recharge my data" and "recharge my line with 1gb" all resolved to
+    // VEND_AIRTIME. Because this feeds the CONTEXT PIVOT below (which WIPES the in-progress
+    // session the moment its guess differs from the live intent), saying "recharge 500mb for
+    // me" while ALREADY in a data flow destroyed that flow and restarted the user in airtime.
+    // Ordering is the whole fix: the explicit word 'airtime' still wins outright (so "buy
+    // airtime and data" is unchanged), then an explicit data signal, and only then does a bare
+    // 'recharge' with no data words fall back to airtime ("recharge my line" → airtime).
+    if (t.includes('airtime')) return 'VEND_AIRTIME';
     if (t.includes('data') || DATA_UNIT_RE.test(t)) return 'VEND_DATA';
+    if (t.includes('recharge')) return 'VEND_AIRTIME';
     if (t.includes('electric') || t.includes('meter') || t.includes('nepa')) return 'ELECTRICITY';
     if (t.includes('tv') || t.includes('dstv') || t.includes('gotv') || t.includes('cable')) return 'TV';
     if (t.includes('transfer') || t.includes('send money') || t.includes('bank')) return 'BANK_TRANSFER';
