@@ -9,7 +9,8 @@ import { getRemainingAllowance } from '@/lib/deai/relayer';
 import { SUPPORTED_TOKENS } from '@/constants';
 import { checkAccountNumber, checkAmount as checkAmountParity, requiresVariation } from '@/lib/parity';
 import { checkAutonomousCapacity, executeAgentPayment, type BatchItem } from '@/lib/deai/batch';
-import { resolveMcpIdentity } from '@/lib/deai/mcpAuth';
+import { resolveMcpIdentity, type McpIdentity } from '@/lib/deai/mcpAuth';
+import { validateAccessToken } from '@/lib/deai/mcpOAuth';
 import { checkPinAllowed, recordPinFailure, clearPinFailures, notifySpendOutOfBand } from '@/lib/deai/pinSecurity';
 import { verifyPin } from '@/utils/pinSecurity';
 
@@ -28,6 +29,34 @@ import { verifyPin } from '@/utils/pinSecurity';
 
 const PROTOCOL_VERSION = '2025-06-18';
 const SERVER_INFO = { name: 'abapay', version: '1.0.0' };
+
+const APP_URL = process.env.NEXT_PUBLIC_APP_URL || 'https://abapays.com';
+
+// ⚡ OAUTH 2.1 — the credential problem this solves:
+// The api_key/pin tool ARGUMENTS below work, but a brand-new Claude conversation remembers
+// nothing, so the human had to retype their api_key every single time. With OAuth the client
+// authorises ONCE in a browser (see /api/oauth/authorize) and presents a Bearer token
+// automatically forever after.
+//
+// 🔴 WHAT OAUTH DOES NOT CHANGE: the PIN. It is still required on every single pay_bill call,
+// exactly as before, exactly as on Telegram/WhatsApp. OAuth re-establishes the CONNECTION
+// without retyping; it never authorises a spend. A Bearer token on its own can read a
+// balance and nothing more.
+//
+// 🔴 WHY A REAL 401 MATTERS: an HTTP 401 carrying WWW-Authenticate with a `resource_metadata`
+// pointer is the ONLY signal an MCP client uses to discover "this server supports OAuth" and
+// offer the connect button. Returning the same condition as a soft in-band tool error (which
+// is what happened before) is invisible to it — the client just sees a tool that answered.
+// Hence exactly one case became a real 401: NO credential supplied at all. A WRONG api_key, a
+// bad PIN, or a malformed argument stay in-band tool errors, because those are not "you need
+// to authenticate", they are "you authenticated and got it wrong" / "you called it wrong" —
+// turning those into 401s would make a client re-run the whole browser flow over a typo.
+const WWW_AUTH_MISSING = `Bearer resource_metadata="${APP_URL}/.well-known/oauth-protected-resource"`;
+const WWW_AUTH_INVALID = `Bearer error="invalid_token", error_description="The access token is invalid, expired, or revoked", resource_metadata="${APP_URL}/.well-known/oauth-protected-resource"`;
+
+// Sentinel a tool returns when it has NO credential to work with at all — the POST handler
+// turns this, and only this, into a genuine HTTP 401 (see above).
+const NEEDS_AUTH = Symbol('mcp-needs-auth');
 
 const SERVICE_INTENT: Record<string, string> = {
   AIRTIME: 'VEND_AIRTIME',
@@ -80,14 +109,14 @@ const TOOLS = [
   {
     name: 'check_balance',
     title: 'Check Balance',
-    description: "Check a linked wallet's stablecoin balances and remaining agent spending allowance. Requires the api_key created in the AbaPay app's Agent Hub (MCP).",
+    description: "Check a linked wallet's stablecoin balances and remaining agent spending allowance. Works with no arguments once this connector is authorized via OAuth; otherwise pass the api_key created in the AbaPay app's Agent Hub (MCP).",
     inputSchema: {
       type: 'object',
       properties: {
-        api_key: { type: 'string', description: 'AbaPay MCP API key (starts with aba_mcp_)' },
+        api_key: { type: 'string', description: 'AbaPay MCP API key (starts with aba_mcp_). NOT needed when the connector is authorized via OAuth — omit it entirely in that case; only supply it if this server asked you to authenticate and OAuth is unavailable.' },
         chain: { type: 'string', enum: ['CELO', 'BASE'], description: 'Defaults to the chain approved when the key was created.' },
       },
-      required: ['api_key'],
+      required: [],
       additionalProperties: false,
     },
     // Reads on-chain state — never writes, never spends.
@@ -96,12 +125,12 @@ const TOOLS = [
   {
     name: 'pay_bill',
     title: 'Pay Bill',
-    description: 'Pay a real Nigerian bill (airtime, data, electricity, or cable TV) from the linked wallet, settled on-chain and delivered via the same pipeline as the AbaPay app. Requires the api_key and the PIN set when the key was created. Money moves for real — only call this once the human has clearly confirmed the exact amount, provider, and account.',
+    description: 'Pay a real Nigerian bill (airtime, data, electricity, or cable TV) from the linked wallet, settled on-chain and delivered via the same pipeline as the AbaPay app. ALWAYS requires the PIN — including when this connector is authorized via OAuth; ask the human for it every time and never guess or reuse a remembered one. The api_key is only needed when OAuth is not in use. Money moves for real — only call this once the human has clearly confirmed the exact amount, provider, and account.',
     inputSchema: {
       type: 'object',
       properties: {
-        api_key: { type: 'string', description: 'AbaPay MCP API key' },
-        pin: { type: 'string', description: '4-6 digit PIN set when the API key was created' },
+        api_key: { type: 'string', description: 'AbaPay MCP API key. NOT needed when the connector is authorized via OAuth — omit it entirely in that case.' },
+        pin: { type: 'string', description: '4-6 digit PIN set when the API key was created. Required on EVERY payment, including over an OAuth connection — ask the human for it each time.' },
         service: { type: 'string', enum: ['AIRTIME', 'DATA', 'ELECTRICITY', 'CABLE'], description: 'Which kind of bill' },
         provider: { type: 'string', description: 'e.g. mtn, airtel, glo, ikeja-electric, dstv, gotv, startimes' },
         account_number: { type: 'string', description: 'Phone number (airtime/data), meter number (electricity), or smartcard/IUC number (cable)' },
@@ -113,7 +142,11 @@ const TOOLS = [
         customer_name: { type: 'string', description: 'Optional — used for the receipt if known' },
         customer_email: { type: 'string', description: 'Optional — receipt is sent here if provided' },
       },
-      required: ['api_key', 'pin', 'service', 'provider', 'account_number', 'amount_ngn'],
+      // `pin` stays required, deliberately and permanently — OAuth removes the retyping of
+      // the api_key, never the per-payment PIN confirmation. `api_key` is no longer required
+      // because a valid Bearer token supplies the identity instead; the runtime check below
+      // enforces "one or the other" and returns a real 401 when there is neither.
+      required: ['pin', 'service', 'provider', 'account_number', 'amount_ngn'],
       additionalProperties: false,
     },
     // Moves real money on-chain — irreversible, and calling it twice pays twice.
@@ -125,12 +158,39 @@ async function callDescribeCapabilities() {
   return textResult(await describeCapabilities());
 }
 
-async function callCheckBalance(args: any) {
+// Both credential routes converge here, and both produce the identical McpIdentity — so
+// everything downstream (allowance, PIN gate, kill switches, spend alerts) is untouched by
+// which one was used.
+//
+// PRECEDENCE: an explicitly-passed api_key WINS over the OAuth identity. A wallet may hold
+// several MCP keys, and if a caller deliberately names one it must not be silently overridden
+// by whichever identity the connector happens to be authorised as — that would be paying a
+// bill from the wrong wallet, which is the worst possible failure here. Omitting api_key (the
+// normal OAuth case) falls through to the token's identity.
+async function resolveIdentity(
+  args: any,
+  oauthIdentity: McpIdentity | null
+): Promise<{ identity: McpIdentity } | { error: 'missing' | 'invalid' }> {
   const apiKey = String(args?.api_key || '');
-  if (!apiKey) return errorResult('api_key is required.');
+  if (apiKey) {
+    const identity = await resolveMcpIdentity(apiKey);
+    return identity ? { identity } : { error: 'invalid' };
+  }
+  if (oauthIdentity) return { identity: oauthIdentity };
+  return { error: 'missing' };
+}
 
-  const identity = await resolveMcpIdentity(apiKey);
-  if (!identity) return errorResult('Invalid or revoked API key. Create a new one in the AbaPay app under Agent Hub → MCP.');
+const INVALID_KEY_MSG = 'Invalid or revoked API key. Create a new one in the AbaPay app under Agent Hub → MCP.';
+
+async function callCheckBalance(args: any, oauthIdentity: McpIdentity | null) {
+  const resolved = await resolveIdentity(args, oauthIdentity);
+  if ('error' in resolved) {
+    // No credential at all → real 401 so the client can offer the OAuth connect flow.
+    // A wrong key → in-band error, exactly as before.
+    if (resolved.error === 'missing') return NEEDS_AUTH;
+    return errorResult(INVALID_KEY_MSG);
+  }
+  const identity = resolved.identity;
 
   const chain = args?.chain === 'BASE' || args?.chain === 'CELO' ? args.chain : identity.approved_chain || 'CELO';
   const tokens = tokensForChain(chain);
@@ -158,7 +218,7 @@ async function callCheckBalance(args: any) {
   return textResult(lines.join('\n'));
 }
 
-async function callPayBill(args: any) {
+async function callPayBill(args: any, oauthIdentity: McpIdentity | null) {
   const apiKey = String(args?.api_key || '');
   const pin = String(args?.pin || '');
   const service = String(args?.service || '').toUpperCase();
@@ -172,7 +232,12 @@ async function callPayBill(args: any) {
   const chainOverride = args?.chain === 'BASE' || args?.chain === 'CELO' ? args.chain : null;
   const tokenOverride = args?.token ? String(args.token) : null;
 
-  if (!apiKey) return errorResult('api_key is required.');
+  // No credential of ANY kind → this is the "you need to authenticate" case, and the only
+  // one that becomes a real HTTP 401. Checked before argument validation so a caller with no
+  // credential is told to authenticate rather than being sent to fix an unrelated field.
+  if (!apiKey && !oauthIdentity) return NEEDS_AUTH;
+  // The PIN is required regardless of how identity was established — see the note on the
+  // tool's `required` array. An OAuth connection does not, and will never, skip this.
   if (!/^\d{4,6}$/.test(pin)) return errorResult('pin must be 4-6 digits.');
   const intent = SERVICE_INTENT[service];
   if (!intent) {
@@ -213,8 +278,12 @@ async function callPayBill(args: any) {
   // 🔐 Same identity + PIN gate as every other channel — see src/lib/deai/pinSecurity.ts.
   // The counter lives on the agent_links row itself, so it survives across separate MCP
   // calls exactly the way it survives "Cancel"/"Start" on the chat channels.
-  const identity = await resolveMcpIdentity(apiKey);
-  if (!identity) return errorResult('Invalid or revoked API key. Create a new one in the AbaPay app under Agent Hub → MCP.');
+  const resolved = await resolveIdentity(args, oauthIdentity);
+  if ('error' in resolved) {
+    if (resolved.error === 'missing') return NEEDS_AUTH;
+    return errorResult(INVALID_KEY_MSG);
+  }
+  const identity = resolved.identity;
 
   const pinGate = await checkPinAllowed(identity.id);
   if (!pinGate.allowed) return errorResult(pinGate.message || 'Locked — too many incorrect PINs.');
@@ -327,11 +396,15 @@ async function callPayBill(args: any) {
   return textResult(`${result.message}${result.txHash ? `\nTx: ${result.txHash}` : ''}`);
 }
 
-async function callTool(name: string, args: any) {
+// The OAuth identity is threaded through as a PARAMETER, never stashed in module scope — a
+// serverless instance handles many requests and module state is shared between them, so a
+// module-level "current identity" would be a wallet-mixing bug waiting for two concurrent
+// users.
+async function callTool(name: string, args: any, oauthIdentity: McpIdentity | null) {
   switch (name) {
     case 'describe_capabilities': return callDescribeCapabilities();
-    case 'check_balance': return callCheckBalance(args);
-    case 'pay_bill': return callPayBill(args);
+    case 'check_balance': return callCheckBalance(args, oauthIdentity);
+    case 'pay_bill': return callPayBill(args, oauthIdentity);
     default: return null;
   }
 }
@@ -344,9 +417,31 @@ function rpcError(id: unknown, code: number, message: string) {
   return NextResponse.json({ jsonrpc: '2.0', id: id ?? null, error: { code, message } });
 }
 
+/** HTTP 401 + the WWW-Authenticate pointer an MCP client follows to start the OAuth flow. */
+function unauthorized(id: unknown, wwwAuthenticate: string, message: string) {
+  return NextResponse.json(
+    { jsonrpc: '2.0', id: id ?? null, error: { code: -32001, message } },
+    { status: 401, headers: { 'WWW-Authenticate': wwwAuthenticate } }
+  );
+}
+
 export async function POST(req: Request) {
   const limited = await enforceRateLimit(req, 'mcp', 60, 60);
   if (limited) return limited;
+
+  // 🔐 Bearer token, if the client has one. Resolved ONCE per request, before any dispatch,
+  // and passed down explicitly. A token that's present but doesn't resolve is a hard 401 —
+  // an expired or revoked token must tell the client to re-authorise, not silently degrade
+  // into "please type your api_key", which is the exact behaviour we're removing.
+  const authHeader = req.headers.get('authorization') || '';
+  let oauthIdentity: McpIdentity | null = null;
+  if (/^Bearer\s+/i.test(authHeader)) {
+    const token = authHeader.replace(/^Bearer\s+/i, '').trim();
+    oauthIdentity = await validateAccessToken(token);
+    if (!oauthIdentity) {
+      return unauthorized(null, WWW_AUTH_INVALID, 'Invalid or expired access token. Re-authorize the AbaPay connector.');
+    }
+  }
 
   let body: any;
   try {
@@ -369,7 +464,7 @@ export async function POST(req: Request) {
           protocolVersion: params?.protocolVersion || PROTOCOL_VERSION,
           capabilities: { tools: {} },
           serverInfo: SERVER_INFO,
-          instructions: 'AbaPay: check a linked wallet\'s stablecoin balance or pay a real Nigerian bill (airtime, data, electricity, cable), settled on-chain. Call describe_capabilities first. pay_bill and check_balance require an api_key created in the AbaPay app under Agent Hub -> MCP; pay_bill also requires the PIN set at that time.',
+          instructions: "AbaPay: check a linked wallet's stablecoin balance or pay a real Nigerian bill (airtime, data, electricity, cable), settled on-chain. Call describe_capabilities first. Authentication: OAuth 2.1 is supported and preferred — authorize once in the browser and this connection is remembered, so no api_key argument is ever needed again. The api_key created in the AbaPay app under Agent Hub -> MCP remains the fallback for clients that cannot do OAuth. Either way, pay_bill ALWAYS requires the PIN set when the key was created — OAuth does not remove it. Ask the human for their PIN on every single payment.",
         });
 
       case 'ping':
@@ -383,7 +478,17 @@ export async function POST(req: Request) {
         if (!toolName || !TOOLS.some((t) => t.name === toolName)) {
           return rpcError(id, -32602, `Unknown tool: ${toolName}`);
         }
-        const result = await callTool(toolName, params?.arguments || {});
+        const result = await callTool(toolName, params?.arguments || {}, oauthIdentity);
+        // The one and only in-band condition promoted to an HTTP-level failure: a tool that
+        // needs an identity was called with none at all. Everything else — wrong key, wrong
+        // PIN, bad arguments, insufficient allowance — stays a normal tool result.
+        if (result === NEEDS_AUTH) {
+          return unauthorized(
+            id,
+            WWW_AUTH_MISSING,
+            'Authorization required. Connect the AbaPay MCP server via OAuth, or pass an api_key argument.'
+          );
+        }
         return rpcResult(id, result);
       }
 
