@@ -1621,15 +1621,33 @@ async function handleCore(req: Request, ctx: HumanizeCtx): Promise<NextResponse>
 
       session.intent_data.plan_category = picked.category;
 
+      // 🔴 THE BUG THIS FIXES: this rendered the chosen category with renderOptions() — the
+      // UNPAGINATED renderer — numbering every plan 1..N (MTN's Monthly/SME categories run
+      // well past 14) and never setting variation_page. But the AWAITING_VARIATION handler
+      // this hands off to matches with matchPagedOption(page=0, pageSize=8), which only
+      // accepts 1..8. Anything higher fell through to its fuzzy NAME match, where a bare
+      // number is matched as a SUBSTRING of the plan labels — and real VTpass labels are full
+      // of digits ("N1000 1.5GB 30 days"). Observed against a realistic 14-plan list: typing
+      // *10* selected plan 1, and typing *12* selected plan 6 — ₦6,000 instead of ₦12,000.
+      // Not an error message: the WRONG BUNDLE at the WRONG PRICE, silently, one step before
+      // the PIN prompt. The other entry point into this exact state (the variation gate in
+      // the main flow) already renders it paginated; these two had simply drifted apart.
+      // Render the same page-0 view, and stamp variation_page so *next* works from here too.
+      const catPage = renderOptionsPage(picked.plans, 0, { showPrice: true });
+      session.intent_data.variation_page = 0;
+
       await supabase.from('deai_sessions').upsert({
         chat_id: platform_id, platform, intent_data: session.intent_data,
         status: 'AWAITING_VARIATION',
         expires_at: new Date(Date.now() + 300000).toISOString(),
       }, { onConflict: 'chat_id' });
 
+      const catFooter = catPage.hasMore
+        ? `\n\n_Page 1/${catPage.totalPages} — reply *next* to see more, or reply with the number._`
+        : `\n\n_Reply with the number._`;
       return NextResponse.json({
         action: 'REPLY',
-        message: `📦 *${picked.category} plans:*\n\n${renderOptions(picked.plans, { showPrice: true })}\n\n_Reply with the number._`,
+        message: `📦 *${picked.category} plans:*\n\n${catPage.text}${catFooter}`,
       });
     }
     // ⚡ STATE: VARIATION SELECTION (data plans, cable packages, exam products) ⚡
