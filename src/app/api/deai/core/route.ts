@@ -1922,11 +1922,24 @@ async function handleCore(req: Request, ctx: HumanizeCtx): Promise<NextResponse>
     }
     // STATE: METER TYPE
     else if (session?.status === 'AWAITING_METER_TYPE') {
+        // 🔴 THE BUG THIS FIXES: this accepted ONLY the literal strings "1" and "2". Asked
+        // "Is this *Prepaid* or *Postpaid*?", the single most natural answer a human gives is
+        // the word itself — and "prepaid" was rejected with "❌ Please reply with 1 or 2",
+        // which reads as the bot not understanding its own question. Every sibling menu in
+        // this file already accepts the name alongside the number (AWAITING_CHAIN: "a user
+        // typing 'Celo' clearly means option 1"; AWAITING_TOKEN's alias map; AWAITING_CABLE_
+        // ACTION's renew/change words) — electricity was the one that never got it.
         const typeMap: Record<string, string> = { '1': 'prepaid', '2': 'postpaid' };
-        const selectedType = typeMap[userInput];
+        const selectedType = typeMap[userInput]
+            // "postpaid" contains "prepaid" nowhere, but "pre"/"post" are the halves people
+            // actually type — check post FIRST so "postpaid"/"post paid" can't match a
+            // looser prepaid test.
+            || (/\bpost[\s-]?paid\b|^post$/i.test(userInput) ? 'postpaid'
+              : /\bpre[\s-]?paid\b|^pre$/i.test(userInput) ? 'prepaid'
+              : null);
 
         if (!selectedType) return NextResponse.json({ action: 'REPLY', message: "❌ Please reply with *1* for Prepaid or *2* for Postpaid." });
-        
+
         const verification = await verifyAccount(
             session.intent_data.intent,
             session.intent_data.destination_account,
@@ -1934,8 +1947,24 @@ async function handleCore(req: Request, ctx: HumanizeCtx): Promise<NextResponse>
             session.intent_data.provider
         );
         if (!verification.success) {
-            await supabase.from('deai_sessions').delete().eq('chat_id', platform_id);
-            return NextResponse.json({ action: 'REPLY', message: `❌ ${verification.message || 'Verification failed. Please check the meter number and try again.'}` });
+            // 🔴 THE BUG THIS FIXES: this used to DELETE the whole session. A mistyped meter
+            // number — the single most common reason verification fails — threw away the
+            // disco, the amount, the phone and the email the user had already given. Their
+            // next message (the corrected meter number, alone) was then parsed from scratch
+            // with no context and answered with "🤔 I didn't quite catch that." The sibling
+            // electricity-verification site further down already handles this correctly:
+            // keep everything else, clear ONLY the rejected meter number, and ask for it
+            // again. Match it, so both paths recover the same way.
+            session.intent_data.meter_type = selectedType;
+            session.intent_data.destination_account = null;
+            await supabase.from('deai_sessions').upsert({
+                chat_id: platform_id, platform, intent_data: session.intent_data,
+                status: 'AWAITING_DETAILS', expires_at: new Date(Date.now() + 300000).toISOString(),
+            }, { onConflict: 'chat_id' });
+            return NextResponse.json({
+                action: 'REPLY',
+                message: `❌ ${verification.message || "That meter number couldn't be verified"} for *${session.intent_data.provider_label || session.intent_data.provider}*.\n\nPlease reply with the correct meter number.`,
+            });
         }
 
         session.intent_data.meter_type = selectedType;
