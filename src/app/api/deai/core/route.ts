@@ -179,7 +179,35 @@ function extractEntities(text: string, currentData: any = {}) {
     if (foundProvider && !data.provider) data.provider = foundProvider;
 
     // 3. Force Extract Digits
-    const digitsMatch = cleanText.match(/\b\d+\b/g) || [];
+    //
+    // 🔴 THE BUG THIS FIXES: `\b\d+\b` splits a phone number written the way people actually
+    // write them — "0803 123 4567", "0803-123-4567", "+234 803 123 4567" — into three or four
+    // short fragments. Not one of them reaches the 10-digit account threshold, so no
+    // destination_account is ever found; worse, the FIRST fragment lands in the AMOUNT bucket
+    // instead. Observed live against /api/deai/core:
+    //   "send airtime to 0803 123 4567"        -> "💡 *Got it! (₦803)*"
+    //   "airtime for +234 803 123 4567, 200 naira" -> "💡 *Got it! (₦234)*"
+    // i.e. the number the user just typed was silently reinterpreted as the amount of airtime
+    // to buy, and the real amount they stated was discarded — then the bot asked for the
+    // target number they had already given.
+    //
+    // Glue digit runs back together first, but only when it's unambiguous: the separators must
+    // sit strictly BETWEEN digits, the joined result must be a plausible account length
+    // (10-14), and there must be at most 4 groups. That deliberately leaves
+    // "airtime 2000 08031234567" alone (15 digits joined — a genuinely separate amount and
+    // account) and a menu-mashing "1 2 3 4 5 6 7 8 9 10 11" alone (11 groups).
+    const gluedText = cleanText.replace(/\d[\d\s.\-()]*\d/g, (run) => {
+        const digits = run.replace(/\D/g, '');
+        const groups = run.split(/[\s.\-()]+/).filter(Boolean).length;
+        return digits.length >= 10 && digits.length <= 14 && groups <= 4 ? digits : run;
+    });
+    // A "+234"/"234"-prefixed mobile is the same 11-digit local number every downstream
+    // consumer (detectNetwork, checkAccountNumber, VTpass) expects in 0-prefixed form —
+    // without this the glued "2348031234567" is rejected later as a malformed phone number.
+    // Anchored to Nigerian mobile ranges (234 followed by 7/8/9) so a 13-digit meter or
+    // smartcard number that merely starts with 234 is left untouched.
+    const normalizedText = gluedText.replace(/\b234([789]\d{9})\b/g, '0$1');
+    const digitsMatch = normalizedText.match(/\b\d+\b/g) || [];
     const possibleAccountsOrPhones = digitsMatch.filter(d => d.length >= 10);
     const possibleAmounts = digitsMatch.filter(d => d.length >= 2 && d.length < 10);
 
