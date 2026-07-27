@@ -107,6 +107,27 @@ const INTENT_GUESS_LABELS: Record<string, string> = {
     TRANSACTION_HISTORY: 'check your transaction history',
 };
 
+// Bank transfer and Education are genuinely supported features, but only in the app (see
+// capabilities.ts for why) — there is nothing chat can usefully collect for them. Shared by
+// BOTH gates below (the AI-parse one and the keyword-fallback one) so the two can never drift
+// apart on which intents are app-only, or on how they word the hand-off.
+const APP_ONLY_INTENTS = ['BANK_TRANSFER', 'EDUCATION'];
+
+async function appOnlyRedirect(intent: string): Promise<NextResponse> {
+    const f = await assessFeasibility({ intent });
+    const spec = getCapability(capabilityForIntent(intent)!);
+    return NextResponse.json({
+        action: 'REPLY',
+        message: [
+            `📱 *${spec?.label || 'That'}* — I can't complete this from chat, but here's how:`,
+            ``,
+            f.reason,
+            ``,
+            ...f.suggestions.map(sug => `• ${sug}`),
+        ].join('\n'),
+    });
+}
+
 // 🔴 THE "number" BUG: `t.includes('mb')` matched ANY word containing that substring —
 // "number", "member", "remember", "November", "December", "combination"... all silently
 // misclassified as a data-bundle request. Since this feeds the CONTEXT PIVOT below (which
@@ -2161,9 +2182,8 @@ async function handleCore(req: Request, ctx: HumanizeCtx): Promise<NextResponse>
         // Things that are genuinely possible, but belong in the app (bank, education,
         // international). Previously these fell into "I didn't catch that" — which made a
         // supported feature look broken.
-        // Bank transfer and Education stay app-only (see capabilities.ts for why).
+        // Bank transfer and Education stay app-only (see APP_ONLY_INTENTS for why).
         // INTERNATIONAL is fully supported in chat — validated against VTpass's live country list.
-        const appOnly = ['BANK_TRANSFER', 'EDUCATION'];
 
         // 🔴 THE "can't send airtime to NI" BUG: the AI sometimes emits a stray/wrong country
         // code (e.g. "NI" for Nigeria instead of ISO "NG"), and the old check treated ANY
@@ -2180,20 +2200,7 @@ async function handleCore(req: Request, ctx: HumanizeCtx): Promise<NextResponse>
         const isForeign = canBeForeign && normalizedCountry && normalizedCountry !== 'NG';
         const effectiveIntent = isForeign ? 'INTERNATIONAL' : aiParsed.intent;
 
-        if (appOnly.includes(effectiveIntent)) {
-            const f = await assessFeasibility({ intent: effectiveIntent });
-            const spec = getCapability(capabilityForIntent(effectiveIntent)!);
-            return NextResponse.json({
-                action: 'REPLY',
-                message: [
-                    `📱 *${spec?.label || 'That'}* — I can't complete this from chat, but here's how:`,
-                    ``,
-                    f.reason,
-                    ``,
-                    ...f.suggestions.map(sug => `• ${sug}`),
-                ].join('\n'),
-            });
-        }
+        if (APP_ONLY_INTENTS.includes(effectiveIntent)) return await appOnlyRedirect(effectiveIntent);
 
         // INTERNATIONAL — guided, validated against the live VTpass country catalogue.
         if (effectiveIntent === 'INTERNATIONAL') {
@@ -2266,6 +2273,26 @@ async function handleCore(req: Request, ctx: HumanizeCtx): Promise<NextResponse>
             // If details are missing, the existing state machine below collects them.
         }
     }
+
+    // ⚡ APP-ONLY GATE — FALLBACK PATH ⚡
+    //
+    // 🔴 THE BUG THIS FIXES: the app-only redirect above lives INSIDE `if (aiParsed)` and reads
+    // `aiParsed.intent`. But parseIntent() is best-effort by design — it returns null on ANY
+    // AI failure (an API key that's been rotated, a timeout, a non-JSON reply), and it can also
+    // legitimately answer UNKNOWN on a terse message. In either case `intentData.intent` still
+    // carries EDUCATION/BANK_TRANSFER from fallbackIntentMatcher ('waec', 'jamb', 'school',
+    // 'education', 'transfer', 'bank'), the redirect never fires, and the request drops into
+    // the in-chat field collector instead. Observed live with the AI unreachable:
+    //
+    //   "waec"                          -> "To complete your EDUCATION, please reply with the
+    //                                       *Amount*, the *Target Number/Account*, your
+    //                                       *Contact Phone Number*, your *Email Address*."
+    //   "i want to do a transfer to my bank" -> the same, for BANK TRANSFER.
+    //
+    // That's a form chat can never submit, for the two services the redirect exists to route
+    // into the app — the user answers four questions and gets a dead end. Gate on the intent
+    // we are actually about to ACT on, not on the AI's opinion of it.
+    if (APP_ONLY_INTENTS.includes(intentData.intent)) return await appOnlyRedirect(intentData.intent);
 
     // ⚡ 4b-bis. MULTI-RECIPIENT (BATCH) PAYMENTS ⚡
     //
