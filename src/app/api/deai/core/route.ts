@@ -2973,9 +2973,18 @@ async function handleCore(req: Request, ctx: HumanizeCtx): Promise<NextResponse>
     // bogus telecom-network guess for a real, already-known cable provider.
     if (intentData.provider && ['ELECTRICITY', 'TV'].includes(intentData.intent)) {
         const spec = providersFor(intentData.intent);
-        if (spec && !matchProvider(String(intentData.provider), spec.options)) {
+        const matched = spec ? matchProvider(String(intentData.provider), spec.options) : null;
+        if (spec && !matched) {
             intentData.provider = null;
             intentData.provider_label = null;
+        } else if (matched && !intentData.provider_label) {
+            // The AI supplies a raw service id ("ikeja-electric"); only the AWAITING_PROVIDER
+            // menu handler ever stamped the human label, so a disco named in free text showed
+            // up in the echo and in verification errors as "IKEJA-ELECTRIC" while the same
+            // disco picked from the menu showed "Ikeja Electricity". We already have the
+            // matched option here — take the label from it so both routes read the same.
+            intentData.provider = matched.id;
+            intentData.provider_label = matched.label;
         }
     }
 
@@ -3097,6 +3106,17 @@ async function handleCore(req: Request, ctx: HumanizeCtx): Promise<NextResponse>
             let savedItems = [];
             if (intentData.amount_ngn) savedItems.push(`₦${intentData.amount_ngn}`);
             if (intentData.destination_account) savedItems.push(`${intentData.destination_account}`);
+            // 🔴 THE GAP: the echo listed amount/account/email but never the PROVIDER, even
+            // though naming one ("Ikeja", "MTN") is a normal thing to do while this prompt is
+            // up, and it IS absorbed. Because the rest of the reply is a fixed template, the
+            // bot answered a user who had just supplied new information with a byte-identical
+            // message. Observed live mid-ELECTRICITY, the bot asking for the meter number:
+            //   > ikeja
+            //   💡 *Got it! (₦5000 | Email Saved)*
+            //   To complete your ELECTRICITY, please reply with the *Target Number/Account*.
+            // — the exact reply it had just given, so the only reasonable reading is that the
+            // disco was ignored. It wasn't; it just went unacknowledged.
+            if (intentData.provider) savedItems.push(`${intentData.provider_label || String(intentData.provider).toUpperCase()}`);
             if (intentData.email) savedItems.push(`Email Saved`);
 
             let echoMsg = savedItems.length > 0 ? `💡 *Got it! (${savedItems.join(" | ")})*\n\n` : "";
