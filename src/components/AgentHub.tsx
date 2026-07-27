@@ -1,7 +1,6 @@
 "use client";
 
 import React, { useState, useEffect, useCallback } from "react";
-import { useWalletClient } from "wagmi";
 import { Bot, Shield, Check, Copy, Trash2, Loader2, AlertTriangle, ExternalLink, KeyRound } from "lucide-react";
 import { SUPPORTED_TOKENS } from "@/constants";
 
@@ -50,11 +49,17 @@ interface Props {
   // Current on-chain allowance, in human units, for whatever combo was last checked.
   currentAllowance: string | null;
   isApproving: boolean;
+  // Signs a message with whichever wallet client is actually live for the current
+  // environment (plain web/wagmi, MiniPay, or a Farcaster Mini App) and returns the
+  // signature, or null if signing isn't possible/was rejected. Deliberately NOT wagmi's
+  // useWalletClient() here — MiniPay and the Farcaster Mini App both bypass wagmi entirely,
+  // so that hook returns undefined in those two environments even when the wallet is
+  // genuinely connected. The caller (page.tsx) owns the environment detection; this
+  // component only needs "give me a signature for this string."
+  onSignMessage: (message: string) => Promise<string | null>;
 }
 
-export function AgentHub({ address, selectedToken, activeChainName, onApproveAllowance, onCheckAllowance, currentAllowance, isApproving }: Props) {
-  const { data: walletClient } = useWalletClient();
-
+export function AgentHub({ address, selectedToken, activeChainName, onApproveAllowance, onCheckAllowance, currentAllowance, isApproving, onSignMessage }: Props) {
   // 🔐 Every wallet-scoped mutation below (start a link, change/reset a PIN, unlink) must
   // prove the connected wallet actually holds this address's private key — a bare address
   // string proves nothing, since addresses are public. Signs a short-lived, timestamped
@@ -65,17 +70,11 @@ export function AgentHub({ address, selectedToken, activeChainName, onApproveAll
   // (walletAuth.ts binds the signature to it) — a signature signed for one action/endpoint is
   // rejected if replayed against another, so this can't be a generic fixed string anymore.
   const getAuthHeaders = async (action: string): Promise<Record<string, string> | null> => {
-    if (!walletClient || !address) return null;
-    try {
-      const timestamp = Date.now().toString();
-      const signature = await walletClient.signMessage({
-        account: address as `0x${string}`,
-        message: `AbaPay Agent Action: ${action}: ${timestamp}`,
-      });
-      return { 'x-wallet-signature': signature, 'x-wallet-timestamp': timestamp };
-    } catch {
-      return null;
-    }
+    if (!address) return null;
+    const timestamp = Date.now().toString();
+    const signature = await onSignMessage(`AbaPay Agent Action: ${action}: ${timestamp}`);
+    if (!signature) return null;
+    return { 'x-wallet-signature': signature, 'x-wallet-timestamp': timestamp };
   };
 
   const [links, setLinks] = useState<any[]>([]);

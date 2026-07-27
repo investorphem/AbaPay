@@ -1198,7 +1198,12 @@ export default function Home() {
   // tokenSymbol/chainName come from AgentHub's OWN selector, independent of the Pay tab's
   // selectedToken/activeChain — see the resolveAgentChain/etc comment above.
   const handleApproveAgentAllowance = async (amount: string, tokenSymbol: string, chainName: 'CELO' | 'BASE'): Promise<{ success: boolean; message: string }> => {
-    if (!address || !wagmiWalletClient) { const m = "Connect your wallet first."; setStatus(m); return { success: false, message: m }; }
+    // `client` (not wagmiWalletClient) — MiniPay and the Farcaster Mini App both bypass wagmi
+    // entirely (see the environment detector below) and populate `client` from their own
+    // provider instead, so wagmiWalletClient is undefined in those two environments even
+    // though the wallet is genuinely connected. `client` is a superset: in the plain-web
+    // case it's set FROM wagmiWalletClient (see the effect below), so this covers all three.
+    if (!address || !client) { const m = "Connect your wallet first."; setStatus(m); return { success: false, message: m }; }
     const amt = Number(amount);
     if (!Number.isFinite(amt) || amt < 0) { const m = "Enter a valid amount."; setStatus(m); return { success: false, message: m }; }
 
@@ -1211,10 +1216,10 @@ export default function Home() {
     try {
       // Make sure the wallet is actually on the chain we're about to sign for — the user may
       // be approving a DIFFERENT chain here than whatever the Pay tab's wallet is currently on.
-      const currentChainId = await wagmiWalletClient.getChainId();
+      const currentChainId = await client.getChainId();
       if (currentChainId !== targetChain.id) {
         setStatus(`Switching to ${chainName}...`);
-        await wagmiWalletClient.switchChain({ id: targetChain.id });
+        await client.switchChain({ id: targetChain.id });
       }
 
       const amountWei = parseUnits(amt.toFixed(tokenInfo.decimals), tokenInfo.decimals);
@@ -1231,7 +1236,7 @@ export default function Home() {
 
         if (current < amountWei) {
           setStatus("Approve the token spend in your wallet...");
-          const h = await wagmiWalletClient.writeContract({
+          const h = await client.writeContract({
             chain: targetChain,
             address: tokenInfo.address as `0x${string}`,
             abi: ERC20_ABI,
@@ -1246,7 +1251,7 @@ export default function Home() {
 
       // 2) The on-chain agent cap — this is the security boundary.
       setStatus(amt === 0 ? "Revoking agent access..." : "Setting your agent spend limit...");
-      const hash = await wagmiWalletClient.writeContract({
+      const hash = await client.writeContract({
         chain: targetChain,
         address: contract,
         abi: AGENT_ABI,
@@ -1268,6 +1273,20 @@ export default function Home() {
       return { success: false, message: errMsg };
     } finally {
       setIsApprovingAgent(false);
+    }
+  };
+
+  // AgentHub's wallet-signature auth (linking a chat channel / MCP key, changing a PIN,
+  // unlinking) needs a message signed with WHICHEVER client is actually live — same reasoning
+  // as `client` vs wagmiWalletClient above. AgentHub itself stays wallet-agnostic; it just
+  // calls this and gets back a signature or null.
+  const signAgentMessage = async (message: string): Promise<string | null> => {
+    if (!client || !address) return null;
+    try {
+      return await client.signMessage({ account: address as `0x${string}`, message });
+    } catch (e) {
+      console.error('Agent message signing failed:', e);
+      return null;
     }
   };
 
@@ -3327,6 +3346,7 @@ export default function Home() {
             onCheckAllowance={checkAgentAllowanceFor}
             currentAllowance={agentAllowance}
             isApproving={isApprovingAgent}
+            onSignMessage={signAgentMessage}
           />
           </div>
         )}
