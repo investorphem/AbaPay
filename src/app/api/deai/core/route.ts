@@ -289,11 +289,39 @@ function extractEntities(text: string, currentData: any = {}) {
     // smartcard number that merely starts with 234 is left untouched.
     const normalizedText = gluedText.replace(/\b234([789]\d{9})\b/g, '0$1');
     const digitsMatch = normalizedText.match(/\b\d+\b/g) || [];
-    const possibleAccountsOrPhones = digitsMatch.filter(d => d.length >= 10);
+    let possibleAccountsOrPhones = digitsMatch.filter(d => d.length >= 10);
     const possibleAmounts = digitsMatch.filter(d => d.length >= 2 && d.length < 10);
 
     if (possibleAmounts.length > 0 && !data.amount_ngn) data.amount_ngn = Number(possibleAmounts[0]);
-    
+
+    // 🔴 THE BUG THIS FIXES: the first 10+ digit number in the message became
+    // destination_account unconditionally — even when the user had explicitly said it was
+    // their CONTACT phone, and even for a service whose destination is a meter or smartcard,
+    // not a phone at all. Observed live against /api/deai/core:
+    //   "pay 2000 for my ikeja prepaid meter, my phone number is 08031234567"
+    //     -> "💡 *Got it! (₦2000 | 08031234567)*
+    //         To complete your ELECTRICITY, please reply with your *Contact Phone Number*..."
+    // i.e. the user's own phone number was silently filed as the METER NUMBER to be paid,
+    // and the bot then asked for the contact phone they had just given — so the natural next
+    // move (typing that same number again) leaves an electricity payment aimed at a phone
+    // number. ELECTRICITY/TV are the services where this can happen; for airtime and data the
+    // destination genuinely IS a phone, so they are deliberately untouched here.
+    const LABELLED_PHONE_RE = /\b(?:phone|mobile|cell|whatsapp|contact)(?:\s*(?:number|num|no|line))?\s*(?:is|are|:|=|-)?\s*(\d{10,14})\b/gi;
+    if (['ELECTRICITY', 'TV'].includes(data.intent)) {
+        const labelled = new Set(Array.from(normalizedText.matchAll(LABELLED_PHONE_RE), (m) => m[1]));
+        if (labelled.size > 0) {
+            // Take the labelled number out of the destination race entirely and put it where
+            // the user said it belongs. If that was the ONLY number in the message, we simply
+            // still have no meter/smartcard — and asking for one is the correct outcome.
+            for (const n of labelled) if (!data.phone) data.phone = n;
+            possibleAccountsOrPhones = possibleAccountsOrPhones.filter((d) => !labelled.has(d));
+            // The AI parse runs BEFORE this sweep and can make the same mistake (it is told to
+            // pull a destination_account out of the message, and a phone number is the only
+            // candidate there). Correct it too, rather than only guarding our own assignment.
+            if (labelled.has(String(data.destination_account))) data.destination_account = null;
+        }
+    }
+
     if (possibleAccountsOrPhones.length > 0) {
         if (!data.destination_account) {
             data.destination_account = possibleAccountsOrPhones[0];
