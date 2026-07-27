@@ -5,6 +5,7 @@ import { fetchCryptoBalances } from '@/lib/deai/services';
 import { executeVend, getStrictRequestId } from '@/lib/vend';
 import { getActiveDiscountForService, computeDiscountNgn } from '@/lib/discounts';
 import { isMainnetEnv } from '@/lib/chain';
+import { isDuplicateElectricity } from '@/lib/parity';
 
 // ⚡ MULTI-RECIPIENT (BATCH) PAYMENTS — shared between the in-app chat (/api/deai/chat) and
 // the social channels (/api/deai/core). The intent engine emits `recipients` whenever a user
@@ -100,6 +101,23 @@ export async function executeAgentPayment(params: {
   variationCode?: string | null;
 }): Promise<AgentPaymentResult> {
   const { userWallet, item, exchangeRate, sourceChannel } = params;
+
+  // ⚡ DUPLICATE ELECTRICITY GUARD — same check the interactive chat flow already enforces
+  // (src/app/api/deai/core/route.ts), previously missing here, which meant MCP and the
+  // scheduler (the two unattended callers of this function) had no protection at all against
+  // double-vending a meter token — a real, if narrower, "wasted spend" risk on the two LEAST
+  // supervised surfaces. A hard block, not a warning: returns before the preflight row is
+  // even written, so nothing is spent and nothing needs to be refunded.
+  if (item.serviceCategory === 'ELECTRICITY') {
+    const dup = await isDuplicateElectricity(supabase, userWallet, item.billersCode, item.amountNgn);
+    if (dup) {
+      return {
+        success: false,
+        message: `Looks like a duplicate — ₦${item.amountNgn.toLocaleString()} was already paid to meter ${item.billersCode} today. If you really meant to pay again, do it in the app so you can confirm it deliberately.`,
+      };
+    }
+  }
+
   // Same discount engine as every other channel (web, chat, scheduled) — see
   // src/lib/discounts.ts. Each recipient in a batch is checked independently, since each is its
   // own destination account and may hit its own per-destination cap separately.

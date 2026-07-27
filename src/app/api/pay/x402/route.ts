@@ -4,6 +4,7 @@ import { executeVend, getStrictRequestId } from '@/lib/vend';
 import { resolveTokenOnChain } from '@/constants';
 import { sendTelegramAlert } from '@/lib/telegram';
 import { getServiceRules } from '@/lib/serviceRules';
+import { isDuplicateElectricity } from '@/lib/parity';
 
 // ⚡ x402 SETTLEMENT — MAIN APP ONLY. Two rails, resolved by chainConfigFor():
 //   • CELO (default): Celo's own facilitator (api.x402.celo.org — "Built by Celo Core Co."),
@@ -325,6 +326,23 @@ async function handleX402Request(req: Request) {
       status: 402,
       headers: { 'payment-required': Buffer.from(JSON.stringify(v2Challenge)).toString('base64') },
     });
+  }
+
+  // ⚡ DUPLICATE ELECTRICITY GUARD — server-side, enforced, same check /api/pay's intent_only
+  // branch, chat, MCP, and the scheduler all now share (src/lib/parity.ts). Placed here
+  // deliberately: this is the last point BEFORE money moves — the facilitator's /settle call
+  // right below is what actually pulls funds via the payer's signed EIP-3009 authorization.
+  // A check placed after settling would be too late (money already moved) to do anything but
+  // refund, same reasoning as the intent_only placement in /api/pay.
+  if (serviceCategory === 'ELECTRICITY' && vendAmount !== null && wallet_address) {
+    const dup = await isDuplicateElectricity(supabase, wallet_address, billersCode, vendAmount);
+    if (dup) {
+      return NextResponse.json({
+        success: false,
+        status: 'DUPLICATE',
+        message: `You already paid ₦${vendAmount.toLocaleString()} to meter ${billersCode} today. If you really meant to pay again, wait a moment and try again, or contact support.`,
+      }, { status: 409 });
+    }
   }
 
   // A payment header is present — decode it and forward it to Celo's facilitator to settle.

@@ -9,6 +9,7 @@ import { sendWhatsAppMessage } from '@/lib/whatsapp';
 import { executeVend, getStrictRequestId } from '@/lib/vend';
 import { getActiveDiscountForService, computeDiscountNgn } from '@/lib/discounts';
 import { isMainnetEnv } from '@/lib/chain';
+import { isDuplicateElectricity } from '@/lib/parity';
 import { Resend } from 'resend';
 
 const resend = new Resend(process.env.RESEND_API_KEY || 're_dummy_key_for_build');
@@ -206,6 +207,23 @@ export async function runScheduledBills(opts: { scope?: 'recurring' | 'oneoff' |
 
       // ── AUTONOMOUS EXECUTION ─────────────────────────────────────────────
       if (due && bill.auto_execute) {
+        // ⚡ DUPLICATE ELECTRICITY GUARD — same check chat enforces (src/app/api/deai/core/route.ts)
+        // and MCP/batch now enforce (src/lib/deai/batch.ts). This is the LEAST supervised of all
+        // three unattended surfaces — nobody is watching when a scheduled job fires — so it's the
+        // one that most needs a check independent of the scheduled_bills-row claim above (that
+        // claim only stops THIS bill firing twice; it says nothing about the user having already
+        // paid the same meter today some other way). A hard block: marks the day done and notifies,
+        // same shape as every other block in this loop, rather than silently spending anyway.
+        if (bill.service_category === 'ELECTRICITY') {
+          const dup = await isDuplicateElectricity(supabaseAdmin, bill.wallet_address, bill.billers_code, amountNgn);
+          if (dup) {
+            await notify(bill, `⚠️ *${label} — ${amountLabel}*\n\nSkipped — this meter (${bill.billers_code}) already received a ₦${amountNgn.toLocaleString()} payment today. If that wasn't from this schedule, check History in the app.`);
+            await supabaseAdmin.from('scheduled_bills').update({ last_run_date: today, ...doneUpdate }).eq('id', bill.id);
+            r.notified++;
+            continue;
+          }
+        }
+
         // ⚡ OPERATOR GATE — an operator can pause autonomous payments alone (leaving
         // PIN-confirmed chat payments working), or halt the agent entirely.
         const opGate = await checkAgentSpendAllowed(supabaseAdmin, bill.wallet_address, amountNgn, { autonomous: true });

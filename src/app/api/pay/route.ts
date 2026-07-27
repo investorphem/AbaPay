@@ -3,6 +3,7 @@ import { supabaseAdmin as supabase } from '@/utils/supabase';
 import { sendTelegramAlert } from '@/lib/telegram';
 import { executeVend, getStrictRequestId } from '@/lib/vend';
 import { getActiveDiscountForService, computeDiscountNgn } from '@/lib/discounts';
+import { isDuplicateElectricity } from '@/lib/parity';
 import { createPublicClient, http, decodeFunctionData, parseUnits } from 'viem';
 import { base, baseSepolia, celo, celoSepolia } from 'viem/chains';
 
@@ -95,6 +96,25 @@ export async function POST(req: Request) {
     };
 
     if (intent_only) {
+        // ⚡ DUPLICATE ELECTRICITY GUARD — server-side, enforced. The web app already warns
+        // client-side (page.tsx's hasPendingDuplicate/electricityDailyDuplicate) but that was
+        // ONLY a notification — a "PROCEED ANYWAY" click sailed straight through with no
+        // server-side check at all. This runs pre-signature (intent_only fires before the
+        // wallet is even prompted), so a real duplicate is stopped before anything is signed
+        // or spent — unlike a check placed after tx confirmation further down, which would be
+        // too late (money already moved) to do anything but refund. Same guard MCP/scheduler/
+        // chat now all share (src/lib/parity.ts).
+        if (serviceCategory === 'ELECTRICITY') {
+          const dup = await isDuplicateElectricity(supabase, wallet_address, destinationAccount, vendAmount);
+          if (dup) {
+            return NextResponse.json({
+              success: false,
+              status: 'DUPLICATE',
+              message: `You already paid ₦${vendAmount.toLocaleString()} to meter ${destinationAccount} today. If you really meant to pay again, wait a moment and try again, or contact support.`,
+            }, { status: 409 });
+          }
+        }
+
         await supabase.from('transactions').upsert(dbPayload, { onConflict: 'tx_hash' });
         return NextResponse.json({ success: true, status: "PENDING" });
     }

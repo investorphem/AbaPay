@@ -844,7 +844,20 @@ export default function Home() {
       backendPayload.txHash = preflightHash;
 
       setStatus("Securing transaction intent...");
-      await fetch('/api/pay', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ ...backendPayload, intent_only: true }) });
+      const intentRes = await fetch('/api/pay', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ ...backendPayload, intent_only: true }) });
+      // 🔴 THE BUG THIS FIXES: this response used to be discarded entirely — the server's
+      // duplicate-electricity check (and any other intent_only rejection) had no way to stop
+      // anything, since the wallet was prompted to sign regardless of what the server said.
+      // That made the duplicate guard purely advisory even when the SERVER enforced it — the
+      // enforcement never reached the user. Now a rejection here stops the flow before the
+      // wallet is ever prompted, same as the approval-cancelled branch above.
+      if (!intentRes.ok) {
+        let intentMsg = "Couldn't start this payment. Please try again.";
+        try { const intentJson = await intentRes.json(); if (intentJson?.message) intentMsg = intentJson.message; } catch {}
+        setStatus(intentMsg);
+        setIsProcessing(false);
+        return; // 🛑 EXIT FUNCTION IMMEDIATELY — nothing was signed, nothing to clean up
+      }
 
       setStatus("Please sign the final payment...");
 
@@ -1056,6 +1069,17 @@ export default function Home() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(backendPayload),
       });
+
+      // The server's duplicate-electricity check runs BEFORE the facilitator settles the x402
+      // payment (see /api/pay/x402's placement comment), so a DUPLICATE response here means
+      // nothing was charged — handled separately from a real vend failure below, since running
+      // it through handleVendResult would log a fake "DUPLICATE" entry into the user's payment
+      // history for a payment that never actually happened.
+      if (finalStatus?.status === 'DUPLICATE') {
+        setStatus(finalStatus.message || "You already paid this today.");
+        showToast("Duplicate Payment", finalStatus.message || "You already paid this today.", "error");
+        return;
+      }
 
       // Unlike the contract path, the browser never sees this transaction directly — the
       // facilitator submits it, not the connected wallet — so the server hands it back.
