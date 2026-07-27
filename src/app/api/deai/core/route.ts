@@ -384,6 +384,31 @@ async function verifyAccount(intent: string, account: string, type?: string, pro
     return await realVerifyAccount(serviceID, account, type);
 }
 
+// 🔴 THE BUG THIS FIXES: all three "we couldn't verify that number" replies were built as
+// `❌ ${verification.message} for *${provider}*.` — a template that only reads correctly if
+// the message is a bare noun phrase. It never is. verifyAccount ALWAYS returns a complete
+// sentence (VTpass's own response_description, or the "Could not verify that account. Please
+// check the number and try again." default), which made the `||` half of each of those
+// expressions effectively dead code and produced this, observed live:
+//   ❌ Could not verify that account. Please check the number and try again. for *Ikeja Electricity*.
+// Two sentences fused by a dangling "for", on the exact screen where a user needs to
+// understand what went wrong. Lead with the number and provider — the two facts they need in
+// order to spot their own typo, and the ones the old wording buried at the end — then give
+// the reason as its own sentence.
+function verifyFailureMessage(args: {
+    noun: string;              // "meter number" / "smartcard/IUC number"
+    account: string | null;
+    providerLabel: string;
+    reason?: string;
+}): string {
+    const head = args.account
+        ? `❌ I couldn't verify ${args.noun} \`${args.account}\` with *${args.providerLabel}*.`
+        : `❌ I couldn't verify that ${args.noun} with *${args.providerLabel}*.`;
+    return [head, args.reason || null, `Please reply with the correct ${args.noun}.`]
+        .filter(Boolean)
+        .join('\n\n');
+}
+
 // ⚡ CABLE PACKAGE LIST — pins the smartcard's CURRENT package as a "Renew" option ⚡
 //
 // VTpass's merchant-verify genuinely returns `Current_Bouquet`/`Renewal_Amount` for DStv/GOtv
@@ -2146,6 +2171,7 @@ async function handleCore(req: Request, ctx: HumanizeCtx): Promise<NextResponse>
             // electricity-verification site further down already handles this correctly:
             // keep everything else, clear ONLY the rejected meter number, and ask for it
             // again. Match it, so both paths recover the same way.
+            const rejectedMeter = session.intent_data.destination_account;
             session.intent_data.meter_type = selectedType;
             session.intent_data.destination_account = null;
             await supabase.from('deai_sessions').upsert({
@@ -2154,7 +2180,12 @@ async function handleCore(req: Request, ctx: HumanizeCtx): Promise<NextResponse>
             }, { onConflict: 'chat_id' });
             return NextResponse.json({
                 action: 'REPLY',
-                message: `❌ ${verification.message || "That meter number couldn't be verified"} for *${session.intent_data.provider_label || session.intent_data.provider}*.\n\nPlease reply with the correct meter number.`,
+                message: verifyFailureMessage({
+                    noun: 'meter number',
+                    account: rejectedMeter,
+                    providerLabel: session.intent_data.provider_label || session.intent_data.provider,
+                    reason: verification.message,
+                }),
             });
         }
 
@@ -3011,6 +3042,7 @@ async function handleCore(req: Request, ctx: HumanizeCtx): Promise<NextResponse>
 
             const verification = await verifyAccount(intentData.intent, intentData.destination_account, undefined, intentData.provider);
             if (!verification.success) {
+                const rejectedCard = intentData.destination_account;
                 intentData.destination_account = null;
                 await supabase.from('deai_sessions').upsert({
                     chat_id: platform_id, platform, intent_data: intentData,
@@ -3019,7 +3051,12 @@ async function handleCore(req: Request, ctx: HumanizeCtx): Promise<NextResponse>
                 }, { onConflict: 'chat_id' });
                 return NextResponse.json({
                     action: 'REPLY',
-                    message: `❌ ${verification.message || "That smartcard/IUC number couldn't be verified"} for *${intentData.provider_label || intentData.provider}*.\n\nPlease reply with the correct number.`,
+                    message: verifyFailureMessage({
+                        noun: 'smartcard/IUC number',
+                        account: rejectedCard,
+                        providerLabel: intentData.provider_label || intentData.provider,
+                        reason: verification.message,
+                    }),
                 });
             }
 
@@ -3335,11 +3372,17 @@ async function handleCore(req: Request, ctx: HumanizeCtx): Promise<NextResponse>
         if (!verification.success) {
             // Keep everything ELSE (provider, meter_type, phone, email) so the user only has
             // to send a corrected meter number, not restart the whole request from scratch.
+            const rejectedMeter2 = intentData.destination_account;
             intentData.destination_account = null;
             await supabase.from('deai_sessions').upsert({ chat_id: platform_id, platform, intent_data: intentData, status: 'AWAITING_DETAILS', expires_at: new Date(Date.now() + 300000).toISOString() }, { onConflict: 'chat_id' });
             return NextResponse.json({
                 action: 'REPLY',
-                message: `❌ ${verification.message || "That meter number couldn't be verified"} for *${intentData.provider_label || intentData.provider}*.\n\nPlease reply with the correct meter number.`,
+                message: verifyFailureMessage({
+                    noun: 'meter number',
+                    account: rejectedMeter2,
+                    providerLabel: intentData.provider_label || intentData.provider,
+                    reason: verification.message,
+                }),
             });
         }
 
