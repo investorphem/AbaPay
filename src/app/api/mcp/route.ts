@@ -7,7 +7,7 @@ import { describeCapabilities, capabilityForIntent, getCapability } from '@/lib/
 import { resolveServiceId, fetchCryptoBalances, verifyAccount } from '@/lib/deai/services';
 import { getRemainingAllowance } from '@/lib/deai/relayer';
 import { SUPPORTED_TOKENS } from '@/constants';
-import { checkAccountNumber, checkAmount as checkAmountParity, requiresVariation } from '@/lib/parity';
+import { checkAccountNumber, checkAmount as checkAmountParity, requiresVariation, requiresVerifiedName } from '@/lib/parity';
 import { checkAutonomousCapacity, executeAgentPayment, type BatchItem } from '@/lib/deai/batch';
 import { resolveMcpIdentity, type McpIdentity } from '@/lib/deai/mcpAuth';
 import { validateAccessToken } from '@/lib/deai/mcpOAuth';
@@ -63,6 +63,12 @@ const SERVICE_INTENT: Record<string, string> = {
   DATA: 'VEND_DATA',
   ELECTRICITY: 'ELECTRICITY',
   CABLE: 'TV',
+  // EDUCATION joins the list now that capabilities.ts marks it supportedInChat — MCP is meant
+  // to be the same trust boundary reached over JSON-RPC, so it must not be narrower than chat.
+  // Every rule it needs already exists and is shared: requiresVariation() forces a
+  // variation_code, checkAccountNumber() enforces JAMB's >=10-char profile ID, and
+  // requiresVerifiedName() decides that only JAMB merchant-verifies.
+  EDUCATION: 'EDUCATION',
 };
 
 // 🔴 THE BUG THIS AVOIDS: a blanket `/[*_\`]/g` strip (an earlier version of this function)
@@ -125,19 +131,23 @@ const TOOLS = [
   {
     name: 'pay_bill',
     title: 'Pay Bill',
-    description: 'Pay a real Nigerian bill (airtime, data, electricity, or cable TV) from the linked wallet, settled on-chain and delivered via the same pipeline as the AbaPay app. ALWAYS requires the PIN — including when this connector is authorized via OAuth; ask the human for it every time and never guess or reuse a remembered one. The api_key is only needed when OAuth is not in use. Money moves for real — only call this once the human has clearly confirmed the exact amount, provider, and account.',
+    description: 'Pay a real Nigerian bill (airtime, data, electricity, cable TV, or a WAEC/JAMB education PIN) from the linked wallet, settled on-chain and delivered via the same pipeline as the AbaPay app. ALWAYS requires the PIN — including when this connector is authorized via OAuth; ask the human for it every time and never guess or reuse a remembered one. The api_key is only needed when OAuth is not in use. Money moves for real — only call this once the human has clearly confirmed the exact amount, provider, and account.',
     inputSchema: {
       type: 'object',
       properties: {
         api_key: { type: 'string', description: 'AbaPay MCP API key. NOT needed when the connector is authorized via OAuth — omit it entirely in that case.' },
         pin: { type: 'string', description: '4-6 digit PIN set when the API key was created. Required on EVERY payment, including over an OAuth connection — ask the human for it each time.' },
-        service: { type: 'string', enum: ['AIRTIME', 'DATA', 'ELECTRICITY', 'CABLE'], description: 'Which kind of bill' },
-        provider: { type: 'string', description: 'e.g. mtn, airtel, glo, ikeja-electric, dstv, gotv, startimes' },
-        account_number: { type: 'string', description: 'Phone number (airtime/data), meter number (electricity), or smartcard/IUC number (cable)' },
+        service: { type: 'string', enum: ['AIRTIME', 'DATA', 'ELECTRICITY', 'CABLE', 'EDUCATION'], description: 'Which kind of bill' },
+        provider: { type: 'string', description: 'e.g. mtn, airtel, glo, ikeja-electric, dstv, gotv, startimes, waec, waec-registration, jamb' },
+        // WAEC genuinely has no account of its own — the web app sends the buyer's phone as
+        // the billers code (page.tsx: `payloadBillersCode = educationProvider === "jamb" ?
+        // accountNumber : customerPhone`), so this one generic field covers both shapes as
+        // long as the caller is told which value belongs here.
+        account_number: { type: 'string', description: "Phone number (airtime/data), meter number (electricity), smartcard/IUC number (cable), JAMB profile ID (education: jamb), or the buyer's phone number (education: waec — WAEC has no separate account, the PIN is delivered to this number)" },
         amount_ngn: { type: 'number', description: 'Amount in Naira' },
         chain: { type: 'string', enum: ['CELO', 'BASE'], description: 'Defaults to the chain approved when the API key was created. Only override this if the default chain lacks balance/allowance and check_balance shows funds on the other one.' },
         token: { type: 'string', enum: ['USD₮', 'USDC', 'USDm'], description: 'Which stablecoin to pay with. Defaults to the token approved when the API key was created. If that one is short on balance or on-chain allowance, call check_balance first to see what else is available on this chain, then retry with this field set — e.g. if USD₮ is short but the wallet holds USDC with its own approved limit, pass token: "USDC".' },
-        variation_code: { type: 'string', description: 'Plan/bundle code — required for DATA, and for CABLE when changing package (not needed to renew the current one)' },
+        variation_code: { type: 'string', description: 'Plan/bundle/product code — required for DATA and EDUCATION (the exam product, e.g. the WAEC result-checker or the JAMB UTME PIN), and for CABLE when changing package (not needed to renew the current one)' },
         meter_type: { type: 'string', enum: ['prepaid', 'postpaid'], description: 'Required for ELECTRICITY' },
         customer_name: { type: 'string', description: 'Optional — used for the receipt if known' },
         customer_email: { type: 'string', description: 'Optional — receipt is sent here if provided' },
@@ -241,16 +251,19 @@ async function callPayBill(args: any, oauthIdentity: McpIdentity | null) {
   if (!/^\d{4,6}$/.test(pin)) return errorResult('pin must be 4-6 digits.');
   const intent = SERVICE_INTENT[service];
   if (!intent) {
-    // EDUCATION and BANK_TRANSFER are real AbaPay capabilities that deliberately aren't
-    // agent-payable (see capabilities.ts — supportedInChat: false). A bare "must be one of…"
-    // told a calling agent nothing about WHY, so it had no way to give the human a useful
-    // answer beyond "not supported"; it would either keep retrying or report it as missing.
-    const appOnly = capabilityForIntent(service === 'EDUCATION' ? 'EDUCATION' : service === 'BANK_TRANSFER' ? 'BANK_TRANSFER' : '');
+    // BANK_TRANSFER is a real AbaPay capability that deliberately isn't agent-payable (see
+    // capabilities.ts — supportedInChat: false). A bare "must be one of…" told a calling agent
+    // nothing about WHY, so it had no way to give the human a useful answer beyond "not
+    // supported"; it would either keep retrying or report it as missing. Driven off the
+    // capability's OWN supportedInChat flag rather than a second hardcoded list here, so
+    // flipping a capability in capabilities.ts is all it takes — that is exactly what
+    // EDUCATION just did, and it needed no edit at this line.
+    const appOnly = capabilityForIntent(service);
     const appOnlySpec = appOnly ? getCapability(appOnly) : undefined;
-    if (appOnlySpec) {
-      return errorResult(`${appOnlySpec.label} can't be paid through this API — ${appOnlySpec.notes || 'it must be completed in the AbaPay app.'} Tell the user to open ${process.env.NEXT_PUBLIC_APP_URL || 'https://abapays.com'}. pay_bill supports AIRTIME, DATA, ELECTRICITY and CABLE.`);
+    if (appOnlySpec && !appOnlySpec.supportedInChat) {
+      return errorResult(`${appOnlySpec.label} can't be paid through this API — ${appOnlySpec.notes || 'it must be completed in the AbaPay app.'} Tell the user to open ${process.env.NEXT_PUBLIC_APP_URL || 'https://abapays.com'}. pay_bill supports ${Object.keys(SERVICE_INTENT).join(', ')}.`);
     }
-    return errorResult('service must be one of AIRTIME, DATA, ELECTRICITY, CABLE.');
+    return errorResult(`service must be one of ${Object.keys(SERVICE_INTENT).join(', ')}.`);
   }
   if (!provider) return errorResult('provider is required — e.g. mtn, ikeja-electric, dstv.');
   if (!accountNumber) return errorResult('account_number is required.');
@@ -312,13 +325,22 @@ async function callPayBill(args: any, oauthIdentity: McpIdentity | null) {
   const spendGate = await checkAgentSpendAllowed(supabaseAdmin, identity.wallet_address, amountNgn);
   if (!spendGate.allowed) return errorResult(spendGate.reason || 'Agent spending is currently disabled for this account.');
 
-  // Electricity/cable need a merchant-verify pass first — this is where a wrong meter or
-  // smartcard number gets caught BEFORE money moves, same as the web app and chat.
+  // Electricity/cable/JAMB need a merchant-verify pass first — this is where a wrong meter,
+  // smartcard or profile ID gets caught BEFORE money moves, same as the web app and chat.
+  //
+  // 🔴 THE BUG THIS FIXES: this gated on the CAPABILITY's needsVerification flag, which is a
+  // whole-capability yes/no and cannot express the per-provider rule the web app actually
+  // enforces. Two providers get it wrong: showmax (cable, but has no smartcard to verify) and
+  // now WAEC (education, but has no account at all — verifying its billers code, which is
+  // just the buyer's phone, fails outright). parity.ts's requiresVerifiedName IS that rule,
+  // it takes the provider, and it's the same function chat's verification gate calls.
   let resolvedCustomerName = customerName;
-  const capability = capabilityForIntent(intent);
-  const spec = capability ? getCapability(capability) : undefined;
-  if (spec?.needsVerification) {
-    const va = await verifyAccount(serviceID, accountNumber, meterType || undefined);
+  if (requiresVerifiedName(intent, provider)) {
+    // JAMB takes the chosen product as the verify `type`, exactly as the web app does
+    // (page.tsx's verifyMerchant: serviceID "jamb", type = selectedEducationPlan
+    // .variation_code); electricity takes prepaid/postpaid there instead.
+    const verifyType = intent === 'EDUCATION' ? (variationCode || undefined) : (meterType || undefined);
+    const va = await verifyAccount(serviceID, accountNumber, verifyType);
     if (!va.success) return errorResult(va.message || 'Could not verify that account.');
     resolvedCustomerName = va.customer_name || resolvedCustomerName;
   }
