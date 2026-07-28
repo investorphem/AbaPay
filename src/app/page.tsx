@@ -1364,6 +1364,17 @@ export default function Home() {
           const svc = SERVICES.find(s => s.id === 'INTERNET');
           if (svc) setActiveService(svc);
           if (it.provider) setTelecomProvider(it.provider.toLowerCase());
+        } else if (cat === 'EDUCATION') {
+          // Education lives on its OWN tab, not under `pay`/SERVICES — without this branch an
+          // education hand-off landed on the AIRTIME service with the exam body dropped and
+          // the billers code sitting in the airtime number field, i.e. a WAEC PIN request
+          // arriving as an airtime top-up to the buyer's own phone.
+          setActiveTab('education');
+          if (it.serviceID) setEducationProvider(it.serviceID);
+          // WAEC has no account field at all — its billers code IS the contact phone (see
+          // buildBackendPayload). JAMB's is the profile ID, which the shared setAccountNumber
+          // above already put in the right place.
+          if (it.serviceID !== 'jamb' && it.billersCode) setCustomerPhone(it.billersCode);
         } else {
           const svc = SERVICES.find(s => s.id === 'AIRTIME');
           if (svc) setActiveService(svc);
