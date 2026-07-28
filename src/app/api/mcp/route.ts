@@ -9,6 +9,7 @@ import { getRemainingAllowance } from '@/lib/deai/relayer';
 import { SUPPORTED_TOKENS } from '@/constants';
 import { checkAccountNumber, checkAmount as checkAmountParity, requiresVariation, requiresVerifiedName } from '@/lib/parity';
 import { checkAutonomousCapacity, executeAgentPayment, type BatchItem } from '@/lib/deai/batch';
+import { fetchVariations, variationServiceId } from '@/lib/deai/selection';
 import { resolveMcpIdentity, type McpIdentity } from '@/lib/deai/mcpAuth';
 import { validateAccessToken } from '@/lib/deai/mcpOAuth';
 import { checkPinAllowed, recordPinFailure, clearPinFailures, notifySpendOutOfBand } from '@/lib/deai/pinSecurity';
@@ -129,9 +130,34 @@ const TOOLS = [
     annotations: { title: 'Check Balance', readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: true },
   },
   {
+    // 🔴 THE BUG THIS FIXES: pay_bill has REQUIRED variation_code for DATA/EDUCATION (and CABLE
+    // on a change) since commit 8d30836 — correctly, since VTpass rejects a vend with no real
+    // plan code — but nothing ever gave a caller a way to discover what a real one IS. Caught
+    // via genuine live usage: asked to buy ₦1,000 of MTN data, Claude had no source of truth
+    // for actual plan codes/prices and started guessing plausible-sounding sizes ("100, 200MB…
+    // For ₦1,000 you'd typically get something in the 500MB–1GB range") instead of showing the
+    // real catalog — exactly the kind of thing chat has never done, because chat has had
+    // fetchVariations()-backed menus this whole time. This is that same, already-proven
+    // function, exposed as a tool so an agent has the same real data chat's user does.
+    name: 'list_plans',
+    title: 'List Plans',
+    description: 'List the REAL, currently purchasable plans for a service that needs one — DATA bundles, CABLE packages, or EDUCATION products (WAEC/JAMB) — with their exact codes and current VTpass prices. ALWAYS call this before pay_bill for these three services and pass back one of the returned codes as variation_code. Never guess a plan, a code, or a price — if this returns nothing usable, say so rather than inventing one.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        service: { type: 'string', enum: ['DATA', 'CABLE', 'EDUCATION'], description: 'Which service to list plans for. Electricity and airtime are free-amount and have no plan list.' },
+        provider: { type: 'string', description: 'e.g. mtn, airtel, glo, 9mobile (data); dstv, gotv, startimes (cable); waec, waec-registration, jamb (education)' },
+      },
+      required: ['service', 'provider'],
+      additionalProperties: false,
+    },
+    // Read-only catalog lookup — no wallet, no auth, safe to call as often as needed.
+    annotations: { title: 'List Plans', readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: true },
+  },
+  {
     name: 'pay_bill',
     title: 'Pay Bill',
-    description: 'Pay a real Nigerian bill (airtime, data, electricity, cable TV, or a WAEC/JAMB education PIN) from the linked wallet, settled on-chain and delivered via the same pipeline as the AbaPay app. ALWAYS requires the PIN — including when this connector is authorized via OAuth; ask the human for it every time and never guess or reuse a remembered one. The api_key is only needed when OAuth is not in use. Money moves for real — only call this once the human has clearly confirmed the exact amount, provider, and account.',
+    description: 'Pay a real Nigerian bill (airtime, data, electricity, cable TV, or a WAEC/JAMB education PIN) from the linked wallet, settled on-chain and delivered via the same pipeline as the AbaPay app. For DATA, CABLE (when changing package), and EDUCATION, call list_plans first and use a real variation_code from it — never guess one. ALWAYS requires the PIN — including when this connector is authorized via OAuth; ask the human for it every time and never guess or reuse a remembered one. The api_key is only needed when OAuth is not in use. Money moves for real — only call this once the human has clearly confirmed the exact amount, provider, and account.',
     inputSchema: {
       type: 'object',
       properties: {
@@ -166,6 +192,30 @@ const TOOLS = [
 
 async function callDescribeCapabilities() {
   return textResult(await describeCapabilities());
+}
+
+// No auth required — this is a read-only catalog lookup, same trust level as
+// describe_capabilities. Shares fetchVariations()/variationServiceId() with chat
+// (src/lib/deai/selection.ts) so the two can never see a different plan list or price.
+async function callListPlans(args: any) {
+  const service = String(args?.service || '').toUpperCase();
+  const provider = String(args?.provider || '').toLowerCase().trim();
+  if (!provider) return errorResult('provider is required.');
+
+  const intent = SERVICE_INTENT[service];
+  if (!intent || !['VEND_DATA', 'TV', 'EDUCATION'].includes(intent)) {
+    return errorResult(`list_plans only applies to DATA, CABLE, or EDUCATION — "${service || '(missing)'}" has no plan list. Electricity and airtime are free-amount: just pass amount_ngn straight to pay_bill.`);
+  }
+
+  const serviceID = variationServiceId(intent, provider);
+  const options = await fetchVariations(serviceID);
+
+  if (options.length === 0) {
+    return errorResult(`No plans came back for "${provider}" — either the provider name is wrong, or VTpass currently has nothing listed for it (this genuinely happens, e.g. JAMB isn't enabled on this account right now). Double-check the spelling, or tell the human this specific option isn't available rather than guessing a code.`);
+  }
+
+  const lines = options.map((o) => `• code: "${o.id}" — ${o.label}${o.price ? ` — ₦${o.price.toLocaleString()}` : ''}`);
+  return textResult(`${options.length} real, currently purchasable plan(s) for ${provider} — pass the exact "code" shown as variation_code to pay_bill:\n\n${lines.join('\n')}`);
 }
 
 // Both credential routes converge here, and both produce the identical McpIdentity — so
@@ -425,6 +475,7 @@ async function callPayBill(args: any, oauthIdentity: McpIdentity | null) {
 async function callTool(name: string, args: any, oauthIdentity: McpIdentity | null) {
   switch (name) {
     case 'describe_capabilities': return callDescribeCapabilities();
+    case 'list_plans': return callListPlans(args);
     case 'check_balance': return callCheckBalance(args, oauthIdentity);
     case 'pay_bill': return callPayBill(args, oauthIdentity);
     default: return null;
@@ -486,7 +537,7 @@ export async function POST(req: Request) {
           protocolVersion: params?.protocolVersion || PROTOCOL_VERSION,
           capabilities: { tools: {} },
           serverInfo: SERVER_INFO,
-          instructions: "AbaPay: check a linked wallet's stablecoin balance or pay a real Nigerian bill (airtime, data, electricity, cable), settled on-chain. Call describe_capabilities first. Authentication: OAuth 2.1 is supported and preferred — authorize once in the browser and this connection is remembered, so no api_key argument is ever needed again. The api_key created in the AbaPay app under Agent Hub -> MCP remains the fallback for clients that cannot do OAuth. Either way, pay_bill ALWAYS requires the PIN set when the key was created — OAuth does not remove it. Ask the human for their PIN on every single payment.",
+          instructions: "AbaPay: check a linked wallet's stablecoin balance or pay a real Nigerian bill (airtime, data, electricity, cable), settled on-chain. Call describe_capabilities first. For DATA, CABLE, or EDUCATION, call list_plans before pay_bill and use one of its real returned codes as variation_code — never guess a plan, code, or price. Authentication: OAuth 2.1 is supported and preferred — authorize once in the browser and this connection is remembered, so no api_key argument is ever needed again. The api_key created in the AbaPay app under Agent Hub -> MCP remains the fallback for clients that cannot do OAuth. Either way, pay_bill ALWAYS requires the PIN set when the key was created — OAuth does not remove it. Ask the human for their PIN on every single payment.",
         });
 
       case 'ping':
