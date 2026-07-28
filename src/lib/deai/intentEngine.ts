@@ -113,6 +113,12 @@ Rules:
    - 9MOBILE: 0809 0817 0818 0909 0908
 3. Electricity providers (discos) include: ikeja-electric, eko-electric, abuja-electric, ibadan-electric, enugu-electric, portharcourt-electric, kano-electric, jos-electric, kaduna-electric, benin-electric, aba-electric, yola-electric.
 4. Cable providers: dstv, gotv, startimes, showmax.
+4b. EDUCATION providers (the exam body) are: waec, waec-registration, jamb. Set "provider" whenever the user names one, however they phrase it:
+   - "WAEC PIN" / "result checker" / "scratch card" / "check my WAEC result" -> "waec"
+   - "WAEC registration" / "register for WAEC" / "WASSCE PIN for private candidates" -> "waec-registration"
+   - "JAMB" / "UTME" / "direct entry" / "JAMB profile" -> "jamb"
+   Leave it null only when the user genuinely hasn't said which exam body.
+   For EDUCATION, destination_account is the JAMB PROFILE ID (jamb only) — WAEC has no account number, so leave it null for WAEC even if a phone number is present in the message.
 5. destination_account is the phone number, meter number, or smartcard/IUC number.
 6. For electricity, meter_type is "prepaid" or "postpaid" — null if the user didn't say.
 7. "missing" lists the fields you still need to complete the transaction. Use these exact strings:

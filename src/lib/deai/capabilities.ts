@@ -73,12 +73,23 @@ export const CAPABILITIES: CapabilitySpec[] = [
   },
   {
     id: 'EDUCATION',
+    // 🔴 WHY THIS FLIPPED TO supportedInChat: true — the old note ("profile code, exam year
+    // are easier to get right in the app") described a chat channel that could not list a
+    // provider, could not list a product, and could not verify anything. All three exist now
+    // and are the SAME machinery cable/data already use in production: providersFor()
+    // ('🎓 Which exam body?'), fetchVariations() + the paginated AWAITING_VARIATION picker,
+    // and verifyAccount() for the JAMB profile ID. There is no longer any education detail
+    // the app can collect that chat cannot. Bank transfer below is a different case and stays
+    // app-only — that reasoning is about who signs for third-party money movement, not about
+    // which fields are collectable.
     label: 'Education PINs (WAEC, JAMB)',
-    supportedInChat: false,
+    supportedInChat: true,
+    // Only JAMB verifies (see parity.ts's requiresVerifiedName) — WAEC has no account to
+    // verify at all. Callers that need the per-provider rule must use requiresVerifiedName;
+    // this flag only says "this capability verifies SOMETHING".
     needsVerification: true,
-    requires: ['exam body', 'profile/phone', 'quantity'],
+    requires: ['exam body', 'product/plan', 'phone number', 'JAMB profile ID (JAMB only)'],
     example: 'Buy a WAEC result checker PIN',
-    notes: 'Education PINs need extra details (profile code, exam year) that are easier to get right in the app.',
   },
   {
     id: 'INTERNATIONAL',
@@ -94,6 +105,17 @@ export const CAPABILITIES: CapabilitySpec[] = [
 export function getCapability(id: Capability): CapabilitySpec | undefined {
   return CAPABILITIES.find(c => c.id === id);
 }
+
+/** The inverse of capabilityForIntent — each capability's own agent intent. */
+const INTENT_FOR_CAPABILITY: Record<Capability, string> = {
+  AIRTIME: 'VEND_AIRTIME',
+  DATA: 'VEND_DATA',
+  ELECTRICITY: 'ELECTRICITY',
+  CABLE: 'TV',
+  BANK_TRANSFER: 'BANK_TRANSFER',
+  EDUCATION: 'EDUCATION',
+  INTERNATIONAL: 'INTERNATIONAL',
+};
 
 /** Map an agent intent to a capability. */
 export function capabilityForIntent(intent: string): Capability | null {
@@ -308,12 +330,16 @@ export async function describeCapabilities(): Promise<string> {
 
   lines.push('💬 *Right here in chat:*');
   for (const c of chatable) {
-    const key = killSwitchKeyFor(
-      c.id === 'AIRTIME' ? 'VEND_AIRTIME' :
-      c.id === 'DATA' ? 'VEND_DATA' :
-      c.id === 'ELECTRICITY' ? 'ELECTRICITY' : 'TV'
-    );
-    const off = key && rules.killSwitches[key] === false;
+    // 🔴 THE BUG THIS FIXES: this was a ternary chain ending in a bare `: 'TV'`, so EVERY
+    // in-chat capability that wasn't airtime/data/electricity resolved to the CABLE kill
+    // switch — INTERNATIONAL already did, and EDUCATION now would too. Pausing cable would
+    // have printed "_(temporarily paused)_" beside international airtime and education PINs,
+    // and pausing education would never have shown at all. Each capability maps to its OWN
+    // intent, and international has its own master switch (see checkServiceAllowed).
+    const key = killSwitchKeyFor(INTENT_FOR_CAPABILITY[c.id]);
+    const off = c.id === 'INTERNATIONAL'
+      ? rules.killSwitches.MASTER_INTERNATIONAL === false
+      : !!(key && rules.killSwitches[key] === false);
     lines.push(`${off ? '⛔' : '•'} ${c.label}${off ? ' _(temporarily paused)_' : ''}`);
     if (!off) lines.push(`   _"${c.example}"_`);
   }

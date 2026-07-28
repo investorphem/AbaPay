@@ -40,7 +40,18 @@ const SERVICE_RULES: Record<string, any> = {
     // as a safety net, though the fast path below collects destination_account earlier.
     TV: { min: 1500, max: 100000, required: ['destination_account', 'phone', 'email'] },
     BANK_TRANSFER: { min: 500, max: 500000, required: ['amount_ngn', 'destination_account', 'provider'] },
-    EDUCATION: { min: 1000, max: 50000, required: ['amount_ngn', 'destination_account', 'phone', 'email'] }
+    // 🔴 SAME BUG AS TV, ONE STEP WORSE. This used to require amount_ngn AND
+    // destination_account, both asked up front — so the very first thing a user saying "I want
+    // to buy a WAEC PIN" was asked for was an Amount and a "Target Number/Account":
+    //   > To complete your EDUCATION, please reply with the *Amount*, the *Target
+    //     Number/Account*, your *Contact Phone Number*, your *Email Address*.
+    // Neither field is answerable. Education is fixed-price — the amount IS the chosen
+    // product's price (requiresVariation('EDUCATION') is true) — and WAEC has NO account field
+    // at all in the web app: its billers code is the contact phone (page.tsx's
+    // buildBackendPayload: `payloadBillersCode = educationProvider === "jamb" ? accountNumber
+    // : customerPhone`). Only JAMB has a real account (the profile ID), and the EDUCATION FAST
+    // PATH below asks for it by name, after the exam body is known.
+    EDUCATION: { min: 1000, max: 50000, required: ['phone', 'email'] }
 };
 
 // ⚡ Nigerian network prefixes — kept in sync with the list in intentEngine.ts's SYSTEM_PROMPT
@@ -107,11 +118,16 @@ const INTENT_GUESS_LABELS: Record<string, string> = {
     TRANSACTION_HISTORY: 'check your transaction history',
 };
 
-// Bank transfer and Education are genuinely supported features, but only in the app (see
-// capabilities.ts for why) — there is nothing chat can usefully collect for them. Shared by
-// BOTH gates below (the AI-parse one and the keyword-fallback one) so the two can never drift
-// apart on which intents are app-only, or on how they word the hand-off.
-const APP_ONLY_INTENTS = ['BANK_TRANSFER', 'EDUCATION'];
+// Bank transfer is a genuinely supported feature, but only in the app (see capabilities.ts:
+// it moves money to a third party and must be signed by the user's own wallet in-app).
+// Shared by BOTH gates below (the AI-parse one and the keyword-fallback one) so the two can
+// never drift apart on which intents are app-only, or on how they word the hand-off.
+//
+// 🔴 EDUCATION WAS REMOVED FROM THIS LIST. It was here because chat had no way to list exam
+// bodies, no way to list products, and no way to verify a JAMB profile — none of which is
+// true any more (providersFor/fetchVariations/verifyAccount, the same machinery cable and
+// data run on today). See the EDUCATION FAST PATH below for the flow that replaces it.
+const APP_ONLY_INTENTS = ['BANK_TRANSFER'];
 
 async function appOnlyRedirect(intent: string): Promise<NextResponse> {
     const f = await assessFeasibility({ intent });
@@ -305,9 +321,11 @@ function extractEntities(text: string, currentData: any = {}) {
     // and the bot then asked for the contact phone they had just given — so the natural next
     // move (typing that same number again) leaves an electricity payment aimed at a phone
     // number. ELECTRICITY/TV are the services where this can happen; for airtime and data the
-    // destination genuinely IS a phone, so they are deliberately untouched here.
+    // destination genuinely IS a phone, so they are deliberately untouched here. EDUCATION
+    // belongs with them: a JAMB request carries BOTH a profile ID and a contact phone, and
+    // whichever the user happened to type first would otherwise become the profile ID.
     const LABELLED_PHONE_RE = /\b(?:phone|mobile|cell|whatsapp|contact)(?:\s*(?:number|num|no|line))?\s*(?:is|are|:|=|-)?\s*(\d{10,14})\b/gi;
-    if (['ELECTRICITY', 'TV'].includes(data.intent)) {
+    if (['ELECTRICITY', 'TV', 'EDUCATION'].includes(data.intent)) {
         const labelled = new Set(Array.from(normalizedText.matchAll(LABELLED_PHONE_RE), (m) => m[1]));
         if (labelled.size > 0) {
             // Take the labelled number out of the destination race entirely and put it where
@@ -1284,7 +1302,8 @@ async function handleCore(req: Request, ctx: HumanizeCtx): Promise<NextResponse>
 
         const serviceLabel = d.intent === 'ELECTRICITY' ? 'Electricity'
                            : d.intent === 'VEND_DATA' ? 'Data'
-                           : d.intent === 'TV' ? 'Cable' : 'Airtime';
+                           : d.intent === 'TV' ? 'Cable'
+                           : d.intent === 'EDUCATION' ? 'Education PIN' : 'Airtime';
         // Prefer whatever the user explicitly said in THIS conversation (d.chain/d.selected_token);
         // otherwise default to whatever they actually approved an allowance for at link time
         // (globalUser.approved_chain/approved_token), not a hardcoded guess — see the comment
@@ -1293,9 +1312,15 @@ async function handleCore(req: Request, ctx: HumanizeCtx): Promise<NextResponse>
         const tokenSym = d.selected_token || globalUser?.approved_token || 'USD₮';
         // Shared between Path A's transaction record and Path B's deep link, so they can
         // never drift apart on what a given intent maps to.
+        // 🔴 EDUCATION FELL THROUGH TO 'AIRTIME' HERE TOO. This value is the transaction row's
+        // service_category and the deep link's serviceCategory, and it drives the discount
+        // engine (getActiveDiscountForService) and the app's pre-fill — so an education PIN
+        // would have been recorded, discounted and re-opened as an airtime top-up. It matches
+        // page.tsx's own uiCategory ("EDUCATION").
         const serviceCategory = d.intent === 'ELECTRICITY' ? 'ELECTRICITY'
                                : d.intent === 'TV' ? 'CABLE'
-                               : d.intent === 'VEND_DATA' ? 'DATA' : 'AIRTIME';
+                               : d.intent === 'VEND_DATA' ? 'DATA'
+                               : d.intent === 'EDUCATION' ? 'EDUCATION' : 'AIRTIME';
 
         // ⚡ PATH A — AUTONOMOUS AGENT PAYMENT (user pre-approved an on-chain allowance)
         //
@@ -1590,7 +1615,7 @@ async function handleCore(req: Request, ctx: HumanizeCtx): Promise<NextResponse>
             ``,
             `You don't have an agent spend limit approved for *${tokenSym} on ${chain}* — need ${allowanceShortfall.needed} ${tokenSym}, approved: ${allowanceShortfall.have} ${tokenSym}.`,
             ``,
-            `*${d.provider || ''} ${d.intent === 'ELECTRICITY' ? 'Electricity' : d.intent === 'VEND_DATA' ? 'Data' : d.intent === 'TV' ? 'Cable' : 'Airtime'}* — ₦${Number(d.amount_ngn).toLocaleString()}`,
+            `*${d.provider || ''} ${serviceLabel}* — ₦${Number(d.amount_ngn).toLocaleString()}`,
             d.customer_name ? `👤 ${d.customer_name}` : null,
             `📱 ${d.destination_account}`,
             ``,
@@ -1600,7 +1625,7 @@ async function handleCore(req: Request, ctx: HumanizeCtx): Promise<NextResponse>
           ].filter(Boolean).join('\n') : [
             `✅ *PIN Verified!*`,
             ``,
-            `*${d.provider || ''} ${d.intent === 'ELECTRICITY' ? 'Electricity' : d.intent === 'VEND_DATA' ? 'Data' : d.intent === 'TV' ? 'Cable' : 'Airtime'}*`,
+            `*${d.provider || ''} ${serviceLabel}*`,
             d.customer_name ? `👤 ${d.customer_name}` : null,
             `📱 ${d.destination_account}`,
             `💰 ₦${Number(d.amount_ngn).toLocaleString()}`,
@@ -2979,7 +3004,12 @@ async function handleCore(req: Request, ctx: HumanizeCtx): Promise<NextResponse>
     // intent; if it doesn't match (a telecom on ELECTRICITY/TV), drop it so the picker fires.
     // Moved here (was further below) so the CABLE FAST PATH right after it never mistakes a
     // bogus telecom-network guess for a real, already-known cable provider.
-    if (intentData.provider && ['ELECTRICITY', 'TV'].includes(intentData.intent)) {
+    // (EDUCATION is in this list for the same reason: the AI happily answers "MTN" for
+    // "buy a waec pin for 0803…" off the phone prefix, and a telecom id is never a valid
+    // exam body — dropping it makes the "Which exam body?" picker fire instead of failing
+    // at VTpass. It also stamps the human label, so "WAEC Result Checker" reads back
+    // instead of the raw service id.)
+    if (intentData.provider && ['ELECTRICITY', 'TV', 'EDUCATION'].includes(intentData.intent)) {
         const spec = providersFor(intentData.intent);
         const matched = spec ? matchProvider(String(intentData.provider), spec.options) : null;
         if (spec && !matched) {
@@ -3091,6 +3121,102 @@ async function handleCore(req: Request, ctx: HumanizeCtx): Promise<NextResponse>
         // SERVICE_RULES / VARIATION GATE machinery below — provider, destination_account,
         // and verified_name are all already set, so those gates simply pass through to the
         // package list / renew pin.
+    }
+
+    // ═══════════════════════════════════════════════════════════════════════
+    // ⚡ EDUCATION FAST PATH (WAEC / JAMB) ⚡
+    // ═══════════════════════════════════════════════════════════════════════
+    //
+    // Education is the one service whose two providers have genuinely DIFFERENT shapes, which
+    // the generic field collector cannot express on its own (see SERVICE_RULES.EDUCATION):
+    //
+    //   WAEC / WAEC registration — no account field AT ALL. The contact phone is what VTpass
+    //                              receives as the billers code (page.tsx buildBackendPayload:
+    //                              `payloadBillersCode = educationProvider === "jamb"
+    //                               ? accountNumber : customerPhone`).
+    //   JAMB                     — a profile ID (>= 10 chars, checkAccountNumber enforces it)
+    //                              that must be merchant-verified before payment, exactly like
+    //                              a meter or a smartcard.
+    //
+    // This block settles the exam body and — for JAMB only — the profile ID, then falls
+    // through to the same generic SERVICE_RULES -> PROVIDER -> VARIATION -> VERIFY machinery
+    // every other service already uses. It never intercepts any other intent.
+    if (intentData.intent === 'EDUCATION') {
+        // 1. Exam body first. Nothing else about this request — not the product list, not
+        // whether a profile ID is even needed — is answerable before it's known.
+        if (!intentData.provider) {
+            const spec = providersFor('EDUCATION')!;
+            await supabase.from('deai_sessions').upsert({
+                chat_id: platform_id, platform, intent_data: intentData,
+                status: 'AWAITING_PROVIDER',
+                expires_at: new Date(Date.now() + 300000).toISOString(),
+            }, { onConflict: 'chat_id' });
+            return NextResponse.json({
+                action: 'REPLY',
+                message: `${prependSystemMsg}${spec.prompt}\n\n${renderOptions(spec.options)}\n\n_Reply with the number, or the name._`,
+            });
+        }
+
+        // 🔴 EDUCATION HAS NO USER-ENTERED AMOUNT — the product's price IS the price
+        // (requiresVariation is true, and every VTpass education variation is fixedPrice:Yes).
+        // But extractEntities files any 2-9 digit run as an amount, so a half-typed JAMB
+        // profile ID came back as one: replying "12345" to the profile-ID question produced
+        //   💡 *Got it! (₦12345 | ...)*
+        // and left a phantom ₦12,345 sitting in the session until a plan happened to overwrite
+        // it. Nothing may set an education amount except the variation pick.
+        if (!intentData.variation_code) intentData.amount_ngn = null;
+
+        if (String(intentData.provider).toLowerCase().includes('jamb')) {
+            // 2. JAMB's profile ID, asked ALONE and by its real name — not as the generic
+            // "Target Number/Account", which nobody would recognise as a JAMB profile code.
+            //
+            // A bare too-short number here is an ATTEMPT at the profile ID, not noise: it never
+            // reaches destination_account (extractEntities only files 10+ digit runs there), so
+            // without this the user just got the same question again with no hint as to why.
+            if (!intentData.destination_account && /^\d{1,9}$/.test(text.trim())) {
+                await supabase.from('deai_sessions').upsert({
+                    chat_id: platform_id, platform, intent_data: intentData,
+                    status: 'AWAITING_DETAILS',
+                    expires_at: new Date(Date.now() + 300000).toISOString(),
+                }, { onConflict: 'chat_id' });
+                return NextResponse.json({
+                    action: 'REPLY',
+                    message: `⚠️ ${checkAccountNumber('EDUCATION', text.trim(), 'jamb').error}\n\nPlease reply with the correct JAMB profile ID.`,
+                });
+            }
+            if (!intentData.destination_account) {
+                await supabase.from('deai_sessions').upsert({
+                    chat_id: platform_id, platform, intent_data: intentData,
+                    status: 'AWAITING_DETAILS',
+                    expires_at: new Date(Date.now() + 300000).toISOString(),
+                }, { onConflict: 'chat_id' });
+                return NextResponse.json({
+                    action: 'REPLY',
+                    message: `${prependSystemMsg}🎓 *${intentData.provider_label || 'JAMB'}*\n\nWhat's your JAMB *profile ID*? (the 10+ digit code on your JAMB profile)`,
+                });
+            }
+
+            const acctCheck = checkAccountNumber('EDUCATION', intentData.destination_account, intentData.provider);
+            if (!acctCheck.valid) {
+                intentData.destination_account = null;
+                await supabase.from('deai_sessions').upsert({
+                    chat_id: platform_id, platform, intent_data: intentData,
+                    status: 'AWAITING_DETAILS',
+                    expires_at: new Date(Date.now() + 300000).toISOString(),
+                }, { onConflict: 'chat_id' });
+                return NextResponse.json({ action: 'REPLY', message: `⚠️ ${acctCheck.error}\n\nPlease reply with the correct JAMB profile ID.` });
+            }
+            // Verification itself runs at the UNIVERSAL ACCOUNT VERIFICATION gate below —
+            // deliberately, because VTpass wants the chosen product's variation_code as the
+            // merchant-verify `type` for JAMB, so the product must be picked first.
+        } else {
+            // 3. WAEC: the contact phone IS the billers code. Anything the earlier sweeps
+            // filed as an "account" here is really that phone (they have no way to know WAEC
+            // has no account field), so move it rather than lose it, and keep the two in sync
+            // once the phone is known — that's what makes the vend payload match the web app.
+            if (intentData.destination_account && !intentData.phone) intentData.phone = intentData.destination_account;
+            intentData.destination_account = intentData.phone || null;
+        }
     }
 
     const rules = SERVICE_RULES[intentData.intent];
@@ -3218,9 +3344,31 @@ async function handleCore(req: Request, ctx: HumanizeCtx): Promise<NextResponse>
         const rawOptions = await fetchVariations(serviceID);
 
         if (rawOptions.length === 0) {
+            // 🔴 THIS WAS A DEAD END. It returned without touching the session, so the flow was
+            // left sitting on a provider whose plan list can't be built — every subsequent
+            // message walked back to this same line. Found with JAMB, where it is not even
+            // transient: VTpass answers `{"code":"011","content":{"errors":"Service is Not
+            // Valid"}}` for serviceID "jamb" on this merchant account, so "try again shortly"
+            // is advice that can never work. Drop the provider and re-offer the picker, so the
+            // user can choose one that does have products instead of restarting from nothing.
+            const spec = providersFor(intentData.intent);
+            const deadProvider = intentData.provider_label || intentData.provider;
+            if (spec) {
+                intentData.provider = null;
+                intentData.provider_label = null;
+                await supabase.from('deai_sessions').upsert({
+                    chat_id: platform_id, platform, intent_data: intentData,
+                    status: 'AWAITING_PROVIDER',
+                    expires_at: new Date(Date.now() + 300000).toISOString(),
+                }, { onConflict: 'chat_id' });
+                return NextResponse.json({
+                    action: 'REPLY',
+                    message: `⚠️ I couldn't load any products for *${deadProvider}* — our provider isn't offering it right now.\n\n${spec.prompt}\n\n${renderOptions(spec.options)}\n\n_Reply with the number, or the name._`,
+                });
+            }
             return NextResponse.json({
                 action: 'REPLY',
-                message: `⚠️ I couldn't load the plans for ${intentData.provider_label || intentData.provider} right now. Please try again shortly, or pay in the app.`,
+                message: `⚠️ I couldn't load the plans for ${deadProvider} right now. Please try again shortly, or pay in the app.`,
             });
         }
 
@@ -3348,18 +3496,39 @@ async function handleCore(req: Request, ctx: HumanizeCtx): Promise<NextResponse>
         intentData.destination_account &&
         !intentData.verified_name
     ) {
+        // 🔴 JAMB NEEDS THE PRODUCT AS THE VERIFY `type`. The web app calls merchant-verify
+        // with `serviceID: "jamb", type: selectedEducationPlan.variation_code` (page.tsx's
+        // verifyMerchant) — VTpass distinguishes UTME from Direct Entry profiles, so a verify
+        // with no type is not the same call the app makes. This gate runs AFTER the variation
+        // gate above, so by here the product has been picked and variation_code is set.
         const verification = await verifyAccount(
             intentData.intent,
             intentData.destination_account,
-            undefined,
+            intentData.intent === 'EDUCATION' ? (intentData.variation_code || undefined) : undefined,
             intentData.provider
         );
 
         if (!verification.success) {
-            await supabase.from('deai_sessions').delete().eq('chat_id', platform_id);
+            // 🔴 THIS USED TO DELETE THE WHOLE SESSION. Cable no longer reaches this gate (the
+            // CABLE FAST PATH verifies far earlier and keeps the session on failure), so the
+            // only caller left is a JAMB profile ID — where a single mistyped digit threw away
+            // the exam body, the product and the phone the user had already given, and dropped
+            // them back at "I didn't catch that". Keep everything else; clear only the profile
+            // ID so the EDUCATION FAST PATH asks for it again, by name.
+            const rejectedId = intentData.destination_account;
+            intentData.destination_account = null;
+            await supabase.from('deai_sessions').upsert({
+                chat_id: platform_id, platform, intent_data: intentData,
+                status: 'AWAITING_DETAILS', expires_at: new Date(Date.now() + 300000).toISOString(),
+            }, { onConflict: 'chat_id' });
             return NextResponse.json({
                 action: 'REPLY',
-                message: `❌ ${verification.message || "I couldn't verify that account. Please check the number and try again."}`,
+                message: verifyFailureMessage({
+                    noun: intentData.intent === 'EDUCATION' ? 'JAMB profile ID' : 'account',
+                    account: rejectedId,
+                    providerLabel: intentData.provider_label || intentData.provider,
+                    reason: verification.message,
+                }),
             });
         }
 
@@ -3431,16 +3600,24 @@ async function handleCore(req: Request, ctx: HumanizeCtx): Promise<NextResponse>
     // verified data. This is the ONE place "generate a link instead of asking for a PIN" (the
     // final-execution step) actually happens for a guest.
     if (isGuest) {
+        // 🔴 BOTH OF THESE FELL THROUGH TO "AIRTIME" FOR EDUCATION. The category is what the
+        // app's deep-link handler switches on to open the right tab and pre-fill the right
+        // fields, so a WAEC hand-off arrived at the app as an airtime top-up to the user's own
+        // phone number — the one flow where that's a plausible-looking payment, which makes it
+        // worse, not better. The label is what the user reads in the confirmation just above
+        // the link.
         const category = intentData.intent === 'ELECTRICITY' ? 'ELECTRICITY'
                         : intentData.intent === 'TV' ? 'CABLE'
-                        : intentData.intent === 'VEND_DATA' ? 'DATA' : 'AIRTIME';
+                        : intentData.intent === 'VEND_DATA' ? 'DATA'
+                        : intentData.intent === 'EDUCATION' ? 'EDUCATION' : 'AIRTIME';
         const serviceID = resolveServiceId(intentData.intent, intentData.provider || null) || intentData.provider || '';
         const guestHost = req.headers.get('host');
         const guestProto = guestHost?.includes('localhost') ? 'http' : 'https';
         const guestBaseUrl = `${guestProto}://${guestHost}`;
         const serviceLabel = intentData.intent === 'ELECTRICITY' ? 'Electricity'
                             : intentData.intent === 'VEND_DATA' ? 'Data'
-                            : intentData.intent === 'TV' ? 'Cable' : 'Airtime';
+                            : intentData.intent === 'TV' ? 'Cable'
+                            : intentData.intent === 'EDUCATION' ? 'Education PIN' : 'Airtime';
 
         await supabase.from('deai_sessions').delete().eq('chat_id', platform_id);
 
@@ -3456,6 +3633,12 @@ async function handleCore(req: Request, ctx: HumanizeCtx): Promise<NextResponse>
                 cableAction: intentData.cable_action || undefined,
                 customerName: intentData.customer_name || undefined,
                 customerAddress: intentData.customer_address || undefined,
+                // DeepLinkIntent has always carried an email and the app has always pre-filled
+                // it (see page.tsx's resolve handler), but this call site never passed one —
+                // so a receipt address the user typed in chat was dropped at the hand-off and
+                // had to be typed again in the app. EDUCATION makes an email compulsory
+                // (SERVICE_RULES), so losing it is now a guaranteed re-ask, not an occasional one.
+                email: intentData.email || intentData.customer_email || undefined,
                 channel: platform,
                 chatId: platform_id,
             });
