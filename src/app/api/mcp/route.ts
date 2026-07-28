@@ -309,7 +309,7 @@ async function callPayBill(args: any, oauthIdentity: McpIdentity | null) {
 
   // 🔴 RULE GATE — an operator-disabled service must be refused here exactly as it would be
   // in chat or the web app; the agent is a client like any other.
-  const gate = await checkServiceAllowed(intent);
+  const gate = await checkServiceAllowed(intent, provider);
   if (!gate.allowed) return errorResult(gate.reason || 'This service is temporarily unavailable.');
 
   const serviceID = resolveServiceId(intent, provider);

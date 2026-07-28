@@ -137,8 +137,11 @@ async function isExcluded(campaignId: string, walletAddress?: string | null, des
 
 /**
  * The single active campaign (if any) that applies to `serviceKey` — one of the canonical
- * keys killSwitchKeyFor() maps intents/tabs to (AIRTIME, DATA, INTERNET, ELECTRICITY, CABLE,
- * BANK, EDUCATION). A campaign with no `services` list applies to every service.
+ * service-category keys (AIRTIME, DATA, INTERNET, ELECTRICITY, CABLE, BANK, EDUCATION).
+ * These are transaction service_category values, NOT kill-switch keys: the kill switches
+ * moved to the dashboard's MASTER_/per-provider scheme (see serviceRules.ts), and this
+ * comment used to point at killSwitchKeyFor() as though the two vocabularies were the same.
+ * A campaign with no `services` list applies to every service.
  *
  * A campaign whose max_total_discount_ngn has already been fully given away is treated as
  * inactive here — transactions simply fall back to the normal, undiscounted flow with no

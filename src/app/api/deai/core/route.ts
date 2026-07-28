@@ -1335,7 +1335,7 @@ async function handleCore(req: Request, ctx: HumanizeCtx): Promise<NextResponse>
         // service (provider outage, fraud, dispute), the agent must refuse — exactly as the
         // web app does. Without this, the relayer would spend real user funds on a service
         // that has been deliberately switched off.
-        const gate = await checkServiceAllowed(d.intent);
+        const gate = await checkServiceAllowed(d.intent, d.provider);
         if (!gate.allowed) {
           await supabase.from('deai_sessions').delete().eq('chat_id', platform_id);
           return NextResponse.json({ action: 'REPLY', message: `⛔ ${gate.reason}` });

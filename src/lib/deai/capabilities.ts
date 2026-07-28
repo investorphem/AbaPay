@@ -1,5 +1,5 @@
 import 'server-only';
-import { getServiceRules, killSwitchKeyFor, minAmountFor } from '@/lib/serviceRules';
+import { getServiceRules, killSwitchKeysFor, minAmountFor } from '@/lib/serviceRules';
 import { verifyAccount, fetchDataVariations, resolveServiceId } from '@/lib/deai/services';
 import { resolveCountry, fetchCountries } from '@/lib/deai/international';
 
@@ -174,6 +174,25 @@ export async function assessFeasibility(params: {
   // The web app pulls countries live from VTpass, so the agent must too — otherwise it
   // would either refuse countries the app supports, or promise ones that fail at vend time.
   if (intent === 'INTERNATIONAL') {
+    // 🔴 This branch returns before the kill-switch check further down, so international was
+    // the ONE capability that could be walked all the way through country selection with
+    // MASTER_INTERNATIONAL switched off — the help menu already printed it as paused. Refuse
+    // up front instead of at the payment gate, after the user has typed a number.
+    const intlRules = await getServiceRules();
+    if (intlRules.killSwitches.MASTER_INTERNATIONAL === false) {
+      return {
+        possible: false,
+        needsApp: false,
+        reason: "International airtime is temporarily unavailable — we've paused it while we sort out an issue with our provider.",
+        suggestions: [
+          'This usually clears within a few hours.',
+          'I can still send airtime, data, electricity or cable inside Nigeria — just say the word.',
+        ],
+        missing: [],
+        blockCode: 'DISABLED',
+      };
+    }
+
     if (!country) {
       const list = await fetchCountries();
       const sample = list.slice(0, 8).map(c => c.name).join(', ');
@@ -237,17 +256,25 @@ export async function assessFeasibility(params: {
 
   // ── 1. Is the service switched on? ────────────────────────────────────────
   const rules = await getServiceRules();
-  const key = killSwitchKeyFor(intent);
-  if (key && rules.killSwitches[key] === false) {
+  // Two-level, same as the web app and checkServiceAllowed: the whole service can be paused,
+  // or just one provider. `provider` may be absent this early in the conversation — then only
+  // the master is checked, and the per-provider block lands at the payment gate instead.
+  const keys = killSwitchKeysFor(intent, provider);
+  const providerOff = !!(keys?.provider && rules.killSwitches[keys.provider] === false);
+  if (keys && (rules.killSwitches[keys.master] === false || providerOff)) {
+    const what = providerOff && rules.killSwitches[keys.master] !== false && provider
+      ? `${spec.label} with ${String(provider).toUpperCase()}`
+      : spec.label;
     return {
       possible: false,
       needsApp: false,
-      reason: `${spec.label} is temporarily unavailable — we've paused it while we sort out an issue with our provider.`,
+      reason: `${what} is temporarily unavailable — we've paused it while we sort out an issue with our provider.`,
       suggestions: [
         'This usually clears within a few hours.',
         'I can help you with another bill in the meantime — just say the word.',
       ],
       missing: [],
+      blockCode: 'DISABLED',
     };
   }
 
@@ -336,10 +363,11 @@ export async function describeCapabilities(): Promise<string> {
     // have printed "_(temporarily paused)_" beside international airtime and education PINs,
     // and pausing education would never have shown at all. Each capability maps to its OWN
     // intent, and international has its own master switch (see checkServiceAllowed).
-    const key = killSwitchKeyFor(INTENT_FOR_CAPABILITY[c.id]);
-    const off = c.id === 'INTERNATIONAL'
-      ? rules.killSwitches.MASTER_INTERNATIONAL === false
-      : !!(key && rules.killSwitches[key] === false);
+    // This menu is per-SERVICE, so only the MASTER_ level is shown — a single paused disco
+    // shouldn't hide "Electricity" from the list. The per-provider switch is enforced at the
+    // payment gate, once we know which provider the user actually wants.
+    const keys = killSwitchKeysFor(INTENT_FOR_CAPABILITY[c.id]);
+    const off = !!(keys && rules.killSwitches[keys.master] === false);
     lines.push(`${off ? '⛔' : '•'} ${c.label}${off ? ' _(temporarily paused)_' : ''}`);
     if (!off) lines.push(`   _"${c.example}"_`);
   }

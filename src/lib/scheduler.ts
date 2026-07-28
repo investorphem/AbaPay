@@ -183,12 +183,17 @@ export async function runScheduledBills(opts: { scope?: 'recurring' | 'oneoff' |
       const chain = bill.blockchain || 'CELO';
 
       // 🔴 RULE GATE: an operator-disabled service must halt autonomous payments too.
+      // 🔴 EDUCATION fell through this chain to 'VEND_AIRTIME', so an education schedule would
+      // have been gated by the AIRTIME kill switch (and, now that the provider is threaded
+      // through, looked up `AIRTIME_waec`) instead of its own. Same class of miss as the
+      // capabilities.ts fallthrough — every category must name its OWN intent.
       const intentKey =
         bill.service_category === 'ELECTRICITY' ? 'ELECTRICITY' :
         bill.service_category === 'CABLE' ? 'TV' :
-        bill.service_category === 'DATA' ? 'VEND_DATA' : 'VEND_AIRTIME';
+        bill.service_category === 'DATA' ? 'VEND_DATA' :
+        bill.service_category === 'EDUCATION' ? 'EDUCATION' : 'VEND_AIRTIME';
 
-      const gate = await checkServiceAllowed(intentKey);
+      const gate = await checkServiceAllowed(intentKey, bill.provider);
       if (!gate.allowed) {
         if (due) {
           await notify(bill, `⛔ *${label} — ${amountLabel}*\n\nYour scheduled payment was NOT made: ${gate.reason}\n\n${isOneOff ? "You'll need to try again from the chat." : "We'll retry on your next scheduled date."}`);

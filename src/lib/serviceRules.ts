@@ -1,5 +1,6 @@
 import 'server-only';
 import { supabaseAdmin } from '@/utils/supabase';
+import { resolveServiceId } from '@/lib/deai/services';
 
 // ⚡ SHARED SERVICE RULES — one source of truth for the app AND the agent.
 //
@@ -71,19 +72,74 @@ export async function getServiceRules(): Promise<ServiceRules> {
   }
 }
 
+// 🔴 THE BUG THIS FIXES: the admin dashboard's "pause a service" switches did NOTHING to
+// chat, MCP or the scheduler.
+//
+// The dashboard (src/app/admin/page.tsx ~L851) writes a TWO-LEVEL key system into
+// platform_settings.kill_switches: a per-service master (`MASTER_AIRTIME`,
+// `MASTER_INTERNET`, `MASTER_ELECTRICITY`, `MASTER_CABLE`, `MASTER_EDUCATION`,
+// `MASTER_INTERNATIONAL`) and a per-provider switch keyed by VTpass serviceID
+// (`AIRTIME_mtn`, `INTERNET_airtel-data`, `ELEC_ikeja-electric`, `CABLE_dstv`, `EDU_waec`).
+// The web app (src/app/page.tsx ~L216) blocks when EITHER is false.
+//
+// This function used to return a single BARE key — 'AIRTIME', 'INTERNET', 'ELECTRICITY',
+// 'CABLE', 'EDUCATION' — with no prefix. NOTHING has written those keys since the
+// MASTER_/per-provider system replaced them; they survive in production only as dead legacy
+// data, all set to true. So an operator hitting "pause Electricity" in the dashboard flipped
+// `MASTER_ELECTRICITY`, which nothing on the agent's path ever read: the website correctly
+// refused, while chat, MCP and the autonomous scheduler carried on spending real user funds
+// on a service the operator had deliberately switched off. Exactly the failure the top of
+// this file says it exists to prevent — reintroduced by a key rename on the dashboard side.
+//
+// Keys below are copied from admin/page.tsx verbatim. Note DATA's master is MASTER_INTERNET
+// and its provider prefix is INTERNET_ — that is what the dashboard and the web app call it.
+const KILL_SWITCHES: Record<string, { master: string; providerPrefix?: string; label: string }> = {
+  VEND_AIRTIME:    { master: 'MASTER_AIRTIME',       providerPrefix: 'AIRTIME',  label: 'Airtime' },
+  VEND_DATA:       { master: 'MASTER_INTERNET',      providerPrefix: 'INTERNET', label: 'Data' },
+  ELECTRICITY:     { master: 'MASTER_ELECTRICITY',   providerPrefix: 'ELEC',     label: 'Electricity' },
+  PAY_ELECTRICITY: { master: 'MASTER_ELECTRICITY',   providerPrefix: 'ELEC',     label: 'Electricity' },
+  TV:              { master: 'MASTER_CABLE',         providerPrefix: 'CABLE',    label: 'Cable TV' },
+  PAY_CABLE:       { master: 'MASTER_CABLE',         providerPrefix: 'CABLE',    label: 'Cable TV' },
+  EDUCATION:       { master: 'MASTER_EDUCATION',     providerPrefix: 'EDU',      label: 'Education' },
+  // International has a master switch in the dashboard but no per-provider breakdown.
+  INTERNATIONAL:   { master: 'MASTER_INTERNATIONAL', label: 'International airtime' },
+  // ⚠️ Bank transfer has NO toggle in the admin dashboard (no group in admin/page.tsx, and
+  // page.tsx's isCurrentServiceDisabled doesn't check it either). Left on the pre-existing
+  // bare 'BANK' key rather than inventing a MASTER_BANK switch no operator can reach — if a
+  // bank group is ever added to the dashboard, point this at whatever key it writes.
+  BANK_TRANSFER:   { master: 'BANK', label: 'Bank transfer' },
+};
+
+export interface KillSwitchKeys {
+  /** The dashboard's per-service master toggle. */
+  master: string;
+  /** The dashboard's per-provider toggle, or null when no provider was supplied/applies. */
+  provider: string | null;
+  /** Human-readable service name, for the refusal message. */
+  label: string;
+}
+
 /**
- * Map an agent intent to the kill-switch key the operator toggles in the admin dashboard.
+ * Map an agent intent (+ the provider, when known) to the kill-switch keys the operator
+ * actually toggles in the admin dashboard.
+ *
+ * The provider is normalised through resolveServiceId — the same function that turns an
+ * agent's loose provider ("ikeja", "mtn") into the VTpass serviceID ("ikeja-electric",
+ * "mtn") the vend uses — because the dashboard keys its per-provider switches by serviceID.
+ * Without that, `ELEC_ikeja` would silently never match the `ELEC_ikeja-electric` the
+ * operator switched off.
  */
-export function killSwitchKeyFor(intent: string): string | null {
-  switch (intent) {
-    case 'VEND_AIRTIME': return 'AIRTIME';
-    case 'VEND_DATA':    return 'INTERNET';
-    case 'ELECTRICITY':  return 'ELECTRICITY';
-    case 'TV':           return 'CABLE';
-    case 'BANK_TRANSFER':return 'BANK';
-    case 'EDUCATION':    return 'EDUCATION';
-    default:             return null;
+export function killSwitchKeysFor(intent: string, provider?: string | null): KillSwitchKeys | null {
+  const spec = KILL_SWITCHES[intent];
+  if (!spec) return null; // non-payment intents (balance, history, help)
+
+  let providerKey: string | null = null;
+  if (spec.providerPrefix && provider) {
+    const serviceID = resolveServiceId(intent, provider) || String(provider);
+    providerKey = `${spec.providerPrefix}_${serviceID.toLowerCase()}`;
   }
+
+  return { master: spec.master, provider: providerKey, label: spec.label };
 }
 
 export interface RuleCheck {
@@ -94,7 +150,11 @@ export interface RuleCheck {
 /**
  * The gate the agent MUST pass before it promises — or executes — any payment.
  */
-export async function checkServiceAllowed(intent: string, opts: { isInternational?: boolean } = {}): Promise<RuleCheck> {
+export async function checkServiceAllowed(
+  intent: string,
+  provider?: string | null,
+  opts: { isInternational?: boolean } = {}
+): Promise<RuleCheck> {
   const rules = await getServiceRules();
 
   if (opts.isInternational) {
@@ -104,15 +164,22 @@ export async function checkServiceAllowed(intent: string, opts: { isInternationa
     }
   }
 
-  const key = killSwitchKeyFor(intent);
-  if (!key) return { allowed: true }; // non-payment intents (balance, history, help)
+  const keys = killSwitchKeysFor(intent, provider);
+  if (!keys) return { allowed: true }; // non-payment intents (balance, history, help)
 
   // A switch is "on" unless explicitly set to false. Missing key = enabled (matches the app).
-  if (rules.killSwitches[key] === false) {
-    const label = key.charAt(0) + key.slice(1).toLowerCase();
+  // Blocked at EITHER level — the whole service, or just this one provider — exactly as
+  // page.tsx's isCurrentServiceDisabled does with its `||`.
+  const masterOff = rules.killSwitches[keys.master] === false;
+  const providerOff = !!keys.provider && rules.killSwitches[keys.provider] === false;
+
+  if (masterOff || providerOff) {
+    const what = providerOff && !masterOff && provider
+      ? `${keys.label} with ${String(provider).toUpperCase()}`
+      : `${keys.label}`;
     return {
       allowed: false,
-      reason: `${label} payments are temporarily unavailable while we resolve an issue with our provider. Please try again shortly.`,
+      reason: `${what} payments are temporarily unavailable while we resolve an issue with our provider. Please try again shortly.`,
     };
   }
 
