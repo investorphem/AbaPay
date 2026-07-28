@@ -1,5 +1,6 @@
 import 'server-only';
 import { getServiceRules, killSwitchKeysFor, minAmountFor } from '@/lib/serviceRules';
+import { maxAmountFor } from '@/lib/parity';
 import { verifyAccount, fetchDataVariations, resolveServiceId } from '@/lib/deai/services';
 import { resolveCountry, fetchCountries } from '@/lib/deai/international';
 
@@ -329,11 +330,15 @@ export async function assessFeasibility(params: {
         blockCode: 'AMOUNT_TOO_LOW',
       };
     }
-    if (amountNgn > 500_000) {
+    // Same per-service ceiling the payment gates use (parity.maxAmountFor) — this check runs
+    // FIRST, so hardcoding 500,000 here meant a ₦200,000 airtime request was told it was fine
+    // and got the real limit only later, from a different message.
+    const max = maxAmountFor(intent);
+    if (amountNgn > max) {
       return {
         possible: false,
         needsApp: false,
-        reason: `₦${amountNgn.toLocaleString()} is above the ₦500,000 per-transaction limit.`,
+        reason: `₦${amountNgn.toLocaleString()} is above the ₦${max.toLocaleString()} per-transaction limit.`,
         suggestions: ['Split it into smaller payments, or pay in the app.'],
         missing: [],
         blockCode: 'AMOUNT_TOO_HIGH',

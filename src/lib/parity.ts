@@ -213,6 +213,30 @@ export function minAmountFor(intent: string): number {
 
 export const MAX_AMOUNT_NGN = 500_000;
 
+// 🔴 THE BUG THIS FIXES: there was only ONE ceiling — a flat ₦500,000 for every service — but
+// the web form caps AIRTIME at ₦50,000 (page.tsx's dynamicMaxAmount: `activeService.id ===
+// "AIRTIME" ? 50000`). So an amount the app refuses outright sailed through the agent:
+//   "buy 200000 airtime for 08031234567"  ->  ✅ *Ready to pay* … 💰 ₦200,000
+// a signed, ready-to-pay deep link for a ₦200,000 airtime top-up — 4x the app's own limit and
+// far above what the telco will vend in one transaction. The user pays on-chain first and the
+// vend fails afterwards, so the money is already gone and has to come back through the refund
+// path. Both money-moving agent surfaces were affected: chat (core/route.ts) and MCP pay_bill
+// both gate on checkAmount.
+//
+// core/route.ts's SERVICE_RULES already carried the correct `max: 50000` for airtime — but
+// nothing has ever READ that field (only `.min` and `.required` are used), so it was dead
+// data. The cap belongs here next to minAmountFor, where both surfaces already look.
+//
+// Deliberately only ever TIGHTENS toward the app. The app permits MORE than ₦500,000 for
+// electricity (₦1,000,000) and bank transfer (₦5,000,000), but the flat agent ceiling is a
+// separate, intentional limit on what a bot may move in one go, so it still wins there.
+export function maxAmountFor(intent: string): number {
+  switch (intent) {
+    case 'VEND_AIRTIME': return 50_000;
+    default:             return MAX_AMOUNT_NGN;
+  }
+}
+
 /**
  * @param isFixedPlan  When the user picked a fixed-price plan (a data bundle, a cable
  *                     package), the frontend SKIPS min/max entirely — the plan's price is
@@ -237,8 +261,9 @@ export function checkAmount(
   if (amountNgn < min) {
     return { valid: false, missing: [], error: `The minimum for this service is ₦${min.toLocaleString()}.` };
   }
-  if (amountNgn > MAX_AMOUNT_NGN) {
-    return { valid: false, missing: [], error: `That's above the ₦${MAX_AMOUNT_NGN.toLocaleString()} per-transaction limit.` };
+  const max = maxAmountFor(intent);
+  if (amountNgn > max) {
+    return { valid: false, missing: [], error: `That's above the ₦${max.toLocaleString()} per-transaction limit.` };
   }
 
   return { valid: true, missing: [] };
