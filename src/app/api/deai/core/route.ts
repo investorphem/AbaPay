@@ -240,7 +240,12 @@ const PIVOT_STATE_LABELS: Record<string, string> = {
 // down — but with a bar none of the four false positives above can clear.
 const EXPLICIT_SWITCH_RE = /\b(actually|instead|rather|nevermind|never mind|forget (?:that|it|the)|scratch that|changed my mind|change of mind|i meant|no wait|wait no)\b/i;
 
-async function pivotIsGenuine(text: string, currentIntent: string | undefined, status: string): Promise<boolean> {
+async function pivotIsGenuine(
+    text: string,
+    currentIntent: string | undefined,
+    status: string,
+    keywordTarget: string,
+): Promise<boolean> {
     const verdict = await classifyPivot({
         message: text,
         inProgress: currentIntent ? (INTENT_GUESS_LABELS[currentIntent] || currentIntent) : 'a bill payment',
@@ -250,7 +255,15 @@ async function pivotIsGenuine(text: string, currentIntent: string | undefined, s
     // No opinion (AI unreachable) — keep the session unless the user said something
     // unmistakable. Failing CLOSED here is the safe direction: worst case the user repeats
     // themselves or types "cancel", versus silently losing everything they've entered.
-    if (!verdict) return EXPLICIT_SWITCH_RE.test(text);
+    //
+    // The keyword match must ALSO still name a different service. Before the switch-phrase
+    // trigger above existed this function was only ever reached when it did, so requiring it
+    // explicitly keeps the AI-down path exactly as strict as it has always been — otherwise
+    // widening the trigger would have quietly made "actually make it 500 not 200" destroy a
+    // session whenever Anthropic was unreachable.
+    if (!verdict) {
+        return EXPLICIT_SWITCH_RE.test(text) && keywordTarget !== 'UNKNOWN' && keywordTarget !== currentIntent;
+    }
 
     if (!verdict.switching) return false;
 
@@ -1063,8 +1076,25 @@ async function handleCore(req: Request, ctx: HumanizeCtx): Promise<NextResponse>
     // it costs nothing, and it means the extra AI call only ever happens on the handful of
     // turns where a switch is even plausible, not on every menu reply.
     const freshIntentCheck = fallbackIntentMatcher(text);
-    if (session && INTERRUPTIBLE_STATES.has(session.status) && freshIntentCheck !== 'UNKNOWN' && freshIntentCheck !== session.intent_data.intent) {
-        if (await pivotIsGenuine(text, session.intent_data.intent, session.status)) {
+    // 🔴 THE BUG THIS FIXES: the trigger fired only when the keyword matcher named a DIFFERENT
+    // service than the one in progress — but a user abandoning a flow usually names the service
+    // they are LEAVING, and fallbackIntentMatcher returns the first keyword it sees. Confirmed
+    // live, mid-data-flow at the plan-category menu:
+    //   "actually forget the data, i need a waec pin" -> 'data' -> VEND_DATA == in-progress
+    // so the trigger concluded "same intent, nothing to decide", classifyPivot was never called,
+    // and the user got "❌ I didn't recognise that." plus the same menu — trapped in a flow they
+    // had explicitly abandoned, with no way out but the exact word "cancel". "forget the data,
+    // buy airtime" is literally one of PIVOT_SYSTEM_PROMPT's own `switching: true` examples, and
+    // it could never reach the classifier that was written to answer it.
+    //
+    // An unmistakable switch PHRASE is now a trigger in its own right, independent of whatever
+    // the keyword matcher guessed. This only decides whether the question gets ASKED — the
+    // context-aware AI is still the sole authority on the answer, and it is deliberately
+    // conservative (it correctly keeps the session for "actually make it 500 not 200", which
+    // matches this same phrase list).
+    const namesOtherService = freshIntentCheck !== 'UNKNOWN' && freshIntentCheck !== session?.intent_data.intent;
+    if (session && INTERRUPTIBLE_STATES.has(session.status) && (namesOtherService || EXPLICIT_SWITCH_RE.test(text))) {
+        if (await pivotIsGenuine(text, session.intent_data.intent, session.status, freshIntentCheck)) {
             await supabase.from('deai_sessions').delete().eq('chat_id', platform_id);
             session = null;
         }
