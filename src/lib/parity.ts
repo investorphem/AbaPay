@@ -248,7 +248,7 @@ export function maxAmountFor(intent: string): number {
 export function checkAmount(
   intent: string,
   amountNgn: number,
-  opts: { isFixedPlan?: boolean; verifiedMin?: number | null } = {}
+  opts: { isFixedPlan?: boolean; verifiedMin?: number | null; liveMin?: number | null; liveMax?: number | null } = {}
 ): ParityCheck {
   if (!Number.isFinite(amountNgn) || amountNgn <= 0) {
     return { valid: false, missing: [], error: 'Please give me a valid amount.' };
@@ -256,17 +256,62 @@ export function checkAmount(
 
   if (opts.isFixedPlan) return { valid: true, missing: [] };   // plan price IS the price
 
-  const min = Math.max(minAmountFor(intent), Number(opts.verifiedMin) || 0);
+  const min = Math.max(minAmountFor(intent), Number(opts.verifiedMin) || 0, Number(opts.liveMin) || 0);
 
   if (amountNgn < min) {
     return { valid: false, missing: [], error: `The minimum for this service is ₦${min.toLocaleString()}.` };
   }
-  const max = maxAmountFor(intent);
+  // A live per-provider ceiling from VTpass wins outright — see checkAmountLive.
+  const max = Number(opts.liveMax) > 0 ? Number(opts.liveMax) : maxAmountFor(intent);
   if (amountNgn > max) {
-    return { valid: false, missing: [], error: `That's above the ₦${max.toLocaleString()} per-transaction limit.` };
+    return { valid: false, missing: [], error: `That's above the ₦${max.toLocaleString()} per-transaction limit for this provider.` };
   }
 
   return { valid: true, missing: [] };
+}
+
+/**
+ * ⚡ THE REAL, LIVE, PER-PROVIDER AMOUNT GATE — what chat and MCP should use whenever the
+ * provider is known.
+ *
+ * 🔴 THE BUG THIS FIXES: maxAmountFor() above returns one flat number per INTENT — ₦50,000 for
+ * airtime, ₦500,000 for everything else. VTpass's actual ceiling is per PROVIDER and they are
+ * nowhere near each other:
+ *
+ *     airtime:     mtn 200,000 · glo 100,000 · airtel 50,000 · etisalat 50,000
+ *     electricity: aba/ikeja 100 … ibadan 2,000 (min) · eko 100,000 … phed 10,000,000 (max)
+ *
+ * So the flat ₦50,000 airtime cap REFUSED a perfectly valid ₦120,000 MTN top-up, and the
+ * tempting fix — raise the flat number to ₦200,000 — would ACCEPT a ₦120,000 Airtel top-up
+ * that VTpass rejects at vend time, after the user has already paid on-chain and with a refund
+ * to chase. No single flat number is correct for all four networks, which is exactly why this
+ * has to be sourced rather than picked.
+ *
+ * Deliberately still floors the MINIMUM at our own business minimum (see minAmountFor): VTpass
+ * publishes a ₦10 MTN minimum, and honouring that literally would drop the app's ₦100 floor as
+ * an accidental side effect of live sourcing. Live minimums only ever tighten (Ibadan's ₦2,000).
+ *
+ * Falls back to the flat limits when VTpass publishes none for that service, so "unknown" is
+ * never silently treated as "unlimited".
+ */
+export async function checkAmountLive(
+  intent: string,
+  amountNgn: number,
+  opts: { isFixedPlan?: boolean; verifiedMin?: number | null; provider?: string | null } = {}
+): Promise<ParityCheck> {
+  if (opts.isFixedPlan) return checkAmount(intent, amountNgn, opts);
+
+  let live: { min: number | null; max: number | null } = { min: null, max: null };
+  try {
+    const { limitsForIntent } = await import('@/lib/vtpassCatalog');
+    live = await limitsForIntent(intent, opts.provider);
+  } catch (err) {
+    // A catalogue failure must never block a legitimate payment — fall through to the flat
+    // limits, which is exactly the behaviour that existed before live sourcing.
+    console.error('[Parity] live limit lookup failed, using flat limits:', err);
+  }
+
+  return checkAmount(intent, amountNgn, { ...opts, liveMin: live.min, liveMax: live.max });
 }
 
 /**

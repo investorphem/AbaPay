@@ -179,6 +179,30 @@ export function resolveCategory(input: string): CatalogCategory | null {
   return CATEGORY_ALIASES[String(input || '').trim().toLowerCase()] || null;
 }
 
+/** The VTpass category behind each agent intent. */
+const INTENT_CATEGORY: Record<string, CatalogCategory> = {
+  VEND_AIRTIME: 'airtime',
+  VEND_DATA: 'data',
+  INTERNET: 'data',
+  ELECTRICITY: 'electricity-bill',
+  PAY_ELECTRICITY: 'electricity-bill',
+  TV: 'tv-subscription',
+  PAY_CABLE: 'tv-subscription',
+  EDUCATION: 'education',
+};
+
+/**
+ * Every service the agent may legitimately name for an intent. Empty for intents with no
+ * provider list (balance, history) AND — deliberately — never empty-by-accident for the others,
+ * since getCatalog falls back rather than failing. Callers treat empty as "no list applies".
+ */
+export async function providersForIntent(intent: string): Promise<CatalogService[]> {
+  const category = INTENT_CATEGORY[intent];
+  if (!category) return [];
+  const { providers } = await getCatalog(category);
+  return providers;
+}
+
 /** One service's live entry, or null if VTpass doesn't (or no longer) offers it. */
 export async function getService(category: CatalogCategory, serviceID: string): Promise<CatalogService | null> {
   const { providers } = await getCatalog(category);
