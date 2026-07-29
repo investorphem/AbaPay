@@ -20,7 +20,6 @@ import { useSetActiveWallet, useFetchWithPayment } from "thirdweb/react";
 import { viemAdapter } from "thirdweb/adapters/viem";
 
 import { ReceiptModal, SelectionModal } from "@/components/Modals";
-import { TermsModal, PrivacyModal } from "@/components/Modals";
 import PointsBadge from "@/components/PointsBadge"; 
 import DataVariationsUI from "@/components/DataVariationsUI"; 
 import AppFooter from "@/components/AppFooter"; 

@@ -843,7 +843,7 @@ The app ships with Farcaster frame metadata (`public/.well-known/farcaster.json`
 
 ## 📖 User-Facing Documentation Surfaces
 
-Four places tell users what AbaPay does. They are **not** generated from anything — they go
+Four surfaces tell users what AbaPay does. They are **not** generated from anything — they go
 stale silently unless deliberately updated, so treat them as part of the change, not as an
 afterthought:
 
@@ -852,13 +852,17 @@ afterthought:
 | Docs & FAQ page | `src/app/docs/page.tsx` | "Docs & FAQ" link in `AppFooter` |
 | Terms of Service (full) | `src/app/terms/page.tsx` | "Terms" link in `AppFooter` |
 | Privacy Policy (full) | `src/app/privacy/page.tsx` | "Privacy" link in `AppFooter` |
-| In-app Terms / Privacy modals | `src/components/Modals.tsx` | Modal components; short plain-language summaries |
 | This README | `README.md` | GitHub |
 
-⚠️ The in-app `TermsModal`/`PrivacyModal` are **plain-language summaries written by engineers,
-not lawyers**, and have not had legal review. The `/terms` and `/privacy` routes are the longer
-documents. Neither should be treated as legally vetted until a qualified lawyer has reviewed
-them.
+⚠️ `/terms` and `/privacy` are **written by engineers, not lawyers**, and have not had legal
+review. Neither should be treated as legally vetted until a qualified lawyer has reviewed
+them; `/terms` carries a visible notice at the bottom saying exactly that, and it must survive
+any rewrite of the page.
+
+There is no longer a separate in-app Terms/Privacy/FAQ modal. Those components existed in
+`src/components/Modals.tsx`, but `TermsModal`/`PrivacyModal` were imported and never rendered,
+and the FAQ was a footer button duplicating (and drifting from) the `/docs` FAQ. All three are
+gone; `/docs` is the single docs + FAQ surface.
 
 ---
 
