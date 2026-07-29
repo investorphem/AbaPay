@@ -18,6 +18,8 @@ export interface IntlCountry {
   name: string;
   currency?: string;
   prefix?: string;
+  /** VTpass's own flag image URL (https://vtpass.com/resources/images/flags/GH.png). */
+  flag?: string;
 }
 
 export interface IntlProduct { product_type_id: string; name: string; }
@@ -42,20 +44,46 @@ export async function fetchCountries(): Promise<IntlCountry[]> {
       headers: getHeaders(),
     });
     const data = await res.json();
-    const raw = data?.content ?? [];
 
-    const list: IntlCountry[] = (Array.isArray(raw) ? raw : []).map((c: any) => ({
+    // 🔴 THE BUG THIS FIXES: this read `data?.content ?? []` and then `Array.isArray(raw) ? raw
+    // : []`. But VTpass does NOT return a bare array here — unlike every other endpoint in this
+    // file, /get-international-airtime-countries nests the list one level deeper:
+    //
+    //   { "response_description": "000", "content": { "countries": [ {code, flag, name, …} ] } }
+    //
+    // `content` is an OBJECT, so Array.isArray was false on every single successful response and
+    // fetchCountries returned [] every time. It never threw and never logged, so it looked
+    // healthy — but resolveCountry() consequently returned null for EVERY country, and
+    // capabilities.ts turned that into "I can't send airtime to Ghana — our provider doesn't
+    // cover it" for all 100+ countries VTpass actually serves. International airtime was
+    // unreachable from chat and MCP entirely, while the backend supported it the whole time.
+    // (The web app dodged this by going through extractVtpassArray, whose last-ditch branch
+    // digs nested arrays out of `content` — which is why the picker worked there and not here.)
+    const content = data?.content;
+    const raw = Array.isArray(content?.countries) ? content.countries
+              : Array.isArray(content) ? content
+              : [];
+
+    const list: IntlCountry[] = raw.map((c: any) => ({
       code: c.code || c.country_code || c.id,
       name: c.name,
       currency: c.currency,
       prefix: c.prefix,
+      flag: c.flag,
     })).filter((c: IntlCountry) => c.code && c.name);
+
+    // Don't cache a shape we failed to understand — that would pin the empty list for 10
+    // minutes and make the next (possibly fine) response irrelevant.
+    if (list.length === 0) throw new Error(`Unrecognised country payload: ${JSON.stringify(content).slice(0, 200)}`);
 
     countryCache = { list, at: Date.now() };
     return list;
   } catch (err) {
     console.error('[Intl] fetchCountries failed:', err);
-    return [];
+    // Last-known-good beats nothing: an expired list is still overwhelmingly likely to be right,
+    // and returning [] here is what makes resolveCountry() answer "we don't cover that country"
+    // about countries we definitely do cover.
+    return countryCache?.list ?? [];
   }
 }
 
