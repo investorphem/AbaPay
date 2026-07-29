@@ -1900,21 +1900,11 @@ export default function Home() {
     // blobs below. Applied unconditionally, it clips `position: fixed` descendants (the
     // AIChat bubble, the header agent badge) on mobile WebKit, hiding them entirely.
     <main className="min-h-screen bg-slate-50 dark:bg-black text-slate-900 dark:text-slate-100 font-sans p-4 md:p-8 lg:p-12 flex flex-col items-center justify-start md:justify-center pb-20 md:pb-12 relative md:overflow-hidden transition-colors">
-      <style>{`@keyframes logoScale { 0%, 100% { transform: scale(1); opacity: 0.9; } 50% { transform: scale(1.1); opacity: 1; } } .animate-logo-scale { animation: logoScale 1.5s ease-in-out infinite; } .no-scrollbar::-webkit-scrollbar { display: none; } .no-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }`}</style>
+      <style>{`.no-scrollbar::-webkit-scrollbar { display: none; } .no-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }`}</style>
 
       {/* ⚡ 2. NEW: Premium Ambient Web3 Glows (Only visible on PC) ⚡ */}
       <div className="hidden md:block absolute top-[-10%] left-[-5%] w-[40%] h-[40%] rounded-full bg-emerald-500/10 dark:bg-emerald-500/5 blur-[120px] pointer-events-none"></div>
       <div className="hidden md:block absolute bottom-[-10%] right-[-5%] w-[40%] h-[40%] rounded-full bg-blue-500/10 dark:bg-blue-500/5 blur-[120px] pointer-events-none"></div>
-
-      {environment === 'LOADING' && (
-        <div className="fixed inset-0 z-[100] bg-white dark:bg-black flex flex-col items-center justify-center animate-in fade-out duration-500 fill-mode-forwards transition-colors" style={{ animationDelay: '1.5s' }}>
-          <img src="/logo.png" alt="AbaPay" className="h-28 w-auto object-contain animate-logo-scale mb-10" />
-          <div className="flex flex-col items-center gap-2">
-             <div className="w-12 h-0.5 bg-emerald-500 rounded-full animate-pulse" />
-             <p className="text-[10px] font-black uppercase tracking-widest text-slate-400 dark:text-slate-500">Loading AbaPay Protocol...</p>
-          </div>
-        </div>
-      )}
 
       {isConfirmModalOpen && (
         <div className="fixed inset-0 z-[300] flex items-end sm:items-center justify-center bg-slate-900/60 dark:bg-black/80 backdrop-blur-md animate-in fade-in duration-200 transition-colors">
