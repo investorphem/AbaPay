@@ -1,12 +1,5 @@
 import 'server-only';
-import {
-  CABLE_PROVIDERS_LIST,
-  TELECOM_PROVIDERS,
-  INTERNET_PROVIDERS,
-  EDUCATION_PROVIDERS,
-} from '@/constants';
-import { ELECTRICITY_DISCOS } from '@/app/discos';
-import { fetchDataVariations } from '@/lib/deai/services';
+import { getCatalog } from '@/lib/vtpassCatalog';
 import { categorizeDataPlan } from '@/lib/dataCategories';
 import { getHeaders } from '@/lib/vtpass';
 
@@ -111,56 +104,67 @@ export function matchPagedOption(input: string, allOptions: Option[], page: numb
 
 // ─── PROVIDERS ───────────────────────────────────────────────────────────────
 
-export function electricityDiscos(): Option[] {
-  return ELECTRICITY_DISCOS.map((d: any) => ({ id: d.serviceID, label: d.displayName }));
+// 🔴 THESE WERE THE CHAT/MCP COPY OF THE HARDCODED LISTS. They mapped over the very same
+// constants the web app imported, which meant chat could offer `showmax`, `spectranet` and
+// `jamb` — three services this merchant account cannot sell (VTpass answers
+// {"code":"011","errors":"Service is Not Valid"} for all three) — and could never offer
+// `glo-sme-data` or `9mobile-sme-data`, which it can. They are now async readers of the SAME
+// getCatalog() module the web app's /api/providers route sits on, so the form and the agent
+// physically cannot drift apart. No HTTP round-trip here: chat and MCP already run server-side.
+
+async function optionsFrom(category: Parameters<typeof getCatalog>[0]): Promise<Option[]> {
+  const { providers } = await getCatalog(category);
+  return providers.map(p => ({ id: p.serviceID, label: p.displayName }));
 }
 
-export function telecomNetworks(): Option[] {
-  const pretty: Record<string, string> = { mtn: 'MTN', glo: 'Glo', airtel: 'Airtel', etisalat: '9mobile' };
-  return TELECOM_PROVIDERS.map((p: string) => ({ id: p, label: pretty[p] || p.toUpperCase() }));
+export async function electricityDiscos(): Promise<Option[]> {
+  return optionsFrom('electricity-bill');
 }
 
-export function cableProviders(): Option[] {
-  return (CABLE_PROVIDERS_LIST as any[]).map((c) => ({
-    id: c.id || c.serviceID || c,
-    label: c.name || c.displayName || String(c).toUpperCase(),
-  }));
+export async function telecomNetworks(): Promise<Option[]> {
+  return optionsFrom('airtime');
 }
 
-export function internetProviders(): Option[] {
-  return (INTERNET_PROVIDERS as any[]).map((p) => ({
-    id: p.id || p.serviceID || p,
-    label: p.name || p.displayName || String(p).toUpperCase(),
-  }));
+export async function cableProviders(): Promise<Option[]> {
+  return optionsFrom('tv-subscription');
 }
 
-export function educationProviders(): Option[] {
-  return (EDUCATION_PROVIDERS as any[]).map((e) => ({
-    id: e.id || e.serviceID || e,
-    label: e.name || e.displayName || String(e).toUpperCase(),
-  }));
+export async function internetProviders(): Promise<Option[]> {
+  return optionsFrom('data');
+}
+
+export async function educationProviders(): Promise<Option[]> {
+  return optionsFrom('education');
 }
 
 /**
  * The provider list for a given intent — the chat equivalent of the frontend's provider dropdown.
  */
-export function providersFor(intent: string): { options: Option[]; prompt: string } | null {
+export async function providersFor(intent: string): Promise<{ options: Option[]; prompt: string } | null> {
   switch (intent) {
     case 'ELECTRICITY':
-      return { options: electricityDiscos(), prompt: '⚡ *Which electricity provider?*' };
+      return { options: await electricityDiscos(), prompt: '⚡ *Which electricity provider?*' };
     case 'VEND_AIRTIME':
-      return { options: telecomNetworks(), prompt: '📱 *Which network?*' };
+      return { options: await telecomNetworks(), prompt: '📱 *Which network?*' };
     case 'VEND_DATA':
-      return { options: telecomNetworks(), prompt: '🌐 *Which network?*' };
+      // 🔴 Deliberately the AIRTIME list, not the data list: variationServiceId() below turns the
+      // chosen network into "<network>-data", so offering "mtn-data" here would produce
+      // "mtn-data-data". Unchanged behaviour — just now sourced live.
+      return { options: await telecomNetworks(), prompt: '🌐 *Which network?*' };
     case 'TV':
-      return { options: cableProviders(), prompt: '📺 *Which cable provider?*' };
+      return { options: await cableProviders(), prompt: '📺 *Which cable provider?*' };
     case 'INTERNET':
-      return { options: internetProviders(), prompt: '🌐 *Which internet provider?*' };
+      return { options: await internetProviders(), prompt: '🌐 *Which internet provider?*' };
     case 'EDUCATION':
-      return { options: educationProviders(), prompt: '🎓 *Which exam body?*' };
+      return { options: await educationProviders(), prompt: '🎓 *Which exam body?*' };
     default:
       return null;
   }
+}
+
+/** Which intents have a provider list at all — the sync check callers need before awaiting. */
+export function hasProviderList(intent: string): boolean {
+  return ['ELECTRICITY', 'VEND_AIRTIME', 'VEND_DATA', 'TV', 'INTERNET', 'EDUCATION'].includes(intent);
 }
 
 /**

@@ -7,11 +7,11 @@ import { createDeepLink } from '@/lib/deai/deeplink';
 import { relayPayBillFor, getRemainingAllowance } from '@/lib/deai/relayer';
 import { checkServiceAllowed, checkAgentSpendAllowed } from '@/lib/serviceRules';
 import { assessFeasibility, describeCapabilities, getCapability, capabilityForIntent } from '@/lib/deai/capabilities';
-import { checkParity, checkAccountNumber, checkAmount as checkAmountParity, isDuplicateElectricity, formatConversion, REQ, requiresVariation, supportsRenew, requiresVerifiedName } from '@/lib/parity';
+import { checkParity, checkAccountNumber, checkAmountLive, isDuplicateElectricity, formatConversion, REQ, requiresVariation, supportsRenew, requiresVerifiedName } from '@/lib/parity';
 import { sendTelegramAlert } from '@/lib/telegram';
 import { checkPinAllowed, recordPinFailure, clearPinFailures, notifySpendOutOfBand } from '@/lib/deai/pinSecurity';
 import { SUPPORTED_TOKENS } from '@/constants';
-import { providersFor, renderOptions, matchProvider, needsVariation, variationServiceId, fetchVariations, matchVariation, groupDataPlans, renderCategoryMenu, matchCategory, renderOptionsPage, isNextPageRequest, matchPagedOption, type Option } from '@/lib/deai/selection';
+import { providersFor, hasProviderList, renderOptions, matchProvider, needsVariation, variationServiceId, fetchVariations, matchVariation, groupDataPlans, renderCategoryMenu, matchCategory, renderOptionsPage, isNextPageRequest, matchPagedOption, type Option } from '@/lib/deai/selection';
 import { createClient } from '@supabase/supabase-js';
 import { verifyInternalRequest } from '@/utils/internalAuth';
 import { verifyPin, isHashedPin, hashPin } from '@/utils/pinSecurity';
@@ -1371,9 +1371,13 @@ async function handleCore(req: Request, ctx: HumanizeCtx): Promise<NextResponse>
           return NextResponse.json({ action: 'REPLY', message: `⛔ ${gate.reason}` });
         }
 
-        const amountGate = checkAmountParity(d.intent, Number(d.amount_ngn), {
+        // ⚡ Live per-provider ceiling (checkAmountLive) rather than the flat per-intent one:
+        // MTN's real cap is ₦200,000 and Airtel's is ₦50,000, so the old flat ₦50,000 both
+        // refused valid MTN top-ups and would have waved through invalid Airtel ones if raised.
+        const amountGate = await checkAmountLive(d.intent, Number(d.amount_ngn), {
           isFixedPlan: !!d.variation_code,   // a plan's price IS the price — skip min/max
           verifiedMin: d.verified_min,
+          provider: d.provider,
         });
         if (!amountGate.valid) {
           return NextResponse.json({ action: 'REPLY', message: `⚠️ ${amountGate.error}` });
@@ -1825,7 +1829,7 @@ async function handleCore(req: Request, ctx: HumanizeCtx): Promise<NextResponse>
     // "which disco?" but never LISTED them — so a user who didn't already know the exact
     // VTpass service id ("ibadan-electric") had no way forward.
     else if (session?.status === 'AWAITING_PROVIDER') {
-      const spec = providersFor(session.intent_data.intent);
+      const spec = await providersFor(session.intent_data.intent);
       if (!spec) {
         await supabase.from('deai_sessions').delete().eq('chat_id', platform_id);
         return NextResponse.json({ action: 'REPLY', message: "Something went wrong — let's start again." });
@@ -3040,7 +3044,7 @@ async function handleCore(req: Request, ctx: HumanizeCtx): Promise<NextResponse>
     // at VTpass. It also stamps the human label, so "WAEC Result Checker" reads back
     // instead of the raw service id.)
     if (intentData.provider && ['ELECTRICITY', 'TV', 'EDUCATION'].includes(intentData.intent)) {
-        const spec = providersFor(intentData.intent);
+        const spec = await providersFor(intentData.intent);
         const matched = spec ? matchProvider(String(intentData.provider), spec.options) : null;
         if (spec && !matched) {
             intentData.provider = null;
@@ -3079,7 +3083,7 @@ async function handleCore(req: Request, ctx: HumanizeCtx): Promise<NextResponse>
         // 1. Provider first — reuses the existing generic AWAITING_PROVIDER status/handler
         // (see providersFor/matchProvider), so this needs no new state-handling code.
         if (!intentData.provider) {
-            const spec = providersFor('TV')!;
+            const spec = (await providersFor('TV'))!;
             await supabase.from('deai_sessions').upsert({
                 chat_id: platform_id, platform, intent_data: intentData,
                 status: 'AWAITING_PROVIDER',
@@ -3175,7 +3179,7 @@ async function handleCore(req: Request, ctx: HumanizeCtx): Promise<NextResponse>
         // 1. Exam body first. Nothing else about this request — not the product list, not
         // whether a profile ID is even needed — is answerable before it's known.
         if (!intentData.provider) {
-            const spec = providersFor('EDUCATION')!;
+            const spec = (await providersFor('EDUCATION'))!;
             await supabase.from('deai_sessions').upsert({
                 chat_id: platform_id, platform, intent_data: intentData,
                 status: 'AWAITING_PROVIDER',
@@ -3331,8 +3335,13 @@ async function handleCore(req: Request, ctx: HumanizeCtx): Promise<NextResponse>
     // The frontend gives users a dropdown. The agent must too. Without this, a user saying
     // "pay 2000 electricity, meter 021324..." would be asked "which disco?" and have no idea
     // that the answer needs to be a VTpass service id.
-    if (!intentData.provider && providersFor(intentData.intent)) {
-        const spec = providersFor(intentData.intent)!;
+    // 🔴 providersFor is async now, so the old `if (!provider && providersFor(intent))` guard
+    // would be testing a *Promise* — always truthy, including for intents that have no provider
+    // list at all (BALANCE, HISTORY), which would have wedged those flows in AWAITING_PROVIDER
+    // with an empty menu. hasProviderList() is the synchronous predicate that check actually
+    // meant, and it also avoids fetching the catalogue twice per request.
+    if (!intentData.provider && hasProviderList(intentData.intent)) {
+        const spec = (await providersFor(intentData.intent))!;
 
         await supabase.from('deai_sessions').upsert({
             chat_id: platform_id, platform, intent_data: intentData,
@@ -3381,7 +3390,7 @@ async function handleCore(req: Request, ctx: HumanizeCtx): Promise<NextResponse>
             // Valid"}}` for serviceID "jamb" on this merchant account, so "try again shortly"
             // is advice that can never work. Drop the provider and re-offer the picker, so the
             // user can choose one that does have products instead of restarting from nothing.
-            const spec = providersFor(intentData.intent);
+            const spec = await providersFor(intentData.intent);
             const deadProvider = intentData.provider_label || intentData.provider;
             if (spec) {
                 intentData.provider = null;
@@ -3503,9 +3512,10 @@ async function handleCore(req: Request, ctx: HumanizeCtx): Promise<NextResponse>
     // the user chose — so it must skip min/max too, exactly like a variation pick.
     if (intentData.amount_ngn) {
         const isFixedPlan = !!intentData.variation_code || intentData.cable_action === 'renew';
-        const amtCheck = checkAmountParity(intentData.intent, Number(intentData.amount_ngn), {
+        const amtCheck = await checkAmountLive(intentData.intent, Number(intentData.amount_ngn), {
             isFixedPlan,
             verifiedMin: intentData.verified_min,
+            provider: intentData.provider,
         });
         if (!amtCheck.valid) {
             return NextResponse.json({ action: 'REPLY', message: `⚠️ ${amtCheck.error}` });
