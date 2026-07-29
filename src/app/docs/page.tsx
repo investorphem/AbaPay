@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useMemo } from "react";
+import { useState, useMemo, type ReactNode } from "react";
 import Link from "next/link";
 import { useAccount } from "wagmi";
 import AppFooter from "@/components/AppFooter";
@@ -8,8 +8,18 @@ import {
   ArrowLeft, ShieldCheck, Zap, Globe,
   Lock, Wallet, ChevronDown, BookOpen,
   Star, Gift, Smartphone, Share2, HelpCircle,
-  Bot, KeyRound
+  Bot, KeyRound, Plug, GraduationCap, CalendarClock
 } from "lucide-react";
+
+// ⚡ ONE docs + FAQ surface.
+//
+// There used to be two: this page's FAQ accordion, and a separate `FAQModal` opened from a
+// footer button. They asked different questions, answered them differently, and drifted —
+// this page still claimed "over 120 international countries", a number nothing in the code
+// can substantiate (the list is read live from VTpass and we never count it), while the modal
+// knew about MCP, Valora and JAMB and this page didn't. Both are merged here, every answer
+// re-checked against the real code. If you change a limit, a supported wallet or chain, a
+// refund path, a kill switch or a service's availability, update this page too (see CLAUDE.md).
 
 export default function DocsPage() {
   const { address, chain: activeChain } = useAccount();
@@ -33,7 +43,7 @@ export default function DocsPage() {
           </Link>
           <div className="flex items-center gap-3">
             <BookOpen className="text-emerald-500" size={24} />
-            <h1 className="text-xl font-black text-slate-900 dark:text-white tracking-tight">AbaPay <span className="text-slate-400 dark:text-slate-500 font-light">DOCS</span></h1>
+            <h1 className="text-xl font-black text-slate-900 dark:text-white tracking-tight">AbaPay <span className="text-slate-400 dark:text-slate-500 font-light">DOCS &amp; FAQ</span></h1>
           </div>
           <div className="w-10"></div> {/* Spacer for alignment */}
         </div>
@@ -46,9 +56,12 @@ export default function DocsPage() {
               <Globe className="text-emerald-500" size={28} />
             </div>
             <h2 className="text-2xl font-black mb-4 tracking-tight text-slate-900 dark:text-white">The Vision: Global Web3 Utility</h2>
+            <p className="text-slate-600 dark:text-slate-300 leading-relaxed font-medium mb-4">
+              AbaPay is a decentralized payment gateway designed to bridge the gap between global Web3 liquidity and real-world utility systems across Africa and the globe.
+              Traditional utility apps require you to deposit local fiat and trust centralized servers. AbaPay reimagines this by allowing users to pay for real-world bills—airtime, mobile data, electricity, cable TV, education PINs, bank transfers and international top-ups—directly from their self-custodial wallets using stablecoins, settled in seconds on the blockchain.
+            </p>
             <p className="text-slate-600 dark:text-slate-300 leading-relaxed font-medium">
-              AbaPay is a decentralized payment gateway designed to bridge the gap between global Web3 liquidity and real-world utility systems across Africa and the globe. 
-              Traditional utility apps require you to deposit local fiat and trust centralized servers. AbaPay reimagines this by allowing users to pay for real-world bills—International Airtime/Data, domestic Electricity, Cable TV, and Bank Transfers—directly from their self-custodial wallets using stablecoins, settled in seconds on the blockchain.
+              There are three ways in, and they all run on the same payment engine: this app, a chat with our agent on <strong>Telegram, WhatsApp or X</strong>, or an <strong>AI assistant connected over MCP</strong>. Whichever you use, the rules, the limits, the refund path and the on-chain guarantees are identical.
             </p>
           </section>
 
@@ -58,17 +71,21 @@ export default function DocsPage() {
               <Zap className="text-emerald-500" size={20} /> The AbaPay Difference
             </h2>
             <div className="space-y-6">
-              <FeatureBlock 
-                icon={<Wallet />} title="No Deposits. No Fiat Wallets." 
-                desc="You never have to 'fund' an AbaPay account. Your money stays securely in your own wallet (MetaMask, MiniPay, Coinbase Smart Wallet, etc.) until the exact moment you pay a bill."
+              <FeatureBlock
+                icon={<Wallet />} title="No Deposits. No Fiat Wallets."
+                desc="You never have to 'fund' an AbaPay account — there is no AbaPay balance. Your money stays in your own wallet (MiniPay, Valora, MetaMask, Coinbase Smart Wallet / Base Account, or any WalletConnect wallet) until the exact moment you pay a bill."
               />
-              <FeatureBlock 
-                icon={<Lock />} title="Smart Contract Escrow" 
-                desc="Your crypto isn't blindly sent to an admin. It is locked in our secure Smart Contracts on the Base and Celo networks. The contract only releases the funds to our treasury after the utility provider confirms the transaction."
+              <FeatureBlock
+                icon={<Lock />} title="Smart Contract Escrow"
+                desc="Your crypto isn't blindly sent to an admin. It is locked in our smart contracts on the Celo and Base networks. The contract only releases the funds to our treasury after the utility provider confirms the transaction."
               />
-              <FeatureBlock 
-                icon={<Globe />} title="Borderless Payments" 
-                desc="You do not need a local bank account to pay bills in supported countries. Whether you are in Lagos, London, or Los Angeles, as long as you have stablecoins, you can top-up phones in Ghana, pay electricity in Nigeria, or send data to Kenya instantly."
+              <FeatureBlock
+                icon={<Globe />} title="Borderless Payments"
+                desc="You do not need a local bank account to pay bills in supported countries. Whether you are in Lagos, London, or Los Angeles, as long as you have stablecoins, you can top up phones abroad or pay Nigerian bills instantly."
+              />
+              <FeatureBlock
+                icon={<Plug />} title="Live Provider Catalogue"
+                desc="Providers, plans and their amount limits are read live from our payment provider rather than a list we maintain by hand — so the app only ever offers what can genuinely be bought right now, and a provider that goes offline simply disappears instead of failing after you've paid."
               />
             </div>
           </section>
@@ -89,7 +106,7 @@ export default function DocsPage() {
                 </p>
               </div>
               <div className="bg-slate-50 dark:bg-[#1a1a1f] p-5 rounded-2xl border border-slate-100 dark:border-slate-800/80 transition-colors">
-                <h4 className="text-sm font-black text-slate-800 dark:text-slate-200 mb-1">See Your Balance & Limit Before You Choose</h4>
+                <h4 className="text-sm font-black text-slate-800 dark:text-slate-200 mb-1">See Your Balance &amp; Limit Before You Choose</h4>
                 <p className="text-sm text-slate-600 dark:text-slate-400 font-medium leading-relaxed">
                   When the agent asks which stablecoin to use, it shows the live wallet balance <em>and</em> your remaining approved agent limit for every option on that chain — so you're never picking blind.
                 </p>
@@ -103,34 +120,102 @@ export default function DocsPage() {
             </div>
           </section>
 
+          {/* MCP — AI AGENT CONNECTOR */}
+          <section className="bg-white dark:bg-[#111114] border border-slate-100 dark:border-slate-800/60 rounded-[2.5rem] p-8 shadow-sm animate-in fade-in slide-in-from-bottom-4 transition-colors">
+            <h2 className="text-xl font-black mb-6 tracking-tight flex items-center gap-2 text-slate-900 dark:text-white">
+              <Plug className="text-violet-500" size={20} /> MCP — Connect Your Own AI Assistant
+            </h2>
+            <p className="text-slate-600 dark:text-slate-300 font-medium mb-6 leading-relaxed">
+              AbaPay runs an <strong>MCP (Model Context Protocol)</strong> server, so an AI assistant you already use — Claude, or any MCP-speaking client — can pay your bills for you. It's the same engine chat uses, reached over JSON-RPC instead of a message. Nothing about it is a looser trust boundary: same on-chain allowance, same PIN gate, same kill switches, same operator caps, same spend alerts.
+            </p>
+            <div className="space-y-4">
+              <div className="bg-violet-50 dark:bg-violet-900/20 border border-violet-100 dark:border-violet-800/50 p-5 rounded-2xl transition-colors">
+                <h4 className="text-sm font-black text-violet-900 dark:text-violet-100 mb-1">OAuth, or an API key</h4>
+                <p className="text-sm text-violet-800 dark:text-violet-300 font-medium leading-relaxed">
+                  Preferred: authorize once in your browser with <strong>OAuth 2.1</strong> and the connection is remembered — no credential to paste ever again. For clients that can't do OAuth, create an API key in <strong>Agent Hub → MCP</strong> instead. Either one can be revoked instantly from the Agent Hub, which kills every token issued against it.
+                </p>
+              </div>
+              <div className="bg-slate-50 dark:bg-[#1a1a1f] p-5 rounded-2xl border border-slate-100 dark:border-slate-800/80 transition-colors">
+                <h4 className="text-sm font-black text-slate-800 dark:text-slate-200 mb-1">Your PIN is still required — every single payment</h4>
+                <p className="text-sm text-slate-600 dark:text-slate-400 font-medium leading-relaxed">
+                  Authorizing a connection means "this assistant may act for me". It never means "this assistant may spend". Without your PIN a connected assistant can read your balance and the plan catalogue and nothing else. If anything claims it can pay without asking you for your PIN, treat that as a red flag.
+                </p>
+              </div>
+              <div className="bg-slate-50 dark:bg-[#1a1a1f] p-5 rounded-2xl border border-slate-100 dark:border-slate-800/80 transition-colors">
+                <h4 className="text-sm font-black text-slate-800 dark:text-slate-200 mb-1">Real plans, real prices — never guessed</h4>
+                <p className="text-sm text-slate-600 dark:text-slate-400 font-medium leading-relaxed">
+                  A <code className="text-[11px] font-black">list_plans</code> tool gives the assistant the actual purchasable data bundles, cable packages and exam products with their real codes and current prices, straight from our payment provider. It's what stops an assistant inventing a plausible-sounding "1GB for ₦1,000" that doesn't exist — for data, cable and education it must pass back a real code or it can't pay at all.
+                </p>
+              </div>
+            </div>
+          </section>
+
           {/* AGENT HUB */}
           <section className="bg-white dark:bg-[#111114] border border-slate-100 dark:border-slate-800/60 rounded-[2.5rem] p-8 shadow-sm animate-in fade-in slide-in-from-bottom-4 transition-colors">
             <h2 className="text-xl font-black mb-6 tracking-tight flex items-center gap-2 text-slate-900 dark:text-white">
               <KeyRound className="text-emerald-500" size={20} /> Agent Hub — Your Spending Allowance
             </h2>
             <p className="text-slate-600 dark:text-slate-300 font-medium mb-6 leading-relaxed">
-              The Agent Hub tab is where you link a messaging account to your wallet and grant DeAI permission to pay on your behalf — entirely optional, and entirely under your control.
+              The Agent Hub tab is where you link a messaging account (or create an MCP credential) and grant the agent permission to pay on your behalf — entirely optional, and entirely under your control.
             </p>
             <ul className="space-y-4">
               <li className="bg-slate-50 dark:bg-[#1a1a1f] p-5 rounded-2xl border border-slate-100 dark:border-slate-800/80 transition-colors">
-                <strong className="block text-sm font-black text-slate-800 dark:text-slate-200 mb-1">Choose Your Own Chain & Stablecoin</strong>
-                <span className="text-sm text-slate-600 dark:text-slate-400 font-medium leading-relaxed">Approvals are independent per chain and per token — approve USDC on Celo, USDT on Base, both, or neither. Each approval is its own on-chain transaction that only you can sign.</span>
+                <strong className="block text-sm font-black text-slate-800 dark:text-slate-200 mb-1">Choose Your Own Chain &amp; Stablecoin</strong>
+                <span className="text-sm text-slate-600 dark:text-slate-400 font-medium leading-relaxed">Approvals are independent per chain and per token — approve USDC on Celo, USD₮ on Base, both, or neither. Each approval is its own on-chain transaction that only you can sign.</span>
               </li>
               <li className="bg-slate-50 dark:bg-[#1a1a1f] p-5 rounded-2xl border border-slate-100 dark:border-slate-800/80 transition-colors">
                 <strong className="block text-sm font-black text-slate-800 dark:text-slate-200 mb-1">Bounded and Revocable, On-Chain</strong>
-                <span className="text-sm text-slate-600 dark:text-slate-400 font-medium leading-relaxed">The smart contract itself — not AbaPay's servers — enforces the cap. The agent can never spend more than the remaining amount you've approved, and you can lower it, raise it, or revoke it to zero at any moment.</span>
+                <span className="text-sm text-slate-600 dark:text-slate-400 font-medium leading-relaxed">The smart contract itself — not AbaPay's servers — enforces the cap. The agent can never spend more than the remaining amount you've approved, and you can lower it, raise it, or set it to zero at any moment. Setting it to zero is the real revocation; unlinking a chat account stops that channel but doesn't touch the on-chain limit.</span>
               </li>
               <li className="bg-slate-50 dark:bg-[#1a1a1f] p-5 rounded-2xl border border-slate-100 dark:border-slate-800/80 transition-colors">
                 <strong className="block text-sm font-black text-slate-800 dark:text-slate-200 mb-1">No Allowance? No Problem.</strong>
                 <span className="text-sm text-slate-600 dark:text-slate-400 font-medium leading-relaxed">If you ask the agent to pay with a token you haven't approved yet, it tells you plainly and gives you the choice — approve it now in the Agent Hub, or complete just this one payment with a signed link instead.</span>
               </li>
+              <li className="bg-slate-50 dark:bg-[#1a1a1f] p-5 rounded-2xl border border-slate-100 dark:border-slate-800/80 transition-colors">
+                <strong className="block text-sm font-black text-slate-800 dark:text-slate-200 mb-1">You Hear About Every Agent Spend</strong>
+                <span className="text-sm text-slate-600 dark:text-slate-400 font-medium leading-relaxed">The moment an agent moves money, an alert goes out to your other linked channels and your email — so a leaked key or a compromised chat account is visible to you immediately, not at the end of the month.</span>
+              </li>
             </ul>
+          </section>
+
+          {/* SCHEDULED & RECURRING */}
+          <section className="bg-white dark:bg-[#111114] border border-slate-100 dark:border-slate-800/60 rounded-[2.5rem] p-8 shadow-sm animate-in fade-in slide-in-from-bottom-4 transition-colors">
+            <h2 className="text-xl font-black mb-6 tracking-tight flex items-center gap-2 text-slate-900 dark:text-white">
+              <CalendarClock className="text-sky-500" size={20} /> Scheduled &amp; Recurring Bills
+            </h2>
+            <p className="text-slate-600 dark:text-slate-300 font-medium mb-6 leading-relaxed">
+              Tell the agent in plain language — <em>"every Tuesday buy ₦200 MTN airtime"</em>, <em>"pay my meter on the 28th every month"</em>, or a one-off <em>"top up 08012345678 in an hour"</em> — and it becomes a schedule. Ask it to <em>"show my schedules"</em> or <em>"cancel my airtime schedule"</em> the same way.
+            </p>
+            <div className="bg-sky-50 dark:bg-sky-900/20 border border-sky-100 dark:border-sky-800/50 p-5 rounded-2xl transition-colors">
+              <h4 className="text-sm font-black text-sky-900 dark:text-sky-100 mb-2">Automatic execution is opt-in, per schedule</h4>
+              <p className="text-sm text-sky-800 dark:text-sky-300 font-medium leading-relaxed">
+                By default a schedule only <strong>reminds</strong> you when it's due. Only if you explicitly turn on automatic execution does it pay by itself — and even then it's bounded by the same on-chain allowance and the same per-transaction and daily caps as any other agent payment. A schedule runs at most once per due date, re-checks every service rule before it fires, warns you ahead of time if your balance looks short, and pauses itself after repeated failures rather than retrying forever.
+              </p>
+            </div>
+          </section>
+
+          {/* SUPPORTED SERVICES */}
+          <section className="bg-white dark:bg-[#111114] border border-slate-100 dark:border-slate-800/60 rounded-[2.5rem] p-8 shadow-sm animate-in fade-in slide-in-from-bottom-4 transition-colors">
+            <h2 className="text-xl font-black mb-6 tracking-tight flex items-center gap-2 text-slate-900 dark:text-white">
+              <GraduationCap className="text-rose-500" size={20} /> What You Can Pay For
+            </h2>
+            <ul className="space-y-3 text-sm text-slate-600 dark:text-slate-400 font-medium leading-relaxed">
+              <li className="bg-slate-50 dark:bg-[#1a1a1f] p-4 rounded-2xl border border-slate-100 dark:border-slate-800/80"><strong className="text-slate-800 dark:text-slate-200">Airtime &amp; mobile data</strong> — MTN, Airtel, Glo, 9mobile, including SME data bundles. No platform fee.</li>
+              <li className="bg-slate-50 dark:bg-[#1a1a1f] p-4 rounded-2xl border border-slate-100 dark:border-slate-800/80"><strong className="text-slate-800 dark:text-slate-200">Electricity</strong> — prepaid and postpaid, across the Nigerian distribution companies. Your meter is verified with the disco before you pay.</li>
+              <li className="bg-slate-50 dark:bg-[#1a1a1f] p-4 rounded-2xl border border-slate-100 dark:border-slate-800/80"><strong className="text-slate-800 dark:text-slate-200">Cable TV</strong> — DStv, GOtv, Startimes. Smartcard/IUC verified before payment.</li>
+              <li className="bg-slate-50 dark:bg-[#1a1a1f] p-4 rounded-2xl border border-slate-100 dark:border-slate-800/80"><strong className="text-slate-800 dark:text-slate-200">Education PINs</strong> — WAEC result-checker and WAEC registration PINs, buyable in the app, in chat <em>and</em> through a connected AI agent. JAMB is built but not currently enabled on our merchant account, so it can't be bought today.</li>
+              <li className="bg-slate-50 dark:bg-[#1a1a1f] p-4 rounded-2xl border border-slate-100 dark:border-slate-800/80"><strong className="text-slate-800 dark:text-slate-200">International airtime &amp; data</strong> — every country our payment provider currently covers, read live from their own list.</li>
+              <li className="bg-slate-50 dark:bg-[#1a1a1f] p-4 rounded-2xl border border-slate-100 dark:border-slate-800/80"><strong className="text-slate-800 dark:text-slate-200">Bank transfers</strong> — <em>app only, deliberately.</em> Moving money to a third party needs your own wallet signature, so the agent will never execute one from an allowance.</li>
+            </ul>
+            <p className="text-[11px] font-bold text-slate-400 dark:text-slate-500 mt-4 uppercase tracking-wider">
+              The exact providers, plans and amount limits inside each category come live from our payment provider and can change without an app update.
+            </p>
           </section>
 
           {/* ABAPOINTS & REWARDS */}
           <section className="bg-white dark:bg-[#111114] border border-slate-100 dark:border-slate-800/60 rounded-[2.5rem] p-8 shadow-sm animate-in fade-in slide-in-from-bottom-4 transition-colors">
             <h2 className="text-xl font-black mb-6 tracking-tight flex items-center gap-2 text-slate-900 dark:text-white">
-              <Star className="text-purple-500" size={20} /> AbaPoints & Rewards
+              <Star className="text-purple-500" size={20} /> AbaPoints &amp; Rewards
             </h2>
             <p className="text-slate-600 dark:text-slate-300 font-medium mb-6 leading-relaxed">
               AbaPoints (⚡) are our way of rewarding loyal users. You can see your live AbaPoints balance glowing in the top right corner of the app, directly in the header.
@@ -142,7 +227,7 @@ export default function DocsPage() {
                 <p className="text-lg sm:text-2xl font-black text-emerald-600 dark:text-emerald-400 bg-white dark:bg-[#111114] px-4 py-2 rounded-2xl shadow-sm border border-purple-100 dark:border-purple-800/50 transition-colors">1 Stablecoin = <span className="text-purple-600 dark:text-purple-400">1.00 Point</span></p>
               </div>
               <p className="text-sm text-purple-800 dark:text-purple-300 font-medium leading-relaxed">
-                AbaPoints are globally pegged to the stablecoin (cUSD, USDC, USDT) value of your utility purchase. Spend exactly 5.50 USDC on a utility bill? You earn exactly 5.50 points instantly. This ensures your rewards are completely protected against local fiat currency inflation!
+                AbaPoints are globally pegged to the stablecoin (cUSD/USDm, USDC, USD₮) value of your utility purchase. Spend exactly 5.50 USDC on a utility bill? You earn exactly 5.50 points instantly. This ensures your rewards are completely protected against local fiat currency inflation!
               </p>
             </div>
 
@@ -187,13 +272,13 @@ export default function DocsPage() {
           {/* RECEIPTS & SUPPORT */}
           <section className="bg-white dark:bg-[#111114] border border-slate-100 dark:border-slate-800/60 rounded-[2.5rem] p-8 shadow-sm animate-in fade-in slide-in-from-bottom-4 transition-colors">
              <h2 className="text-xl font-black mb-6 tracking-tight flex items-center gap-2 text-slate-900 dark:text-white">
-              <Share2 className="text-orange-500" size={20} /> Receipts & Support
+              <Share2 className="text-orange-500" size={20} /> Receipts &amp; Support
             </h2>
             <div className="space-y-4">
               <div className="bg-slate-50 dark:bg-[#1a1a1f] p-5 rounded-3xl border border-slate-100 dark:border-slate-800/80 transition-colors">
                 <h4 className="text-sm font-black text-slate-800 dark:text-slate-200 mb-2">Sharing Your Receipt</h4>
                 <p className="text-sm text-slate-600 dark:text-slate-400 font-medium leading-relaxed">
-                  Click the dark "SHARE" button at the bottom of any successful transaction receipt. AbaPay will automatically generate a beautiful, clean image of your receipt that you can send directly to WhatsApp, Telegram, or save to your phone's gallery.
+                  Click the dark "SHARE" button at the bottom of any successful transaction receipt. AbaPay generates a clean image of your receipt that you can send straight to WhatsApp or Telegram via your phone's share sheet — or, where that isn't available (desktop and some wallet browsers), save it as a PNG or PDF, or simply long-press the preview image.
                 </p>
                 <p className="text-[11px] font-bold text-slate-400 dark:text-slate-500 mt-3 uppercase tracking-wider">
                   Note: The dopamine "+AbaPoints" animation happens on the app screen to celebrate your purchase, but it is intentionally hidden from the final receipt image so your receipts look professional when shared.
@@ -215,7 +300,7 @@ export default function DocsPage() {
           {/* SECURITY & FAILSAFES */}
           <section className="bg-white dark:bg-[#111114] border border-slate-100 dark:border-slate-800/60 rounded-[2.5rem] p-8 shadow-sm animate-in fade-in slide-in-from-bottom-4 transition-colors">
              <h2 className="text-xl font-black mb-6 tracking-tight flex items-center gap-2 text-slate-900 dark:text-white">
-              <ShieldCheck className="text-emerald-500" size={20} /> Security & Failsafes
+              <ShieldCheck className="text-emerald-500" size={20} /> Security &amp; Failsafes
             </h2>
             <p className="text-slate-600 dark:text-slate-300 font-medium mb-6">
               Domestic and international utility networks can occasionally experience downtime. AbaPay is built with <strong className="text-slate-900 dark:text-white">Defensive Programming</strong> to ensure you never lose money to a dropped connection.
@@ -223,7 +308,7 @@ export default function DocsPage() {
             <ul className="space-y-4">
               <li className="bg-slate-50 dark:bg-[#1a1a1f] p-5 rounded-2xl border border-slate-100 dark:border-slate-800/80 transition-colors">
                 <strong className="block text-sm font-black text-slate-800 dark:text-slate-200 mb-1">Strict Token Requirements</strong>
-                <span className="text-sm text-slate-600 dark:text-slate-400 font-medium leading-relaxed">If a provider claims "Success" but fails to generate your Electricity Token or Airtime PIN, our system refuses to accept it. Your transaction goes into a PENDING state while our background webhook safely hunts down your token.</span>
+                <span className="text-sm text-slate-600 dark:text-slate-400 font-medium leading-relaxed">If a provider claims "Success" but fails to generate your electricity token or education PIN, our system refuses to accept it. Your transaction goes into a PENDING state while our background webhook safely hunts down your token.</span>
               </li>
               <li className="bg-slate-50 dark:bg-[#1a1a1f] p-5 rounded-2xl border border-slate-100 dark:border-slate-800/80 transition-colors">
                 <strong className="block text-sm font-black text-slate-800 dark:text-slate-200 mb-1">Deep On-Chain Payload Decoding</strong>
@@ -233,26 +318,190 @@ export default function DocsPage() {
                 <strong className="block text-sm font-black text-slate-800 dark:text-slate-200 mb-1">Preflight Intent Recovery</strong>
                 <span className="text-sm text-slate-600 dark:text-slate-400 font-medium leading-relaxed">If your mobile app crashes or your network drops immediately after signing the transaction in your wallet, your funds are not lost. The system actively scans the blockchain to recover your "abandoned" preflight intent and completes the vending in the background.</span>
               </li>
+              <li className="bg-slate-50 dark:bg-[#1a1a1f] p-5 rounded-2xl border border-slate-100 dark:border-slate-800/80 transition-colors">
+                <strong className="block text-sm font-black text-slate-800 dark:text-slate-200 mb-1">Verified Refunds Only</strong>
+                <span className="text-sm text-slate-600 dark:text-slate-400 font-medium leading-relaxed">Every refund is checked against the blockchain — correct token, correct recipient, sufficient amount — before it can be marked as refunded. A refund can never be recorded that didn't actually happen.</span>
+              </li>
             </ul>
           </section>
 
-          {/* FAQ */}
+          {/* ⚡ THE ONE FAQ — merged from this page's old accordion and the retired FAQ modal.
+               Every answer below is written from real behaviour. Keep it that way. */}
           <section className="bg-white dark:bg-[#111114] border border-slate-100 dark:border-slate-800/60 rounded-[2.5rem] p-8 shadow-sm animate-in fade-in slide-in-from-bottom-4 transition-colors">
-            <h2 className="text-xl font-black mb-6 tracking-tight text-slate-900 dark:text-white">Frequently Asked Questions</h2>
+            <h2 className="text-xl font-black mb-2 tracking-tight text-slate-900 dark:text-white">Frequently Asked Questions</h2>
+            <p className="text-sm text-slate-500 dark:text-slate-400 font-medium mb-6">Everything in one place — no separate FAQ page to hunt for.</p>
+
+            <FaqGroup title="Getting paid up" />
+            <div className="space-y-3 mb-8">
+              <FAQItem
+                q="How do I pay a bill?"
+                a={<>
+                  <p>Three ways, all running the same payment engine. <strong>In this app:</strong> pick the service, enter the number, confirm, and sign in your wallet. <strong>By chat:</strong> message AbaPay on Telegram, WhatsApp or X in plain language — "send ₦500 airtime to 08012345678". <strong>Through an AI assistant:</strong> connect AbaPay as a tool over MCP and just ask it to pay.</p>
+                  <p>Chat and AI payments need a spending allowance approved first (or they'll send you a signed link to pay yourself, one time).</p>
+                </>}
+              />
+              <FAQItem
+                q="What wallets and apps can I use?"
+                a={<>
+                  <p>MiniPay (Opera Mini's Celo wallet), Valora, MetaMask, Coinbase Smart Wallet / Base Account, and any other wallet reachable over WalletConnect or injected into your browser. AbaPay also runs as a Farcaster Mini App.</p>
+                  <p>Wallets that support smart-account gas sponsorship on Base get it automatically — the app detects the capability and batches the token approval and the payment into one sponsored transaction. Every other wallet just pays normal network fees, with no difference in behaviour.</p>
+                </>}
+              />
+              <FAQItem
+                q="Which chains and stablecoins are supported?"
+                a={<>
+                  <p>Celo and Base — those two, plus their public test networks, and nothing else. USD₮ and USDC work on both; cUSD/USDm is Celo-only.</p>
+                  <p>The token picker filters itself to whatever chain your wallet is on, so you can't accidentally choose one that doesn't exist there. Sending funds to our contract by hand, on another network or in another token, is not a payment and can't be matched to an order.</p>
+                </>}
+              />
+              <FAQItem
+                q="How long does a payment take?"
+                a="The blockchain part confirms in roughly a few seconds on both Celo and Base. Utility delivery normally follows immediately after confirmation — electricity tokens and education PINs appear on the receipt itself. If a provider is slow, the transaction sits in a PENDING state and our webhook keeps chasing it rather than declaring failure."
+              />
+              <FAQItem
+                q="Do you hold my money?"
+                a="No. There's no AbaPay balance to top up, and we never hold your keys. Your stablecoins stay in your own wallet until the moment you pay a bill, and they go straight into the payment smart contract. We can't move your funds without either your signature or an allowance you explicitly approved on-chain."
+              />
+              <FAQItem
+                q="Are there fees?"
+                a={<>
+                  <p>Yes, and they're always shown in the total before you confirm. There's a small flat platform fee on electricity, cable TV, education and bank transfers. Airtime, mobile data and international top-ups carry no platform fee at all.</p>
+                  <p>Blockchain gas is separate, goes to the network rather than to us, and depends on your wallet and chain — Base smart wallets are often sponsored, so free.</p>
+                </>}
+              />
+            </div>
+
+            <FaqGroup title="What you can buy" />
+            <div className="space-y-3 mb-8">
+              <FAQItem
+                q="What services do you support?"
+                a={<>
+                  <p>Airtime, mobile data (including SME bundles), electricity (prepaid and postpaid), cable TV (DStv, GOtv, Startimes), education PINs, bank transfers, and international airtime/data.</p>
+                  <p>The providers inside each category are pulled live from our payment provider, so the list only ever shows what can genuinely be bought right now. If a provider disappears from the picker, it isn't purchasable at that moment — which is deliberately better than letting you pay for it and fail afterwards.</p>
+                </>}
+              />
+              <FAQItem
+                q="Is JAMB supported?"
+                a={<>
+                  <p>Not right now, honestly. WAEC result-checker and WAEC registration PINs work — in the app, in chat, and through a connected AI agent. JAMB is fully built on our side, but it isn't enabled on our current merchant account with our payment provider, so it doesn't appear in the live product list and can't be bought.</p>
+                  <p>If that changes at their end it will simply start appearing, with no update needed from us.</p>
+                </>}
+              />
+              <FAQItem
+                q="Which countries can I send international airtime to?"
+                a={<>
+                  <p>Every country our payment provider currently covers — including Ghana, Kenya, South Africa, the UK and the US. We deliberately don't publish a count, because we read that list live from the provider rather than keeping our own copy of it, so it can change without us knowing.</p>
+                  <p>Pick the country in the app (or just name it in chat) and you'll see its own operators, plans and local currency. If a country isn't in the live list, the agent will tell you so instead of promising something that would fail at delivery.</p>
+                </>}
+              />
+              <FAQItem
+                q="Can I set up recurring or scheduled payments?"
+                a={<>
+                  <p>Yes — just say so in chat: "every Tuesday buy ₦200 MTN airtime", "pay my meter on the 28th every month", or a one-off "top up 08012345678 in an hour". Ask to "show my schedules" or "cancel my airtime schedule" the same way.</p>
+                  <p>Automatic execution is opt-in per schedule; by default a schedule only reminds you. When it is on, it's still bounded by your on-chain allowance and our per-transaction and daily caps, runs at most once per due date, and pauses itself after repeated failures.</p>
+                </>}
+              />
+              <FAQItem
+                q="Where do I get my electricity token or education PIN?"
+                a="On the receipt, immediately after a successful payment — shown in full, and shareable as an image or saveable as a PNG/PDF. It's also in your History tab, and sent by email where we have your address."
+              />
+            </div>
+
+            <FaqGroup title="Agents, MCP and your PIN" />
+            <div className="space-y-3 mb-8">
+              <FAQItem
+                q="What's the difference between paying in the app and letting an agent pay for me?"
+                a={<>
+                  <p>In the app, you sign every payment in your wallet — nothing moves without that signature. With an agent, you approve an on-chain <em>spending allowance</em> once from the Agent Hub, for one specific chain and one specific stablecoin. After that the agent can pay without a fresh signature each time, but only up to what's left of that allowance.</p>
+                  <p>The cap is enforced by the smart contract itself, not by our servers, so it cannot reach the rest of your wallet no matter what goes wrong on our side. Our own per-transaction and daily limits sit on top of yours.</p>
+                </>}
+              />
+              <FAQItem
+                q="How do I approve or revoke the agent's spending allowance?"
+                a="Open the Agent Hub tab, pick the chain and stablecoin you want the agent to be able to use, and approve a limit — that's an on-chain transaction only you can sign. To revoke, set the limit back to zero; it takes effect on-chain immediately. Note that unlinking a chat account stops that channel but does not by itself zero your allowance, so do both if you want a full stop."
+              />
+              <FAQItem
+                q="What is MCP, and what does connecting an AI assistant actually give it?"
+                a={<>
+                  <p>MCP (Model Context Protocol) is the standard that lets an AI assistant like Claude use AbaPay as a tool. A connected assistant can describe what AbaPay supports, list real purchasable plans with real prices, read your balance and remaining allowance, and — with your PIN — pay a bill.</p>
+                  <p>It reaches exactly the same engine as chat: same on-chain allowance ceiling, same PIN gate with lockout, same kill switches, same operator caps, same spend alerts. It is not a looser door.</p>
+                </>}
+              />
+              <FAQItem
+                q="OAuth or API key — which should I use for MCP?"
+                a={<>
+                  <p>OAuth if your client supports it: you authorize once in the browser and the connection is remembered, so there's no credential to paste into every new conversation. The API key you create in Agent Hub → MCP is the fallback for clients that can't do the OAuth flow.</p>
+                  <p>Both can be revoked instantly from the Agent Hub, and revoking kills every token issued against that link. An expired or revoked authorization makes the assistant ask you to reconnect rather than quietly failing.</p>
+                </>}
+              />
+              <FAQItem
+                q="If I connect an AI assistant, does it still need my PIN?"
+                a="Yes — every single payment, every time. Authorizing the connector means 'this assistant may act for me'; it never means 'this assistant may spend'. Without the PIN a connected assistant can only read your balance and the plan catalogue. If something claims it can pay without asking for your PIN, treat that as a red flag."
+              />
+              <FAQItem
+                q="Is my AbaPay PIN the same as my wallet password?"
+                a={<>
+                  <p>No, and it's important not to confuse them. Your wallet password and recovery phrase belong to your wallet app and we never see them. Your AbaPay PIN is a separate 4–6 digit code you set when linking a chat account or creating an MCP credential.</p>
+                  <p>It gates one thing: authorising a payment through those channels. It can't move funds on its own — it only unlocks spending inside the allowance you already approved on-chain. Repeated wrong PINs lock the channel out.</p>
+                </>}
+              />
+              <FAQItem
+                q="Won't the AI just make up a data plan or a price?"
+                a="It can't, for the services where that would matter. Data bundles, cable packages and education products all require a real plan code, and the connector exposes a list_plans tool that returns the actual purchasable plans, codes and current prices from our payment provider. If an agent can't get a real code, the payment is refused before any money moves rather than settling on-chain and failing at delivery."
+              />
+              <FAQItem
+                q="What if I ask the agent to pay with a token I haven't approved?"
+                a="It checks first. If there's no allowance for that chain and token, it says so and gives you the choice — approve a limit now in the Agent Hub, or complete just that one payment via a secure signed link. If another stablecoin on the same chain already has both the balance and the approved limit to cover it, it will tell you that too, so you can just use that one instead."
+              />
+              <FAQItem
+                q="Can I link more than one account to my wallet?"
+                a="Yes — Telegram, WhatsApp and X can be linked independently to the same wallet, alongside one or more MCP credentials, and each can be managed or unlinked separately from the Agent Hub."
+              />
+              <FAQItem
+                q="Can an agent do a bank transfer for me?"
+                a="No, and that's deliberate. Bank transfers move money to a third party, so they must be confirmed with your own wallet signature in the app. The agent will refuse and point you there rather than spending from an allowance."
+              />
+            </div>
+
+            <FaqGroup title="When something goes wrong" />
             <div className="space-y-3">
-              <FAQItem q="Which countries do you support?" a="We support comprehensive utility payments (Electricity, Transfers, Cable TV, Education) in Nigeria, and Mobile Airtime/Data top-ups across over 120 international countries including Ghana, Kenya, South Africa, the US, and the UK." />
-              <FAQItem q="What cryptocurrencies do you accept?" a="Currently, AbaPay supports major stablecoins designed for everyday commerce. We accept USD₮ (Tether), USDC, and cUSD natively." />
-              <FAQItem q="Which blockchain networks are supported?" a="AbaPay is a multi-chain protocol! We are natively live on the Base Network (for deep Coinbase smart wallet integration) and the Celo Network (chosen for its blazing-fast speeds and mobile-first architecture)." />
-              <FAQItem q="Do you charge hidden fees?" a="No. The live Crypto-to-Fiat exchange rate is openly displayed. Certain heavy-infrastructure utilities (like Bank Transfers or Electricity) carry a small flat processing fee, which is explicitly shown in your total before you pay. Airtime and Data are completely free of platform fees." />
-              <FAQItem q="How long does a transaction take?" a="Because we build on high-speed EVM networks, the blockchain portion confirms in roughly 3 to 5 seconds. The utility delivery typically arrives immediately after block confirmation." />
-              <FAQItem q="What happens if I pay, but my electricity token isn't generated?" a="Utility networks occasionally lag. If this happens, your dashboard will display a 'Transaction Processing' badge. Our backend Webhook will continuously ping the utility provider until they generate your token, and will text/email you the result." />
-              <FAQItem q="Who controls the funds?" a="You do. AbaPay is a non-custodial gateway. We do not have access to your private keys, and we cannot move your funds without you explicitly signing a transaction in your wallet." />
-              <FAQItem q="What is the DeAI agent?" a="DeAI is our conversational AI assistant, reachable on Telegram, WhatsApp, X, and the in-app chat widget. You can check your balance or pay a bill just by describing what you want in plain language — no need to open the app." />
-              <FAQItem q="Is it safe to let the agent pay bills automatically?" a="Yes. The agent can only ever spend from a bounded, on-chain spending allowance that you personally approve for a specific chain and stablecoin — it never has access to your full wallet balance, your private keys, or any other asset. You can lower or revoke that allowance at any time from the Agent Hub. Just protect your Telegram/WhatsApp/X account and your transaction PIN the same way you'd protect a banking PIN." />
-              <FAQItem q="How do I approve or revoke the agent's spending allowance?" a="Open the Agent Hub tab in the app, pick the chain and stablecoin you want the agent to be able to use, and approve a limit. To revoke it, set the limit back to zero at any time — the change takes effect on-chain immediately." />
-              <FAQItem q="What happens if I ask the agent to pay with a token I haven't approved?" a="The agent checks your allowance before attempting anything. If there isn't one for that chain/token, it tells you directly and lets you choose: approve a limit now in the Agent Hub, or complete just that one payment via a secure signed link instead — it will never guess or fail silently." />
-              <FAQItem q="Can I link more than one messaging account to my wallet?" a="Yes — you can link Telegram, WhatsApp, and X independently to the same wallet, and manage or unlink each one from the Agent Hub." />
-              <FAQItem q="What is x402 settlement, and does it change anything for me?" a="x402 is an HTTP-native payment protocol some of your web-app payments (USDC or USD₮ on Celo) settle through automatically, instead of a direct contract call. It's invisible in day-to-day use — same wallet signature, same vault, same refund protection — it simply makes that payment independently verifiable on public x402 explorers." />
+              <FAQItem
+                q="What happens if my payment succeeds on-chain but the bill doesn't deliver?"
+                a={<>
+                  <p>You get refunded, and you don't have to chase it. The moment a delivery fails after your money has landed on-chain, the transaction is flagged, queued for a refund, and our operators are alerted. You're told on the channel you used (and by email if we have one), then again when the refund actually lands.</p>
+                  <p>It goes back to the same wallet, in the same stablecoin, and is verified against the blockchain — correct token, correct recipient, sufficient amount — before it can be marked as refunded. Refunds are released by an operator rather than instantly; we aim for 24–72 hours. The gas you originally paid to submit the transaction isn't recoverable.</p>
+                </>}
+              />
+              <FAQItem
+                q="My blockchain transaction failed. Do I get a refund?"
+                a="There's nothing to refund — if the transaction reverted or never landed, your money never left your wallet. Refunds exist for the case where we received your funds and the provider then failed to deliver. Check your wallet balance; if you're still unsure, tap Support on the receipt and the ticket carries your transaction hash automatically."
+              />
+              <FAQItem
+                q="Why was my payment refused before I even paid?"
+                a={<>
+                  <p>Usually one of four things. (1) The service, or that one specific provider, is paused — we do that during an outage, a dispute or a security concern, and we'd rather refuse up front than take your money for something we know is broken. (2) The amount is outside the provider's own limits, which vary by network and by biller rather than following one flat rule. (3) You picked a provider our payment provider can't currently sell. (4) For agent payments: the amount exceeds your remaining allowance, your daily limit, or our operator cap.</p>
+                  <p>The refusal message tells you which one it was.</p>
+                </>}
+              />
+              <FAQItem
+                q="Why is a service sometimes 'temporarily offline'?"
+                a="We can pause things at two levels — a whole category (all electricity, say) or a single provider within it (just one disco). Both are applied identically to the app, chat, the MCP connector and the scheduler, so nothing can slip through a side door while the website correctly refuses. It's almost always a provider outage or a dispute, and it's temporary."
+              />
+              <FAQItem
+                q="Who controls the funds?"
+                a="You do. AbaPay is a non-custodial gateway. We do not have access to your private keys, and we cannot move your funds without you either signing a transaction or having explicitly approved an on-chain allowance — which you can revoke at any moment."
+              />
+              <FAQItem
+                q="What is x402 settlement, and does it change anything for me?"
+                a="x402 is an HTTP-native payment protocol that some app payments settle through automatically instead of a direct contract call, where the chain and token support it. It's invisible in day-to-day use — same wallet signature, same vault, same refund protection — it simply makes that payment independently verifiable on public x402 explorers. Which rail is used is our routing decision, not something you pick."
+              />
+              <FAQItem
+                q="Something's still wrong. How do I reach a human?"
+                a={<>
+                  <p>Tap <strong>Support</strong> on any receipt — the ticket goes straight to our ops team with your transaction hash attached, which is by far the fastest route.</p>
+                  <p>Otherwise, email <a href="mailto:support@abapays.com" className="underline font-bold">support@abapays.com</a>. Our <Link href="/terms" className="underline font-bold">Terms</Link> and <Link href="/privacy" className="underline font-bold">Privacy Policy</Link> spell out the formal version of everything above.</p>
+                </>}
+              />
             </div>
           </section>
 
@@ -280,21 +529,33 @@ function FeatureBlock({ icon, title, desc }: { icon: any, title: string, desc: s
   );
 }
 
-function FAQItem({ q, a }: { q: string, a: string }) {
+function FaqGroup({ title }: { title: string }) {
+  return (
+    <h3 className="text-[11px] font-black uppercase tracking-[0.2em] text-slate-400 dark:text-slate-500 mb-3">{title}</h3>
+  );
+}
+
+function FAQItem({ q, a }: { q: string, a: ReactNode }) {
   const [isOpen, setIsOpen] = useState(false);
   return (
     <div className="border border-slate-100 dark:border-slate-800/60 rounded-2xl overflow-hidden bg-slate-50 dark:bg-[#1a1a1f] transition-all">
-      <button 
-        onClick={() => setIsOpen(!isOpen)} 
+      <button
+        onClick={() => setIsOpen(!isOpen)}
+        aria-expanded={isOpen}
         className="w-full text-left p-5 flex justify-between items-center hover:bg-slate-100 dark:hover:bg-slate-800/50 transition-colors"
       >
         <span className="font-bold text-sm text-slate-800 dark:text-slate-200 pr-4">{q}</span>
         <ChevronDown size={18} className={`text-slate-400 dark:text-slate-500 transition-transform duration-300 shrink-0 ${isOpen ? 'rotate-180' : ''}`} />
       </button>
-      <div className={`overflow-hidden transition-all duration-300 ease-in-out ${isOpen ? 'max-h-48 opacity-100' : 'max-h-0 opacity-0'}`}>
-        <p className="p-5 pt-0 text-sm text-slate-600 dark:text-slate-400 leading-relaxed font-medium">
-          {a}
-        </p>
+      {/* ⚡ grid-rows 0fr→1fr rather than a max-height guess: several answers below are two
+          paragraphs long, and the old `max-h-48` silently clipped anything taller. This
+          animates to the content's real height whatever that turns out to be. */}
+      <div className={`grid transition-all duration-300 ease-in-out ${isOpen ? 'grid-rows-[1fr] opacity-100' : 'grid-rows-[0fr] opacity-0'}`}>
+        <div className="overflow-hidden">
+          <div className="p-5 pt-0 text-sm text-slate-600 dark:text-slate-400 leading-relaxed font-medium space-y-3">
+            {typeof a === 'string' ? <p>{a}</p> : a}
+          </div>
+        </div>
       </div>
     </div>
   );
