@@ -30,6 +30,7 @@ function serviceCategoryForIntent(intent: string): string {
   return intent === 'PAY_ELECTRICITY' ? 'ELECTRICITY'
     : intent === 'PAY_CABLE' ? 'CABLE'
     : intent === 'VEND_DATA' ? 'DATA'
+    : intent === 'EDUCATION' ? 'EDUCATION'
     : 'AIRTIME';
 }
 
@@ -168,6 +169,24 @@ async function handleChat(req: Request, ctx: { lang?: string; userText?: string 
     const isForeign = !!(ai.country && ai.country !== 'NG');
     const effectiveIntent = isForeign ? 'INTERNATIONAL' : ai.intent;
 
+    // 🔴 THE BUG THIS AVOIDS: capabilities.ts marked EDUCATION supportedInChat: true today
+    // (WhatsApp/Telegram/X and MCP have no other way in, so they now fully collect and pay
+    // for it) — but THIS route's prefill mechanism (handleAIPrefill in page.tsx) only ever
+    // understands the main Pay tab's fields, and serviceCategoryForIntent() had no EDUCATION
+    // case at all, so an education request reaching the generic prefill path below would have
+    // fallen through to 'AIRTIME' and prefilled the wrong tab entirely with the wrong service —
+    // the exact bug already fixed for WhatsApp's deep links in commit 15d262a, just reappearing
+    // here since this route was never updated when the capability flag changed. The in-app chat
+    // has direct access to the Education tab's own picker + JAMB verification, so — same as
+    // bank transfers already do — route there instead of trying to duplicate that flow in chat.
+    if (effectiveIntent === 'EDUCATION') {
+      return NextResponse.json({
+        success: true,
+        reply: 'Education PINs (WAEC/JAMB) — opening the Education tab so you can pick your exam and the right plan.',
+        navigate: 'education',
+      });
+    }
+
     // ⚡ MULTI-RECIPIENT BATCH — "send 500 to X on Celo with USDC and 1000 to Y on Base with
     // USDT". Each recipient can name its OWN chain/token (falls back to whatever's currently
     // selected in the app); the batch groups by (chain, token) and checks the allowance and
@@ -305,13 +324,15 @@ async function handleChat(req: Request, ctx: { lang?: string; userText?: string 
       });
     }
 
-    // Belongs in a different part of the app (bank, education).
+    // Belongs in a different part of the app. EDUCATION no longer reaches here — it's
+    // intercepted above, before assessFeasibility runs, now that supportedInChat is true for
+    // it — so this only ever fires for BANK_TRANSFER today.
     if (f.needsApp) {
       const spec = getCapability(capabilityForIntent(effectiveIntent)!);
       return NextResponse.json({
         success: true,
         reply: `${spec?.label}: ${f.reason}`,
-        navigate: effectiveIntent === 'BANK_TRANSFER' ? 'bank' : effectiveIntent === 'EDUCATION' ? 'education' : undefined,
+        navigate: effectiveIntent === 'BANK_TRANSFER' ? 'bank' : undefined,
       });
     }
 
