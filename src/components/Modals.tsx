@@ -19,12 +19,43 @@ export function TermsModal({ isOpen, onClose }: any) {
             <button onClick={onClose} className="p-2 bg-slate-100 dark:bg-slate-800 rounded-full hover:bg-slate-200 dark:hover:bg-slate-700 transition-colors"><XCircle size={20} className="text-slate-500 dark:text-slate-400" /></button>
           </div>
           <div className="overflow-y-auto text-sm text-slate-600 dark:text-slate-300 space-y-4 pr-2 leading-relaxed">
+             <p className="text-xs bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-800/50 text-amber-800 dark:text-amber-300 rounded-xl p-3 font-medium">
+               This is a plain-language summary of how AbaPay works, written to be readable rather than exhaustive. The full Terms of Service are on the <a href="/terms" className="underline font-bold">Terms page</a>, and they take precedence if the two ever disagree.
+             </p>
+
              <p className="font-bold text-slate-800 dark:text-slate-100">1. Acceptance of Terms</p>
-             <p>By connecting your wallet and using the AbaPay Protocol, you agree to execute blockchain transactions via smart contracts. You acknowledge that blockchain transactions are immutable.</p>
-             <p className="font-bold text-slate-800 dark:text-slate-100 mt-4">2. Service Delivery</p>
-             <p>AbaPay acts as a decentralized bridge to fiat utility providers. While we strive for instant vending, delays caused by third-party telecom or electricity providers are beyond our direct control.</p>
-             <p className="font-bold text-slate-800 dark:text-slate-100 mt-4">3. Supported Assets</p>
-             <p>You are responsible for ensuring you send the correct supported asset on the Celo Network. AbaPay is not liable for funds lost due to incorrect network transfers.</p>
+             <p>By connecting your wallet and using AbaPay, you agree to execute blockchain transactions via smart contracts. You acknowledge that blockchain transactions are immutable — once confirmed, they cannot be reversed by us or by anyone else.</p>
+
+             <p className="font-bold text-slate-800 dark:text-slate-100 mt-4">2. What AbaPay Actually Does</p>
+             <p>AbaPay is a non-custodial bridge between your stablecoins and real Nigerian utility services. You pay on-chain in USD₮, USDC or cUSD/USDm on Celo or Base; we pass that payment to our licensed provider (VTpass), who delivers the airtime, data, electricity token, cable subscription or education PIN. We are not a bank, we do not hold fiat deposits for you, and we never take custody of your wallet or your private keys.</p>
+
+             <p className="font-bold text-slate-800 dark:text-slate-100 mt-4">3. Your Responsibilities</p>
+             <p>You are responsible for the details you give us. Phone numbers, meter numbers, smartcard/IUC numbers and JAMB profile IDs are checked for format — and, where the provider supports it, verified against the real account before you pay — but the final confirmation screen is yours to read. If you approve a payment to the wrong meter or the wrong phone number, that money reaches the wrong person and we cannot pull it back.</p>
+             <p>You are also responsible for keeping your wallet, your recovery phrase, your transaction PIN and any linked messaging account (Telegram, WhatsApp, X) secure. Anyone who has those can spend within whatever limits you have approved.</p>
+
+             <p className="font-bold text-slate-800 dark:text-slate-100 mt-4">4. Supported Assets & Networks</p>
+             <p>Only the stablecoins and networks the app offers you are supported. Sending funds to our contract address by hand, on an unsupported network, or in an unsupported token is not a payment and cannot be matched to an order. AbaPay is not liable for funds lost that way.</p>
+
+             <p className="font-bold text-slate-800 dark:text-slate-100 mt-4">5. If You Pay But the Service Doesn't Deliver</p>
+             <p>If your payment lands on-chain and the provider then fails to deliver, the transaction is automatically flagged and queued for a refund, our operators are alerted immediately, and you are notified on the channel you used (and by email, if you gave us one). The refund is sent back to the same wallet that paid, in the same stablecoin. Every refund is verified on-chain before it's marked as refunded, so a refund can never be recorded that didn't actually happen. You do not need to open a ticket for this — it starts on its own.</p>
+             <p>Two limits worth knowing. First, refunds are only ever issued for a <strong>delivery</strong> failure after we actually received your funds — if a blockchain transaction fails or never lands, your money never left your wallet and there is nothing to refund. Second, refunds are reviewed and released by an operator rather than paid out instantly, so allow a reasonable window (the full Terms state 24–72 hours, less blockchain gas fees). If you think something has been missed, use the Support button on the receipt.</p>
+
+             <p className="font-bold text-slate-800 dark:text-slate-100 mt-4">6. Service Availability</p>
+             <p>AbaPay does not guarantee 100% uptime and none of our services are guaranteed to be available at any given moment. Individual services — or individual providers within a service — can be paused, either by our provider or by us, when there's an outage, a dispute, or a security concern. When that happens, the app, the chat agents and the AI-agent connector all refuse the payment up front rather than taking your money for something we know is broken. Amount limits are set by the provider and vary by network and by biller.</p>
+
+             <p className="font-bold text-slate-800 dark:text-slate-100 mt-4">7. Limitation of Liability</p>
+             <p>To the fullest extent permitted by law, AbaPay is not liable for: blockchain transactions you signed that turned out to be wrong (wrong meter number, wrong phone number, wrong network, wrong amount); loss of your PIN, wallet, device or recovery phrase; downtime, delays or failures at telecom operators, electricity discos, exam bodies or our payment provider; blockchain congestion, RPC outages or gas costs; or losses caused by someone else gaining access to your wallet, PIN or linked messaging accounts. Blockchain transactions are irreversible by design — that is the trade-off that also means nobody can freeze or seize your funds.</p>
+
+             <p className="font-bold text-slate-800 dark:text-slate-100 mt-4">8. Agent & Automated Payments</p>
+             <p>You can optionally let AbaPay's agent pay bills for you from Telegram, WhatsApp, X, an AI assistant connected over MCP, or a schedule you set. When you do, payments happen without a fresh wallet signature each time — but never beyond the on-chain spending allowance you personally approved, for the specific chain and stablecoin you chose. That cap is enforced by the smart contract itself, not by our servers, and it can never reach the rest of your wallet.</p>
+             <p>You can change or cancel that permission at any time by setting the allowance back to zero from the Agent Hub; it takes effect on-chain immediately. Your transaction PIN is required on every agent payment, including for AI assistants that have been authorised through our sign-in flow — authorising a connection is not the same as authorising a spend. We also apply our own per-transaction and daily caps on top of your allowance, and we may pause agent payments entirely for security or operational reasons.</p>
+
+             <p className="font-bold text-slate-800 dark:text-slate-100 mt-4">9. AI Interpretation</p>
+             <p>The chat and AI-agent channels use a third-party language model to interpret what you ask for, and it can occasionally misread a request. The confirmation you're shown before entering your PIN — service, provider, account number, amount, chain and token — is the authoritative version of the order, and confirming it is your final authorisation.</p>
+
+             <p className="text-xs bg-slate-50 dark:bg-[#1a1a1f] border border-slate-200 dark:border-slate-800 text-slate-500 dark:text-slate-400 rounded-xl p-3 font-medium mt-4">
+               <strong className="text-slate-700 dark:text-slate-200">Please note:</strong> this summary was written by AbaPay's engineering team, not by a lawyer, and has not been reviewed by one. It describes how the product actually behaves — it is not legal advice and should not be relied on as a complete statement of your rights. Questions: <a href="mailto:support@abapays.com" className="underline font-bold">support@abapays.com</a>.
+             </p>
           </div>
        </div>
     </div>
