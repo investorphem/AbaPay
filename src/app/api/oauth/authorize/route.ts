@@ -56,37 +56,55 @@ function htmlResponse(body: string, status = 200) {
   });
 }
 
+// Brand colors match the main app's header exactly (src/app/page.tsx: the "AbaPay." wordmark
+// and its emerald accent dot) — this page used to run its own unrelated blue theme, which is
+// exactly why it didn't read as AbaPay at all despite being the one page in the whole OAuth
+// flow a real person actually looks at.
 const STYLE = `
   *{box-sizing:border-box}
   body{margin:0;min-height:100vh;display:flex;align-items:center;justify-content:center;
-    padding:24px;background:#0f172a;color:#e2e8f0;
+    padding:24px;background:#0b0f14;color:#e2e8f0;
     font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif}
-  .card{width:100%;max-width:420px;background:#1e293b;border:1px solid #334155;
-    border-radius:16px;padding:28px}
-  .brand{font-size:13px;letter-spacing:.14em;text-transform:uppercase;color:#38bdf8;
-    font-weight:700;margin:0 0 14px}
-  h1{font-size:20px;line-height:1.35;margin:0 0 8px;color:#f8fafc}
-  .sub{font-size:14px;line-height:1.5;color:#94a3b8;margin:0 0 20px}
-  label{display:block;font-size:13px;font-weight:600;color:#cbd5e1;margin:0 0 6px}
-  input{width:100%;padding:11px 13px;margin:0 0 16px;border-radius:9px;
-    border:1px solid #475569;background:#0f172a;color:#f1f5f9;font-size:15px;
+  .card{width:100%;max-width:420px;background:#111114;border:1px solid #1f2937;
+    border-radius:28px;padding:32px;box-shadow:0 20px 60px -20px rgba(16,185,129,.15)}
+  .brandRow{display:flex;align-items:center;gap:10px;margin:0 0 22px}
+  .brandRow img{height:34px;width:auto;display:block}
+  .brandRow span{font-size:19px;font-weight:900;letter-spacing:-.01em;color:#f8fafc}
+  .brandRow .dot{color:#10b981}
+  h1{font-size:20px;line-height:1.35;margin:0 0 8px;color:#f8fafc;font-weight:800}
+  .sub{font-size:14px;line-height:1.55;color:#94a3b8;margin:0 0 22px}
+  label{display:block;font-size:11px;font-weight:800;text-transform:uppercase;
+    letter-spacing:.06em;color:#64748b;margin:0 0 7px}
+  input{width:100%;padding:13px 14px;margin:0 0 16px;border-radius:12px;
+    border:1px solid #27272a;background:#0b0f14;color:#f1f5f9;font-size:15px;
     font-family:inherit}
-  input:focus{outline:none;border-color:#38bdf8}
-  button{width:100%;padding:13px;border:0;border-radius:9px;background:#38bdf8;color:#082f49;
-    font-size:15px;font-weight:700;cursor:pointer;font-family:inherit}
-  button:hover{background:#0ea5e9}
-  .err{background:#450a0a;border:1px solid #7f1d1d;color:#fecaca;padding:11px 13px;
-    border-radius:9px;font-size:13.5px;line-height:1.5;margin:0 0 18px;white-space:pre-wrap}
-  .note{margin:18px 0 0;font-size:12.5px;line-height:1.6;color:#64748b}
-  .note strong{color:#94a3b8}
-  a{color:#38bdf8}
-  code{background:#0f172a;padding:1px 5px;border-radius:4px;font-size:12px}
+  input::placeholder{color:#475569}
+  input:focus{outline:none;border-color:#10b981;box-shadow:0 0 0 3px rgba(16,185,129,.15)}
+  button{width:100%;padding:14px;border:0;border-radius:12px;background:#10b981;color:#022c22;
+    font-size:15px;font-weight:800;cursor:pointer;font-family:inherit;letter-spacing:.01em}
+  button:hover{background:#059669}
+  button:active{transform:scale(.99)}
+  .err{background:#2a0e0e;border:1px solid #7f1d1d;color:#fecaca;padding:12px 14px;
+    border-radius:12px;font-size:13.5px;line-height:1.5;margin:0 0 18px;white-space:pre-wrap}
+  .note{margin:20px 0 0;font-size:12.5px;line-height:1.65;color:#64748b;
+    border-top:1px solid #1f2937;padding-top:18px}
+  .note strong{color:#a1a1aa}
+  a{color:#10b981;text-decoration:none}
+  a:hover{text-decoration:underline}
+  code{background:#0b0f14;border:1px solid #1f2937;padding:1px 6px;border-radius:5px;font-size:12px}
 `;
+
+// The logo is a same-origin request to AbaPay's own static asset (/logo.png), so it's covered
+// by the app's existing CSP (img-src 'self' ...) exactly like every other page — this doesn't
+// weaken the "no external dependency" property the hand-rendered HTML was built for, since
+// "external" there meant third-party CDNs/fonts/scripts, not the app's own domain.
+const BRAND_ROW = `<div class="brandRow"><img src="${APP_URL}/logo.png" alt="AbaPay"><span>AbaPay<span class="dot">.</span></span></div>`;
 
 function page(title: string, inner: string): string {
   return `<!DOCTYPE html><html lang="en"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <meta name="robots" content="noindex,nofollow">
+<link rel="icon" href="${APP_URL}/logo.png">
 <title>${esc(title)}</title><style>${STYLE}</style></head>
 <body><div class="card">${inner}</div></body></html>`;
 }
@@ -96,7 +114,7 @@ function errorPage(heading: string, detail: string, status = 400) {
   return htmlResponse(
     page(
       'AbaPay — authorization error',
-      `<p class="brand">AbaPay</p>
+      `${BRAND_ROW}
        <h1>${esc(heading)}</h1>
        <p class="sub">${esc(detail)}</p>
        <p class="note">Nothing was authorized and no access was granted. Close this window and
@@ -119,7 +137,7 @@ function consentPage(p: OAuthParams, clientName: string | null, error?: string) 
   return htmlResponse(
     page(
       `Authorize ${clientName || 'MCP client'} — AbaPay`,
-      `<p class="brand">AbaPay</p>
+      `${BRAND_ROW}
        <h1>Authorize ${who} to access your AbaPay agent</h1>
        <p class="sub">Sign in with the MCP API key and PIN you created in the AbaPay app under
        Agent Hub → MCP. You only have to do this once — after this, ${who} stays connected.</p>
