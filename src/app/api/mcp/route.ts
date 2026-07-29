@@ -7,7 +7,8 @@ import { describeCapabilities, capabilityForIntent, getCapability } from '@/lib/
 import { resolveServiceId, fetchCryptoBalances, verifyAccount } from '@/lib/deai/services';
 import { getRemainingAllowance } from '@/lib/deai/relayer';
 import { SUPPORTED_TOKENS } from '@/constants';
-import { checkAccountNumber, checkAmount as checkAmountParity, requiresVariation, requiresVerifiedName } from '@/lib/parity';
+import { providersForIntent } from '@/lib/vtpassCatalog';
+import { checkAccountNumber, checkAmountLive, requiresVariation, requiresVerifiedName } from '@/lib/parity';
 import { checkAutonomousCapacity, executeAgentPayment, type BatchItem } from '@/lib/deai/batch';
 import { fetchVariations, variationServiceId } from '@/lib/deai/selection';
 import { resolveMcpIdentity, type McpIdentity } from '@/lib/deai/mcpAuth';
@@ -365,10 +366,26 @@ async function callPayBill(args: any, oauthIdentity: McpIdentity | null) {
   const serviceID = resolveServiceId(intent, provider);
   if (!serviceID) return errorResult(`Unknown provider "${provider}" for ${service}.`);
 
+  // 🔴 resolveServiceId is a pure STRING TRANSFORM — it appends "-data"/"-electric" and hands
+  // anything else straight back. It has never checked that the result is a service VTpass
+  // actually sells, so an agent passing provider:"showmax" or "jamb" got a confident
+  // serviceID back, cleared every gate below, moved real money on-chain, and only THEN hit
+  // {"code":"011","errors":"Service is Not Valid"} at vend time — leaving a paid-for
+  // transaction to be refunded for a service that never existed. Now checked against the live
+  // catalogue, before the on-chain spend, with the real alternatives in the error message.
+  const validProviders = await providersForIntent(intent);
+  if (validProviders.length > 0 && !validProviders.some(p => p.serviceID.toLowerCase() === serviceID.toLowerCase())) {
+    return errorResult(
+      `"${provider}" is not a ${service} provider AbaPay can currently sell. Available: ${validProviders.map(p => p.serviceID).join(', ')}.`
+    );
+  }
+
   const accCheck = checkAccountNumber(intent, accountNumber, provider);
   if (!accCheck.valid) return errorResult(accCheck.error || 'Invalid account number.');
 
-  const amtCheck = checkAmountParity(intent, amountNgn, { isFixedPlan: !!variationCode });
+  // Live per-provider ceiling — serviceID is already resolved above, so the MCP surface gets
+  // the same real MTN-200k/Airtel-50k limits the web form and chat do, not a flat number.
+  const amtCheck = await checkAmountLive(intent, amountNgn, { isFixedPlan: !!variationCode, provider: serviceID });
   if (!amtCheck.valid) return errorResult(amtCheck.error || 'Invalid amount.');
 
   // ⚡ OPERATOR GATE — per-tx / per-day caps and the master agent kill switch.

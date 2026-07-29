@@ -319,7 +319,18 @@ export async function assessFeasibility(params: {
 
   // ── 4. Does the amount clear the limits? ──────────────────────────────────
   if (amountNgn) {
-    const min = Math.max(minAmountFor(intent), Number(params.verifiedMin) || 0);
+    // ⚡ Live per-provider limits, same source as the payment gates (see parity.checkAmountLive).
+    // 🔴 This pre-flight check runs FIRST, so leaving it on the flat per-intent numbers would
+    // have it confidently tell a user "₦120,000 is above the ₦50,000 limit" for an MTN top-up
+    // that the actual payment gate — now sourcing MTN's real ₦200,000 ceiling — would allow.
+    // The two must agree or the agent contradicts itself between messages.
+    let live: { min: number | null; max: number | null } = { min: null, max: null };
+    try {
+      const { limitsForIntent } = await import('@/lib/vtpassCatalog');
+      live = await limitsForIntent(intent, params.provider);
+    } catch { /* fall through to the flat limits below */ }
+
+    const min = Math.max(minAmountFor(intent), Number(params.verifiedMin) || 0, Number(live.min) || 0);
     if (amountNgn < min) {
       return {
         possible: false,
@@ -330,10 +341,11 @@ export async function assessFeasibility(params: {
         blockCode: 'AMOUNT_TOO_LOW',
       };
     }
-    // Same per-service ceiling the payment gates use (parity.maxAmountFor) — this check runs
-    // FIRST, so hardcoding 500,000 here meant a ₦200,000 airtime request was told it was fine
-    // and got the real limit only later, from a different message.
-    const max = maxAmountFor(intent);
+    // Same ceiling the payment gates use — this check runs FIRST, so hardcoding 500,000 here
+    // meant a ₦200,000 airtime request was told it was fine and got the real limit only later,
+    // from a different message. Now VTpass's own per-provider ceiling when it publishes one,
+    // falling back to the flat per-intent number when it doesn't.
+    const max = Number(live.max) > 0 ? Number(live.max) : maxAmountFor(intent);
     if (amountNgn > max) {
       return {
         possible: false,

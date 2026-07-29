@@ -177,6 +177,11 @@ export async function fetchCryptoBalances(walletAddress: string, blockchain = 'C
 
 /**
  * Maps a parsed intent's provider + intent into the VTpass serviceID the app actually uses.
+ *
+ * ⚠️ This is a pure STRING TRANSFORM, not a validator — it appends a suffix and hands anything
+ * else straight back, so a serviceID coming out of here is well-FORMED, not necessarily one
+ * VTpass sells. Callers that are about to move money must check it against the live catalogue
+ * (vtpassCatalog.providersForIntent) first; see the guard in api/mcp/route.ts's pay_bill.
  */
 export function resolveServiceId(intent: string, provider: string | null): string | null {
   if (!provider) return null;
@@ -198,13 +203,13 @@ export function resolveServiceId(intent: string, provider: string | null): strin
     // Same again: core uses 'TV', engine emits 'PAY_CABLE'.
     case 'TV':
     case 'PAY_CABLE':
-      return p;                                   // dstv | gotv | startimes | showmax
+      return p;                                   // dstv | gotv | startimes (showmax is NOT sold on this account)
 
     case 'INTERNET':
-      return p;                                   // smile-direct | spectranet
+      return p;                                   // smile-direct (spectranet is NOT sold on this account)
 
     case 'EDUCATION':
-      return p;                                   // waec | jamb | neco
+      return p;                                   // waec | waec-registration (jamb/neco are NOT sold on this account)
 
     case 'BANK_TRANSFER':
       return 'bank-deposit';
