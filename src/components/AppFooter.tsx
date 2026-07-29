@@ -4,6 +4,7 @@ import React, { useEffect, useState, useRef } from 'react';
 import Link from 'next/link';
 import { ShieldCheck, Send, Moon, Sun, Monitor } from 'lucide-react';
 import { useTheme } from "next-themes";
+import { FAQModal } from "@/components/Modals";
 
 interface AppFooterProps {
   network?: string;
@@ -83,6 +84,11 @@ function ThemeToggle() {
 }
 
 export default function AppFooter({ network = "Base & Celo" }: AppFooterProps) {
+  // ⚡ The FAQ is a modal rather than another route on purpose: the questions it answers
+  // ("why was I refused?", "is my PIN my wallet password?") get asked mid-payment, and a
+  // navigation would throw away whatever the user had already filled in.
+  const [isFaqOpen, setIsFaqOpen] = useState(false);
+
   return (
     <footer className="mt-12 w-full border-t border-slate-200 dark:border-slate-800/60 pt-8 pb-4 flex flex-col items-center gap-5 animate-in fade-in transition-colors">
 
@@ -104,7 +110,8 @@ export default function AppFooter({ network = "Base & Celo" }: AppFooterProps) {
       </div>
 
       <div className="flex items-center gap-5">
-        <Link href="/docs" className="text-[10px] font-black text-slate-400 dark:text-slate-500 hover:text-emerald-600 dark:hover:text-emerald-400 uppercase transition-colors">Docs & FAQ</Link>
+        <Link href="/docs" className="text-[10px] font-black text-slate-400 dark:text-slate-500 hover:text-emerald-600 dark:hover:text-emerald-400 uppercase transition-colors">Docs</Link>
+        <button type="button" onClick={() => setIsFaqOpen(true)} className="text-[10px] font-black text-slate-400 dark:text-slate-500 hover:text-emerald-600 dark:hover:text-emerald-400 uppercase transition-colors">FAQ</button>
         <Link href="/terms" className="text-[10px] font-black text-slate-400 dark:text-slate-500 hover:text-emerald-600 dark:hover:text-emerald-400 uppercase transition-colors">Terms</Link>
 
         {/* ⚡ PRIVACY LINK & NEW INLINE THEME TOGGLE ⚡ */}
@@ -116,6 +123,8 @@ export default function AppFooter({ network = "Base & Celo" }: AppFooterProps) {
       </div>
 
       <p className="text-[9px] font-medium text-slate-300 dark:text-slate-600 uppercase tracking-[0.2em] mt-1">© 2026 MASONODE TECHNOLOGIES LIMITED • RC 9524980 • v3.1</p>
+
+      <FAQModal isOpen={isFaqOpen} onClose={() => setIsFaqOpen(false)} />
     </footer>
   );
 }
