@@ -193,13 +193,6 @@ export default function Home() {
   const currentTelecom = useMemo(() => telecomProviders.find(t => t.serviceID === telecomProvider), [telecomProviders, telecomProvider]);
   const currentEducation = useMemo(() => educationProviders.find(e => e.serviceID === educationProvider), [educationProviders, educationProvider]);
 
-  // Keep every selection pointing at a service VTpass still sells (see useValidSelection).
-  useValidSelection(telecomProviders, telecomProvider, setTelecomProvider);
-  useValidSelection(internetProviders, internetProvider, setInternetProvider);
-  useValidSelection(electricityProviders, elecProvider, setElecProvider);
-  useValidSelection(cableProviders, cableProvider, setCableProvider);
-  useValidSelection(educationProviders, educationProvider, setEducationProvider);
-
   const isInternational = activeCountry.code !== "NG";
 
   // ⚡ DYNAMIC NETWORK TEXT ⚡
@@ -527,6 +520,22 @@ export default function Home() {
     else if (type === 'bank') { setSelectedBank(newProvider); }
     else if (type === 'education') { setEducationProvider(newProvider); setSelectedEducationPlan(null); }
   };
+
+  // Keep every selection pointing at a service VTpass still sells (see useValidSelection).
+  //
+  // 🔴 Deliberately routed through handleProviderChange rather than the bare setState: if VTpass
+  // drops the service the user is currently on, the meter/smartcard number, amount, verified
+  // name and fetched plan list sitting in the form all belong to the OLD provider. Silently
+  // swapping only the provider id would leave that stale data attached to a different service —
+  // e.g. an Ikeja meter number verified against Ikeja, now submitted to Eko. This is the exact
+  // reset the picker already performs on a manual provider change; an automatic one is no
+  // different. Membership-based, not position-based, so the normal seed->live handover (whose
+  // orderings differ — the seed leads with mtn, VTpass leads with airtel) changes nothing.
+  useValidSelection(telecomProviders, telecomProvider, (id) => handleProviderChange(id, 'telecom'));
+  useValidSelection(internetProviders, internetProvider, (id) => handleProviderChange(id, 'internet'));
+  useValidSelection(electricityProviders, elecProvider, (id) => handleProviderChange(id, 'elec'));
+  useValidSelection(cableProviders, cableProvider, (id) => handleProviderChange(id, 'cable'));
+  useValidSelection(educationProviders, educationProvider, (id) => handleProviderChange(id, 'education'));
 
   const handleResetService = (s: any) => {
     setIsVerifying(false); setStatus(""); 
