@@ -2,7 +2,7 @@
 
 AbaPay is a decentralized, Web3-native utility payment platform built on **Celo** and **Base**. It lets users pay for real-world bills — Airtime, Mobile Data, Electricity, Cable TV, Bank Transfers, Education PINs, and International Airtime/Data — using on-chain stablecoins (**USDT**, **USDC**, **cUSD/USDm**), with instant fiat settlement handled server-side via the VTpass API. Payments can be made directly in the web app, or hands-free through a conversational, autonomous AI agent ("DeAI") on Telegram, WhatsApp, and X — a real on-chain identity under [ERC-8004](https://eips.ethereum.org/EIPS/eip-8004), discoverable on [8004scan.io](https://8004scan.io) — that can pay bills unattended, run recurring/scheduled autopay, and settle multi-recipient batch payments, all spending from a bounded, user-revocable on-chain allowance — no custody, no server-side keys.
 
-Designed for low fees, cross-border utility vending (Nigeria + supported international countries), and mobile-first accessibility (optimized for Celo MiniPay, Farcaster Mini Apps, and any WalletConnect/MetaMask-compatible wallet).
+Designed for low fees, cross-border utility vending (Nigeria + every country VTpass's live international catalogue returns), and mobile-first accessibility — MiniPay, Valora, Farcaster Mini Apps, Coinbase Smart Wallet / Base Account, MetaMask, and any other WalletConnect-compatible wallet (see [Supported Wallets & Environments](#-supported-wallets--environments)).
 
 **Operator:** Masonode Technologies Limited (RC 9524980), Nigeria.
 
@@ -11,8 +11,11 @@ Designed for low fees, cross-border utility vending (Nigeria + supported interna
 ## 🌟 Key Features
 
 * **Multi-Chain Payments:** Pay bills directly with USDT, USDC, or cUSD on Celo (Mainnet/Alfajores) or Base (Mainnet/Sepolia). The app auto-detects the connected chain and filters/reorders available stablecoins accordingly (e.g. cUSD is Celo-exclusive; USDT defaults first on Celo).
-* **International Bill Pay:** Users can select a country and pay for foreign airtime/data in that country's own currency and rate — transaction history and receipts reflect the *local* currency, not just Naira.
+* **Live VTpass Catalogue — nothing about a provider is hardcoded any more:** every provider name, logo, and amount limit for airtime, data, electricity, cable and education is fetched live from VTpass (`src/lib/vtpassCatalog.ts`, served to the browser by `/api/providers`) rather than from four separate hardcoded lists. The app, chat, MCP and the admin dashboard all read the same in-process cache, so there is exactly one source of truth. See [Live provider catalogue](#live-provider-catalogue-vtpass-sourced) below.
+* **Per-Provider Amount Limits, Enforced Live:** the ceiling is VTpass's real published `minimium_amount`/`maximum_amount` *per provider*, not one flat number per service — airtime alone ranges MTN ₦200,000 / Glo ₦100,000 / Airtel ₦50,000 / 9mobile ₦50,000, and electricity minimums range ₦100 (Ikeja, Aba) to ₦2,000 (Ibadan). A flat cap either wrongly refused a valid MTN top-up or wrongly accepted an Airtel one that VTpass rejects *after* the user has already paid on-chain.
+* **International Bill Pay:** Users can select a country and pay for foreign airtime/data in that country's own currency and rate — transaction history and receipts reflect the *local* currency, not just Naira. The country list is fetched live from VTpass (`/get-international-airtime-countries`) on every channel, so the app, chat and MCP can never disagree about which countries are covered.
 * **Instant Vending:** Automated API integration with VTpass for instant token generation, airtime top-ups, and data bundle delivery.
+* **Education PINs in every channel:** WAEC result-checker and WAEC registration PINs are buyable from the app, from chat (Telegram/WhatsApp/X/in-app), and over MCP — not app-only. ⚠️ **JAMB is a deliberate honesty caveat:** the code path exists end-to-end (intent parsing, profile-ID verification, `variation_code` handling), but `jamb` is not enabled on the current VTpass merchant account — VTpass answers `{"code":"011","content":{"errors":"Service is Not Valid"}}` — so it does not appear in the live catalogue and cannot currently be sold. If the account is enabled for it, it appears automatically with no code change.
 * **Smart Merchant Verification:** Validates electricity meters, smartcard/IUC numbers, and account details *before* accepting crypto payments, eliminating user errors and failed vends.
 * **AbaPoints Loyalty System:** Users earn points pegged 1:1 to stablecoin value spent, trackable via the in-app points badge and a dedicated API endpoint.
 * **Automatic Refund Safety Net:** Failed vends after confirmed on-chain payment are automatically flagged, verified, and refunded on-chain to the user's wallet.
@@ -23,10 +26,13 @@ Designed for low fees, cross-border utility vending (Nigeria + supported interna
 * **Autonomous Scheduling & Autopay Agent:** Beyond one-off chat payments, users can ask the DeAI agent to set up recurring bills (monthly/weekly/daily), a one-time future payment ("pay this in 10 minutes"), or a single request covering **multiple recipients/accounts at once** — the agent groups them by chain/token and settles each leg through the same allowance-bounded relayer, unattended, on schedule, with zero further interaction required from the user.
 * **On-Chain Attribution:** Celo transactions carry an ERC-8021 attribution tag (`src/lib/attribution.ts`) crediting the Celo Builders program; a no-op on Base.
 * **On-Chain Agent Identity (ERC-8004):** AbaPay's DeAI agent is registered as a real on-chain identity on **both Celo and Base** via the ERC-8004 "Trustless Agents" registry, so it's discoverable on 8004scan.io / AgentScan — independent of, and unrelated to, how it moves money. See [ERC-8004 agent identity](#erc-8004-agent-identity) below.
-* **MCP Server (AI Agent Payments):** AbaPay is reachable by any MCP-speaking AI client (Claude, or any other agent that supports the Model Context Protocol) as a real tool server — `describe_capabilities`, `check_balance`, and `pay_bill` — over Streamable HTTP JSON-RPC at `/api/mcp`. This is a fourth channel alongside Telegram/WhatsApp/X, not a new trust boundary: it authenticates with a one-time API key + PIN and runs through the exact same allowance-bounded, kill-switch-gated, discount-aware execution pipeline as the chat channels, on **either Celo or Base** depending on what the linking wallet approved. See [MCP Server](#mcp-server-ai-agent-payments) below.
+* **MCP Server (AI Agent Payments):** AbaPay is reachable by any MCP-speaking AI client (Claude, or any other agent that supports the Model Context Protocol) as a real tool server — `describe_capabilities`, `check_balance`, `list_plans`, and `pay_bill` — over Streamable HTTP JSON-RPC at `/api/mcp`. This is a fourth channel alongside Telegram/WhatsApp/X, not a new trust boundary: it runs through the exact same allowance-bounded, kill-switch-gated, discount-aware execution pipeline as the chat channels, on **either Celo or Base** depending on what the linking wallet approved. See [MCP Server](#mcp-server-ai-agent-payments) below.
+* **MCP OAuth 2.1 (authorize once, not once per conversation):** the connector supports a full OAuth 2.1 authorization-code + PKCE (S256) flow with Dynamic Client Registration (`/api/oauth/register`, `/api/oauth/authorize`, `/api/oauth/token`, discovery under `/.well-known/`). A user authorizes once in a browser — proving their API key **and** PIN on AbaPay's own hand-rendered consent page — and every future conversation reconnects with a Bearer token instead of retyping an API key. **OAuth never authorizes a spend:** the PIN is still required on every single `pay_bill` call, and a Bearer token alone can only read a balance. The `api_key` tool argument remains the fallback for clients that can't do OAuth.
+* **`list_plans` — real VTpass plan codes and prices, never guessed:** `variation_code` used to be something an agent had to invent for DATA/CABLE/EDUCATION. `list_plans` returns the currently purchasable plans with their exact codes and live VTpass prices, and both the tool description and the server instructions tell the client to call it before `pay_bill` rather than guessing.
 * **x402 Settlement (main app, Celo + USDC/USDT):** Payments made directly in the web app — where the user is present and signing — settle automatically via the [x402](https://x402.org) HTTP-payment protocol against Celo's own facilitator whenever the user pays with **USDC or USD₮ on Celo** (no user-facing toggle), so they're genuinely indexed on x402scan, not just relabeled contract calls. Everything else (Base, cUSD/USDm) uses the original on-chain `payBill` flow, including Base's sponsored-gas path, unchanged — and the signature-free agent-initiated flow above is completely untouched, since x402 requires a fresh signature per payment, incompatible with unattended agent payments. See [x402 settlement](#x402-settlement-main-app-only) below.
 * **Dynamic Exchange Engine:** Live market rate conversions with admin-configurable exchange rate and automated profit spread calculation, verified server-side to prevent underpayment exploits.
 * **Executive Admin Dashboard:** Real-time monitoring of VTpass fiat balance, on-chain vault balances per token/chain, transaction analytics, manual refund tools, and CSV export — protected behind admin auth.
+* **Kill Switches That Actually Stop Every Channel:** the dashboard's "pause a service" toggles are a **two-level** model — a per-service master (`MASTER_AIRTIME`, `MASTER_INTERNET`, `MASTER_ELECTRICITY`, `MASTER_CABLE`, `MASTER_EDUCATION`, `MASTER_INTERNATIONAL`) plus a per-provider switch keyed by VTpass serviceID (`AIRTIME_mtn`, `INTERNET_airtel-data`, `ELEC_ikeja-electric`, `CABLE_dstv`, `EDU_waec`). A payment is refused when **either** level is off. `src/lib/serviceRules.ts`'s `killSwitchKeysFor()` maps an agent intent (+ provider, normalised through `resolveServiceId` so `ELEC_ikeja` can't miss `ELEC_ikeja-electric`) onto exactly those keys, so chat, MCP and the autonomous scheduler now honour the same switches the web app does. See [Kill switches](#kill-switches-two-level-master--per-provider) below.
 * **Sponsored Gas on Base:** Coinbase Smart Wallet / Base Account users can pay with zero gas fees — the app detects paymaster support via EIP-5792 and batches approval + payment into a single sponsored transaction. Wallets without this capability (MetaMask, WalletConnect, Valora, etc.) transparently fall back to the normal self-paid flow.
 * **Shareable & Downloadable Receipts:** Every receipt can be shared as an image straight to WhatsApp/Telegram/etc. via the device's native share sheet, or saved directly as a PNG or PDF.
 * **Farcaster Mini App Ready:** Ships with Farcaster frame metadata so AbaPay can be launched directly inside Farcaster clients.
@@ -49,38 +55,83 @@ Designed for low fees, cross-border utility vending (Nigeria + supported interna
 
 ---
 
+## 👛 Supported Wallets & Environments
+
+AbaPay runs in three distinct runtime environments, detected at load in `src/app/page.tsx`
+(`environment` = `MINIPAY` | `FARCASTER` | `WEB`, with `LOADING` as the pre-detection state and a
+2-second timeout that falls back to `WEB`). Wallet connectivity for the `WEB` case comes from
+`src/config/wagmi.ts`, which registers exactly three connectors: `injected()`, `baseAccount()`,
+and `walletConnect()`.
+
+| Wallet / environment | How it connects | Notes |
+|---|---|---|
+| **MiniPay** (Opera Mini's built-in Celo wallet) | Detected directly via `window.ethereum.isMiniPay`; the app builds its own viem wallet client and locks to Celo | Gas is paid in a stablecoin (`txConfig.feeCurrency`), so users need no CELO. Network switching is intentionally disabled here. |
+| **Farcaster Mini App** | Detected via `@farcaster/miniapp-sdk`'s `sdk.context`; uses `sdk.wallet.ethProvider`, locked to Base | Addresses are read with a *silent* `getAddresses()` so opening the app never forces a wallet popup. Frame metadata ships in `public/.well-known/farcaster.json`. |
+| **Valora** | Standard WalletConnect connector — **no Valora-specific code exists or is needed** | Valora is pinned to the top of the WalletConnect modal's recommended list via `explorerRecommendedWalletIds`, and `chains` puts Celo first so Valora defaults to Celo. It works exactly the way MetaMask does. |
+| **MetaMask** and other injected browser wallets | `injected()` connector (also used for the silent auto-reconnect on desktop) | — |
+| **Coinbase Smart Wallet / Base Account** | `baseAccount()` connector | The only wallets that get **sponsored gas** — the app probes EIP-5792 paymaster capability and batches approve + pay into one sponsored call. Everything else falls back to the normal self-paid flow. |
+| **Any other WalletConnect v2 wallet** (Trust, Rainbow, Ledger Live, …) | `walletConnect()` connector with the QR modal | Nothing wallet-specific in the code — if it speaks WalletConnect and supports Celo or Base, it works. |
+
+Chains registered in `wagmi.ts`, in order: **Celo, Celo Alfajores, Base, Base Sepolia** — Celo is
+deliberately first so mobile Celo wallets default to it. Note the app's own non-wagmi paths
+(`src/lib/chain.ts`, `page.tsx`) use viem's **`celoSepolia`** as the Celo testnet, while
+`wagmi.ts` still lists `celoAlfajores`; mainnet is unaffected, but they should be reconciled if
+testnet WalletConnect flows are exercised.
+
+Stablecoins: **USD₮** and **USDC** on both chains, plus **cUSD/USDm** on Celo only
+(`supportedNetworks` in `src/constants/index.ts`) — the token picker filters and reorders itself
+from the connected chain.
+
+---
+
 ## 📁 Project Structure
 
 ```
 src/
 ├── app/
-│   ├── page.tsx              # Main storefront (pay flow, wallet connect, history)
-│   ├── admin/page.tsx         # Admin ops dashboard
-│   ├── docs/page.tsx          # Docs & FAQ
-│   ├── terms/, privacy/       # Legal pages
+│   ├── page.tsx              # Main storefront (pay flow, wallet connect, history, env detection)
+│   ├── admin/page.tsx         # Admin ops dashboard (incl. the kill-switch toggles)
+│   ├── docs/page.tsx          # Docs & FAQ page
+│   ├── terms/, privacy/       # Legal pages (standalone routes; the in-app modals live in components/Modals.tsx)
+│   ├── .well-known/           # OAuth discovery metadata, incl. the RFC path-insertion variants
+│   │   ├── oauth-authorization-server/{route.ts, api/mcp/route.ts}
+│   │   └── oauth-protected-resource/{route.ts, api/mcp/route.ts}
 │   └── api/
-│       ├── pay/                # Core payment + vending endpoint
+│       ├── pay/                # Core payment + vending endpoint (pay/x402/ is the x402 rail)
 │       ├── paymaster/           # Server-side proxy for Base gas-sponsorship (keeps the CDP paymaster key off the client)
+│       ├── providers/           # Live VTpass provider catalogue for the browser's pickers
 │       ├── requery/             # Delayed/timeout transaction requery
 │       ├── rate/, admin/rate/   # Exchange rate endpoints
 │       ├── variations/          # VTpass service variation lookups
-│       ├── intl/, foreign/      # International bill pay (products/operators/rates)
+│       ├── intl/, foreign/      # International bill pay (countries/products/operators/rates)
 │       ├── verify/              # Meter/account/customer verification
 │       ├── admin/                # Admin data, actions, refunds, health
+│       ├── discounts/            # Discount campaign lookup
+│       ├── schedules/            # Recurring + one-off scheduled bill execution
 │       ├── user/points/          # AbaPoints balance
+│       ├── agent/                # Agent link/allowance management (Agent Hub)
 │       ├── deai/                 # Conversational AI agent
-│       ├── mcp/                  # MCP server (tools: describe_capabilities, check_balance, pay_bill)
+│       ├── mcp/                  # MCP server (describe_capabilities, check_balance, list_plans, pay_bill)
+│       ├── oauth/{register,authorize,token}/  # OAuth 2.1 (DCR, consent page, token endpoint) for MCP
+│       ├── cleanup/              # Stale pre-flight intent sweeper
 │       ├── webhook/, webhook/vtpass/  # VTpass + on-chain webhooks
 │       ├── telegram/webhook/, whatsapp/webhook/, x/webhook/  # Bot channel webhooks
 │       └── support/              # Support ticket submission
-├── components/                 # Shared UI (AppFooter, Modals, tabs, AIChat, AdminAgentPanel, etc.)
-├── config/wagmi.ts             # Wallet/chain configuration
-├── constants/                  # Supported tokens, services, providers
+├── components/                 # Shared UI (AppFooter, Modals — Terms/Privacy/FAQ/Receipt —, tabs, AIChat, AgentHub, Admin panels)
+├── config/wagmi.ts             # Wallet/chain configuration (injected, Base Account, WalletConnect)
+├── constants/                  # Supported tokens, services, initial country list
 ├── lib/
+│   ├── vtpassCatalog.ts         # ⭐ Live VTpass provider catalogue + per-provider amount limits
+│   ├── providerFallback.ts      # Offline seed used only when VTpass is unreachable
+│   ├── serviceRules.ts          # Kill switches, operator agent caps, min/max amounts
+│   ├── refunds.ts               # Refund queue (enqueue on vend failure + user notification)
+│   ├── vend.ts                  # Shared vend execution for the contract and x402 rails
 │   ├── attribution.ts           # Celo Builders on-chain attribution tag (ERC-8021 dataSuffix)
-│   ├── deai/                    # Intent parsing, capability rules, agent relayer (payBillFor)
-│   └── ...                      # VTpass, Telegram, WhatsApp, messaging helpers
-└── utils/                      # Supabase client, admin auth
+│   ├── parity.ts                # Shared validation so chat/MCP match the web form
+│   ├── deai/                    # Intent parsing, capabilities, selection, relayer (payBillFor),
+│   │                            #   mcpAuth.ts (API key), mcpOAuth.ts (OAuth token lifecycle)
+│   └── ...                      # VTpass, Telegram, WhatsApp, scheduler, discount helpers
+└── utils/                      # Supabase client, admin auth, PIN hashing
 contracts/
 ├── AbaPay.sol                   # V1 — original escrow/vault smart contract
 ├── AbaPayV2.sol                 # V2 — hardened (see below)
@@ -241,12 +292,12 @@ ERC8004_AGENT_ID=59561 ERC8004_AGENT_URI=https://abapays.com/.well-known/agent.j
 ```
 Run this any time `agent.json`'s contents change (like the `mcp` service entry above) and you want an already-registered identity to be re-read.
 
-### x402 Settlement (main app, Celo + USDC)
+### x402 Settlement (main app, Celo + USDC/USD₮)
 ```
 CELO_X402_API_KEY=your_x402_celo_org_api_key   # Server-side: settles via api.x402.celo.org
 NEXT_PUBLIC_THIRDWEB_CLIENT_ID=your_thirdweb_client_id    # Client-side only: useFetchWithPayment's signing infra
 ```
-Distinct infra from `RELAYER_PRIVATE_KEY` above. This is not optional/toggleable in the UI — the main app's "Confirm & Pay" button automatically routes through x402 whenever the user pays with USDC on Celo (the only asset/chain combination supported today — see below), and through the normal contract call for everything else. It never touches the agent-initiated flow.
+Distinct infra from `RELAYER_PRIVATE_KEY` above. This is not optional/toggleable in the UI — the main app's "Confirm & Pay" button automatically routes through x402 whenever the user pays with **USDC or USD₮ on Celo** (each settling against its own EIP-712 domain), and through the normal contract call for everything else. It never touches the agent-initiated flow.
 
 Settlement runs through **Celo's own x402 facilitator** (`api.x402.celo.org` mainnet /
 `api.x402.sepolia.celo.org` testnet — built by Celo Core Co.), not thirdweb. thirdweb is
@@ -408,8 +459,23 @@ already backs Telegram/WhatsApp/X, not a parallel system with its own rules:
 | Tool | What it does | Needs |
 |---|---|---|
 | `describe_capabilities` | Human-readable menu of what AbaPay can pay and what's currently paused | Nothing — public |
-| `check_balance` | Reads the linked wallet's live balance + approved agent limit, **per token**, on a chain | `api_key` |
-| `pay_bill` | Pays a real bill (airtime, data, electricity, cable) end-to-end, on-chain | `api_key` + `pin` |
+| `list_plans` | The **real, currently purchasable** plans for DATA / CABLE / EDUCATION, with exact `variation_code`s and live VTpass prices | Nothing — public |
+| `check_balance` | Reads the linked wallet's live balance + approved agent limit, **per token**, on a chain | OAuth Bearer token *or* `api_key` |
+| `pay_bill` | Pays a real bill (airtime, data, electricity, cable TV, **education PIN**) end-to-end, on-chain | (OAuth Bearer token *or* `api_key`) **+ `pin`, always** |
+
+`list_plans` exists because `variation_code` was previously something the agent had to invent.
+Its description, and the server-level `instructions`, both tell the client to call it before
+`pay_bill` for those three services and to pass back a returned code verbatim — never to guess a
+plan, a code, or a price. If it returns nothing usable (which genuinely happens — JAMB is not
+enabled on this merchant account), the correct behaviour is to say so, not to fabricate a code.
+
+`pay_bill` covers **EDUCATION** as well as airtime/data/electricity/cable, because MCP is meant
+to be the same trust boundary as chat, not a narrower one. Every rule it needs is shared and
+already existed: `requiresVariation()` forces a `variation_code`, `checkAccountNumber()` enforces
+JAMB's ≥10-character profile ID, and `requiresVerifiedName()` decides that only JAMB
+merchant-verifies (WAEC has no account to verify). It also validates the provider against the
+**live** VTpass catalogue up front, so an agent can no longer pass a provider VTpass cannot sell
+and discover it only after the money has moved.
 
 Both accept optional `chain`/`token` overrides — they default to whatever was approved when the
 API key was created, but a caller isn't stuck with that default if it comes up short. `check_balance`
@@ -442,6 +508,44 @@ Celo-specific or Base-specific in the MCP layer itself — it's the same multi-c
 (`src/lib/deai/relayer.ts`) and balance reader (`src/lib/deai/services.ts`) every other channel
 shares.
 
+**OAuth 2.1 — authorize once, in a browser, and never retype an API key again.**
+The `api_key`/`pin` tool *arguments* work, but a brand-new Claude conversation remembers
+nothing, so the human had to paste their API key every single time. The server now implements a
+full OAuth 2.1 authorization-code flow with **PKCE (S256 only)** and **Dynamic Client
+Registration**:
+
+| Endpoint | Purpose |
+|---|---|
+| `/.well-known/oauth-protected-resource` (+ `/.well-known/oauth-protected-resource/api/mcp`) | Tells the client this resource is OAuth-protected and where its authorization server is |
+| `/.well-known/oauth-authorization-server` (+ `/.well-known/oauth-authorization-server/api/mcp`) | Authorization-server metadata |
+| `/api/oauth/register` | Dynamic Client Registration (RFC 7591) — no manual client setup |
+| `/api/oauth/authorize` | The consent page — the only page a human ever sees |
+| `/api/oauth/token` | Code exchange + refresh, with refresh-token rotation |
+
+Both discovery documents are served at the plain `/.well-known/…` path **and** at the RFC
+path-insertion variant with `/api/mcp` appended, because different clients probe different ones.
+
+Things worth knowing about this implementation:
+- **The consent page proves *both* the API key and the PIN** before an authorization code is
+  ever issued. A stolen API key alone is not enough to authorize a connector.
+- **OAuth never authorizes a spend.** The PIN is still required on *every* `pay_bill` call,
+  exactly as on Telegram/WhatsApp. A Bearer token on its own can read a balance and nothing more.
+- **Exactly one condition returns a real HTTP 401** (with `WWW-Authenticate` +
+  `resource_metadata`): *no credential supplied at all*. That 401 is the only signal an MCP
+  client uses to discover "this server supports OAuth" and show a connect button. A **wrong**
+  API key, a bad PIN, or a malformed argument stay in-band tool errors — turning those into 401s
+  would make the client re-run the whole browser flow over a typo.
+- **`redirect_uri` is validated against the registered list *before* anything renders**, and a
+  failure renders a plain error page rather than redirecting — redirecting to an unvalidated URI
+  is precisely the open-redirect vulnerability that would leak the authorization code.
+- The consent page is a hand-rendered, fully self-contained HTML string (inline `<style>`, no
+  scripts, no fonts, no third-party assets) so it satisfies the app's CSP without exception and
+  can't be broken by anything else in the app. It uses AbaPay's own emerald wordmark styling —
+  it previously ran an unrelated blue theme.
+- Refresh tokens **rotate** on every use (OAuth 2.1's requirement for public clients), so a
+  stolen refresh token stops working as soon as the legitimate client refreshes — and the theft
+  becomes detectable instead of silent.
+
 **Linking (no new env vars, no new table):** `agent_links.channel` gained an `'MCP'` value
 (`supabase/migrations/019_mcp_channel.sql`) alongside `TELEGRAM`/`WHATSAPP`/`X`. Unlike those,
 there's no bot to "claim" a link code with — from the app's **Agent Hub** tab, pick the **MCP (AI
@@ -471,9 +575,13 @@ each with its own label.
      ```
    - **Any other MCP client:** the same URL, Streamable HTTP transport — no API key or auth
      header at the connection level; see step 4.
-4. Give the API key and PIN to the agent in conversation (or however your client supports
-   passing tool arguments) — they're arguments to `check_balance`/`pay_bill`, not an HTTP header,
-   so no separate app-level auth step is needed.
+4. **Authorize.** If your client supports OAuth (claude.ai and Claude Desktop do), it will offer
+   a **Connect** button — click it, and AbaPay's own consent page asks for your API key and PIN
+   once, in the browser. Every future conversation reconnects automatically. If your client
+   can't do OAuth, pass the API key as the `api_key` tool argument instead — it's a tool
+   argument, not an HTTP header, so there's no separate app-level auth step.
+5. **Your PIN is asked for on every payment either way.** Authorizing the connector does not
+   authorize spending. If an agent claims it can pay without your PIN, something is wrong.
 
 Every tool declares `annotations` (`title`, `readOnlyHint`/`destructiveHint`, `idempotentHint`,
 `openWorldHint`) — `pay_bill` is correctly flagged destructive/non-idempotent (it moves real
@@ -490,13 +598,11 @@ organizational submission through Anthropic, not a code change:
   `readOnlyHint`/`destructiveHint` annotations (✅ done above), a public documentation URL
   (`https://abapays.com/docs` — live), a privacy policy URL (`https://abapays.com/privacy` —
   live), an icon, and reviewer test-account credentials.
-- **The real gap: OAuth 2.0.** The directory requires OAuth for authenticated connectors;
-  `pay_bill`/`check_balance` currently authenticate via an `api_key` **tool argument** (the same
-  model as every other channel here), not an OAuth handshake at the connection level. Anthropic's
-  submission flow does also support "a custom connection where users supply their own
-  credentials at connection time" as an alternative to full OAuth — worth confirming against
-  the current review criteria before assuming a full OAuth authorization server needs to be
-  built. Either way, this needs its own scoped change; it hasn't been attempted here.
+- **OAuth 2.0 — no longer a gap.** The directory requires OAuth for authenticated connectors,
+  and that is now built (see the OAuth section above): authorization code + PKCE, Dynamic Client
+  Registration, discovery metadata, and a real 401 so clients can discover it. What remains for
+  a directory listing is the *organizational* submission itself (a Team/Enterprise org, an icon,
+  and reviewer test-account credentials) — not code.
 - Until submitted/approved, "Add custom connector" with the URL (above) is a fully working,
   unrestricted way to use it today — the directory only adds discoverability, not capability.
 
@@ -559,6 +665,89 @@ without needing x402.
 
 ---
 
+## 🔌 Provider Data & Operator Controls
+
+#### Live provider catalogue (VTpass-sourced)
+
+`src/lib/vtpassCatalog.ts` is the single source of truth for every provider list in the app.
+It calls VTpass's `/services?identifier=…` and returns the provider's real `serviceID`, VTpass's
+own product **name**, VTpass's own **logo URL**, and its published **`minimium_amount`** (sic)
+and **`maximum_amount`**.
+
+Five categories are supported, keyed by the identifiers VTpass actually accepts (two of which
+had to be discovered — the obvious guesses return `011 "Category Does not Exist"`):
+
+| App concept | VTpass identifier |
+|---|---|
+| Airtime | `airtime` (with `foreign-airtime` filtered out — international is its own flow) |
+| Data / Internet | `data` — **not** `mobile-data`/`internet` |
+| Electricity | `electricity-bill` |
+| Cable TV | `tv-subscription` — **not** `cable-tv` |
+| Education | `education` |
+
+**Caching and failure behaviour (this is the important part):**
+- A module-level `Map` cache with a **1-hour TTL**, shared in-process. The browser reaches it
+  through `GET /api/providers?category=…` (rate-limited 60/min per IP, `Cache-Control:
+  public, max-age=300, s-maxage=3600, stale-while-revalidate=86400`); chat and MCP call
+  `getCatalog()` directly. Both land on the same cache, so there is exactly one source of truth.
+- **The cache is never evicted on failure — only overwritten on success.** The fallback chain is
+  *fresh cache → live fetch → stale cache → bundled seed*, and `getCatalog()` **never throws and
+  never returns an empty list**, so a picker can be rendered unconditionally and a VTpass blip
+  can't blank it mid-purchase.
+- A stale answer is returned with `stale: true`, and `/api/providers` then serves it `no-store`
+  so a brief outage can't get frozen into an edge cache for an hour.
+- `src/lib/providerFallback.ts` is the last-resort offline seed — **the only hardcoded provider
+  data left**. Its logos are deliberately *local* files, because the one code path that exists
+  for "VTpass is unreachable" must not render a dozen broken remote images.
+
+**Why this replaced the hardcoded lists:** the old lists advertised `showmax`, `spectranet` and
+`jamb` — all three return `Service is Not Valid` on this merchant account, so a user could pick
+one, fill the form, pay on-chain, and only then have the vend fail into the refund path. They
+also *omitted* `glo-sme-data` and `9mobile-sme-data`, which are live and were unreachable.
+
+**Amount limits** come from the same records: `limitsFor(category, serviceID)` and
+`limitsForIntent(intent, provider)` return the live per-provider `{min, max}`, and `null` when
+VTpass publishes none — so "unknown" falls back to the caller's service-level default rather
+than being mistaken for "unlimited".
+
+#### Kill switches (two-level: master + per-provider)
+
+`platform_settings.kill_switches` holds a **two-level** key system written by the admin
+dashboard:
+
+| Level | Keys |
+|---|---|
+| Per-service master | `MASTER_AIRTIME`, `MASTER_INTERNET`, `MASTER_ELECTRICITY`, `MASTER_CABLE`, `MASTER_EDUCATION`, `MASTER_INTERNATIONAL` |
+| Per-provider (keyed by VTpass serviceID) | `AIRTIME_mtn`, `INTERNET_airtel-data`, `ELEC_ikeja-electric`, `CABLE_dstv`, `EDU_waec`, … |
+
+A switch is **on unless explicitly `false`** (a missing key means enabled), and a payment is
+refused when **either** level is off — the same `||` the web app uses.
+
+`killSwitchKeysFor(intent, provider)` in `src/lib/serviceRules.ts` maps an agent intent onto
+exactly those keys, normalising the provider through `resolveServiceId` first so a loose
+`"ikeja"` from chat resolves to the `ELEC_ikeja-electric` key the operator actually toggled.
+`checkServiceAllowed()` is then the gate every non-web channel must pass. Settings are cached
+for **30 seconds**, so flipping a switch takes effect within half a minute everywhere.
+
+> 🔴 **The bug this fixed:** these functions previously returned a single *bare* key
+> (`AIRTIME`, `ELECTRICITY`, …) that nothing has written since the `MASTER_`/per-provider system
+> replaced it. So "pause Electricity" in the dashboard flipped `MASTER_ELECTRICITY`, the website
+> correctly refused — and chat, MCP and the autonomous scheduler carried on spending real user
+> funds on a service the operator had deliberately switched off.
+
+Separate from the per-service switches, `checkAgentSpendAllowed()` enforces the operator's
+controls over the *agent* specifically: `agent_enabled` (master kill for all agent payments),
+`agent_autonomous_enabled` (kills only unattended/scheduled execution), `agent_max_ngn_per_tx`,
+`agent_daily_cap_ngn` (per user, per UTC day), and `ai_chat_enabled` for the in-app widget.
+These sit **on top of** the on-chain allowance, never instead of it.
+
+> ⚠️ **Bank transfer has no dashboard toggle.** There is no group for it in `admin/page.tsx` and
+> `page.tsx` doesn't check one either, so `BANK_TRANSFER` is deliberately left pointed at the
+> pre-existing bare `BANK` key rather than inventing a `MASTER_BANK` switch no operator can
+> reach.
+
+---
+
 ## 🧪 Testing & CI
 
 ```
@@ -605,6 +794,15 @@ Beyond the core tables, run the migrations in `supabase/migrations/` **in order*
 * `011_one_off_schedules.sql` — adds `run_once_at` and `batch_id` to `scheduled_bills`, so a
   single chat request can create a one-time future payment (`frequency = 'once'`) or a
   multi-recipient batch, on top of the existing recurring monthly/weekly/daily schedules.
+* `012_schedule_notify_channel.sql` — records which channel a schedule should report back on.
+* `014`–`018_discount_*.sql` — the discount-campaign engine: campaigns, per-campaign caps,
+  destination/IP caps, per-phone caps + a fraud toggle, and exclusions/full-status counting.
+  (There is no `013`; numbering skips it.)
+* `019_mcp_channel.sql` — adds `'MCP'` to `agent_links.channel` alongside
+  `TELEGRAM`/`WHATSAPP`/`X`, so an AI agent is a first-class linked channel.
+* `020_mcp_oauth.sql` — the OAuth 2.1 tables: dynamically registered clients, single-use
+  authorization codes (with their PKCE challenge), and access/refresh token records (hashed,
+  with rotation and revocation).
 
 ---
 
@@ -640,6 +838,27 @@ The app ships with Farcaster frame metadata (`public/.well-known/farcaster.json`
 * **Bot Webhook Signatures:** The WhatsApp and X webhooks verify Meta's `X-Hub-Signature-256` / X's `x-twitter-webhooks-signature` HMAC on every inbound payload (when the corresponding secret is configured), and Telegram verifies its secret token — so message events can't be forged.
 * **Hashed Transaction PINs:** DeAI PINs are stored as salted scrypt hashes (`src/utils/pinSecurity.ts`), never plaintext, with legacy plaintext values transparently upgraded on next use and a 4-attempt lockout.
 * **Scoped Paymaster Proxy:** The gas-sponsorship proxy (`/api/paymaster`) allowlists only ERC-7677 paymaster JSON-RPC methods, so it can't be abused as a general-purpose RPC relay running on your CDP key.
+
+---
+
+## 📖 User-Facing Documentation Surfaces
+
+Four places tell users what AbaPay does. They are **not** generated from anything — they go
+stale silently unless deliberately updated, so treat them as part of the change, not as an
+afterthought:
+
+| Surface | Where | Reached from |
+|---|---|---|
+| Docs & FAQ page | `src/app/docs/page.tsx` | "Docs & FAQ" link in `AppFooter` |
+| Terms of Service (full) | `src/app/terms/page.tsx` | "Terms" link in `AppFooter` |
+| Privacy Policy (full) | `src/app/privacy/page.tsx` | "Privacy" link in `AppFooter` |
+| In-app Terms / Privacy modals | `src/components/Modals.tsx` | Modal components; short plain-language summaries |
+| This README | `README.md` | GitHub |
+
+⚠️ The in-app `TermsModal`/`PrivacyModal` are **plain-language summaries written by engineers,
+not lawyers**, and have not had legal review. The `/terms` and `/privacy` routes are the longer
+documents. Neither should be treated as legally vetted until a qualified lawyer has reviewed
+them.
 
 ---
 
