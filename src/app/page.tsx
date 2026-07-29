@@ -13,7 +13,7 @@ import {
 } from "lucide-react";
 import { supabase } from "@/utils/supabase";
 import { celoAttributionSuffix } from "@/lib/attribution";
-import { ELECTRICITY_DISCOS } from "./discos";
+import { useProviders, useValidSelection, useProviderLimits } from "@/lib/useProviders";
 import { useAccount, useConnect, useDisconnect, useWalletClient, useSwitchChain } from 'wagmi';
 import { createThirdwebClient } from "thirdweb";
 import { useSetActiveWallet, useFetchWithPayment } from "thirdweb/react";
@@ -26,11 +26,10 @@ import DataVariationsUI from "@/components/DataVariationsUI";
 import AppFooter from "@/components/AppFooter"; 
 import { AgentHub } from "@/components/AgentHub";
 import { AIChat } from "@/components/AIChat";
-import { 
-  ABAPAY_ABI, ERC20_ABI, SERVICES, CABLE_PROVIDERS_LIST, TELECOM_PROVIDERS, 
-  INTERNET_PROVIDERS, SUPPORTED_TOKENS, SUPPORTED_COUNTRIES, PRE_SELECT_AMOUNTS, 
-  ELEC_PRE_SELECT_AMOUNTS, ITEMS_PER_PAGE, extractVtpassArray,
-  ELECTRICITY_PROVIDER_IDS, EDUCATION_PROVIDERS
+import {
+  ABAPAY_ABI, ERC20_ABI, SERVICES,
+  SUPPORTED_TOKENS, SUPPORTED_COUNTRIES, PRE_SELECT_AMOUNTS,
+  ELEC_PRE_SELECT_AMOUNTS, ITEMS_PER_PAGE, extractVtpassArray
 } from "@/constants";
 import { HistoryTab } from "@/components/HistoryTab";
 import AppTour, { hasSeenTour, type TourTab } from "@/components/AppTour";
@@ -118,10 +117,13 @@ export default function Home() {
 
   const [activeCountry, setActiveCountry] = useState<{code: string, name: string, currency?: string, flag?: string}>(SUPPORTED_COUNTRIES[0]);
   const [activeService, setActiveService] = useState(SERVICES[0]);
-  const [elecProvider, setElecProvider] = useState(ELECTRICITY_PROVIDER_IDS[0]);
-  const [cableProvider, setCableProvider] = useState(CABLE_PROVIDERS_LIST[0].serviceID);
-  const [telecomProvider, setTelecomProvider] = useState(TELECOM_PROVIDERS[0]);
-  const [internetProvider, setInternetProvider] = useState(INTERNET_PROVIDERS[0].serviceID);
+  // ⚡ Seeded from the bundled list purely so the very first render has SOMETHING selected; the
+  // live lists below take over as soon as /api/providers answers, and useValidSelection moves
+  // the selection off any serviceID VTpass no longer offers.
+  const [elecProvider, setElecProvider] = useState("ikeja-electric");
+  const [cableProvider, setCableProvider] = useState("dstv");
+  const [telecomProvider, setTelecomProvider] = useState("mtn");
+  const [internetProvider, setInternetProvider] = useState("mtn-data");
   const [meterType, setMeterType] = useState<"prepaid" | "postpaid">("prepaid");
 
   const [intlCountries, setIntlCountries] = useState<any[]>([]);
@@ -174,9 +176,29 @@ export default function Home() {
   const currentTransactions = transactions.slice(indexOfFirstItem, indexOfLastItem);
   const totalPages = Math.ceil(transactions.length / ITEMS_PER_PAGE);
 
-  const currentDisco = useMemo(() => ELECTRICITY_DISCOS.find(d => d.serviceID === elecProvider), [elecProvider]);
-  const currentCable = useMemo(() => CABLE_PROVIDERS_LIST.find(c => c.serviceID === cableProvider), [cableProvider]);
-  const currentInternet = useMemo(() => INTERNET_PROVIDERS.find(c => c.serviceID === internetProvider), [internetProvider]);
+  // ⚡ LIVE PROVIDER LISTS — names, logos and amount limits straight from VTpass's
+  // /services?identifier=… catalogue (via /api/providers, since VTpass credentials are
+  // server-only). Nothing about the arrangement of the pickers changed; only the source of the
+  // data behind them. A provider VTpass adds appears here with no deploy; one it drops
+  // disappears, instead of being offered and then failing at vend time.
+  const { providers: telecomProviders } = useProviders('airtime');
+  const { providers: internetProviders } = useProviders('data');
+  const { providers: electricityProviders } = useProviders('electricity');
+  const { providers: cableProviders } = useProviders('cable');
+  const { providers: educationProviders } = useProviders('education');
+
+  const currentDisco = useMemo(() => electricityProviders.find(d => d.serviceID === elecProvider), [electricityProviders, elecProvider]);
+  const currentCable = useMemo(() => cableProviders.find(c => c.serviceID === cableProvider), [cableProviders, cableProvider]);
+  const currentInternet = useMemo(() => internetProviders.find(c => c.serviceID === internetProvider), [internetProviders, internetProvider]);
+  const currentTelecom = useMemo(() => telecomProviders.find(t => t.serviceID === telecomProvider), [telecomProviders, telecomProvider]);
+  const currentEducation = useMemo(() => educationProviders.find(e => e.serviceID === educationProvider), [educationProviders, educationProvider]);
+
+  // Keep every selection pointing at a service VTpass still sells (see useValidSelection).
+  useValidSelection(telecomProviders, telecomProvider, setTelecomProvider);
+  useValidSelection(internetProviders, internetProvider, setInternetProvider);
+  useValidSelection(electricityProviders, elecProvider, setElecProvider);
+  useValidSelection(cableProviders, cableProvider, setCableProvider);
+  useValidSelection(educationProviders, educationProvider, setEducationProvider);
 
   const isInternational = activeCountry.code !== "NG";
 
@@ -228,24 +250,53 @@ export default function Home() {
       return false;
   }, [killSwitches, activeTab, activeService, educationProvider, telecomProvider, internetProvider, elecProvider, cableProvider, isInternational]);
 
+  // ⚡ LIVE PER-PROVIDER AMOUNT LIMITS (VTpass minimium_amount / maximum_amount).
+  //
+  // 🔴 THE BUG THIS FIXES: the ceiling here was ONE flat number per service, but VTpass's real
+  // ceiling varies per network — mtn 200,000 · glo 100,000 · airtel 50,000 · etisalat 50,000.
+  // The flat ₦50,000 airtime cap therefore REFUSED a perfectly valid ₦120,000 MTN top-up, while
+  // simply raising it to a flat ₦200,000 would ACCEPT a ₦120,000 Airtel top-up that VTpass
+  // rejects at vend time — after the user has already paid on-chain. No single flat number is
+  // correct for all four networks, so the number now comes from the network itself.
+  //
+  // Electricity is the same story: the discos range from ₦100 (Ikeja, Aba) to ₦2,000 (Ibadan)
+  // against one hardcoded ₦1,000 default.
+  const telecomLimits = useProviderLimits(telecomProviders, telecomProvider);
+  const elecLimits = useProviderLimits(electricityProviders, elecProvider);
+
   const dynamicMinAmount = useMemo(() => {
     if (activeTab === "bank") return 1000;
-    if (activeService.id === "AIRTIME") return 100;
-    return 100; 
-  }, [activeService, activeTab]);
+    // 🔴 Deliberately Math.max, not a straight swap: VTpass's floor can only ever TIGHTEN our
+    // own ₦100 floor, never loosen it. MTN's published minimum is ₦10 — honouring that literally
+    // would silently drop the app's business minimum to ₦10 as a side effect of live sourcing,
+    // which is a pricing change nobody asked for. Where VTpass is STRICTER (Airtel's ₦50 floor,
+    // Ibadan's ₦2,000) it wins, because those are vends that would otherwise be paid for and
+    // then rejected.
+    if (activeService.id === "AIRTIME") return Math.max(100, telecomLimits.min ?? 0);
+    return 100;
+  }, [activeService, activeTab, telecomLimits.min]);
 
   const dynamicMaxAmount = useMemo(() => {
     if (activeTab === "bank") return 5000000;
-    if (activeService.id === "ELECTRICITY") return 1000000; 
-    if (activeService.id === "AIRTIME") return 50000;
-    return Infinity; 
-  }, [activeService, activeTab]);
+    // Falls back to the previous flat number when VTpass publishes no ceiling, so "unknown"
+    // never accidentally becomes "unlimited".
+    if (activeService.id === "ELECTRICITY") return elecLimits.max ?? 1000000;
+    if (activeService.id === "AIRTIME") return telecomLimits.max ?? 50000;
+    return Infinity;
+  }, [activeService, activeTab, telecomLimits.max, elecLimits.max]);
+
+  // The electricity floor is the stricter of VTpass's published disco minimum and whatever the
+  // meter verification came back with (a postpaid balance owed sets dynamicElecMin).
+  const effectiveElecMin = useMemo(
+    () => Math.max(dynamicElecMin, elecLimits.min ?? 0),
+    [dynamicElecMin, elecLimits.min]
+  );
 
   const isFixedPlan = isInternational 
     ? (selectedIntlVariation && selectedIntlVariation.fixedPrice === "Yes")
     : (activeTab === "education" || (activeTab === "pay" && (activeService.id === "INTERNET" || activeService.id === "CABLE")));
 
-  const currentMinDisplay = (activeTab === "pay" && activeService.id === "ELECTRICITY") ? dynamicElecMin : dynamicMinAmount;
+  const currentMinDisplay = (activeTab === "pay" && activeService.id === "ELECTRICITY") ? effectiveElecMin : dynamicMinAmount;
 
   const displayForeignAmount = useMemo(() => {
       if (!isInternational) return "0";
@@ -362,7 +413,7 @@ export default function Home() {
     } else if (activeTab === "bank") {
       title = `Transfer to ${selectedBank?.name || "Bank"}`; recipientLabel = "Account";
     } else if (activeTab === "education") {
-      title = EDUCATION_PROVIDERS.find(p => p.serviceID === educationProvider)?.displayName || "Education";
+      title = currentEducation?.displayName || "Education";
       recipient = educationProvider === "jamb" ? accountNumber : customerPhone; recipientLabel = educationProvider === "jamb" ? "Profile ID" : "Phone Number";
     } else {
       if (activeService.id === "AIRTIME") { 
@@ -432,7 +483,7 @@ export default function Home() {
     const amount = parseFloat(nairaAmount);
     if (!nairaAmount || isNaN(amount)) return false;
     if (!isFixedPlan) {
-        const activeMinAmount = (activeTab === "pay" && activeService.id === "ELECTRICITY") ? dynamicElecMin : dynamicMinAmount;
+        const activeMinAmount = (activeTab === "pay" && activeService.id === "ELECTRICITY") ? effectiveElecMin : dynamicMinAmount;
         if (amount < activeMinAmount || amount > dynamicMaxAmount) return false;
     }
     if (activeTab === "bank") return accountNumber.length === 10 && customerName !== null && selectedBank !== null && customerPhone.length >= 10;
@@ -460,7 +511,7 @@ export default function Home() {
       }
     }
     return false;
-  }, [isInternational, selectedIntlProduct, selectedIntlOperator, selectedIntlVariation, intlFlexibleAmount, customerEmail, accountNumber, nairaAmount, activeService, customerName, dynamicMinAmount, dynamicMaxAmount, dynamicElecMin, cableSubscriptionType, selectedCablePlan, selectedBank, selectedInternetPlan, internetAccountId, customerPhone, internetProvider, activeTab, cableProvider, selectedEducationPlan, educationProvider, isFixedPlan, isCurrentServiceDisabled]);
+  }, [isInternational, selectedIntlProduct, selectedIntlOperator, selectedIntlVariation, intlFlexibleAmount, customerEmail, accountNumber, nairaAmount, activeService, customerName, dynamicMinAmount, dynamicMaxAmount, effectiveElecMin, cableSubscriptionType, selectedCablePlan, selectedBank, selectedInternetPlan, internetAccountId, customerPhone, internetProvider, activeTab, cableProvider, selectedEducationPlan, educationProvider, isFixedPlan, isCurrentServiceDisabled]);
 
   const showToast = (title: string, message: string, type: 'success' | 'error' = 'success') => {
     setToast({ title, message, type }); setTimeout(() => setToast(null), 5000);
@@ -1719,10 +1770,15 @@ export default function Home() {
       .then(data => {
           const countriesArr = extractVtpassArray(data);
           if (countriesArr && countriesArr.length > 0) {
-              const fetched = countriesArr.map((c: any) => ({ 
-                  code: c.code || c.country_code || c.id, 
+              // ⚡ `flag` is VTpass's own flag image URL. It was being DROPPED here, so the
+              // picker fell back to a third-party flag CDN (flagcdn.com) for every country —
+              // an extra external dependency for artwork VTpass already hands us in the same
+              // response. Carried through now; flagcdn stays as the fallback in SelectionModal.
+              const fetched = countriesArr.map((c: any) => ({
+                  code: c.code || c.country_code || c.id,
                   name: c.name || c.country || c.title,
-                  currency: c.currency || c.currency_code || c.Currency 
+                  currency: c.currency || c.currency_code || c.Currency,
+                  flag: c.flag
               })).filter((c:any) => c.code && c.name);
               const merged = [...SUPPORTED_COUNTRIES.filter(c=>!c.disabled), ...fetched.filter((c:any) => c.code !== "NG")];
               setIntlCountries(merged);
@@ -2476,7 +2532,7 @@ export default function Home() {
                     <label className="text-[10px] font-black text-slate-400 dark:text-slate-500 uppercase mb-3 block">Service</label>
                     <button 
                         onClick={() => {
-                            const optionsWithStatus = EDUCATION_PROVIDERS.map(p => {
+                            const optionsWithStatus = educationProviders.map(p => {
                                 const isMasterOff = killSwitches['MASTER_EDUCATION'] === false;
                                 const isProviderOff = killSwitches[`EDU_${p.serviceID}`] === false;
                                 return { ...p, disabled: isMasterOff || isProviderOff };
@@ -2491,7 +2547,7 @@ export default function Home() {
                             </div>
                             <div>
                                 <span className="text-sm font-black text-slate-900 dark:text-white tracking-tight uppercase">
-                                  {EDUCATION_PROVIDERS.find(p => p.serviceID === educationProvider)?.displayName || 'Select Service'}
+                                  {currentEducation?.displayName || 'Select Service'}
                                 </span>
                             </div>
                         </div>
@@ -2779,50 +2835,51 @@ export default function Home() {
                         </div>
                     ) : (
                         activeService.id === "INTERNET" ? (
-                            <button onClick={() => openSelectionModal('provider', "Select Provider", INTERNET_PROVIDERS, (val) => handleProviderChange(val, 'internet'))} className="w-full bg-white dark:bg-[#1a1a1f] border border-slate-200 dark:border-slate-800/80 p-4 rounded-2xl flex justify-between items-center hover:border-sky-400 dark:hover:border-sky-600 transition-colors shadow-sm active:scale-[0.98]">
+                            <button onClick={() => openSelectionModal('provider', "Select Provider", internetProviders, (val) => handleProviderChange(val, 'internet'))} className="w-full bg-white dark:bg-[#1a1a1f] border border-slate-200 dark:border-slate-800/80 p-4 rounded-2xl flex justify-between items-center hover:border-sky-400 dark:hover:border-sky-600 transition-colors shadow-sm active:scale-[0.98]">
                                 <div className="flex items-center gap-4">
-                                    <div className="w-12 h-12 shrink-0 rounded-full border border-slate-100 dark:border-slate-800/50 bg-sky-50 dark:bg-sky-900/20 flex items-center justify-center shadow-inner overflow-hidden transition-colors"><img src={currentInternet?.logo || '/wifi.png'} alt={currentInternet?.displayName} className="w-full h-full object-contain" /></div>
+                                    <div className="w-12 h-12 shrink-0 rounded-full border border-slate-100 dark:border-slate-800/50 bg-sky-50 dark:bg-sky-900/20 flex items-center justify-center shadow-inner overflow-hidden transition-colors"><img src={currentInternet?.logo || '/wifi.png'} alt={currentInternet?.displayName} onError={(e) => { e.currentTarget.src = '/logo.png'; }} className="w-full h-full object-contain" /></div>
                                     <span className="text-sm font-black text-slate-900 dark:text-white tracking-tight">{currentInternet?.displayName}</span>
                                 </div><ChevronDown size={18} className="text-slate-400 dark:text-slate-500"/>
                             </button>
                         ) : activeService.id === "AIRTIME" ? (
                             <button 
                                 onClick={() => {
-                                    const optionsWithStatus = TELECOM_PROVIDERS.map(p => {
-                                        const isMasterOff = killSwitches['MASTER_AIRTIME'] === false;
-                                        const isProviderOff = killSwitches[`AIRTIME_${p.toLowerCase()}`] === false;
-                                        return { 
-                                            serviceID: p, 
-                                            displayName: p === 'etisalat' ? '9MOBILE' : p.toUpperCase(), 
-                                            logo: `/${p === 'etisalat' ? '9mobile' : p}.png`, 
-                                            disabled: isMasterOff || isProviderOff 
-                                        };
-                                    });
+                                    // 🔴 This used to BUILD a logo path from the provider string
+                                    // (`/${p}.png`, with a special case renaming etisalat ->
+                                    // 9mobile) and lean on an onError handler to swap in
+                                    // /logo.png when the guess was wrong. Every new network
+                                    // needed both a code change and a new PNG. Name and logo now
+                                    // come from VTpass with the rest of the list.
+                                    const optionsWithStatus = telecomProviders.map(p => ({
+                                        ...p,
+                                        disabled: killSwitches['MASTER_AIRTIME'] === false
+                                               || killSwitches[`AIRTIME_${p.serviceID.toLowerCase()}`] === false,
+                                    }));
                                     openSelectionModal('standard', "Select Network", optionsWithStatus, (val) => handleProviderChange(val, 'telecom'));
                                 }}
                                 className="w-full bg-white dark:bg-[#1a1a1f] border border-slate-200 dark:border-slate-800/80 p-4 rounded-2xl flex justify-between items-center hover:border-emerald-400 dark:hover:border-emerald-600 transition-colors shadow-sm active:scale-[0.98]"
                             >
                                 <div className="flex items-center gap-4">
                                     <div className="w-12 h-12 shrink-0 rounded-full border border-slate-100 dark:border-slate-800/50 bg-emerald-50 dark:bg-emerald-900/20 flex items-center justify-center shadow-inner overflow-hidden transition-colors">
-                                        <img src={`/${telecomProvider === 'etisalat' ? '9mobile' : telecomProvider}.png`} alt={telecomProvider} className="w-full h-full object-contain" onError={(e) => { e.currentTarget.src = '/logo.png'; }} />
+                                        <img src={currentTelecom?.logo || '/logo.png'} alt={currentTelecom?.displayName || telecomProvider} className="w-full h-full object-contain" onError={(e) => { e.currentTarget.src = '/logo.png'; }} />
                                     </div>
                                     <span className="text-sm font-black text-slate-900 dark:text-white tracking-tight uppercase">
-                                        {telecomProvider === 'etisalat' ? '9MOBILE' : telecomProvider}
+                                        {currentTelecom?.displayName || telecomProvider}
                                     </span>
                                 </div>
                                 <ChevronDown size={18} className="text-slate-400 dark:text-slate-500"/>
                             </button>
                         ) : activeService.id === "ELECTRICITY" ? (
-                            <button onClick={() => openSelectionModal('provider', "Select Provider", ELECTRICITY_DISCOS, (val) => handleProviderChange(val, 'elec'))} className="w-full bg-white dark:bg-[#1a1a1f] border border-slate-200 dark:border-slate-800/80 p-4 rounded-2xl flex justify-between items-center hover:border-orange-400 dark:hover:border-orange-600 transition-colors shadow-sm active:scale-[0.98]">
+                            <button onClick={() => openSelectionModal('provider', "Select Provider", electricityProviders, (val) => handleProviderChange(val, 'elec'))} className="w-full bg-white dark:bg-[#1a1a1f] border border-slate-200 dark:border-slate-800/80 p-4 rounded-2xl flex justify-between items-center hover:border-orange-400 dark:hover:border-orange-600 transition-colors shadow-sm active:scale-[0.98]">
                                 <div className="flex items-center gap-4">
-                                    <div className="w-12 h-12 shrink-0 rounded-full border border-slate-100 dark:border-slate-800/50 bg-white dark:bg-slate-800 p-0.5 flex items-center justify-center shadow-inner overflow-hidden transition-colors"><img src={currentDisco?.logo} alt={currentDisco?.displayName} className="w-full h-full object-contain" /></div>
+                                    <div className="w-12 h-12 shrink-0 rounded-full border border-slate-100 dark:border-slate-800/50 bg-white dark:bg-slate-800 p-0.5 flex items-center justify-center shadow-inner overflow-hidden transition-colors"><img src={currentDisco?.logo || '/logo.png'} alt={currentDisco?.displayName} onError={(e) => { e.currentTarget.src = '/logo.png'; }} className="w-full h-full object-contain" /></div>
                                     <span className="text-sm font-black text-slate-900 dark:text-white tracking-tight">{currentDisco?.displayName}</span>
                                 </div><ChevronDown size={18} className="text-slate-400 dark:text-slate-500"/>
                             </button>
                         ) : (
-                          <button onClick={() => openSelectionModal('provider', "Select Provider", CABLE_PROVIDERS_LIST, (val) => handleProviderChange(val, 'cable'))} className="w-full bg-white dark:bg-[#1a1a1f] border border-slate-200 dark:border-slate-800/80 p-4 rounded-2xl flex justify-between items-center hover:border-pink-400 dark:hover:border-pink-600 transition-colors shadow-sm active:scale-[0.98]">
+                          <button onClick={() => openSelectionModal('provider', "Select Provider", cableProviders, (val) => handleProviderChange(val, 'cable'))} className="w-full bg-white dark:bg-[#1a1a1f] border border-slate-200 dark:border-slate-800/80 p-4 rounded-2xl flex justify-between items-center hover:border-pink-400 dark:hover:border-pink-600 transition-colors shadow-sm active:scale-[0.98]">
                             <div className="flex items-center gap-4">
-                                <div className="w-12 h-12 shrink-0 rounded-full border border-slate-100 dark:border-slate-800/50 bg-white dark:bg-slate-800 p-0.5 flex items-center justify-center shadow-inner overflow-hidden transition-colors"><img src={currentCable?.logo} alt={currentCable?.displayName} className="w-full h-full object-contain" /></div>
+                                <div className="w-12 h-12 shrink-0 rounded-full border border-slate-100 dark:border-slate-800/50 bg-white dark:bg-slate-800 p-0.5 flex items-center justify-center shadow-inner overflow-hidden transition-colors"><img src={currentCable?.logo || '/logo.png'} alt={currentCable?.displayName} onError={(e) => { e.currentTarget.src = '/logo.png'; }} className="w-full h-full object-contain" /></div>
                                 <span className="text-sm font-black text-slate-900 dark:text-white tracking-tight">{currentCable?.displayName}</span>
                             </div><ChevronDown size={18} className="text-slate-400 dark:text-slate-500"/>
                           </button>

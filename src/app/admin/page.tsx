@@ -15,8 +15,7 @@ import { AdminAgentPanel } from "@/components/AdminAgentPanel";
 import { AdminDiscountsPanel } from "@/components/AdminDiscountsPanel";
 import { AdminOpsPanel } from "@/components/AdminOpsPanel";
 
-import { TELECOM_PROVIDERS, INTERNET_PROVIDERS, CABLE_PROVIDERS_LIST, EDUCATION_PROVIDERS } from "@/constants";
-import { ELECTRICITY_DISCOS } from "../discos"; 
+import { useProviders } from "@/lib/useProviders";
 
 // ⚡ V2/V3 replaced the old one-shot `withdrawFunds` with a timelocked
 // queue → wait 24h → execute flow (see contracts/AbaPayV3.sol). `withdrawFunds`
@@ -847,12 +846,28 @@ export default function AdminDashboard() {
     const a = document.createElement('a'); a.href = url; a.download = `AbaPay_Report_${timeFilter}.csv`; a.click();
   };
 
+  // ⚡ The per-provider kill switches are built from the SAME live VTpass catalogue the
+  // customer-facing pickers use.
+  //
+  // 🔴 WHY THIS HAD TO MOVE OFF THE HARDCODED LISTS TOO: these switches are keyed by VTpass
+  // serviceID (`INTERNET_glo-sme-data`), and the web app blocks a payment when the matching key
+  // is false. Leaving admin on the old constants would have meant users could see and buy
+  // `glo-sme-data`/`9mobile-sme-data` — live on VTpass, absent from the old list — with NO
+  // switch anywhere in the dashboard to pause them during an incident. The reverse was just as
+  // bad: three toggles (`CABLE_showmax`, `INTERNET_spectranet`, `EDU_jamb`) for services that
+  // do not exist on this merchant account, which an operator could flip forever with no effect.
+  const { providers: telecomProviders } = useProviders('airtime');
+  const { providers: internetProviders } = useProviders('data');
+  const { providers: electricityProviders } = useProviders('electricity');
+  const { providers: cableProviders } = useProviders('cable');
+  const { providers: educationProviders } = useProviders('education');
+
   const switchGroups = [
-      { title: "Airtime", master: "MASTER_AIRTIME", providers: TELECOM_PROVIDERS.map(p => ({ id: `AIRTIME_${p}`, name: p.toUpperCase() })) },
-      { title: "Internet Data", master: "MASTER_INTERNET", providers: INTERNET_PROVIDERS.map(p => ({ id: `INTERNET_${p.serviceID}`, name: p.displayName })) },
-      { title: "Electricity", master: "MASTER_ELECTRICITY", providers: ELECTRICITY_DISCOS.map(p => ({ id: `ELEC_${p.serviceID}`, name: p.displayName })) },
-      { title: "Cable TV", master: "MASTER_CABLE", providers: CABLE_PROVIDERS_LIST.map(p => ({ id: `CABLE_${p.serviceID}`, name: p.displayName })) },
-      { title: "Education", master: "MASTER_EDUCATION", providers: EDUCATION_PROVIDERS.map(p => ({ id: `EDU_${p.serviceID}`, name: p.displayName })) }
+      { title: "Airtime", master: "MASTER_AIRTIME", providers: telecomProviders.map(p => ({ id: `AIRTIME_${p.serviceID}`, name: p.displayName })) },
+      { title: "Internet Data", master: "MASTER_INTERNET", providers: internetProviders.map(p => ({ id: `INTERNET_${p.serviceID}`, name: p.displayName })) },
+      { title: "Electricity", master: "MASTER_ELECTRICITY", providers: electricityProviders.map(p => ({ id: `ELEC_${p.serviceID}`, name: p.displayName })) },
+      { title: "Cable TV", master: "MASTER_CABLE", providers: cableProviders.map(p => ({ id: `CABLE_${p.serviceID}`, name: p.displayName })) },
+      { title: "Education", master: "MASTER_EDUCATION", providers: educationProviders.map(p => ({ id: `EDU_${p.serviceID}`, name: p.displayName })) }
   ];
 
 

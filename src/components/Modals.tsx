@@ -1,6 +1,6 @@
 import React, { useRef, useState, useEffect } from "react";
 import { CheckCircle2, ExternalLink, Share2, HelpCircle, XCircle, Loader2, Search, Download } from "lucide-react";
-import { SUPPORTED_COUNTRIES, SUPPORTED_TOKENS } from "@/constants";
+import { SUPPORTED_TOKENS } from "@/constants";
 
 // ⚡ International transactions store a pre-formatted currency string (e.g. "GHS 2.50").
 // Domestic transactions store a plain NGN number. Render each correctly instead of forcing ₦ on everything.
@@ -458,10 +458,14 @@ export function SelectionModal({
                <button key={country.code} disabled={country.disabled} onClick={() => { if (!country.disabled) { onSelect(country.code); onClose(); } }}
                  className={`w-full text-left p-4 rounded-xl font-bold text-sm transition-all flex justify-between items-center ${country.disabled ? 'bg-slate-50 dark:bg-[#1a1a1f]/50 border border-slate-100 dark:border-slate-800/50 text-slate-400 dark:text-slate-600 cursor-not-allowed' : 'text-slate-700 dark:text-slate-300 bg-slate-50 dark:bg-[#1a1a1f] border border-slate-100 dark:border-slate-800/80 hover:border-emerald-300 dark:hover:border-emerald-700 hover:bg-emerald-50/50 dark:hover:bg-emerald-900/20'}`}>
                  <div className="flex items-center gap-3">
-                   <img 
-                     src={`https://flagcdn.com/w40/${country.code.toLowerCase()}.png`} 
-                     alt={country.name} 
-                     className={`w-7 h-auto rounded-sm shadow-sm ${country.disabled ? 'opacity-50 grayscale' : ''}`} 
+                   {/* ⚡ VTpass ships a flag URL with every country it supports — prefer its own
+                       artwork (same reason the provider pickers use VTpass's product images),
+                       and keep flagcdn as the fallback for the local "NG" entry, which is not
+                       part of VTpass's international catalogue and so carries no flag. */}
+                   <img
+                     src={country.flag || `https://flagcdn.com/w40/${country.code.toLowerCase()}.png`}
+                     alt={country.name}
+                     className={`w-7 h-auto rounded-sm shadow-sm ${country.disabled ? 'opacity-50 grayscale' : ''}`}
                      onError={(e) => { e.currentTarget.style.display = 'none'; }}
                    />
                    <span className={`font-black ${country.disabled ? 'text-slate-400 dark:text-slate-600' : 'text-slate-800 dark:text-slate-200'}`}>{country.name}</span>

@@ -1,5 +1,4 @@
 import { Phone, Globe, Lightbulb, Tv } from "lucide-react";
-import { ELECTRICITY_DISCOS } from "@/app/discos";
 
 export const ABAPAY_ABI = [{"inputs":[{"internalType":"address","name":"tokenAddress","type":"address"},{"internalType":"string","name":"serviceType","type":"string"},{"internalType":"string","name":"accountNumber","type":"string"},{"internalType":"uint256","name":"amount","type":"uint256"}],"name":"payBill","outputs":[],"stateMutability":"nonpayable","type":"function"}];
 
@@ -26,31 +25,21 @@ export const SERVICES = [
   { id: "CABLE", name: "Cable TV", icon: Tv, color: "text-[#ec4899]", bg: "bg-pink-500/10" },
 ];
 
-export const ELECTRICITY_PROVIDER_IDS = ELECTRICITY_DISCOS.map(d => d.serviceID); 
-
-export const CABLE_PROVIDERS_LIST = [
-  { serviceID: "dstv", displayName: "DSTV", logo: "/dstv.png" },
-  { serviceID: "gotv", displayName: "GOTV", logo: "/gotv.png" },
-  { serviceID: "startimes", displayName: "Startimes", logo: "/startimes.png" }, 
-  { serviceID: "showmax", displayName: "Showmax", logo: "/showmax.png" },
-];
-
-export const TELECOM_PROVIDERS = ["mtn", "glo", "etisalat", "airtel"]; 
-
-export const INTERNET_PROVIDERS = [
-  { serviceID: "mtn-data", displayName: "MTN Data", logo: "/mtn.png" },
-  { serviceID: "glo-data", displayName: "Glo Data", logo: "/glo.png" },
-  { serviceID: "airtel-data", displayName: "Airtel Data", logo: "/airtel.png" },
-  { serviceID: "etisalat-data", displayName: "9Mobile Data", logo: "/9mobile.png" },
-  { serviceID: "smile-direct", displayName: "Smile Network", logo: "/smile.png" },
-  { serviceID: "spectranet", displayName: "Spectranet", logo: "/spectranet.png" }
-];
-
-export const EDUCATION_PROVIDERS = [
-  { serviceID: "waec", displayName: "WAEC Result Checker", logo: "/waec.png" },
-  { serviceID: "waec-registration", displayName: "WAEC Registration", logo: "/waec.png" },
-  { serviceID: "jamb", displayName: "JAMB PIN Vending", logo: "/jamb.png" }
-];
+// ⚡ ELECTRICITY_PROVIDER_IDS / CABLE_PROVIDERS_LIST / TELECOM_PROVIDERS / INTERNET_PROVIDERS /
+// EDUCATION_PROVIDERS USED TO LIVE HERE. Every one of them is now sourced LIVE from VTpass's
+// /services?identifier=… catalogue:
+//
+//   • web app  -> src/lib/useProviders.ts  -> GET /api/providers?category=…
+//   • chat/MCP -> src/lib/deai/selection.ts -> getCatalog() in-process
+//   • both land on the same 1h TTL cache in src/lib/vtpassCatalog.ts
+//
+// The only remaining hardcoded copy is src/lib/providerFallback.ts, which exists purely so a
+// cold start during a VTpass outage degrades to a usable picker instead of an empty one.
+//
+// 🔴 These lists were not merely stale, they were WRONG in both directions: they advertised
+// `showmax`, `spectranet` and `jamb` (VTpass: "Service is Not Valid" on this merchant account —
+// a user could pick one, pay on-chain, and only then have the vend fail) while omitting
+// `glo-sme-data` and `9mobile-sme-data`, which are live and were unreachable from the app.
 
 export const SUPPORTED_TOKENS = [
   {
@@ -103,9 +92,22 @@ export function resolveTokenOnChain(symbol: string, blockchain: string, isMainne
   return { address: address.toLowerCase(), decimals: token.decimals };
 }
 
+// ⚡ THE HOME COUNTRY ONLY — not the supported-country list.
+//
+// The real list is fetched live from VTpass (/api/intl?action=countries -> 100+ countries with
+// their own flag URLs and currencies) and merged in front of this entry; see page.tsx's
+// intlCountries effect. Nigeria stays hardcoded because it is the DOMESTIC side of the app, not
+// an entry in VTpass's international-airtime catalogue — it has no VTpass country record to
+// source from, and `activeCountry.code !== "NG"` is what switches the whole form into
+// international mode.
+//
+// 🔴 REMOVED: a second entry, `{ code: "SOON", name: "Other countries coming soon",
+// disabled: true }`. It was dead weight that actively misled anyone reading this file into
+// thinking international was unbuilt — every consumer already filtered it out
+// (`SUPPORTED_COUNTRIES.filter(c => !c.disabled)`), so it was unreachable in the running app
+// while the live list it claimed was "coming soon" had been shipping the whole time.
 export const SUPPORTED_COUNTRIES = [
-  { code: "NG", name: "Nigeria", flag: "🇳🇬", disabled: false },
-  { code: "SOON", name: "Other countries coming soon", flag: "🌍", disabled: true }
+  { code: "NG", name: "Nigeria", flag: "🇳🇬", disabled: false }
 ];
 
 export const PRE_SELECT_AMOUNTS = ["100", "200", "500", "1000", "2000"];
