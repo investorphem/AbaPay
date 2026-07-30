@@ -8,11 +8,17 @@ import { join } from 'node:path';
 // block alongside the plain-text result, so a pay_bill/list_transactions call in Claude (or
 // any MCP client that renders inline images) shows a branded card, not just a wall of text.
 //
-// 🔴 NO NAIRA GLYPH INSIDE THE IMAGE: Satori's bundled default font is a subset that does not
-// reliably include "₦" — an unsupported glyph renders as a blank/tofu box, which would make
-// the "premium" card look broken rather than premium. The plain-text MCP responses keep using
-// ₦ freely (that's just UTF-8 text in a chat message, no font subsetting involved); anything
-// baked into a PNG here spells it out as "NGN" instead.
+// 🔴 NO EXOTIC GLYPHS INSIDE THE IMAGE: Satori's bundled default font is a subset that does
+// not cover "₦" (confirmed by design — callers pre-format as "NGN" for image use) or "₮" (found
+// live in production: "USD₮" rendered with a blank/tofu box where the Tether sign should be —
+// the original comment on cryptoCharged claiming "Latin token symbols only" was simply wrong).
+// An unsupported glyph renders as a blank box, which makes the "premium" card look broken
+// rather than premium. The plain-text MCP responses keep using ₦/₮ freely (that's just UTF-8
+// text in a chat message, no font subsetting involved) — this sanitizer only ever touches what
+// gets baked into the PNG.
+function imgSafe(s: string): string {
+  return String(s || '').replace(/₦/g, 'NGN ').replace(/₮/g, 'T');
+}
 
 let logoDataUrlPromise: Promise<string> | null = null;
 function getLogoDataUrl(): Promise<string> {
@@ -45,7 +51,7 @@ function Row({ label, value, accent }: { label: string; value: string; accent?: 
           textAlign: 'right',
         }}
       >
-        {value}
+        {imgSafe(value)}
       </span>
     </div>
   );
@@ -123,12 +129,15 @@ export async function receiptImageResponse(data: ReceiptCardData): Promise<Image
                 background: accent,
                 alignItems: 'center',
                 justifyContent: 'center',
-                fontSize: 20,
-                fontWeight: 800,
-                color: '#0b0b0e',
               }}
             >
-              {ok ? '✓' : '!'}
+              {ok ? (
+                // Drawn with borders, not a "✓" glyph — Satori's bundled font doesn't cover it
+                // (confirmed live: it rendered as a blank tofu box in production).
+                <div style={{ display: 'flex', width: 14, height: 8, marginTop: -2, borderLeft: '3px solid #0b0b0e', borderBottom: '3px solid #0b0b0e', transform: 'rotate(-45deg)' }} />
+              ) : (
+                <span style={{ display: 'flex', fontSize: 20, fontWeight: 800, color: '#0b0b0e' }}>!</span>
+              )}
             </div>
             <span style={{ display: 'flex', fontSize: 22, fontWeight: 800, color: accent }}>
               {ok ? 'Payment Successful' : 'Payment Failed'}
@@ -140,8 +149,8 @@ export async function receiptImageResponse(data: ReceiptCardData): Promise<Image
             <span style={{ display: 'flex', fontSize: 14, color: MUTED, fontWeight: 700, textTransform: 'uppercase', letterSpacing: 1.5 }}>
               Amount Paid
             </span>
-            <span style={{ display: 'flex', fontSize: 50, color: WHITE, fontWeight: 800, marginTop: 4 }}>{data.displayAmountNgn}</span>
-            <span style={{ display: 'flex', fontSize: 16, color: MUTED, marginTop: 2 }}>{data.cryptoCharged}</span>
+            <span style={{ display: 'flex', fontSize: 50, color: WHITE, fontWeight: 800, marginTop: 4 }}>{imgSafe(data.displayAmountNgn)}</span>
+            <span style={{ display: 'flex', fontSize: 16, color: MUTED, marginTop: 2 }}>{imgSafe(data.cryptoCharged)}</span>
           </div>
 
           {/* details */}
@@ -247,13 +256,13 @@ export async function renderHistoryStatementImage(rows: HistoryRow[], wallet: st
                   }}
                 >
                   <div style={{ display: 'flex', flexDirection: 'column' }}>
-                    <span style={{ display: 'flex', fontSize: 16, fontWeight: 700, color: WHITE }}>{row.serviceLabel}</span>
+                    <span style={{ display: 'flex', fontSize: 16, fontWeight: 700, color: WHITE }}>{imgSafe(row.serviceLabel)}</span>
                     <span style={{ display: 'flex', fontSize: 13, color: MUTED, marginTop: 2 }}>
-                      {row.date} • {row.accountNumber}
+                      {row.date} - {imgSafe(row.accountNumber)}
                     </span>
                   </div>
                   <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end' }}>
-                    <span style={{ display: 'flex', fontSize: 16, fontWeight: 800, color: WHITE }}>{row.displayAmountNgn}</span>
+                    <span style={{ display: 'flex', fontSize: 16, fontWeight: 800, color: WHITE }}>{imgSafe(row.displayAmountNgn)}</span>
                     <span style={{ display: 'flex', fontSize: 12, fontWeight: 700, color, textTransform: 'uppercase', letterSpacing: 1, marginTop: 2 }}>
                       {row.status}
                     </span>
