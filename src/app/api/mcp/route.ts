@@ -9,12 +9,16 @@ import { getRemainingAllowance } from '@/lib/deai/relayer';
 import { SUPPORTED_TOKENS } from '@/constants';
 import { providersForIntent } from '@/lib/vtpassCatalog';
 import { checkAccountNumber, checkAmountLive, requiresVariation, requiresVerifiedName } from '@/lib/parity';
-import { checkAutonomousCapacity, executeAgentPayment, type BatchItem } from '@/lib/deai/batch';
+import { checkAutonomousCapacity, executeAgentPayment, type BatchItem, type AgentPaymentResult } from '@/lib/deai/batch';
 import { fetchVariations, variationServiceId } from '@/lib/deai/selection';
 import { resolveMcpIdentity, type McpIdentity } from '@/lib/deai/mcpAuth';
 import { validateAccessToken } from '@/lib/deai/mcpOAuth';
 import { checkPinAllowed, recordPinFailure, clearPinFailures, notifySpendOutOfBand } from '@/lib/deai/pinSecurity';
 import { verifyPin } from '@/utils/pinSecurity';
+import { renderReceiptImage, renderHistoryStatementImage } from '@/lib/deai/receiptCard';
+import { explorerBaseFor } from '@/lib/chain';
+import { resolveCountry, fetchCountries, fetchProducts, fetchOperators, fetchIntlVariations } from '@/lib/deai/international';
+import { checkIntlMinimum } from '@/lib/parity';
 
 // ⚡ MCP SERVER — lets an AI agent (Claude, or any MCP-speaking client) check a balance or
 // pay a bill on behalf of a wallet that has explicitly linked and PIN-protected an API key
@@ -71,6 +75,15 @@ const SERVICE_INTENT: Record<string, string> = {
   // variation_code, checkAccountNumber() enforces JAMB's >=10-char profile ID, and
   // requiresVerifiedName() decides that only JAMB merchant-verifies.
   EDUCATION: 'EDUCATION',
+  // 🔴 THE GAP THIS FIXES: capabilities.ts has always marked INTERNATIONAL supportedInChat —
+  // but chat itself only ever VALIDATES an international request (country/account/amount) and
+  // then tells the user to finish it in the app (src/app/api/deai/core/route.ts's INTERNATIONAL
+  // branch literally replies "Open AbaPay to pick the operator and confirm"). MCP had no entry
+  // at all, so it couldn't even get that far. callPayBill's INTERNATIONAL branch below actually
+  // completes the purchase end-to-end — country → product type → operator → real variation
+  // (see list_international_options) → vend — making MCP the first agent surface that finishes
+  // an international payment itself rather than redirecting to the app.
+  INTERNATIONAL: 'INTERNATIONAL',
 };
 
 // 🔴 THE BUG THIS AVOIDS: a blanket `/[*_\`]/g` strip (an earlier version of this function)
@@ -93,6 +106,18 @@ function textResult(text: string) {
 
 function errorResult(text: string) {
   return { content: [{ type: 'text', text: stripMd(text) }], isError: true };
+}
+
+// Image block first, text second — MCP clients that render inline images (Claude included)
+// show the card as the visual lead-in, with the text underneath exactly like the screenshot
+// this was modeled on. A client that only supports text content just ignores the image block.
+function imageAndTextResult(pngBuffer: Buffer, text: string) {
+  return {
+    content: [
+      { type: 'image', data: pngBuffer.toString('base64'), mimeType: 'image/png' },
+      { type: 'text', text: stripMd(text) },
+    ],
+  };
 }
 
 // Which stablecoins actually exist on a given chain — same source (SUPPORTED_TOKENS) every
@@ -156,34 +181,80 @@ const TOOLS = [
     annotations: { title: 'List Plans', readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: true },
   },
   {
+    // Same "never guess a code" principle as list_plans, but for international top-ups: VTpass's
+    // catalogue is FOUR levels deep (country -> product type -> operator -> priced variation),
+    // so this drills down one level per call depending on which args are supplied, rather than
+    // needing four separate tools. Call with no args (or just `country`) to browse.
+    name: 'list_international_options',
+    title: 'List International Options',
+    description: "Browse the REAL, live international top-up catalogue (170+ countries) one level at a time. Call with no country to see supported countries. Add country to see its product types. Add product_type_id to see operators. Add operator_id too to see real, currently purchasable plans with their exact codes, foreign-currency price, and NGN-equivalent cost. ALWAYS call this before pay_bill with service: INTERNATIONAL, and pass back the exact country/product_type_id/operator_id/variation_code shown — never guess any of them. Only plans marked fixed-price can be paid via pay_bill right now; flexible-amount plans must be completed in the AbaPay app.",
+    inputSchema: {
+      type: 'object',
+      properties: {
+        country: { type: 'string', description: 'Country name or ISO code, e.g. "Ghana" or "GH". Omit to list all supported countries.' },
+        product_type_id: { type: 'string', description: 'A product_type_id returned for this country — e.g. which kind of top-up (airtime vs a data bundle). Omit to list the country\'s product types.' },
+        operator_id: { type: 'string', description: 'An operator_id returned for this country + product_type_id — the network to top up. Omit to list operators.' },
+      },
+      required: [],
+      additionalProperties: false,
+    },
+    // Read-only catalog lookup — no wallet, no auth, safe to call as often as needed.
+    annotations: { title: 'List International Options', readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: true },
+  },
+  {
+    // 🔴 THE GAP THIS FILLS: the app's own History tab has always let a user browse past
+    // transactions (src/components/HistoryTab.tsx, backed by the same `transactions` table),
+    // but MCP had no equivalent — an agent could pay a bill and check a balance, but never
+    // answer "what did I pay last week?" without the human opening the app. Same trust level
+    // as check_balance: read-only, no PIN, works with the linked wallet's own records only.
+    name: 'transaction_history',
+    title: 'Transaction History',
+    description: "List recent real transactions for the linked wallet — same data as the AbaPay app's History tab (service, provider, amount, status, tx hash). Read-only, no PIN required.",
+    inputSchema: {
+      type: 'object',
+      properties: {
+        api_key: { type: 'string', description: 'AbaPay MCP API key. NOT needed when the connector is authorized via OAuth — omit it entirely in that case.' },
+        limit: { type: 'number', description: 'How many recent transactions to return. Defaults to 10, max 25.' },
+      },
+      required: [],
+      additionalProperties: false,
+    },
+    annotations: { title: 'Transaction History', readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: true },
+  },
+  {
     name: 'pay_bill',
     title: 'Pay Bill',
-    description: 'Pay a real Nigerian bill (airtime, data, electricity, cable TV, or a WAEC/JAMB education PIN) from the linked wallet, settled on-chain and delivered via the same pipeline as the AbaPay app. For DATA, CABLE (when changing package), and EDUCATION, call list_plans first and use a real variation_code from it — never guess one. ALWAYS requires the PIN — including when this connector is authorized via OAuth; ask the human for it every time and never guess or reuse a remembered one. The api_key is only needed when OAuth is not in use. Money moves for real — only call this once the human has clearly confirmed the exact amount, provider, and account.',
+    description: 'Pay a real bill — Nigerian (airtime, data, electricity, cable TV, a WAEC/JAMB education PIN) or international airtime/data across 170+ countries — from the linked wallet, settled on-chain and delivered via the same pipeline as the AbaPay app. For DATA, CABLE (when changing package), and EDUCATION, call list_plans first and use a real variation_code from it. For service: INTERNATIONAL, call list_international_options first and pass back its exact country/product_type_id/operator_id/variation_code — never guess any of these. ALWAYS requires the PIN — including when this connector is authorized via OAuth; ask the human for it every time and never guess or reuse a remembered one. The api_key is only needed when OAuth is not in use. Money moves for real — only call this once the human has clearly confirmed the exact amount, provider, and account.',
     inputSchema: {
       type: 'object',
       properties: {
         api_key: { type: 'string', description: 'AbaPay MCP API key. NOT needed when the connector is authorized via OAuth — omit it entirely in that case.' },
         pin: { type: 'string', description: '4-6 digit PIN set when the API key was created. Required on EVERY payment, including over an OAuth connection — ask the human for it each time.' },
-        service: { type: 'string', enum: ['AIRTIME', 'DATA', 'ELECTRICITY', 'CABLE', 'EDUCATION'], description: 'Which kind of bill' },
-        provider: { type: 'string', description: 'e.g. mtn, airtel, glo, ikeja-electric, dstv, gotv, startimes, waec, waec-registration, jamb' },
+        service: { type: 'string', enum: ['AIRTIME', 'DATA', 'ELECTRICITY', 'CABLE', 'EDUCATION', 'INTERNATIONAL'], description: 'Which kind of bill' },
         // WAEC genuinely has no account of its own — the web app sends the buyer's phone as
         // the billers code (page.tsx: `payloadBillersCode = educationProvider === "jamb" ?
         // accountNumber : customerPhone`), so this one generic field covers both shapes as
         // long as the caller is told which value belongs here.
-        account_number: { type: 'string', description: "Phone number (airtime/data), meter number (electricity), smartcard/IUC number (cable), JAMB profile ID (education: jamb), or the buyer's phone number (education: waec — WAEC has no separate account, the PIN is delivered to this number)" },
-        amount_ngn: { type: 'number', description: 'Amount in Naira' },
+        provider: { type: 'string', description: 'e.g. mtn, airtel, glo, ikeja-electric, dstv, gotv, startimes, waec, waec-registration, jamb. Not used for service: INTERNATIONAL — use country/product_type_id/operator_id instead.' },
+        account_number: { type: 'string', description: "Phone number (airtime/data), meter number (electricity), smartcard/IUC number (cable), JAMB profile ID (education: jamb), the buyer's phone number (education: waec), or the destination phone number abroad (international)" },
+        amount_ngn: { type: 'number', description: 'Amount in Naira. Not needed for service: INTERNATIONAL — the NGN-equivalent is derived from the live plan you picked via list_international_options.' },
         chain: { type: 'string', enum: ['CELO', 'BASE'], description: 'Defaults to the chain approved when the API key was created. Only override this if the default chain lacks balance/allowance and check_balance shows funds on the other one.' },
         token: { type: 'string', enum: ['USD₮', 'USDC', 'USDm'], description: 'Which stablecoin to pay with. Defaults to the token approved when the API key was created. If that one is short on balance or on-chain allowance, call check_balance first to see what else is available on this chain, then retry with this field set — e.g. if USD₮ is short but the wallet holds USDC with its own approved limit, pass token: "USDC".' },
-        variation_code: { type: 'string', description: 'Plan/bundle/product code — required for DATA and EDUCATION (the exam product, e.g. the WAEC result-checker or the JAMB UTME PIN), and for CABLE when changing package (not needed to renew the current one)' },
+        variation_code: { type: 'string', description: 'Plan/bundle/product code — required for DATA, EDUCATION, and INTERNATIONAL, and for CABLE when changing package (not needed to renew the current one)' },
         meter_type: { type: 'string', enum: ['prepaid', 'postpaid'], description: 'Required for ELECTRICITY' },
         customer_name: { type: 'string', description: 'Optional — used for the receipt if known' },
-        customer_email: { type: 'string', description: 'Optional — receipt is sent here if provided' },
+        customer_email: { type: 'string', description: 'Required for service: INTERNATIONAL (the receipt goes here). Optional otherwise.' },
+        country: { type: 'string', description: 'Required for service: INTERNATIONAL — country name or ISO code, from list_international_options.' },
+        product_type_id: { type: 'string', description: 'Required for service: INTERNATIONAL — from list_international_options.' },
+        operator_id: { type: 'string', description: 'Required for service: INTERNATIONAL — from list_international_options.' },
       },
       // `pin` stays required, deliberately and permanently — OAuth removes the retyping of
       // the api_key, never the per-payment PIN confirmation. `api_key` is no longer required
       // because a valid Bearer token supplies the identity instead; the runtime check below
-      // enforces "one or the other" and returns a real 401 when there is neither.
-      required: ['pin', 'service', 'provider', 'account_number', 'amount_ngn'],
+      // enforces "one or the other" and returns a real 401 when there is neither. `provider` and
+      // `amount_ngn` are conditionally required (not for INTERNATIONAL) — enforced in code per
+      // branch rather than here, same treatment as `variation_code`/`meter_type` already get.
+      required: ['pin', 'service', 'account_number'],
       additionalProperties: false,
     },
     // Moves real money on-chain — irreversible, and calling it twice pays twice.
@@ -279,6 +350,312 @@ async function callCheckBalance(args: any, oauthIdentity: McpIdentity | null) {
   return textResult(lines.join('\n'));
 }
 
+async function callTransactionHistory(args: any, oauthIdentity: McpIdentity | null) {
+  const resolved = await resolveIdentity(args, oauthIdentity);
+  if ('error' in resolved) {
+    if (resolved.error === 'missing') return NEEDS_AUTH;
+    return errorResult(INVALID_KEY_MSG);
+  }
+  const identity = resolved.identity;
+
+  const limitRaw = Number(args?.limit);
+  const limit = Number.isFinite(limitRaw) && limitRaw > 0 ? Math.min(Math.floor(limitRaw), 25) : 10;
+
+  // Excludes preflight rows (never-broadcast intents, same convention as cleanupPreflights.ts)
+  // — those aren't real transactions a user would recognize as "something I did".
+  const { data, error } = await supabaseAdmin
+    .from('transactions')
+    .select('*')
+    .ilike('wallet_address', identity.wallet_address)
+    .not('tx_hash', 'like', 'preflight_%')
+    .order('created_at', { ascending: false })
+    .limit(limit);
+
+  if (error) {
+    console.error('[MCP] transaction_history query failed:', error.message);
+    return errorResult('Could not load transaction history right now — try again shortly.');
+  }
+  if (!data || data.length === 0) {
+    return textResult('No transactions found for this wallet yet.');
+  }
+
+  const lines = data.map((tx: any, i: number) => {
+    const date = new Date(tx.created_at).toLocaleString('en-NG', { timeZone: 'Africa/Lagos', day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' });
+    const serviceLabel = `${(tx.network || '').toUpperCase()} ${tx.service_category || ''}`.trim();
+    const amount = `₦${Number(tx.amount_naira || 0).toLocaleString()}`;
+    const explorerLink = String(tx.tx_hash || '').startsWith('0x') ? ` — ${explorerBaseFor(tx.blockchain)}/tx/${tx.tx_hash}` : '';
+    return `${i + 1}. ${date} — ${serviceLabel} — ${amount} — ${tx.status} — acct ${tx.account_number}${explorerLink}`;
+  });
+
+  const text = `${data.length} recent transaction(s) for ${identity.wallet_address}:\n\n${lines.join('\n')}`;
+
+  try {
+    const rows = data.map((tx: any) => ({
+      date: new Date(tx.created_at).toLocaleString('en-NG', { timeZone: 'Africa/Lagos', day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' }),
+      serviceLabel: `${(tx.network || '').toUpperCase()} ${tx.service_category || ''}`.trim(),
+      accountNumber: tx.account_number || '',
+      displayAmountNgn: `NGN ${Number(tx.amount_naira || 0).toLocaleString()}`,
+      status: String(tx.status || ''),
+    }));
+    const png = await renderHistoryStatementImage(rows, identity.wallet_address);
+    return imageAndTextResult(png, text);
+  } catch (imgErr) {
+    console.error('[MCP] Failed to render history image:', imgErr);
+    return textResult(text);
+  }
+}
+
+// No auth required — read-only catalogue lookup, same trust level as list_plans. Drills down
+// one level of VTpass's country -> product type -> operator -> variation chain per call,
+// depending on which args are already known.
+async function callListInternationalOptions(args: any) {
+  const countryInput = args?.country ? String(args.country).trim() : '';
+  const productTypeId = args?.product_type_id ? String(args.product_type_id) : '';
+  const operatorId = args?.operator_id ? String(args.operator_id) : '';
+
+  if (!countryInput) {
+    const countries = await fetchCountries();
+    if (countries.length === 0) return errorResult('Could not load the international country list right now — try again shortly.');
+    const lines = countries.map((c) => `• ${c.name} — code: "${c.code}"${c.currency ? ` (${c.currency})` : ''}`);
+    return textResult(`${countries.length} supported countries — call again with one of these as country:\n\n${lines.join('\n')}`);
+  }
+
+  const country = await resolveCountry(countryInput);
+  if (!country) {
+    return errorResult(`"${countryInput}" isn't in our live international catalogue right now. Call list_international_options with no country to see what's supported.`);
+  }
+
+  if (!productTypeId) {
+    const products = await fetchProducts(country.code);
+    if (products.length === 0) return errorResult(`No product types came back for ${country.name} right now.`);
+    const lines = products.map((p) => `• ${p.name} — product_type_id: "${p.product_type_id}"`);
+    return textResult(`${products.length} product type(s) for ${country.name} — call again with country: "${country.code}" and one of these as product_type_id:\n\n${lines.join('\n')}`);
+  }
+
+  if (!operatorId) {
+    const operators = await fetchOperators(country.code, productTypeId);
+    if (operators.length === 0) return errorResult(`No operators came back for ${country.name} with that product type — double-check product_type_id.`);
+    const lines = operators.map((o) => `• ${o.name} — operator_id: "${o.operator_id}"`);
+    return textResult(`${operators.length} operator(s) for ${country.name} — call again with the same country/product_type_id and one of these as operator_id:\n\n${lines.join('\n')}`);
+  }
+
+  const variations = await fetchIntlVariations(operatorId, productTypeId);
+  if (variations.length === 0) return errorResult('No plans came back for that operator — double-check operator_id and product_type_id.');
+
+  const lines = variations.map((v) => {
+    const isFixed = v.fixedPrice === 'Yes';
+    const foreignAmount = Number(v.variation_amount);
+    const chargedAmount = Number(v.charged_amount);
+    const nairaEquivalent = chargedAmount > 0 ? chargedAmount : foreignAmount * Number(v.variation_rate || '1');
+    const payability = isFixed ? '[fixed-price — payable via pay_bill]' : '[flexible amount — complete in the AbaPay app for now]';
+    const priceText = isFixed && Number.isFinite(nairaEquivalent) && nairaEquivalent > 0
+      ? ` — ${country.currency || ''} ${v.variation_amount} ≈ ₦${Math.round(nairaEquivalent).toLocaleString()}`
+      : '';
+    return `• ${v.name} — code: "${v.variation_code}"${priceText} ${payability}`;
+  });
+
+  return textResult(
+    `${variations.length} plan(s) for this operator in ${country.name} — to pay_bill, pass service: "INTERNATIONAL", country: "${country.code}", product_type_id: "${productTypeId}", operator_id: "${operatorId}", and the exact code as variation_code:\n\n${lines.join('\n')}`
+  );
+}
+
+// Shared tail end of pay_bill — the out-of-band spend alert plus the final response — used by
+// both the domestic branch and the INTERNATIONAL branch so the two can't quietly drift apart.
+//
+// 🔴 SECURITY: the receipt page is PUBLIC (no auth — the whole point is that it's shareable),
+// and a payment's tx_hash is visible to anyone watching the vault address on-chain. Keying the
+// receipt URL by tx_hash would let anyone monitoring the blockchain correlate a public
+// transaction to this page's contents — which, for electricity, includes the meter's verified
+// customer NAME and ADDRESS. request_id is the same unguessable (36^12 keyspace, see
+// getStrictRequestId in src/lib/vend.ts) lookup key this codebase already treats as the secure
+// reference for sensitive per-transaction data, so it's what the shareable link uses instead.
+async function finalizePayBillResult(params: {
+  identity: McpIdentity;
+  result: AgentPaymentResult;
+  amountNgn: number;
+  capacity: { neededCrypto: number; allowanceRemaining: number };
+  tokenSymbol: string;
+  serviceLabel: string;
+  accountNumber: string;
+  chain: string;
+  customerName: string | null;
+  customerAddress: string | null;
+}) {
+  const { identity, result, amountNgn, capacity, tokenSymbol, serviceLabel, accountNumber, chain, customerName, customerAddress } = params;
+
+  // 🔒 OUT-OF-BAND SPEND ALERT — the real defence if this API key leaks: the owner is told
+  // by email and on every other linked channel the instant money moves, regardless of vend
+  // outcome. Figures are the pre-discount estimate from the capacity check above (the exact
+  // amount is on the transaction row); good enough for a "was this you?" alert.
+  if (result.success || result.vendFailed || result.pending) {
+    try {
+      await notifySpendOutOfBand(identity.wallet_address, {
+        amountNgn,
+        amountCrypto: capacity.neededCrypto.toFixed(6),
+        token: tokenSymbol,
+        service: serviceLabel,
+        account: accountNumber,
+        channel: 'MCP',
+        txHash: result.txHash || '',
+        remaining: Math.max(0, capacity.allowanceRemaining - capacity.neededCrypto).toFixed(4),
+      });
+    } catch { /* never block a result on alerting */ }
+  }
+
+  if (!result.success && !result.pending) return errorResult(result.message);
+
+  const baseText = `${result.message}${result.txHash ? `\nTx: ${result.txHash}` : ''}`;
+
+  // Only a genuinely completed, delivered payment gets the premium receipt card — a
+  // pending/still-confirming result has no purchased_code/units yet, and a failed vend
+  // already carries its own refund messaging in result.message. Never let a rendering
+  // hiccup here hide a payment that actually succeeded — fall back to plain text.
+  if (result.success && !result.vendFailed && !result.pending && result.txHash) {
+    try {
+      const { data: txRow } = await supabaseAdmin.from('transactions').select('*').eq('tx_hash', result.txHash).maybeSingle();
+      const row = txRow as any;
+      const receiptUrl = row?.request_id
+        ? `${process.env.NEXT_PUBLIC_APP_URL || 'https://abapays.com'}/receipt/${row.request_id}`
+        : null;
+      const png = await renderReceiptImage({
+        status: 'SUCCESS',
+        serviceLabel,
+        accountNumber,
+        customerName: row?.customer_name || customerName || null,
+        customerAddress: row?.customer_address || customerAddress || null,
+        displayAmountNgn: `NGN ${amountNgn.toLocaleString()}`,
+        cryptoCharged: `${Number(row?.amount_usdt ?? capacity.neededCrypto).toFixed(6)} ${tokenSymbol}`,
+        purchasedCode: row?.purchased_code || null,
+        units: row?.units || null,
+        referenceId: row?.request_id || null,
+        txHash: result.txHash,
+        chain,
+      });
+      return imageAndTextResult(png, receiptUrl ? `${baseText}\nReceipt: ${receiptUrl}` : baseText);
+    } catch (imgErr) {
+      console.error('[MCP] Failed to render receipt image:', imgErr);
+    }
+  }
+
+  return textResult(baseText);
+}
+
+// INTERNATIONAL branch of pay_bill — the identity is already resolved and the PIN already
+// verified by the caller (callPayBill). Unlike chat's INTERNATIONAL handling (which only
+// validates and then tells the user to finish in the app), this actually completes the
+// purchase: country/operator/product-type/variation resolved against the LIVE VTpass catalogue,
+// priced server-side from the variation's own rate (never a client-claimed amount), then run
+// through the exact same allowance/spend/discount engine every other MCP payment uses.
+async function callPayBillInternational(
+  args: any,
+  identity: McpIdentity,
+  ctx: { accountNumber: string; customerName: string | null; customerEmail: string | null; chainOverride: string | null; tokenOverride: string | null }
+) {
+  const countryInput = args?.country ? String(args.country).trim() : '';
+  const productTypeId = args?.product_type_id ? String(args.product_type_id) : '';
+  const operatorId = args?.operator_id ? String(args.operator_id) : '';
+  const variationCode = args?.variation_code ? String(args.variation_code) : '';
+  const { accountNumber, customerName, customerEmail, chainOverride, tokenOverride } = ctx;
+
+  if (!countryInput) return errorResult('country is required for service: INTERNATIONAL — call list_international_options first.');
+  if (!productTypeId) return errorResult('product_type_id is required for service: INTERNATIONAL — call list_international_options first.');
+  if (!operatorId) return errorResult('operator_id is required for service: INTERNATIONAL — call list_international_options first.');
+  if (!variationCode) return errorResult('variation_code is required for service: INTERNATIONAL — call list_international_options first and pass back a real code.');
+  // Same >=6 char rule the web app's international flow enforces (src/lib/parity.ts's
+  // checkParity, isInternational branch).
+  if (accountNumber.replace(/\s/g, '').length < 6) return errorResult('account_number looks too short — international top-ups need at least 6 characters.');
+  // The frontend hard-requires a valid email for ALL international payments (parity.ts's
+  // requiredFieldsFor) — the receipt is genuinely the only confirmation some of these deliver.
+  if (!customerEmail || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(customerEmail)) {
+    return errorResult('customer_email is required for service: INTERNATIONAL (your receipt is sent there) and must be a valid email address.');
+  }
+
+  const country = await resolveCountry(countryInput);
+  if (!country) return errorResult(`"${countryInput}" isn't in our live international catalogue right now. Call list_international_options with no country to see what's supported.`);
+
+  const gate = await checkServiceAllowed('INTERNATIONAL', null, { isInternational: true });
+  if (!gate.allowed) return errorResult(gate.reason || 'International payments are temporarily unavailable.');
+
+  // 🔴 NEVER TRUST A CLIENT-CLAIMED PRICE: re-fetch the live variation and derive the
+  // NGN-equivalent ourselves, exactly like the web app does (variation_rate / charged_amount —
+  // see international.ts) — this is what actually prices the on-chain crypto charge, so a stale
+  // or fabricated amount would otherwise under/overcharge real money.
+  const variations = await fetchIntlVariations(operatorId, productTypeId);
+  const variation = variations.find((v) => v.variation_code === variationCode);
+  if (!variation) return errorResult(`"${variationCode}" isn't a real plan for that operator/product type right now — call list_international_options again to get a current code.`);
+
+  if (variation.fixedPrice !== 'Yes') {
+    return errorResult(`"${variation.name}" is a flexible-amount plan — pay_bill only supports fixed-price international plans right now. Complete this one in the AbaPay app, or pick a fixed-price plan from list_international_options.`);
+  }
+
+  const foreignAmount = Number(variation.variation_amount);
+  const variationRate = Number(variation.variation_rate || '1');
+  const chargedAmount = Number(variation.charged_amount);
+  const vendAmountNgn = chargedAmount > 0 ? chargedAmount : foreignAmount * variationRate;
+  if (!Number.isFinite(vendAmountNgn) || vendAmountNgn <= 0) return errorResult('Could not price this plan right now — try again shortly.');
+
+  const rules = await getServiceRules();
+  const rate = rules.exchangeRate;
+
+  // Same $1 floor the web app enforces for international (parity.ts's checkIntlMinimum).
+  const intlMin = checkIntlMinimum(foreignAmount, variationRate, rate);
+  if (!intlMin.valid) return errorResult(intlMin.error || 'That amount is too low.');
+
+  const spendGate = await checkAgentSpendAllowed(supabaseAdmin, identity.wallet_address, vendAmountNgn);
+  if (!spendGate.allowed) return errorResult(spendGate.reason || 'Agent spending is currently disabled for this account.');
+
+  const chain = chainOverride || identity.approved_chain || 'CELO';
+  const chainTokens = tokensForChain(chain);
+  const tokenSymbol = tokenOverride && chainTokens.includes(tokenOverride) ? tokenOverride : (identity.approved_token || 'USD₮');
+
+  const capacity = await checkAutonomousCapacity(identity.wallet_address, chain, tokenSymbol, vendAmountNgn, rate);
+  if (!capacity.ok) {
+    const otherTokens = chainTokens.filter((t) => t !== tokenSymbol);
+    const otherChecks = await Promise.all(otherTokens.map((t) => checkAutonomousCapacity(identity.wallet_address, chain, t, vendAmountNgn, rate)));
+    const viable = otherTokens.find((_, i) => otherChecks[i].ok);
+    if (viable) {
+      return errorResult(`${capacity.reason}\n\nHowever, ${viable} on ${chain} already has enough balance and an approved agent limit to cover this. Retry pay_bill with token: "${viable}" to use it instead.`);
+    }
+    return errorResult(capacity.reason);
+  }
+
+  const displayAmount = `${country.currency || ''} ${foreignAmount.toLocaleString()}`.trim();
+
+  const item: BatchItem = {
+    serviceCategory: 'INTERNATIONAL',
+    serviceID: 'foreign-airtime',
+    provider: country.name,
+    billersCode: accountNumber,
+    amountNgn: vendAmountNgn,
+    chain,
+    tokenSymbol,
+    isForeign: true,
+    foreignAmount: variation.variation_amount,
+    displayAmount,
+    operatorId,
+    countryCode: country.code,
+    productTypeId,
+  };
+
+  const result = await executeAgentPayment({
+    userWallet: identity.wallet_address,
+    item,
+    exchangeRate: rate,
+    sourceChannel: 'MCP',
+    email: customerEmail,
+    customerName,
+    variationCode,
+  });
+
+  return finalizePayBillResult({
+    identity, result, amountNgn: vendAmountNgn, capacity, tokenSymbol,
+    serviceLabel: `${country.name} INTERNATIONAL`,
+    accountNumber, chain,
+    customerName,
+    customerAddress: null,
+  });
+}
+
 async function callPayBill(args: any, oauthIdentity: McpIdentity | null) {
   const apiKey = String(args?.api_key || '');
   const pin = String(args?.pin || '');
@@ -316,27 +693,35 @@ async function callPayBill(args: any, oauthIdentity: McpIdentity | null) {
     }
     return errorResult(`service must be one of ${Object.keys(SERVICE_INTENT).join(', ')}.`);
   }
-  if (!provider) return errorResult('provider is required — e.g. mtn, ikeja-electric, dstv.');
+  const isInternational = intent === 'INTERNATIONAL';
   if (!accountNumber) return errorResult('account_number is required.');
-  if (!Number.isFinite(amountNgn) || amountNgn <= 0) return errorResult('amount_ngn must be a positive number.');
 
-  // 🔴 THE BUG THIS FIXES: both of these were described as required in the tool's inputSchema
-  // but NOTHING enforced them, and neither is recoverable once the money has moved. The chat
-  // channel gates both (requiresVariation() blocks a data purchase until a plan is picked; the
-  // AWAITING_METER_TYPE step blocks electricity until prepaid/postpaid is known) — MCP simply
-  // skipped straight to settlement:
-  //   • DATA with no variation_code: the on-chain payment settles, then VTpass is asked to
-  //     vend a bundle that was never named — FAILED_VENDING and a refund round-trip, for a
-  //     mistake that costs nothing to catch here.
-  //   • ELECTRICITY with no meter_type: merchant-verify is called without a type and the vend
-  //     goes out with no prepaid/postpaid at all.
-  // Reuses parity.ts's requiresVariation — the same function the chat gate calls — rather
-  // than a second copy of the rule that could drift away from it.
-  if (requiresVariation(intent, provider) && !variationCode) {
-    return errorResult(`variation_code is required for ${service} — it names the exact bundle/package to buy. Call describe_capabilities, or pick the plan in the AbaPay app, to get a valid code.`);
-  }
-  if (intent === 'ELECTRICITY' && meterType !== 'prepaid' && meterType !== 'postpaid') {
-    return errorResult('meter_type is required for ELECTRICITY and must be exactly "prepaid" or "postpaid".');
+  // INTERNATIONAL doesn't use provider/amount_ngn/variation-via-requiresVariation/meter_type at
+  // all — it has its own field set (country/product_type_id/operator_id/variation_code) and its
+  // own amount source (the live plan's price, re-derived server-side — see
+  // callPayBillInternational), validated inside its own branch below instead.
+  if (!isInternational) {
+    if (!provider) return errorResult('provider is required — e.g. mtn, ikeja-electric, dstv.');
+    if (!Number.isFinite(amountNgn) || amountNgn <= 0) return errorResult('amount_ngn must be a positive number.');
+
+    // 🔴 THE BUG THIS FIXES: both of these were described as required in the tool's inputSchema
+    // but NOTHING enforced them, and neither is recoverable once the money has moved. The chat
+    // channel gates both (requiresVariation() blocks a data purchase until a plan is picked; the
+    // AWAITING_METER_TYPE step blocks electricity until prepaid/postpaid is known) — MCP simply
+    // skipped straight to settlement:
+    //   • DATA with no variation_code: the on-chain payment settles, then VTpass is asked to
+    //     vend a bundle that was never named — FAILED_VENDING and a refund round-trip, for a
+    //     mistake that costs nothing to catch here.
+    //   • ELECTRICITY with no meter_type: merchant-verify is called without a type and the vend
+    //     goes out with no prepaid/postpaid at all.
+    // Reuses parity.ts's requiresVariation — the same function the chat gate calls — rather
+    // than a second copy of the rule that could drift away from it.
+    if (requiresVariation(intent, provider) && !variationCode) {
+      return errorResult(`variation_code is required for ${service} — it names the exact bundle/package to buy. Call describe_capabilities, or pick the plan in the AbaPay app, to get a valid code.`);
+    }
+    if (intent === 'ELECTRICITY' && meterType !== 'prepaid' && meterType !== 'postpaid') {
+      return errorResult('meter_type is required for ELECTRICITY and must be exactly "prepaid" or "postpaid".');
+    }
   }
 
   // 🔐 Same identity + PIN gate as every other channel — see src/lib/deai/pinSecurity.ts.
@@ -357,6 +742,12 @@ async function callPayBill(args: any, oauthIdentity: McpIdentity | null) {
     return errorResult(fail.message || 'Incorrect PIN.');
   }
   await clearPinFailures(identity.id);
+
+  if (isInternational) {
+    return callPayBillInternational(args, identity, {
+      accountNumber, customerName, customerEmail, chainOverride, tokenOverride,
+    });
+  }
 
   // 🔴 RULE GATE — an operator-disabled service must be refused here exactly as it would be
   // in chat or the web app; the agent is a client like any other.
@@ -402,6 +793,13 @@ async function callPayBill(args: any, oauthIdentity: McpIdentity | null) {
   // just the buyer's phone, fails outright). parity.ts's requiresVerifiedName IS that rule,
   // it takes the provider, and it's the same function chat's verification gate calls.
   let resolvedCustomerName = customerName;
+  // 🔴 THE BUG THIS FIXES: verifyAccount() returns customer_address too (VTpass's real
+  // merchant-verify response for electricity meters) but this handler only ever read
+  // customer_name off it — the address was verified and then silently thrown away, so
+  // electricity receipts never carried the meter's registered name AND address the way the
+  // web app's own merchant-verify flow does. executeAgentPayment/executeVend already accept
+  // and store customerAddress; it just never reached them from here.
+  let resolvedCustomerAddress: string | null = null;
   if (requiresVerifiedName(intent, provider)) {
     // JAMB takes the chosen product as the verify `type`, exactly as the web app does
     // (page.tsx's verifyMerchant: serviceID "jamb", type = selectedEducationPlan
@@ -410,6 +808,7 @@ async function callPayBill(args: any, oauthIdentity: McpIdentity | null) {
     const va = await verifyAccount(serviceID, accountNumber, verifyType);
     if (!va.success) return errorResult(va.message || 'Could not verify that account.');
     resolvedCustomerName = va.customer_name || resolvedCustomerName;
+    resolvedCustomerAddress = va.customer_address || null;
   }
 
   const rules = await getServiceRules();
@@ -459,30 +858,17 @@ async function callPayBill(args: any, oauthIdentity: McpIdentity | null) {
     sourceChannel: 'MCP',
     email: customerEmail,
     customerName: resolvedCustomerName,
+    customerAddress: resolvedCustomerAddress,
     variationCode,
   });
 
-  // 🔒 OUT-OF-BAND SPEND ALERT — the real defence if this API key leaks: the owner is told
-  // by email and on every other linked channel the instant money moves, regardless of vend
-  // outcome. Figures are the pre-discount estimate from the capacity check above (the exact
-  // amount is on the transaction row); good enough for a "was this you?" alert.
-  if (result.success || result.vendFailed || result.pending) {
-    try {
-      await notifySpendOutOfBand(identity.wallet_address, {
-        amountNgn,
-        amountCrypto: capacity.neededCrypto.toFixed(6),
-        token: tokenSymbol,
-        service: `${provider} ${service}`,
-        account: accountNumber,
-        channel: 'MCP',
-        txHash: result.txHash || '',
-        remaining: Math.max(0, capacity.allowanceRemaining - capacity.neededCrypto).toFixed(4),
-      });
-    } catch { /* never block a result on alerting */ }
-  }
-
-  if (!result.success && !result.pending) return errorResult(result.message);
-  return textResult(`${result.message}${result.txHash ? `\nTx: ${result.txHash}` : ''}`);
+  return finalizePayBillResult({
+    identity, result, amountNgn, capacity, tokenSymbol,
+    serviceLabel: `${provider.toUpperCase()} ${service}`,
+    accountNumber, chain,
+    customerName: resolvedCustomerName,
+    customerAddress: resolvedCustomerAddress,
+  });
 }
 
 // The OAuth identity is threaded through as a PARAMETER, never stashed in module scope — a
@@ -493,7 +879,9 @@ async function callTool(name: string, args: any, oauthIdentity: McpIdentity | nu
   switch (name) {
     case 'describe_capabilities': return callDescribeCapabilities();
     case 'list_plans': return callListPlans(args);
+    case 'list_international_options': return callListInternationalOptions(args);
     case 'check_balance': return callCheckBalance(args, oauthIdentity);
+    case 'transaction_history': return callTransactionHistory(args, oauthIdentity);
     case 'pay_bill': return callPayBill(args, oauthIdentity);
     default: return null;
   }
@@ -554,7 +942,7 @@ export async function POST(req: Request) {
           protocolVersion: params?.protocolVersion || PROTOCOL_VERSION,
           capabilities: { tools: {} },
           serverInfo: SERVER_INFO,
-          instructions: "AbaPay: check a linked wallet's stablecoin balance or pay a real Nigerian bill (airtime, data, electricity, cable), settled on-chain. Call describe_capabilities first. For DATA, CABLE, or EDUCATION, call list_plans before pay_bill and use one of its real returned codes as variation_code — never guess a plan, code, or price. Authentication: OAuth 2.1 is supported and preferred — authorize once in the browser and this connection is remembered, so no api_key argument is ever needed again. The api_key created in the AbaPay app under Agent Hub -> MCP remains the fallback for clients that cannot do OAuth. Either way, pay_bill ALWAYS requires the PIN set when the key was created — OAuth does not remove it. Ask the human for their PIN on every single payment.",
+          instructions: "AbaPay: check a linked wallet's stablecoin balance, browse recent transaction history, or pay a real bill — Nigerian services (airtime, data, electricity, cable) or international airtime/data across 170+ countries — settled on-chain. Call describe_capabilities first. For DATA, CABLE, or EDUCATION, call list_plans before pay_bill and use one of its real returned codes as variation_code. For service: INTERNATIONAL, call list_international_options first (drills down country -> product type -> operator -> plan) and pass back its exact country/product_type_id/operator_id/variation_code — never guess any of these. A successful pay_bill returns a rich receipt (image card plus a shareable receipt link) alongside the confirmation text. Use transaction_history to answer 'what did I pay recently' without the human needing to open the app. Authentication: OAuth 2.1 is supported and preferred — authorize once in the browser and this connection is remembered, so no api_key argument is ever needed again. The api_key created in the AbaPay app under Agent Hub -> MCP remains the fallback for clients that cannot do OAuth. Either way, pay_bill ALWAYS requires the PIN set when the key was created — OAuth does not remove it. Ask the human for their PIN on every single payment.",
         });
 
       case 'ping':

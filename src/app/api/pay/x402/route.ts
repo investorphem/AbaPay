@@ -5,6 +5,7 @@ import { resolveTokenOnChain } from '@/constants';
 import { sendTelegramAlert } from '@/lib/telegram';
 import { getServiceRules } from '@/lib/serviceRules';
 import { isDuplicateElectricity } from '@/lib/parity';
+import { enqueueRefund } from '@/lib/refunds';
 
 // ⚡ x402 SETTLEMENT — MAIN APP ONLY. Two rails, resolved by chainConfigFor():
 //   • CELO (default): Celo's own facilitator (api.x402.celo.org — "Built by Celo Core Co."),
@@ -439,41 +440,35 @@ async function handleX402Request(req: Request) {
     );
   }
 
-  // ⚡ Payment is now CONFIRMED and irreversibly settled. Everything past this point is
-  // "do we have enough to actually vend a bill" — scope/field checks live here, not before
-  // the payment gate, so they never interfere with discovery probing.
+  // ⚡ Payment is now CONFIRMED and irreversibly settled — real money already moved via the
+  // payer's signed EIP-3009 authorization. EVERYTHING below this point, including the row
+  // write immediately following, must happen unconditionally: a generic x402 client (e.g. a
+  // third-party wallet/agent paying this endpoint via the raw x402 protocol rather than
+  // AbaPay's own web app or MCP tool) only ever resends the standard challenge fields
+  // (scheme/network/amount/asset/payTo) that the facilitator itself needs to settle — it has
+  // no reason to know about AbaPay-specific extras like serviceID/billersCode/nairaAmount, so
+  // those can legitimately be absent even on a perfectly valid settlement.
   //
-  // Note: this checks blockchain/vendAmount/etc, but NOT tokenSymbol against 'USDC' — the
-  // actual charged token is requestedTokenSymbol (resolved above from the request, falling
-  // back to USDC), which is what really went on-chain. It's used below in place of the raw
-  // client-claimed tokenSymbol for exactly that reason.
-  // The settled chain is whatever chainCfg actually used — cross-check the client's requested
-  // chain agrees, so a Base settlement can't be mislabelled as Celo (or a Base request that
-  // silently fell back to Celo because Base wasn't configured can't vend).
-  if (requestedChain !== chainKey || vendAmount === null || !serviceID || !billersCode) {
-    console.error('[Pay/x402] Payment settled but request lacked real bill details:', { blockchain, requestedChain, chainKey, tokenSymbol, vendAmount, serviceID, billersCode, tx: settleResult.transaction });
-    return NextResponse.json({ success: false, status: 'FAILED_VENDING', message: 'Payment settled, but the request was missing bill details — contact support with your transaction hash.' }, { status: 400 });
-  }
-
+  // 🔴 THE BUG THIS FIXES: the old code ran the "do we have enough to vend" field check
+  // BEFORE ever writing a `transactions` row, and returned early on a miss. That left a fully
+  // settled, real on-chain payment with ZERO trace anywhere in the database — invisible to
+  // cleanupStalePreflights, reconcileStuckProcessing, the admin refunds dashboard, and the
+  // "contact support with your tx hash" message it printed was the only record of it existing
+  // at all. Now: write the row FIRST (so every settled payment is always auditable), THEN
+  // decide whether there's enough to vend — and if not, auto-queue a refund using the
+  // settlement's own known payer/amount/token/chain (all always available, unlike the bill
+  // details) instead of leaving it for someone to notice and chase manually.
   const txHash = settleResult.transaction;
   const payer = settleResult.payer;
-
-  // Cross-check the payer matches who the frontend claims is paying — mirrors the
-  // SENDER_MISMATCH check in /api/webhook for the contract-call path.
-  if (payer && wallet_address && payer.toLowerCase() !== String(wallet_address).toLowerCase()) {
-    return NextResponse.json({ success: false, status: 'FAILED_VENDING', message: 'Payer address mismatch.' }, { status: 400 });
-  }
-
   const explorerUrl = `${explorerBase}/tx/${txHash}`;
+  const settledWallet = (payer || wallet_address || 'UNKNOWN').toLowerCase();
 
-  // Record the transaction, then atomically lock it before vending — same pattern as
-  // /api/pay, so a retried request with the same settlement tx can't double-vend.
   const dbPayload = {
-    tx_hash: txHash, request_id: vtRequestId, service_category: serviceCategory, service_id: serviceID,
-    variation_code: variation_code, network: network, blockchain: chainKey,
+    tx_hash: txHash, request_id: vtRequestId, service_category: serviceCategory || 'UNKNOWN', service_id: serviceID || 'UNKNOWN',
+    variation_code: variation_code, network: network || 'UNKNOWN', blockchain: chainKey,
     account_number: billersCode || phone || 'N/A', phone: phone || null,
     amount_usdt: requiredCrypto, amount_naira: vendAmount, fee_naira: serviceFee, status: 'PENDING',
-    wallet_address: (payer || wallet_address || 'UNKNOWN').toLowerCase(),
+    wallet_address: settledWallet,
     customer_name: customer_name || null, customer_address: customer_address || null,
     source_channel: source_channel || 'WEB', token_used: requestedTokenSymbol,
     meter_account_type: meter_account_type || null, customer_email: email || null,
@@ -484,6 +479,52 @@ async function handleX402Request(req: Request) {
   };
 
   await supabase.from('transactions').upsert(dbPayload, { onConflict: 'tx_hash' });
+
+  // Cross-check the payer matches who the frontend claims is paying — mirrors the
+  // SENDER_MISMATCH check in /api/webhook for the contract-call path.
+  const payerMismatch = payer && wallet_address && payer.toLowerCase() !== String(wallet_address).toLowerCase();
+  // Note: this checks blockchain/vendAmount/etc, but NOT tokenSymbol against 'USDC' — the
+  // actual charged token is requestedTokenSymbol (resolved above from the request, falling
+  // back to USDC), which is what really went on-chain. It's used below in place of the raw
+  // client-claimed tokenSymbol for exactly that reason.
+  // The settled chain is whatever chainCfg actually used — cross-check the client's requested
+  // chain agrees, so a Base settlement can't be mislabelled as Celo (or a Base request that
+  // silently fell back to Celo because Base wasn't configured can't vend).
+  const missingBillDetails = requestedChain !== chainKey || vendAmount === null || !serviceID || !billersCode;
+
+  if (payerMismatch || missingBillDetails) {
+    const errorCode = payerMismatch ? 'PAYER_MISMATCH' : 'SETTLED_MISSING_BILL_DETAILS';
+    const reason = payerMismatch
+      ? 'x402 settled but the payer address did not match the wallet the request claimed.'
+      : 'x402 settled but the request lacked real bill details (serviceID/billersCode/amount) — likely a generic x402 client that only resent the payment challenge fields.';
+    console.error('[Pay/x402] Settled payment cannot be vended:', { errorCode, blockchain, requestedChain, chainKey, tokenSymbol, vendAmount, serviceID, billersCode, tx: txHash });
+
+    await supabase.from('transactions').update({ status: 'FAILED_VENDING', error_code: errorCode, api_response: reason }).eq('tx_hash', txHash);
+
+    try {
+      await enqueueRefund({
+        txHash,
+        walletAddress: settledWallet,
+        tokenUsed: requestedTokenSymbol,
+        amountCrypto: requiredCrypto,
+        amountNaira: vendAmount ?? undefined,
+        blockchain: chainKey,
+        reason,
+        vtpassError: errorCode,
+        serviceCategory: serviceCategory || undefined,
+        sourceChannel: source_channel || 'WEB',
+      });
+    } catch (refundErr) {
+      console.error('[Pay/x402] Failed to queue refund for settled-but-unvendable payment:', refundErr);
+    }
+
+    return NextResponse.json({
+      success: false,
+      status: 'FAILED_VENDING',
+      message: payerMismatch ? 'Payer address mismatch. Your payment is being refunded.' : 'Payment settled, but the request was missing bill details — your payment is being refunded automatically.',
+      tx_hash: txHash,
+    }, { status: 400 });
+  }
 
   const { data: lockedRecord, error: lockError } = await supabase
     .from('transactions')

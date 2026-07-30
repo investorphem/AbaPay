@@ -460,8 +460,10 @@ already backs Telegram/WhatsApp/X, not a parallel system with its own rules:
 |---|---|---|
 | `describe_capabilities` | Human-readable menu of what AbaPay can pay and what's currently paused | Nothing — public |
 | `list_plans` | The **real, currently purchasable** plans for DATA / CABLE / EDUCATION, with exact `variation_code`s and live VTpass prices | Nothing — public |
+| `list_international_options` | Browses the live international catalogue (170+ countries) one level at a time — country → product type → operator → priced plan | Nothing — public |
 | `check_balance` | Reads the linked wallet's live balance + approved agent limit, **per token**, on a chain | OAuth Bearer token *or* `api_key` |
-| `pay_bill` | Pays a real bill (airtime, data, electricity, cable TV, **education PIN**) end-to-end, on-chain | (OAuth Bearer token *or* `api_key`) **+ `pin`, always** |
+| `transaction_history` | Lists recent real transactions for the linked wallet — same data as the app's History tab | OAuth Bearer token *or* `api_key` |
+| `pay_bill` | Pays a real bill (airtime, data, electricity, cable TV, **education PIN**, or **international airtime/data**) end-to-end, on-chain | (OAuth Bearer token *or* `api_key`) **+ `pin`, always** |
 
 `list_plans` exists because `variation_code` was previously something the agent had to invent.
 Its description, and the server-level `instructions`, both tell the client to call it before
@@ -476,6 +478,25 @@ JAMB's ≥10-character profile ID, and `requiresVerifiedName()` decides that onl
 merchant-verifies (WAEC has no account to verify). It also validates the provider against the
 **live** VTpass catalogue up front, so an agent can no longer pass a provider VTpass cannot sell
 and discover it only after the money has moved.
+
+**`service: "INTERNATIONAL"` completes the purchase, unlike chat.** Chat's INTERNATIONAL handling
+(`src/app/api/deai/core/route.ts`) only validates a request and then tells the user to finish it
+in the app — it has never actually vended one. MCP's `pay_bill` does: `list_international_options`
+walks VTpass's country → product type → operator → variation chain, and `pay_bill` re-fetches the
+chosen variation itself to derive the NGN-equivalent price from its own `variation_rate`/
+`charged_amount` — never trusting a client-supplied amount, since that number is what prices the
+on-chain charge. Only **fixed-price** plans are payable this way for now; flexible-amount plans
+still redirect to the app.
+
+**Every successful `pay_bill` now returns a premium receipt, not just a text line.** Alongside the
+confirmation text, the response includes a branded receipt card (rendered server-side with
+`next/og`'s `ImageResponse` — no extra dependency — see `src/lib/deai/receiptCard.tsx`) and a link
+to a shareable, public receipt page at `/receipt/[request_id]` (`src/app/receipt/`). The link is
+keyed by `request_id`, not `tx_hash`: a transaction hash is visible to anyone watching the vault
+address on-chain, and the receipt page — being public and shareable by design — must not let a
+blockchain observer correlate a payment to the customer's verified name/address, so it never shows
+the purchased code/PIN either. `transaction_history` gets the same rich treatment — a statement
+card image alongside the plain-text list — for browsing past activity without opening the app.
 
 Both accept optional `chain`/`token` overrides — they default to whatever was approved when the
 API key was created, but a caller isn't stuck with that default if it comes up short. `check_balance`

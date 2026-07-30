@@ -29,6 +29,15 @@ export interface IntlVariation {
   name: string;
   variation_amount: string;
   fixedPrice?: string;
+  // ⚡ NAIRA-EQUIVALENT PRICING — VTpass returns these on every variation, but this function
+  // used to drop both. The web app reads them straight off its own raw fetch (src/app/page.tsx's
+  // calculatedNairaAmount: `charged_amount` for a fixed plan when present, else
+  // `variation_amount * variation_rate`) to know what a foreign-currency plan actually costs in
+  // Naira — without them, nothing server-side (MCP included) can price an international plan
+  // without re-trusting a client-claimed amount, which is exactly the number that decides how
+  // much crypto gets charged.
+  variation_rate?: string;
+  charged_amount?: string;
 }
 
 // Countries change rarely; cache to avoid hammering VTpass on every chat message.
@@ -135,6 +144,8 @@ export async function fetchIntlVariations(operatorId: string, productTypeId: str
       name: v.name,
       variation_amount: String(v.variation_amount),
       fixedPrice: v.fixedPrice,
+      variation_rate: v.variation_rate != null ? String(v.variation_rate) : undefined,
+      charged_amount: v.charged_amount != null ? String(v.charged_amount) : undefined,
     })).filter((v: IntlVariation) => v.variation_code);
   } catch (err) {
     console.error('[Intl] fetchIntlVariations failed:', err);

@@ -81,7 +81,7 @@ export default function DocsPage() {
               />
               <FeatureBlock
                 icon={<Globe />} title="Borderless Payments"
-                desc="You do not need a local bank account to pay bills in supported countries. Whether you are in Lagos, London, or Los Angeles, as long as you have stablecoins, you can top up phones abroad or pay Nigerian bills instantly."
+                desc="You do not need a local bank account to pay bills in supported countries. Whether you are in Lagos, London, or Los Angeles, as long as you have stablecoins, you can pay Nigerian bills or top up phones abroad across 170+ supported countries, instantly."
               />
               <FeatureBlock
                 icon={<Plug />} title="Live Provider Catalogue"
@@ -126,7 +126,7 @@ export default function DocsPage() {
               <Plug className="text-violet-500" size={20} /> MCP — Connect Your Own AI Assistant
             </h2>
             <p className="text-slate-600 dark:text-slate-300 font-medium mb-6 leading-relaxed">
-              AbaPay runs an <strong>MCP (Model Context Protocol)</strong> server, so an AI assistant you already use — Claude, or any MCP-speaking client — can pay your bills for you. It's the same engine chat uses, reached over JSON-RPC instead of a message. Nothing about it is a looser trust boundary: same on-chain allowance, same PIN gate, same kill switches, same operator caps, same spend alerts.
+              AbaPay runs an <strong>MCP (Model Context Protocol)</strong> server, so an AI assistant you already use — Claude, or any MCP-speaking client — can pay your bills for you: Nigerian services, or international airtime/data across 170+ countries. It's the same engine chat uses, reached over JSON-RPC instead of a message. Nothing about it is a looser trust boundary: same on-chain allowance, same PIN gate, same kill switches, same operator caps, same spend alerts.
             </p>
             <div className="space-y-4">
               <div className="bg-violet-50 dark:bg-violet-900/20 border border-violet-100 dark:border-violet-800/50 p-5 rounded-2xl transition-colors">
@@ -144,7 +144,13 @@ export default function DocsPage() {
               <div className="bg-slate-50 dark:bg-[#1a1a1f] p-5 rounded-2xl border border-slate-100 dark:border-slate-800/80 transition-colors">
                 <h4 className="text-sm font-black text-slate-800 dark:text-slate-200 mb-1">Real plans, real prices — never guessed</h4>
                 <p className="text-sm text-slate-600 dark:text-slate-400 font-medium leading-relaxed">
-                  A <code className="text-[11px] font-black">list_plans</code> tool gives the assistant the actual purchasable data bundles, cable packages and exam products with their real codes and current prices, straight from our payment provider. It's what stops an assistant inventing a plausible-sounding "1GB for ₦1,000" that doesn't exist — for data, cable and education it must pass back a real code or it can't pay at all.
+                  A <code className="text-[11px] font-black">list_plans</code> tool gives the assistant the actual purchasable data bundles, cable packages and exam products with their real codes and current prices, straight from our payment provider. A separate <code className="text-[11px] font-black">list_international_options</code> tool does the same for the international catalogue — country, product type, operator and priced plan. It's what stops an assistant inventing a plausible-sounding "1GB for ₦1,000" that doesn't exist — a real code is required or it can't pay at all.
+                </p>
+              </div>
+              <div className="bg-slate-50 dark:bg-[#1a1a1f] p-5 rounded-2xl border border-slate-100 dark:border-slate-800/80 transition-colors">
+                <h4 className="text-sm font-black text-slate-800 dark:text-slate-200 mb-1">Premium receipts, and your own history — right in chat</h4>
+                <p className="text-sm text-slate-600 dark:text-slate-400 font-medium leading-relaxed">
+                  Every successful payment comes back with a branded receipt card and a shareable receipt link, not just a line of text. A <code className="text-[11px] font-black">transaction_history</code> tool lets the assistant answer "what did I pay recently" with the same records as your app's History tab, without you needing to open it.
                 </p>
               </div>
             </div>

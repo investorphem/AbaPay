@@ -26,6 +26,16 @@ export interface BatchItem {
   meterType?: string;
   chain: string;
   tokenSymbol: string;
+  // ⚡ INTERNATIONAL (foreign-airtime) — all optional and unused by every existing caller
+  // (scheduler, domestic MCP pay_bill), populated only when serviceCategory === 'INTERNATIONAL'.
+  // executeVend's isForeign branch charges VTpass the FOREIGN amount, not amountNgn — amountNgn
+  // here is still required (it's the NGN-equivalent that prices the on-chain crypto charge).
+  isForeign?: boolean;
+  foreignAmount?: string | number;
+  displayAmount?: string;
+  operatorId?: string | number;
+  countryCode?: string;
+  productTypeId?: string | number;
 }
 
 export async function checkAutonomousCapacity(
@@ -144,6 +154,8 @@ export async function executeAgentPayment(params: {
       customer_name: params.customerName || null, customer_address: params.customerAddress || null,
       source_channel: sourceChannel, token_used: item.tokenSymbol,
       meter_account_type: item.meterType || null, customer_email: params.email || null,
+      operator_id: item.operatorId || null, country_code: item.countryCode || null, product_type_id: item.productTypeId || null,
+      foreign_amount: item.foreignAmount || null, display_amount: item.displayAmount || null,
       payment_method: 'AGENT_RELAY',
     }, { onConflict: 'tx_hash' });
 
@@ -189,7 +201,9 @@ export async function executeAgentPayment(params: {
         vtRequestId, txHash, serviceID: item.serviceID, serviceCategory: item.serviceCategory,
         network: item.provider || '', billersCode: item.billersCode, phone: null,
         variation_code: vendVariationCode, subscription_type: undefined,
-        amount: amountCrypto, tokenSymbol: item.tokenSymbol, vendAmount: item.amountNgn, isForeign: false,
+        amount: amountCrypto, tokenSymbol: item.tokenSymbol, vendAmount: item.amountNgn, isForeign: !!item.isForeign,
+        foreignAmount: item.foreignAmount, displayAmount: item.displayAmount,
+        operator_id: item.operatorId, country_code: item.countryCode, product_type_id: item.productTypeId,
         email: params.email || null, wallet_address: userWallet, blockchain: item.chain,
         source_channel: sourceChannel, customer_name: params.customerName || null,
         customer_address: params.customerAddress || null,
