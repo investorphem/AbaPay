@@ -1208,8 +1208,21 @@ export default function Home() {
         setWalletBalance(parseFloat(formatUnits(balanceWei as bigint, selectedToken.decimals)).toFixed(4));
       }
     } catch (e: any) {
-      setStatus(`Payment failed: ${e.message?.slice(0, 60) || "Unknown error"}`);
-      showToast("Payment Failed", e.message || "The payment could not be completed.", "error");
+      // 🔴 THE BUG THIS FIXES: an x402 settlement failure (Celo's facilitator briefly
+      // unreachable, its own backend down, whatever) simply failed the payment outright —
+      // "Payment failed with status 402" — with no way to complete it until the facilitator
+      // recovered, even though the standard on-chain flow was working fine the whole time.
+      //
+      // x402 settlement is atomic: the facilitator either actually moves funds via the
+      // payer's signed EIP-3009 authorization (a real success, handled above — never reaches
+      // this catch) or nothing happens at all. So ANY failure here is safe to retry via the
+      // completely independent contract-call flow: it's a different signing mechanism
+      // entirely (a real payBill() transaction, not an EIP-3009 authorization), so whatever
+      // caused x402 to fail cannot recur there.
+      console.error('[x402] Settlement failed, falling back to the standard on-chain flow:', e.message);
+      setStatus("This payment method is temporarily unavailable — trying the standard payment method instead...");
+      await processBlockchainPayment();
+      return; // processBlockchainPayment manages its own isProcessing/status lifecycle
     } finally {
       setIsProcessing(false);
     }
