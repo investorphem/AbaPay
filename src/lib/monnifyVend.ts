@@ -123,6 +123,7 @@ export async function finalizeMonnifyTransfer(p: FinalizeParams): Promise<VendRe
         txHash: record.tx_hash,
         referenceId: record.request_id,
         customerName: record.customer_name,
+        bankName: record.network,
       });
       try {
         await resend.emails.send({

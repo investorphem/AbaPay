@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server';
-import { getHeaders } from '@/lib/vtpass'; 
+import { getHeaders } from '@/lib/vtpass';
+import { getWalletBalance } from '@/lib/monnify';
 import { verifyAdminRequest } from '@/utils/adminAuth';
 
 export async function GET(req) {
@@ -31,11 +32,22 @@ export async function GET(req) {
     });
     const smsBalance = await smsRes.text();
 
+    // 3. Fetch Monnify (Moniepoint) disbursement wallet balance — separate provider, separate
+    // float, so it's tracked alongside VTpass's rather than folded into it. null (not thrown)
+    // when credentials aren't configured yet, so this never breaks the health check for
+    // installs still waiting on Monnify approval.
+    const monnifyBalance = await getWalletBalance();
+
     return NextResponse.json({
       env: appMode,
       chain: process.env.NEXT_PUBLIC_NETWORK || "Unknown",
       naira: walletData.contents?.balance?.toLocaleString() || "0.00",
       sms: !isNaN(parseFloat(smsBalance)) ? parseFloat(smsBalance).toFixed(0) : "0",
+      monnify: monnifyBalance ? {
+        available: monnifyBalance.availableBalance.toLocaleString(),
+        ledger: monnifyBalance.ledgerBalance.toLocaleString(),
+        accountNumber: monnifyBalance.accountNumber,
+      } : null,
       status: "Operational"
     });
   } catch (err) { // ⚡ REMOVED ": any" for JavaScript compatibility

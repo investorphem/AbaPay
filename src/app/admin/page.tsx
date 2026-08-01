@@ -101,8 +101,9 @@ export default function AdminDashboard() {
   const [ccBusyKey, setCcBusyKey] = useState<string | null>(null);
   const [ccInputs, setCcInputs] = useState<Record<string, string>>({});
 
-  const [vtBalance, setVtBalance] = useState("0.00"); 
-  const [smsBalance, setSmsBalance] = useState("0");    
+  const [vtBalance, setVtBalance] = useState("0.00");
+  const [smsBalance, setSmsBalance] = useState("0");
+  const [monnifyBalance, setMonnifyBalance] = useState<string | null>(null); // null = not configured yet
   const [status, setStatus] = useState("");
   const [activeTab, setActiveTab] = useState("analytics");
   const [timeFilter, setTimeFilter] = useState<TimeFilter>('ALL'); 
@@ -590,6 +591,7 @@ export default function AdminDashboard() {
       const data = await res.json();
       setVtBalance(data.naira);
       setSmsBalance(data.sms);
+      setMonnifyBalance(data.monnify ? data.monnify.available : null);
     } catch (e) { console.error("Failed to fetch VTpass health"); }
   };
 
@@ -1025,8 +1027,9 @@ export default function AdminDashboard() {
           <div className="space-y-6">
 
             {/* STATS */}
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-4">
               <StatBox label="VTpass Wallet" value={`₦${vtBalance}`} sub="Live Naira Float" color="text-white" icon={<Banknote size={16}/>} />
+              <StatBox label="Monnify Wallet" value={monnifyBalance !== null ? `₦${monnifyBalance}` : "Not set up"} sub="Moniepoint Transfer Float" color="text-white" icon={<Banknote size={16}/>} />
               <StatBox label={`Global Vaults (${timeFilter})`} value={`$${currentVaultTotal.toFixed(2)}`} sub="Base & Celo Combined" color="text-emerald-500" icon={<Wallet size={16}/>} />
               <StatBox label={`Profit (${timeFilter})`} value={`₦${analytics.fees.toLocaleString()}`} sub="Service Fees Accrued" color="text-blue-400" icon={<BarChart3 size={16}/>} />
               <StatBox label="SMS Health" value={`${smsBalance} Units`} sub="Messaging Units" color="text-orange-400" icon={<Activity size={16}/>} />

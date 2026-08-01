@@ -27,6 +27,11 @@ export interface ReceiptEmailData {
   customerName?: string | null;   // ⚡ from VTpass merchant-verify (electricity/bank)
   customerAddress?: string | null;// ⚡ from VTpass merchant-verify (electricity)
   isDelayed?: boolean;            // vended late via webhook/requery
+  // ⚡ Bank transfer only (Monnify) — when present, the receipt uses "Bank"/"Account Name"/
+  // "Account Number" labels instead of the generic "Service"/"Customer Name"/"Account / Phone"
+  // ones shared with every other category, since a transfer receipt reads oddly calling the
+  // recipient's bank a "service" and their name a "customer".
+  bankName?: string | null;
 }
 
 function row(label: string, value: string, opts: { mono?: boolean; highlight?: boolean; labelWidth?: number } = {}) {
@@ -47,14 +52,21 @@ function row(label: string, value: string, opts: { mono?: boolean; highlight?: b
 export function buildReceiptEmail(d: ReceiptEmailData): string {
   const rows: string[] = [];
 
-  rows.push(row('Service', d.serviceLabel.toUpperCase()));
+  if (d.bankName) {
+    rows.push(row('Bank', d.bankName));
+    if (d.customerName) rows.push(row('Account Name', d.customerName));
+    rows.push(row('Account Number', d.accountNumber));
+  } else {
+    rows.push(row('Service', d.serviceLabel.toUpperCase()));
 
-  // ⚡ Customer details from VTpass merchant-verify. Only shown when present, so this is
-  // safe for airtime/data (which have no registered customer name).
-  if (d.customerName) rows.push(row('Customer Name', d.customerName));
-  if (d.customerAddress) rows.push(row('Address', d.customerAddress, { labelWidth: 30 }));
+    // ⚡ Customer details from VTpass merchant-verify. Only shown when present, so this is
+    // safe for airtime/data (which have no registered customer name).
+    if (d.customerName) rows.push(row('Customer Name', d.customerName));
+    if (d.customerAddress) rows.push(row('Address', d.customerAddress, { labelWidth: 30 }));
 
-  rows.push(row('Account / Phone', d.accountNumber));
+    rows.push(row('Account / Phone', d.accountNumber));
+  }
+
   if (d.cryptoCharged) rows.push(row('Crypto Charged', d.cryptoCharged));
   if (d.units) rows.push(row('Units', d.units));
   if (d.txHash) rows.push(row('Transaction Hash', d.txHash, { mono: true, labelWidth: 30 }));

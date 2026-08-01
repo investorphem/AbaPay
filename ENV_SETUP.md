@@ -264,6 +264,16 @@ separate Monnify merchant account.
    above to the live equivalents, and set `MONNIFY_MODE=live` (or just delete it, since it then
    falls back to `NEXT_PUBLIC_APP_MODE`, which is already `live`).
 
+**Optional — low-balance alerting:**
+```
+VTPASS_LOW_BALANCE_THRESHOLD_NGN=5000    # default 5000 if unset
+MONNIFY_LOW_BALANCE_THRESHOLD_NGN=5000   # default 5000 if unset
+```
+Free — just numbers you set yourself. `src/lib/balanceAlerts.ts` checks both providers'
+float every time `/api/cleanup` runs (same external cron already recommended for the stuck-
+transaction sweep) and sends a Telegram alert when either drops below its threshold, with a 6h
+cooldown per provider so a cron running every few minutes doesn't spam the same warning.
+
 ---
 
 ## 10. Telegram

@@ -240,6 +240,33 @@ export async function getTransferStatus(reference: string): Promise<TransferResu
   }
 }
 
+// --- 6b. WALLET BALANCE (for the admin dashboard + low-balance alerting) ---
+
+export interface WalletBalance {
+  availableBalance: number;
+  ledgerBalance: number;
+  accountNumber: string;
+}
+
+export async function getWalletBalance(): Promise<WalletBalance | null> {
+  const accountNumber = process.env.MONNIFY_SOURCE_ACCOUNT_NUMBER || '';
+  if (!accountNumber) return null;
+
+  try {
+    const data = await monnifyFetch(`/api/v2/disbursements/wallet-balance?accountNumber=${encodeURIComponent(accountNumber)}`, { method: 'GET' });
+    if (!data?.requestSuccessful || !data?.responseBody) return null;
+    const body = data.responseBody;
+    return {
+      availableBalance: Number(body.availableBalance) || 0,
+      ledgerBalance: Number(body.ledgerBalance) || 0,
+      accountNumber: body.accountNumber || accountNumber,
+    };
+  } catch (e) {
+    console.error('[Monnify] getWalletBalance failed:', (e as Error).message);
+    return null;
+  }
+}
+
 // --- 7. WEBHOOK SIGNATURE VERIFICATION ---
 //
 // Monnify signs every webhook body with HMAC-SHA512, keyed with the secret key, in the
