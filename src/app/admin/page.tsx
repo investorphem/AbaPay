@@ -654,6 +654,25 @@ export default function AdminDashboard() {
         setStatus(`Withdrawal already queued for ${network} ${tokenSymbol} — executable in ~${mins} min.`);
         return;
       } else {
+        // 🔴 THE BUG THIS FIXES: executeWithdrawal() reverts with InsufficientVaultBalance
+        // if the vault balance has dropped below the QUEUED amount since queueing (e.g. a
+        // refund paid out of the same vault in the meantime) — the contract has no way to
+        // partially fulfill a stale request. That revert showed up in the UI as a bare
+        // "execution reverted" with no indication of why, and clicking Execute again just
+        // reverted identically forever, since the queued amount never changes on its own.
+        // Reading the CURRENT balance fresh here (not the possibly-stale `balanceToCheck`
+        // display value) lets us catch this before spending gas on a doomed transaction and
+        // tell the operator exactly what to do: cancel, then re-queue at today's balance.
+        const freshBalance = await publicClient.readContract({
+            address: tokenAddr, abi: ERC20_ABI, functionName: 'balanceOf', args: [targetContract],
+        }) as bigint;
+
+        if (queued.amount > freshBalance) {
+          const decimals = TOKENS[tokenSymbol].decimals;
+          setStatus(`Can't execute: ${(Number(queued.amount) / 10 ** decimals).toLocaleString()} ${tokenSymbol} was queued, but the vault only holds ${(Number(freshBalance) / 10 ** decimals).toLocaleString()} now (funds likely left via a refund since queueing). Cancel this queued withdrawal, then withdraw again to queue the current balance.`);
+          return;
+        }
+
         setStatus(`Executing queued ${tokenSymbol} withdrawal on ${network}...`);
         hash = await client.writeContract({
             chain: targetChain, address: targetContract, abi: ABAPAY_ADMIN_ABI,
