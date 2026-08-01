@@ -1,4 +1,8 @@
-// ⚡ LAST-RESORT PROVIDER SEED — the ONLY hardcoded provider data left in the app.
+// ⚡ LAST-RESORT PROVIDER SEED — the only hardcoded provider data left in the app, and it is
+// never the second-best source: it is the THIRD tier of a fresh cache → live fetch → stale
+// cache → this seed chain, only reached on a cold start during a genuine provider outage. See
+// vtpassCatalog.ts's getCatalog() (VTpass) and monnify.ts's getBanks() (Monnify/Moniepoint) —
+// both implement the identical chain, just against different providers.
 //
 // Every provider picker (web app, chat, MCP, admin) is now sourced LIVE from VTpass's
 // `/services?identifier=…` catalogue via src/lib/vtpassCatalog.ts. This file exists purely so
@@ -72,6 +76,40 @@ export const CABLE_SEED: SeedService[] = [
 export const EDUCATION_SEED: SeedService[] = [
   { serviceID: 'waec',              displayName: 'WAEC Result Checker PIN', logo: '/waec.png', minAmount: 10,   maxAmount: 1000000 },
   { serviceID: 'waec-registration', displayName: 'WAEC Registration PIN',   logo: '/waec.png', minAmount: null, maxAmount: null },
+];
+
+export interface SeedBank {
+  code: string; // CBN bank code, e.g. "044" (Access), "50515" (Moniepoint MFB)
+  name: string;
+}
+
+// Only reached if Monnify's /api/v1/banks has never once succeeded since this instance's cold
+// start (see monnify.ts's getBanks() — same fresh/live/stale/seed chain as the VTpass catalogue
+// above). Not the full ~30-bank Monnify list — just enough that account auto-detect still works
+// for the large majority of users during a genuine outage.
+export const BANK_SEED: SeedBank[] = [
+  { code: '044', name: 'Access Bank' },
+  { code: '063', name: 'Access Bank (Diamond)' },
+  { code: '050', name: 'Ecobank Nigeria' },
+  { code: '070', name: 'Fidelity Bank' },
+  { code: '011', name: 'First Bank of Nigeria' },
+  { code: '214', name: 'First City Monument Bank' },
+  { code: '058', name: 'Guaranty Trust Bank' },
+  { code: '301', name: 'Jaiz Bank' },
+  { code: '082', name: 'Keystone Bank' },
+  { code: '50211', name: 'Kuda Microfinance Bank' },
+  { code: '50515', name: 'Moniepoint Microfinance Bank' },
+  { code: '999992', name: 'OPay' },
+  { code: '999991', name: 'PalmPay' },
+  { code: '076', name: 'Polaris Bank' },
+  { code: '101', name: 'Providus Bank' },
+  { code: '221', name: 'Stanbic IBTC Bank' },
+  { code: '232', name: 'Sterling Bank' },
+  { code: '032', name: 'Union Bank of Nigeria' },
+  { code: '033', name: 'United Bank For Africa' },
+  { code: '215', name: 'Unity Bank' },
+  { code: '035', name: 'Wema Bank' },
+  { code: '057', name: 'Zenith Bank' },
 ];
 
 // 🔴 Local artwork for the handful of serviceIDs where VTpass's own image is the right one to

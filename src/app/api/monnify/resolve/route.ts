@@ -34,7 +34,7 @@ export async function POST(req: Request) {
       return NextResponse.json({ success: false, message: 'A valid 10-digit account number is required.' }, { status: 400 });
     }
 
-    const banks = await getBanks();
+    const { banks } = await getBanks();
 
     const attempts = await mapWithConcurrency(banks, BATCH_SIZE, async (bank) => {
       const result = await validateAccount(accountNumber, bank.code);

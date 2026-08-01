@@ -1,5 +1,6 @@
 import 'server-only'; // SECURITY: Monnify (Moniepoint's API product) keys never leak to the frontend
 import crypto from 'crypto';
+import { BANK_SEED } from '@/lib/providerFallback';
 
 // ⚡ MONIEPOINT / MONNIFY CLIENT ⚡
 //
@@ -67,45 +68,35 @@ async function monnifyFetch(path: string, opts: RequestInit = {}, retried = fals
 }
 
 // --- 3. BANK LIST ---
+//
+// Same fresh-cache → live-fetch → stale-cache → seed chain as vtpassCatalog.ts's getCatalog()
+// — no reason for the bank list to be architecturally weaker just because it has one entry
+// instead of five categories. The cache is deliberately never evicted on a failed fetch: a
+// brief Monnify blip keeps serving the last-known-good full bank list (marked stale) instead
+// of collapsing to the ~22-bank seed, exactly like a VTpass blip does for airtime/electricity.
 
 export interface MonnifyBank {
   code: string; // CBN 3-6 digit bank code, e.g. "044" (Access), "50515" (Moniepoint MFB)
   name: string;
 }
 
-// Small, correct fallback so the bank picker still works if Monnify's /banks endpoint is
-// briefly unreachable — mirrors the defensive pattern page.tsx already used for VTpass.
-const FALLBACK_BANKS: MonnifyBank[] = [
-  { code: '044', name: 'Access Bank' },
-  { code: '063', name: 'Access Bank (Diamond)' },
-  { code: '023', name: 'Citibank Nigeria' },
-  { code: '050', name: 'Ecobank Nigeria' },
-  { code: '070', name: 'Fidelity Bank' },
-  { code: '011', name: 'First Bank of Nigeria' },
-  { code: '214', name: 'First City Monument Bank' },
-  { code: '058', name: 'Guaranty Trust Bank' },
-  { code: '301', name: 'Jaiz Bank' },
-  { code: '082', name: 'Keystone Bank' },
-  { code: '50211', name: 'Kuda Microfinance Bank' },
-  { code: '50515', name: 'Moniepoint Microfinance Bank' },
-  { code: '999992', name: 'OPay' },
-  { code: '999991', name: 'PalmPay' },
-  { code: '076', name: 'Polaris Bank' },
-  { code: '101', name: 'Providus Bank' },
-  { code: '221', name: 'Stanbic IBTC Bank' },
-  { code: '232', name: 'Sterling Bank' },
-  { code: '032', name: 'Union Bank of Nigeria' },
-  { code: '033', name: 'United Bank For Africa' },
-  { code: '215', name: 'Unity Bank' },
-  { code: '035', name: 'Wema Bank' },
-  { code: '057', name: 'Zenith Bank' },
-];
+export interface BankListResult {
+  banks: MonnifyBank[];
+  /** true when this came from the offline seed or an expired cache rather than a live fetch. */
+  stale: boolean;
+}
 
+const BANK_CACHE_MS = 6 * 60 * 60 * 1000; // Monnify's bank list changes on the order of months
 let bankCache: { banks: MonnifyBank[]; at: number } | null = null;
-const BANK_CACHE_MS = 6 * 60 * 60 * 1000; // bank list changes rarely
 
-export async function getBanks(): Promise<MonnifyBank[]> {
-  if (bankCache && Date.now() - bankCache.at < BANK_CACHE_MS) return bankCache.banks;
+function seedBanks(): MonnifyBank[] {
+  return BANK_SEED.map(b => ({ code: b.code, name: b.name }));
+}
+
+export async function getBanks(): Promise<BankListResult> {
+  if (bankCache && Date.now() - bankCache.at < BANK_CACHE_MS) {
+    return { banks: bankCache.banks, stale: false };
+  }
 
   try {
     const data = await monnifyFetch('/api/v1/banks', { method: 'GET' });
@@ -117,10 +108,14 @@ export async function getBanks(): Promise<MonnifyBank[]> {
       .sort((a: MonnifyBank, b: MonnifyBank) => a.name.localeCompare(b.name));
 
     bankCache = { banks, at: Date.now() };
-    return banks;
+    return { banks, stale: false };
   } catch (e) {
-    console.error('[Monnify] getBanks failed, using fallback list:', (e as Error).message);
-    return FALLBACK_BANKS;
+    console.error('[Monnify] getBanks live fetch failed:', (e as Error).message);
+    // Last-known-good beats blank, exactly as vtpassCatalog.ts's getCatalog() reasons: an
+    // expired entry is still overwhelmingly likely to be correct (bank lists barely move), and
+    // a user mid-transfer must not be dumped into a stunted picker over one failed request.
+    if (bankCache) return { banks: bankCache.banks, stale: true };
+    return { banks: seedBanks(), stale: true };
   }
 }
 
