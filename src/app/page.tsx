@@ -2581,11 +2581,11 @@ export default function Home() {
 
                 <button
                     onClick={() => setIsConfirmModalOpen(true)}
-                    disabled={isVerifying || !isFormValid || isProcessing}
-                    className="w-full bg-slate-900 dark:bg-white hover:bg-black dark:hover:bg-slate-200 text-white dark:text-slate-900 font-black py-6 rounded-3xl flex items-center justify-center gap-3.5 transition-all active:scale-95 disabled:bg-slate-300 dark:disabled:bg-slate-800 disabled:text-slate-500 dark:disabled:text-slate-500 shadow-xl shadow-slate-900/20 dark:shadow-white/10 text-lg tracking-tight"
+                    disabled={isVerifying || !isFormValid || isProcessing || isCurrentServiceDisabled}
+                    className={`w-full text-white dark:text-slate-900 font-black py-6 rounded-3xl flex items-center justify-center gap-3.5 transition-all active:scale-95 shadow-xl text-lg tracking-tight ${isCurrentServiceDisabled ? 'bg-slate-300 dark:bg-slate-800 opacity-50 cursor-not-allowed text-slate-500 dark:text-slate-500 shadow-none' : 'bg-slate-900 dark:bg-white hover:bg-black dark:hover:bg-slate-200 disabled:opacity-30 shadow-slate-900/20 dark:shadow-white/10'}`}
                 >
-                    {isProcessing ? <Loader2 size={24} className="animate-spin text-emerald-400 dark:text-emerald-600"/> : <ShieldCheck size={24} className="text-emerald-400 dark:text-emerald-600" />}
-                    {isProcessing ? 'PROCESSING...' : `TRANSFER ${cryptoToCharge} ${selectedToken.symbol}`}
+                    {isProcessing ? <Loader2 size={24} className="animate-spin text-emerald-400 dark:text-emerald-600"/> : <ShieldCheck size={24} className={isCurrentServiceDisabled ? 'text-slate-400 dark:text-slate-500' : 'text-emerald-400 dark:text-emerald-600'} />}
+                    {isCurrentServiceDisabled ? 'TEMPORARILY OFFLINE' : isProcessing ? 'PROCESSING...' : `TRANSFER ${cryptoToCharge} ${selectedToken.symbol}`}
                 </button>
             </div>
           </div>
