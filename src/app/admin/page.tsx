@@ -1385,13 +1385,31 @@ export default function AdminDashboard() {
                                 )}
 
                               {tx.status === 'PENDING' && (
-                                <button 
+                                <button
                                   onClick={() => handleRequery(tx)}
                                   disabled={isRequeryingId === tx.id}
                                   className="bg-slate-800 hover:bg-slate-700 border border-slate-700 text-white text-[9px] font-bold uppercase tracking-widest px-3 py-1.5 rounded-lg flex items-center gap-1.5 transition-colors disabled:opacity-50"
                                 >
                                   {isRequeryingId === tx.id ? <Loader2 size={10} className="animate-spin text-orange-400" /> : <RefreshCw size={10} className="text-orange-400" />}
                                   {isRequeryingId === tx.id ? 'Checking...' : 'Check Status'}
+                                </button>
+                              )}
+
+                              {/* 🔴 THE GAP THIS FIXES: a PENDING row (e.g. Check Status confirms the
+                                  provider has no record of it — never actually delivered, funds
+                                  already on-chain) previously had NO way to refund it — Refund only
+                                  ever appeared once something had transitioned to FAILED_*. The
+                                  underlying /api/admin/refund endpoint never required that status
+                                  anyway (it verifies the on-chain refund tx itself, not the row's
+                                  prior status), so this was a UI gap, not a real safeguard. */}
+                              {tx.status === 'PENDING' && (
+                                <button
+                                  onClick={() => handleRefund(tx)}
+                                  disabled={processingRefundId === tx.id}
+                                  className="bg-slate-800 hover:bg-slate-700 border border-slate-700 text-white text-[9px] font-bold uppercase tracking-widest px-3 py-1.5 rounded-lg flex items-center gap-1.5 transition-colors disabled:opacity-50"
+                                >
+                                  {processingRefundId === tx.id ? <Loader2 size={10} className="animate-spin text-emerald-400" /> : <Zap size={10} className="text-emerald-400" />}
+                                  {processingRefundId === tx.id ? 'Refunding...' : 'Refund'}
                                 </button>
                               )}
 

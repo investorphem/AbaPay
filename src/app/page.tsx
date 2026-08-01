@@ -798,8 +798,14 @@ export default function Home() {
       saveBeneficiary(accountNumber, customerName);
       handleResetService(SERVICES[0]);
 
+      // 🔴 THE BUG THIS FIXES: this status/toast wording is shared by every category, and was
+      // written entirely from the "vending a bill/token" mental model — fine for airtime,
+      // meaningless (and a little alarming) for a bank transfer, where nothing is being
+      // "vended" at all, just sent.
+      const isBankTransfer = uiCategory === 'BANK';
+
       if (finalStatus.status === 'SUCCESS') {
-          setStatus("Success! Token/Ref Dispatched.");
+          setStatus(isBankTransfer ? "Success! Your transfer has been sent." : "Success! Token/Ref Dispatched.");
           const earnedPoints = Number((parseFloat(calculatedNairaAmount) / exchangeRate).toFixed(2));
           if (earnedPoints > 0) {
               window.dispatchEvent(new CustomEvent('abapoints-awarded', { detail: earnedPoints }));
@@ -808,18 +814,22 @@ export default function Home() {
               showToast("Transaction Successful", "Your transaction has been successfully processed.", "success");
           }
       } else if (finalStatus.status === 'TIMEOUT') {
-          setStatus("Payment Sent! We're finishing your vending in the background.");
+          setStatus(isBankTransfer ? "Transfer sent! We're confirming it landed in the background." : "Payment Sent! We're finishing your vending in the background.");
           showToast("Processing", "You can safely leave this page. Receipt will be in History.", "success");
       } else {
-          setStatus("Vending Failed. Admin alerted.");
-          showToast("Vending Error", finalStatus.message || "Payment received, but vending failed.", "error");
+          setStatus(isBankTransfer ? "Transfer Failed. Admin alerted." : "Vending Failed. Admin alerted.");
+          showToast(isBankTransfer ? "Transfer Error" : "Vending Error", finalStatus.message || (isBankTransfer ? "Payment received, but the transfer failed." : "Payment received, but vending failed."), "error");
       }
 
       const updatedHistory = [{
           id: realTxHash.slice(0,8), date: new Date().toLocaleString(), status: finalStatus.status === 'TIMEOUT' ? "PENDING" : finalStatus.status,
           amountNaira: isInternational ? `${intlCurrency || activeCountry.code} ${displayForeignAmount}` : calculatedNairaAmount,
           amountCrypto: backendPayload.amount, tokenUsed: selectedToken.symbol, service: uiCategory, network: displayNetwork.toUpperCase(), txHash: realTxHash, account: payloadBillersCode,
-          blockchain: currentBlockchainName, purchased_code: finalStatus.purchased_code, units: finalStatus.units, country_code: isInternational ? activeCountry.code : null
+          blockchain: currentBlockchainName, purchased_code: finalStatus.purchased_code, units: finalStatus.units, country_code: isInternational ? activeCountry.code : null,
+          // ⚡ The verified name shown live during entry (bank account holder / electricity
+          // meter owner) — previously dropped here, so it never made it into history or the
+          // receipt modal even though it was captured and saved to the DB correctly.
+          customerName: customerName || null,
       }, ...transactions];
       setTransactions(updatedHistory);
       localStorage.setItem(`abapay_history_${address}`, JSON.stringify(updatedHistory));
@@ -1105,7 +1115,7 @@ export default function Home() {
           throw new Error("Transaction failed on the blockchain. Your funds were not deducted.");
       }
 
-      setStatus(`Payment Secured! Vending in progress...`);
+      setStatus(uiCategory === 'BANK' ? `Payment Secured! Sending your transfer...` : `Payment Secured! Vending in progress...`);
 
       const res = await fetch('/api/pay', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ ...backendPayload, intent_only: false, preflight_hash: preflightHash }) });
       const finalStatus = await res.json();
@@ -1780,8 +1790,9 @@ export default function Home() {
              amountNaira: (tx.country_code && tx.display_amount) ? tx.display_amount : tx.amount_naira.toString(), amountCrypto: tx.amount_usdt.toString(), 
              tokenUsed: tx.token_used || "USD₮", service: tx.service_category, network: tx.network, 
              blockchain: tx.blockchain || 'CELO', country_code: tx.country_code || null,
-             txHash: tx.tx_hash, account: tx.account_number, refund_hash: tx.refund_hash, 
-             purchased_code: tx.purchased_code, request_id: tx.request_id, units: tx.units 
+             txHash: tx.tx_hash, account: tx.account_number, refund_hash: tx.refund_hash,
+             purchased_code: tx.purchased_code, request_id: tx.request_id, units: tx.units,
+             customerName: tx.customer_name || null,
           }));
           setTransactions(cloudHistory); localStorage.setItem(`abapay_history_${address}`, JSON.stringify(cloudHistory));
         }

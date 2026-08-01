@@ -44,10 +44,24 @@ export async function initiateMonnifyBankTransfer(input: VendInput): Promise<Ven
       destinationAccountName: customer_name,
     });
   } catch (e: any) {
-    // Couldn't even reach Monnify — leave the lock and let the caller's TIMEOUT path retry
-    // via the reconcile sweep, exactly like executeVend does when the VTpass fetch throws.
+    // 🔴 THE BUG THIS FIXES: this used to silently reset the row to PENDING and tell the user
+    // "finishing in background" for ANY failure here — a genuine network blip AND an outright
+    // rejection from Monnify (bad request, insufficient float, whatever reason) got IDENTICAL
+    // treatment. That's misleading either way: the reconcile sweep's BANK branch only ever
+    // re-checks a reference's STATUS (requeryMonnifyTransfer) — it never re-attempts the
+    // initiate call — so a reference Monnify never received stays unrecoverable by itself no
+    // matter which of the two this was. The only real difference silence made was a 5+ minute
+    // delay before the stuck-sweep's generic "Monnify has no record" alert, with none of the
+    // actual rejection reason attached. Alerting immediately, with the real error, gets the
+    // operator to a manual retry-or-refund decision faster and better-informed.
+    console.error('[Monnify] initiateTransfer threw:', e.message);
     await supabase.from('transactions').update({ status: 'PENDING' }).eq('tx_hash', txHash);
-    return { success: true, status: 'TIMEOUT', message: 'Network slow. Finishing in background.' };
+    try {
+      await sendTelegramAlert(
+        `🚨 *TRANSFER INITIATE FAILED*\n\nMonnify never confirmed receiving this transfer request — funds are already on-chain, but nothing was submitted for delivery. Needs a manual retry-or-refund decision in the admin dashboard.\n\n💰 ₦${vendAmount} to ${network} (${billersCode})\n👤 *Account:* ${customer_name}\n🧾 *Ref:* ${vtRequestId}\n🛑 *Error:* ${e.message}\n🔗 \`${txHash}\``
+      );
+    } catch {}
+    return { success: true, status: 'TIMEOUT', message: 'Your transfer is being confirmed — you will be notified once it completes.' };
   }
 
   if (result.status === 'SUCCESS') {

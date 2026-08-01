@@ -89,17 +89,28 @@ async function getAccessToken(): Promise<string> {
 // entire resolve batch — which awaits Promise.all per batch — indefinitely. 8 seconds is
 // generous for a same-region API call; a bank that hasn't answered by then is treated as no
 // match, exactly like a genuine "wrong bank" response, rather than freezing the whole sweep.
-async function monnifyFetch(path: string, opts: RequestInit = {}, retried = false): Promise<any> {
+//
+// 🔴 THE BUG THIS FIXES: that same flat 8s applied to EVERY call, including the single,
+// critical disbursement-initiate request — a real money-moving call with no batch/parallelism
+// concern at all (unlike the ~25-way resolve sweep this was tuned for). Aborting it early
+// meant our OWN client gave up before Monnify's sandbox (observed as noticeably slower than
+// its live equivalent) had even finished processing — the request never showed up in
+// Monnify's own event log, and the caller's catch-all treated the abort as "network blip,
+// safe to retry later," silently parking a transfer that was never actually submitted.
+// Callers that are NOT part of a large parallel batch now get a longer default.
+const DEFAULT_TIMEOUT_MS = 8_000;
+
+async function monnifyFetch(path: string, opts: RequestInit = {}, retried = false, timeoutMs: number = DEFAULT_TIMEOUT_MS): Promise<any> {
   const token = await getAccessToken();
   const res = await fetch(`${baseUrl()}${path}`, {
     ...opts,
     headers: { ...(opts.headers || {}), Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
-    signal: AbortSignal.timeout(8_000),
+    signal: AbortSignal.timeout(timeoutMs),
   });
 
   if (res.status === 401 && !retried) {
     tokenCache = null; // force a fresh login
-    return monnifyFetch(path, opts, true);
+    return monnifyFetch(path, opts, true, timeoutMs);
   }
 
   return res.json();
@@ -217,7 +228,7 @@ export async function initiateTransfer(params: InitiateTransferParams): Promise<
       async: true, // don't block on Monnify's own processing — the webhook (or the
                    // reconcile sweep, if the webhook never arrives) finalizes the row
     }),
-  });
+  }, false, 20_000); // longer timeout: a single critical money-moving call, not part of a batch
 
   if (!data?.requestSuccessful && !data?.responseBody) {
     throw new Error(`Monnify transfer request rejected: ${data?.responseMessage || 'unknown error'}`);
@@ -231,7 +242,7 @@ export async function initiateTransfer(params: InitiateTransferParams): Promise<
 
 export async function getTransferStatus(reference: string): Promise<TransferResult | null> {
   try {
-    const data = await monnifyFetch(`/api/v2/disbursements/single/summary?reference=${encodeURIComponent(reference)}`, { method: 'GET' });
+    const data = await monnifyFetch(`/api/v2/disbursements/single/summary?reference=${encodeURIComponent(reference)}`, { method: 'GET' }, false, 20_000);
     if (!data?.requestSuccessful || !data?.responseBody) return null;
     const body = data.responseBody;
     return { status: body.status, reference: body.reference || reference, amount: body.amount, raw: data };

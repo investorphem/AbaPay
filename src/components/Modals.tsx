@@ -26,7 +26,7 @@ export function ReceiptModal({ receipt, isMainnet, onClose, onSupport }: any) {
   const isElectricity = receipt.service?.toUpperCase() === 'ELECTRICITY' || receipt.service === 'Electricity';
   const isEducation = receipt.service === 'Education PIN' || receipt.service?.toUpperCase().includes('WAEC') || receipt.service?.toUpperCase().includes('JAMB');
 
-  const buildFallbackText = () => `🧾 AbaPay Receipt\n\nService: ${receipt.network} ${receipt.service}\nAmount: ${formatTxAmount(receipt.amountNaira)}\nStatus: ${receipt.status}\nAccount: ${receipt.account}\nRef: ${receipt.id}\n${hasPin ? `\nPIN/TOKEN: ${receipt.purchased_code}` : ''}\n\nSecured by ${receipt.blockchain || 'Celo'} ⚡`;
+  const buildFallbackText = () => `🧾 AbaPay Receipt\n\nService: ${receipt.network} ${receipt.service}\nAmount: ${formatTxAmount(receipt.amountNaira)}\nStatus: ${receipt.status}\nAccount: ${receipt.account}${receipt.customerName ? `\nName: ${receipt.customerName}` : ''}\nRef: ${receipt.id}\n${hasPin ? `\nPIN/TOKEN: ${receipt.purchased_code}` : ''}\n\nSecured by ${receipt.blockchain || 'Celo'} ⚡`;
 
   // ⚡ THE ACTUAL BUG — this project runs Tailwind v4, whose default palette (and every
   // `/opacity` utility like `bg-emerald-900/20`) compiles to `oklch()`/`color-mix()` colors.
@@ -215,10 +215,16 @@ export function ReceiptModal({ receipt, isMainnet, onClose, onSupport }: any) {
                </div>
                <div className="flex justify-between border-b border-slate-100 dark:border-slate-800/60 pb-3 transition-colors">
                   <span className="text-slate-400 dark:text-slate-500 text-[10px] font-bold uppercase tracking-wider">
-                    {isElectricity ? 'Meter Number' : isEducation ? 'Customer Phone' : receipt.service === 'Send Money' || receipt.service === 'Bank Transfer' ? 'Account No' : 'Recipient'}
+                    {isElectricity ? 'Meter Number' : isEducation ? 'Customer Phone' : receipt.service === 'BANK' ? 'Account No' : 'Recipient'}
                   </span>
                   <span className="text-slate-800 dark:text-slate-200 font-mono font-bold text-xs">{receipt.account}</span>
                </div>
+               {receipt.customerName && (
+                 <div className="flex justify-between border-b border-slate-100 dark:border-slate-800/60 pb-3 transition-colors">
+                    <span className="text-slate-400 dark:text-slate-500 text-[10px] font-bold uppercase tracking-wider">{receipt.service === 'BANK' ? 'Account Name' : 'Verified Name'}</span>
+                    <span className="text-slate-800 dark:text-slate-200 font-black text-xs text-right">{receipt.customerName}</span>
+                 </div>
+               )}
                {receipt.request_id && (
                  <div className="flex justify-between border-b border-slate-100 dark:border-slate-800/60 pb-3 transition-colors">
                     <span className="text-slate-400 dark:text-slate-500 text-[10px] font-bold uppercase tracking-wider">Transaction ID</span>
