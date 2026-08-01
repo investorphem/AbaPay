@@ -30,26 +30,51 @@ function baseUrl(): string {
 
 let tokenCache: { token: string; expiresAt: number } | null = null;
 
+// 🔴 THE BUG THIS FIXES: /api/monnify/resolve fires validateAccount for every bank in
+// parallel batches (see resolve/route.ts). Every one of those calls independently checked
+// "is there a cached token?" and, on a cold start (no token yet) or right at expiry, ALL of
+// them saw no valid cache at the same instant and each fired its OWN /api/v1/auth/login —
+// a thundering herd of up to 8 simultaneous logins for what should be one shared token. Some
+// of those got rejected/rate-limited, and the resulting 401s each triggered ANOTHER retry
+// login in monnifyFetch below — compounding into the "Task timed out after 300 seconds" seen
+// in production on /api/monnify/resolve, and, likely, most of the batch silently coming back
+// as "no match" (validateAccount swallows any error into null) even for the correct bank.
+//
+// Fix: at most one login in flight at a time. Concurrent callers await the SAME promise
+// instead of each starting their own.
+let tokenFetchPromise: Promise<string> | null = null;
+
 async function fetchNewToken(): Promise<string> {
-  const apiKey = process.env.MONNIFY_API_KEY || '';
-  const secretKey = process.env.MONNIFY_SECRET_KEY || '';
-  const basic = Buffer.from(`${apiKey}:${secretKey}`).toString('base64');
+  if (tokenFetchPromise) return tokenFetchPromise;
 
-  const res = await fetch(`${baseUrl()}/api/v1/auth/login`, {
-    method: 'POST',
-    headers: { Authorization: `Basic ${basic}`, 'Content-Type': 'application/json' },
-  });
-  const data = await res.json();
+  tokenFetchPromise = (async () => {
+    try {
+      const apiKey = process.env.MONNIFY_API_KEY || '';
+      const secretKey = process.env.MONNIFY_SECRET_KEY || '';
+      const basic = Buffer.from(`${apiKey}:${secretKey}`).toString('base64');
 
-  if (!data?.requestSuccessful || !data?.responseBody?.accessToken) {
-    throw new Error(`Monnify auth failed: ${data?.responseMessage || res.status}`);
-  }
+      const res = await fetch(`${baseUrl()}/api/v1/auth/login`, {
+        method: 'POST',
+        headers: { Authorization: `Basic ${basic}`, 'Content-Type': 'application/json' },
+        signal: AbortSignal.timeout(10_000),
+      });
+      const data = await res.json();
 
-  // expiresIn is seconds (Monnify tokens run ~1hr) — refresh 90s early to avoid a
-  // request racing an expiry mid-flight.
-  const expiresInMs = (Number(data.responseBody.expiresIn) || 3600) * 1000;
-  tokenCache = { token: data.responseBody.accessToken, expiresAt: Date.now() + expiresInMs - 90_000 };
-  return tokenCache.token;
+      if (!data?.requestSuccessful || !data?.responseBody?.accessToken) {
+        throw new Error(`Monnify auth failed: ${data?.responseMessage || res.status}`);
+      }
+
+      // expiresIn is seconds (Monnify tokens run ~1hr) — refresh 90s early to avoid a
+      // request racing an expiry mid-flight.
+      const expiresInMs = (Number(data.responseBody.expiresIn) || 3600) * 1000;
+      tokenCache = { token: data.responseBody.accessToken, expiresAt: Date.now() + expiresInMs - 90_000 };
+      return tokenCache.token;
+    } finally {
+      tokenFetchPromise = null; // next call (after this settles) is free to fetch again if needed
+    }
+  })();
+
+  return tokenFetchPromise;
 }
 
 async function getAccessToken(): Promise<string> {
@@ -59,11 +84,17 @@ async function getAccessToken(): Promise<string> {
 
 // --- 2. AUTHENTICATED FETCH (retries once on 401 with a fresh token) ---
 
+// 🔴 ALSO PART OF THE TIMEOUT FIX ABOVE: no call into Monnify had a timeout at all, so one
+// slow/hanging response (sandbox is noticeably less consistent than live) could block an
+// entire resolve batch — which awaits Promise.all per batch — indefinitely. 8 seconds is
+// generous for a same-region API call; a bank that hasn't answered by then is treated as no
+// match, exactly like a genuine "wrong bank" response, rather than freezing the whole sweep.
 async function monnifyFetch(path: string, opts: RequestInit = {}, retried = false): Promise<any> {
   const token = await getAccessToken();
   const res = await fetch(`${baseUrl()}${path}`, {
     ...opts,
     headers: { ...(opts.headers || {}), Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+    signal: AbortSignal.timeout(8_000),
   });
 
   if (res.status === 401 && !retried) {

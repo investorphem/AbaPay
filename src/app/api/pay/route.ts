@@ -115,12 +115,40 @@ export async function POST(req: Request) {
           }
         }
 
-        await supabase.from('transactions').upsert(dbPayload, { onConflict: 'tx_hash' });
+        // 🔴 THE BUG THIS FIXES: this write's result was never checked. If the upsert failed
+        // (bad column value, transient DB error, whatever) the response still unconditionally
+        // said `{success:true, status:"PENDING"}` — so the frontend proceeded to prompt the
+        // REAL payBill signature with no row for it to ever attach to. The user's crypto moved
+        // on-chain, but the app never knew the payment existed at all: no ledger entry, no
+        // Telegram alert, nothing for the reconcile sweep to find later either (it only scans
+        // EXISTING rows). Silent from end to end. Now a failed write stops the flow before any
+        // signature is requested, exactly like the electricity duplicate guard just above.
+        const { error: intentError } = await supabase.from('transactions').upsert(dbPayload, { onConflict: 'tx_hash' });
+        if (intentError) {
+            console.error('[Pay] intent_only upsert failed:', intentError.message, JSON.stringify(dbPayload).slice(0, 500));
+            try {
+                await sendTelegramAlert(`🚨 *PREFLIGHT WRITE FAILED*\nCouldn't create the intent row for a ${serviceCategory} payment — refused before any signature was requested.\n👤 Wallet: \`${wallet_address}\`\n🛑 Error: ${intentError.message}`);
+            } catch {}
+            return NextResponse.json({ success: false, status: 'FAILED_VENDING', message: "Couldn't start this payment — please try again or contact support." }, { status: 500 });
+        }
         return NextResponse.json({ success: true, status: "PENDING" });
     }
 
     if (preflight_hash) {
-        await supabase.from('transactions').update({ tx_hash: txHash }).eq('tx_hash', preflight_hash);
+        const { data: reconciled, error: reconcileError } = await supabase.from('transactions').update({ tx_hash: txHash }).eq('tx_hash', preflight_hash).select();
+        // 🔴 SAME CLASS OF BUG: if the preflight row from the intent_only step above doesn't
+        // exist (e.g. it silently failed before this fix, or a race), this update matches zero
+        // rows and nothing here noticed — the on-chain payment then proceeds with no DB row to
+        // attach to, exactly the "money moved, app has no idea" failure the user hit. Now it's
+        // impossible to miss: real money is on-chain by this point (txHash is a REAL hash, not
+        // a preflight placeholder), so this alerts rather than silently letting the atomic lock
+        // below fail the exact same way a moment later.
+        if (reconcileError || !reconciled || reconciled.length === 0) {
+            console.error('[Pay] Failed to reconcile preflight row', preflight_hash, '->', txHash, reconcileError?.message);
+            try {
+                await sendTelegramAlert(`🚨 *PREFLIGHT RECONCILE FAILED*\nNo preflight row found for \`${preflight_hash}\` when attaching real tx \`${txHash}\`. Funds are already on-chain — this payment needs manual recovery.\n👤 Wallet: \`${wallet_address}\`\n🔗 \`${txHash}\``);
+            } catch {}
+        }
     }
 
     // 3. ON-CHAIN VERIFICATION (Smart Wallet & Payload Tamper Check)

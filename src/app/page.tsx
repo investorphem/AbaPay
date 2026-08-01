@@ -489,7 +489,7 @@ export default function Home() {
         const activeMinAmount = (activeTab === "pay" && activeService.id === "ELECTRICITY") ? effectiveElecMin : dynamicMinAmount;
         if (amount < activeMinAmount || amount > dynamicMaxAmount) return false;
     }
-    if (activeTab === "bank") return accountNumber.length === 10 && customerName !== null && selectedBank !== null && customerPhone.length >= 10;
+    if (activeTab === "bank") return accountNumber.length === 10 && customerName !== null && selectedBank !== null && customerPhone.length >= 10 && customerEmail.includes('@') && customerEmail.includes('.');
     if (activeTab === "education") {
       if (educationProvider === "jamb") return accountNumber.length >= 10 && customerName !== null && selectedEducationPlan !== null && customerPhone.length >= 10;
       return selectedEducationPlan !== null && customerPhone.length >= 10;
@@ -2541,7 +2541,7 @@ export default function Home() {
                 </div>
 
                 <div className="animate-in fade-in">
-                     <input 
+                     <input
                         type="tel" placeholder="Sender's Phone (Receipt)"
                         maxLength={11}
                         className="w-full bg-slate-50 dark:bg-[#1a1a1f] border border-slate-100 dark:border-slate-800/80 p-5 rounded-2xl font-bold text-slate-700 dark:text-white outline-none focus:border-emerald-500 dark:focus:border-emerald-500 transition-colors"
@@ -2551,9 +2551,11 @@ export default function Home() {
                 </div>
 
                 <div className="animate-in fade-in mt-3">
-                     <input 
-                        type="email" placeholder="Email Address (Optional for Receipt)"
-                        className="w-full bg-slate-50 dark:bg-[#1a1a1f] border border-slate-100 dark:border-slate-800/80 p-5 rounded-2xl font-bold text-slate-700 dark:text-white outline-none focus:border-emerald-500 dark:focus:border-emerald-500 transition-colors"
+                     <input
+                        type="email" placeholder="Email Address (Required for Receipt)"
+                        className={`w-full bg-slate-50 dark:bg-[#1a1a1f] border p-5 rounded-2xl font-bold text-slate-700 dark:text-white outline-none transition-colors ${
+                          customerEmail.length > 0 && !(customerEmail.includes('@') && customerEmail.includes('.')) ? "border-red-300 dark:border-red-500/50 focus:border-red-500" : "border-slate-100 dark:border-slate-800/80 focus:border-emerald-500 dark:focus:border-emerald-500"
+                        }`}
                         value={customerEmail}
                         onChange={(e) => setCustomerEmail(e.target.value)}
                     />
