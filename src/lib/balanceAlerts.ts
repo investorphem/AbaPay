@@ -25,7 +25,7 @@ async function getVtpassBalance(): Promise<number | null> {
   try {
     const appMode = process.env.NEXT_PUBLIC_APP_MODE || 'sandbox';
     const baseUrl = appMode === 'live' ? 'https://vtpass.com/api' : 'https://sandbox.vtpass.com/api';
-    const res = await fetch(`${baseUrl}/balance`, { method: 'GET', headers: getHeaders('GET'), signal: AbortSignal.timeout(8_000) });
+    const res = await fetch(`${baseUrl}/balance`, { method: 'GET', headers: getHeaders(), signal: AbortSignal.timeout(8_000) });
     const data = await res.json();
     const balance = Number(data?.contents?.balance);
     return Number.isFinite(balance) ? balance : null;
