@@ -1184,6 +1184,41 @@ export default function AdminDashboard() {
                      </div>
                  </div>
 
+                 {/* ⚡ STANDALONE SWITCHES — services/channels with no per-provider breakdown ⚡
+                     Bank Transfer has no VTpass provider catalog to iterate (it settles
+                     through Monnify/Moniepoint, not a picker of providers), and the four
+                     agent channels are pause/resume toggles for the whole channel, not a
+                     product — so both render as a single switch, same shape as the
+                     International block above. */}
+                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-6">
+                    {[
+                        { key: 'BANK', title: 'Bank Transfer', subtitle: 'Moniepoint (via Monnify) payouts' },
+                        { key: 'CHANNEL_WHATSAPP', title: 'WhatsApp Agent', subtitle: 'Pause chat payments on WhatsApp' },
+                        { key: 'CHANNEL_TELEGRAM', title: 'Telegram Agent', subtitle: 'Pause chat payments on Telegram' },
+                        { key: 'CHANNEL_X', title: 'X Agent', subtitle: 'Pause chat payments on X (DMs)' },
+                        { key: 'CHANNEL_MCP', title: 'MCP', subtitle: 'Pause the AbaPay MCP server (Claude & other agents)' },
+                    ].map((sw) => {
+                        const isOn = killSwitches[sw.key] !== false;
+                        return (
+                            <div key={sw.key} className="bg-slate-900 border border-slate-800 rounded-2xl overflow-hidden">
+                                <div className="p-5 flex items-center justify-between">
+                                    <div>
+                                        <h3 className="font-black text-white text-sm">{sw.title}</h3>
+                                        <p className="text-[10px] font-bold text-slate-500 uppercase tracking-widest mt-0.5">{sw.subtitle}</p>
+                                    </div>
+                                    <button
+                                        onClick={() => toggleKillSwitch(sw.key, !isOn)}
+                                        disabled={isUpdatingSwitches}
+                                        className={`relative inline-flex h-7 w-12 shrink-0 items-center rounded-full transition-colors disabled:opacity-50 ${isOn ? 'bg-emerald-500' : 'bg-slate-700'}`}
+                                    >
+                                        <span className={`inline-block h-5 w-5 transform rounded-full bg-white transition-transform ${isOn ? 'translate-x-6' : 'translate-x-1'}`} />
+                                    </button>
+                                </div>
+                            </div>
+                        );
+                    })}
+                 </div>
+
                  <div className="space-y-6">
                     {switchGroups.map((group) => {
                         const isMasterOn = killSwitches[group.master] !== false;

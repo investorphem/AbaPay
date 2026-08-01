@@ -49,6 +49,7 @@ Designed for low fees, cross-border utility vending (Nigeria + every country VTp
 * **Agent Identity & Payments:** ERC-8004 (on-chain agent identity, Celo + Base) and x402 (`thirdweb` SDK) for HTTP-native, facilitator-settled payments in the main app
 * **Agent Tool Access:** MCP (Model Context Protocol) — Streamable HTTP/JSON-RPC server at `/api/mcp` exposing balance-check and bill-pay tools to any MCP client
 * **Utility Provider:** VTpass API (bills, airtime, data, education, international airtime)
+* **Bank Transfer Provider:** Monnify API (Moniepoint Inc.) — account auto-detect, Name Enquiry verification, and the real NUBAN payout, debited from a Moniepoint Microfinance Bank business account
 * **Database / Ledger:** Supabase (PostgreSQL) — transactions, platform settings, points, refunds
 * **Email:** Resend (transactional receipt emails)
 * **Notifications & Bots:** Telegram Bot API, WhatsApp Cloud API, X (Twitter) API, VTpass Messaging API (SMS)
@@ -115,6 +116,7 @@ src/
 │       ├── oauth/{register,authorize,token}/  # OAuth 2.1 (DCR, consent page, token endpoint) for MCP
 │       ├── cleanup/              # Stale pre-flight intent sweeper
 │       ├── webhook/, webhook/vtpass/  # VTpass + on-chain webhooks
+│       ├── monnify/              # Moniepoint bank list, account resolve/verify, transfer webhook
 │       ├── telegram/webhook/, whatsapp/webhook/, x/webhook/  # Bot channel webhooks
 │       └── support/              # Support ticket submission
 ├── components/                 # Shared UI (AppFooter, Modals — Terms/Privacy/FAQ/Receipt —, tabs, AIChat, AgentHub, Admin panels)
@@ -123,6 +125,8 @@ src/
 ├── lib/
 │   ├── vtpassCatalog.ts         # ⭐ Live VTpass provider catalogue + per-provider amount limits
 │   ├── providerFallback.ts      # Offline seed used only when VTpass is unreachable
+│   ├── monnify.ts               # Moniepoint (Monnify) API client — banks, verify, transfer
+│   ├── monnifyVend.ts           # Bank transfer vend + finalize (success/failure/refund)
 │   ├── serviceRules.ts          # Kill switches, operator agent caps, min/max amounts
 │   ├── refunds.ts               # Refund queue (enqueue on vend failure + user notification)
 │   ├── vend.ts                  # Shared vend execution for the contract and x402 rails
@@ -181,6 +185,15 @@ VTPASS_SECRET_KEY=SK_your_secret_key
 VTPASS_MSG_TOKEN=VT_PK_your_token
 VTPASS_MSG_SECRET=VT_SK_your_secret
 ```
+
+### Monnify (Moniepoint's API — Bank Transfer Provider)
+```
+MONNIFY_API_KEY=MK_your_api_key
+MONNIFY_SECRET_KEY=your_secret_key
+MONNIFY_CONTRACT_CODE=your_contract_code
+MONNIFY_SOURCE_ACCOUNT_NUMBER=your_wallet_account_number
+```
+See `ENV_SETUP.md` §9b for where to find these and the MFA/webhook setup steps.
 
 ### Supabase (Database)
 ```
@@ -762,10 +775,16 @@ controls over the *agent* specifically: `agent_enabled` (master kill for all age
 `agent_daily_cap_ngn` (per user, per UTC day), and `ai_chat_enabled` for the in-app widget.
 These sit **on top of** the on-chain allowance, never instead of it.
 
-> ⚠️ **Bank transfer has no dashboard toggle.** There is no group for it in `admin/page.tsx` and
-> `page.tsx` doesn't check one either, so `BANK_TRANSFER` is deliberately left pointed at the
-> pre-existing bare `BANK` key rather than inventing a `MASTER_BANK` switch no operator can
-> reach.
+Bank Transfer has a standalone dashboard toggle (`BANK` key — no per-provider breakdown, since
+it settles through Monnify/Moniepoint rather than a picker of VTpass providers), checked by
+both the agent gate (`BANK_TRANSFER` in `serviceRules.ts`) and the web app's
+`isCurrentServiceDisabled` in `page.tsx`.
+
+Four more standalone switches pause an entire **channel** rather than a product —
+`CHANNEL_WHATSAPP`, `CHANNEL_TELEGRAM`, `CHANNEL_X`, `CHANNEL_MCP` — enforced by
+`isChannelEnabled()` in `serviceRules.ts`. WhatsApp/Telegram/X are checked once at the top of
+the shared `/api/deai/core` engine (all three route through it); MCP is checked at
+`tools/call` in `/api/mcp`. Same "missing key = enabled" default as every other switch here.
 
 ---
 

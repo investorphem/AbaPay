@@ -2,7 +2,7 @@ import 'server-only';
 import { NextResponse } from 'next/server';
 import { supabaseAdmin } from '@/utils/supabase';
 import { enforceRateLimit } from '@/lib/rateLimit';
-import { getServiceRules, checkServiceAllowed, checkAgentSpendAllowed } from '@/lib/serviceRules';
+import { getServiceRules, checkServiceAllowed, checkAgentSpendAllowed, isChannelEnabled } from '@/lib/serviceRules';
 import { describeCapabilities, capabilityForIntent, getCapability } from '@/lib/deai/capabilities';
 import { resolveServiceId, fetchCryptoBalances, verifyAccount } from '@/lib/deai/services';
 import { getRemainingAllowance } from '@/lib/deai/relayer';
@@ -955,6 +955,12 @@ export async function POST(req: Request) {
         const toolName = params?.name;
         if (!toolName || !TOOLS.some((t) => t.name === toolName)) {
           return rpcError(id, -32602, `Unknown tool: ${toolName}`);
+        }
+        // 🔴 OPERATOR EMERGENCY BRAKE — same per-channel pause as WhatsApp/Telegram/X (see
+        // isChannelEnabled in serviceRules.ts). A normal in-band tool error, not a transport
+        // failure — the agent should be able to tell the human clearly what's going on.
+        if (!(await isChannelEnabled('MCP'))) {
+          return rpcResult(id, errorResult('AbaPay MCP is temporarily paused for maintenance. Please try again shortly, or use the AbaPay app.'));
         }
         const result = await callTool(toolName, params?.arguments || {}, oauthIdentity);
         // The one and only in-band condition promoted to an HTTP-level failure: a tool that

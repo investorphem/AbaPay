@@ -221,6 +221,41 @@ VTpass pays the underlying telco/disco/etc. out of your float balance.
 
 ---
 
+## 9b. Monnify (Moniepoint's API — Bank Transfer Provider)
+
+```
+MONNIFY_API_KEY=MK_...
+MONNIFY_SECRET_KEY=...
+MONNIFY_CONTRACT_CODE=...
+MONNIFY_SOURCE_ACCOUNT_NUMBER=...
+```
+**Business relationship, same shape as VTpass above** — your money sits at **Moniepoint
+Microfinance Bank** (that's the actual bank holding the current/business account), but the API
+that triggers transfers, verifies account numbers, and lists banks is **Monnify** — Moniepoint
+Inc.'s own API product, not a separate company. Your Moniepoint business dashboard's
+"Developers"/API section is where this all comes from.
+1. Log into your Moniepoint business dashboard → **Developers** (this is Monnify, same login).
+2. Get **sandbox** credentials first for `MONNIFY_API_KEY` / `MONNIFY_SECRET_KEY` /
+   `MONNIFY_CONTRACT_CODE` — test with `NEXT_PUBLIC_APP_MODE=sandbox` (base URL
+   `sandbox.monnify.com`), same switch VTpass uses.
+3. `MONNIFY_SOURCE_ACCOUNT_NUMBER` is the wallet/account number disbursements are debited
+   from — shown on the dashboard as your settlement/wallet account number.
+4. **Turn OFF transaction MFA/OTP approval for this API credential.** With it on, every
+   transfer sits at `PENDING_AUTHORIZATION` until a human clicks an email approval link —
+   incompatible with AbaPay's automated flow. Look for this under the API credential's
+   security settings; the app sends a Telegram alert if it ever hits this state anyway, as a
+   safety net.
+5. Register a webhook pointed at `https://www.abapays.com/api/monnify/webhook` (verify your
+   canonical domain first — Monnify does not follow redirects, same trap as every other
+   webhook in this app) so completed/failed transfers get confirmed asynchronously. The
+   webhook is signed with `MONNIFY_SECRET_KEY` (HMAC-SHA512, `monnify-signature` header) —
+   nothing extra to generate.
+6. Once ready for real money, apply for/fund a **live** account, get live keys, and switch
+   `NEXT_PUBLIC_APP_MODE=live` (base URL becomes `api.monnify.com`) — same switch as VTpass,
+   shared across both providers.
+
+---
+
 ## 10. Telegram
 
 ```
@@ -349,6 +384,7 @@ Free — not issued by anyone, just protects the manual `/api/cleanup` endpoint.
 | Resend | Yes | Paid plans at higher volume |
 | Anthropic (Claude) | No meaningful free tier | Pay-as-you-go per token, always |
 | VTpass | — | Business account + funded Naira float balance |
+| Monnify (Moniepoint) | — | Business account + funded Moniepoint balance to disburse from |
 | Telegram | Yes, always free | — |
 | WhatsApp Cloud API | Yes, limited | Paid per-conversation beyond free tier |
 | X (Twitter) API | No | Paid tier required for webhook/DM access |

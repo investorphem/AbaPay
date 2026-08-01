@@ -5,6 +5,7 @@ import { sendAbaPaySms } from '@/lib/messaging';
 import { getHeaders } from '@/lib/vtpass';
 import { enqueueRefund } from '@/lib/refunds';
 import { buildReceiptEmail } from '@/lib/receiptEmail';
+import { requeryMonnifyTransfer, finalizeMonnifyTransfer } from '@/lib/monnifyVend';
 import { Resend } from 'resend';
 
 const resend = new Resend(process.env.RESEND_API_KEY || 're_dummy_key_for_build');
@@ -85,6 +86,33 @@ export async function reconcileStuckProcessing(opts: { force?: boolean } = {}) {
           `🚨 *STUCK PAYMENT — NO REQUEST ID*\n\nTx \`${record.tx_hash}\` has been ${record.status} for over ${STUCK_MINUTES} min with no request_id to requery. Funds are on-chain; nothing was ever sent to VTpass. Needs manual review in the admin dashboard.\n\n👤 Wallet: \`${record.wallet_address || 'unknown'}\`\n💰 ${record.amount_usdt} ${record.token_used || 'USD₮'} (₦${record.amount_naira})`
         );
         alerted++;
+        continue;
+      }
+
+      // ⚡ BANK transfers never touch VTpass at all — they settle through Monnify
+      // (see src/lib/monnifyVend.ts). Reconciling a stuck one means asking Monnify's
+      // transfer-status endpoint instead of VTpass /requery, then routing through the
+      // SAME finalize function the webhook uses, so there is exactly one success/failure
+      // side-effect implementation for this rail too.
+      if (record.service_category === 'BANK') {
+        const monnifyStatus = await requeryMonnifyTransfer(record.request_id);
+
+        if (monnifyStatus?.status === 'SUCCESS') {
+          await finalizeMonnifyTransfer({ txHash: record.tx_hash, reference: record.request_id, outcome: 'SUCCESS', raw: monnifyStatus.raw });
+          reconciled++;
+        } else if (monnifyStatus?.status === 'FAILED') {
+          await finalizeMonnifyTransfer({ txHash: record.tx_hash, reference: record.request_id, outcome: 'FAILED', raw: monnifyStatus.raw, failureReason: 'Monnify confirmed failure via reconciliation requery' });
+          reconciled++;
+        } else if (!monnifyStatus) {
+          // Monnify has no record of this reference at all — our crash happened before the
+          // initiate call ever went out (or Monnify itself is unreachable right now). Funds
+          // are already on-chain; genuinely ambiguous, so alert rather than guess.
+          await sendTelegramAlert(
+            `🚨 *STUCK TRANSFER — MONNIFY HAS NO RECORD*\n\nTx \`${record.tx_hash}\` has been ${record.status} for over ${STUCK_MINUTES} min. Funds are already on-chain, but Monnify shows no record of reference \`${record.request_id}\`. Needs a manual decision in the admin dashboard: retry the transfer, or refund.\n\n👤 Wallet: \`${record.wallet_address || 'unknown'}\`\n💰 ₦${record.amount_naira} to ${record.network} (${record.account_number})`
+          );
+          alerted++;
+        }
+        // else: still PENDING/PENDING_AUTHORIZATION at Monnify — leave it, checked again next sweep.
         continue;
       }
 

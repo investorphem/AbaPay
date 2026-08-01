@@ -6,6 +6,7 @@ import { sendAbaPaySms } from '@/lib/messaging';
 import { getHeaders } from '@/lib/vtpass';
 import { buildReceiptEmail } from '@/lib/receiptEmail';
 import { enqueueRefund } from '@/lib/refunds';
+import { initiateMonnifyBankTransfer } from '@/lib/monnifyVend';
 import { Resend } from 'resend';
 
 const resend = new Resend(process.env.RESEND_API_KEY || 're_dummy_key_for_build');
@@ -106,7 +107,19 @@ export interface VendResult {
  */
 export async function executeVend(input: VendInput): Promise<VendResult> {
   const {
-    vtRequestId, txHash, serviceID, serviceCategory, network, billersCode, phone,
+    serviceCategory,
+  } = input;
+
+  // ⚡ Bank transfers don't go to VTpass at all — they're real NUBAN payouts through Monnify
+  // (Moniepoint Inc.'s API), debiting the operator's Moniepoint business account. See
+  // src/lib/monnifyVend.ts for why this rail is inherently async (submit now, confirm via
+  // webhook/reconcile later) unlike VTpass's mostly-synchronous /pay.
+  if (serviceCategory === 'BANK') {
+    return initiateMonnifyBankTransfer(input);
+  }
+
+  const {
+    vtRequestId, txHash, serviceID, network, billersCode, phone,
     variation_code, subscription_type, amount, tokenSymbol, vendAmount, displayAmount,
     foreignAmount, isForeign, operator_id, country_code, product_type_id, email,
     wallet_address, blockchain, source_channel, customer_name, customer_address,

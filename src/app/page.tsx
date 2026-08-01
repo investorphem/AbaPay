@@ -110,6 +110,11 @@ export default function Home() {
   const [bankVariations, setBankVariations] = useState<any[]>([]);
   const [selectedBank, setSelectedBank] = useState<any>(null);
   const [isFetchingBanks, setIsFetchingBanks] = useState(false);
+  // ⚡ Populated when auto-detect (resolveBankAccount) finds MORE THAN ONE bank matching a
+  // typed account number — the user picks theirs from this short list rather than the full
+  // ~25-bank picker. Empty otherwise (single match auto-selects; zero matches falls back to
+  // the full manual picker).
+  const [bankSuggestions, setBankSuggestions] = useState<any[]>([]);
   const [educationProvider, setEducationProvider] = useState("waec");
   const [educationVariations, setEducationVariations] = useState<any[]>([]);
   const [selectedEducationPlan, setSelectedEducationPlan] = useState<any>(null);
@@ -233,6 +238,12 @@ export default function Home() {
       }
 
       if (activeTab === 'education') return killSwitches['MASTER_EDUCATION'] === false || killSwitches[`EDU_${educationProvider}`] === false;
+      // 🔴 THE GAP THIS FIXES: the admin dashboard now has a Bank Transfer kill switch
+      // (writes kill_switches.BANK — see src/lib/serviceRules.ts's BANK_TRANSFER spec,
+      // which the agent already reads), but nothing here ever checked it — an operator
+      // pausing bank transfers only stopped the agent, while the web app happily kept
+      // taking crypto for transfers the operator had explicitly switched off.
+      if (activeTab === 'bank') return killSwitches['BANK'] === false;
       if (activeTab === 'pay') {
           if (activeService.id === "AIRTIME") return killSwitches['MASTER_AIRTIME'] === false || killSwitches[`AIRTIME_${telecomProvider.toLowerCase()}`] === false;
           if (activeService.id === "INTERNET") return killSwitches['MASTER_INTERNET'] === false || killSwitches[`INTERNET_${internetProvider}`] === false;
@@ -510,13 +521,21 @@ export default function Home() {
   };
 
   const handleProviderChange = (newProvider: string, type: 'internet' | 'telecom' | 'cable' | 'elec' | 'bank' | 'education') => {
-    setIsVerifying(false); setStatus(""); 
-    setNairaAmount(""); setAccountNumber(""); setCustomerName(null); setCustomerPhone(""); setCustomerEmail(""); setMeterAddress(null); setDynamicElecMin(1000); setMeterAccountType(null);
-    if (type === 'internet') { setInternetVariations([]); setInternetProvider(newProvider); setSelectedInternetPlan(null); setInternetAccountId(null); } 
-    else if (type === 'telecom') { setTelecomProvider(newProvider); } 
-    else if (type === 'cable') { setCableProvider(newProvider); setSelectedCablePlan(null); setCableCurrentBouquet(null); setCableRenewAmount(null); setCableSubscriptionType("renew"); } 
-    else if (type === 'elec') { setElecProvider(newProvider); } 
-    else if (type === 'bank') { setSelectedBank(newProvider); }
+    setIsVerifying(false); setStatus("");
+    setNairaAmount(""); setCustomerName(null); setCustomerPhone(""); setCustomerEmail(""); setMeterAddress(null); setDynamicElecMin(1000); setMeterAccountType(null);
+    // ⚡ Bank is the exception: the account number is typed FIRST (auto-detect resolves the
+    // bank from it) — a manual pick here is an override of an already-typed number, not the
+    // start of a fresh entry, so wiping accountNumber would throw away what the user typed.
+    if (type !== 'bank') setAccountNumber("");
+    if (type === 'internet') { setInternetVariations([]); setInternetProvider(newProvider); setSelectedInternetPlan(null); setInternetAccountId(null); }
+    else if (type === 'telecom') { setTelecomProvider(newProvider); }
+    else if (type === 'cable') { setCableProvider(newProvider); setSelectedCablePlan(null); setCableCurrentBouquet(null); setCableRenewAmount(null); setCableSubscriptionType("renew"); }
+    else if (type === 'elec') { setElecProvider(newProvider); }
+    else if (type === 'bank') {
+      setSelectedBank(newProvider);
+      setBankSuggestions([]);
+      if (accountNumber.length === 10 && (newProvider as any)?.variation_code) verifyBankAccount((newProvider as any).variation_code);
+    }
     else if (type === 'education') { setEducationProvider(newProvider); setSelectedEducationPlan(null); }
   };
 
@@ -645,21 +664,58 @@ export default function Home() {
     finally { setIsSendingSupport(false); }
   };
 
+  // ⚡ Bank transfers settle through Monnify (Moniepoint Inc.'s API), not VTpass — the bank
+  // list, account verification and the actual payout all come from src/lib/monnify.ts now.
+  // `variation_code` here holds Monnify's CBN bank code (e.g. "044"), not a VTpass slug.
   const fetchBanksManual = async () => {
     setIsFetchingBanks(true);
     try {
-      const res = await fetch(`/api/variations?serviceID=bank-deposit`);
+      const res = await fetch(`/api/monnify/banks`);
       const data = await res.json();
-      if (data.code === '011' || !data.content || !data.content.variations) {
-        setBankVariations([{ variation_code: 'access', name: 'ACCESS BANK PLC' }, { variation_code: 'firstbank', name: 'FIRST BANK OF NIGERIA PLC' }, { variation_code: 'gtb', name: 'GTBANK PLC' }, { variation_code: 'opay', name: 'OPAY' }, { variation_code: 'moniepoint', name: 'MONIEPOINT MICROFINANCE BANK' }, { variation_code: 'uba', name: 'UBA - UNITED BANK FOR AFRICA PLC' }, { variation_code: 'zenith', name: 'ZENITH BANK PLC' }]);
+      if (data.success && Array.isArray(data.banks) && data.banks.length > 0) {
+        setBankVariations(data.banks.map((b: any) => ({ variation_code: b.code, name: b.name })));
+      } else throw new Error("Empty");
+    } catch (e) {
+      setBankVariations([{ variation_code: '044', name: 'Access Bank' }, { variation_code: '058', name: 'Guaranty Trust Bank' }, { variation_code: '999992', name: 'OPay' }, { variation_code: '50515', name: 'Moniepoint Microfinance Bank' }, { variation_code: '057', name: 'Zenith Bank' }]);
+    } finally { setIsFetchingBanks(false); }
+  };
+
+  // Single-bank verify — used when the user manually (re)picks a bank, either because
+  // auto-detect found no match or they're overriding an auto-detected suggestion.
+  const verifyBankAccount = async (bankCode: string) => {
+    setIsVerifying(true); setCustomerName(null);
+    try {
+      const res = await fetch('/api/monnify/verify', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ accountNumber, bankCode }) });
+      const data = await res.json();
+      if (data.success) setCustomerName(data.accountName);
+    } catch (e) {}
+    setIsVerifying(false);
+  };
+
+  // Auto-detect: "here's an account number, which bank is it?" — tries the number against
+  // every bank's Name Enquiry until one (or more) return a real account name. The way
+  // Paystack/Mono-style "auto-detect" actually works — there's no way to derive the bank
+  // from a NUBAN's digits alone.
+  const resolveBankAccount = async () => {
+    setIsVerifying(true); setCustomerName(null); setBankSuggestions([]);
+    try {
+      const res = await fetch('/api/monnify/resolve', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ accountNumber }) });
+      const data = await res.json();
+      const matches = data.matches || [];
+
+      if (matches.length === 1) {
+        setSelectedBank({ variation_code: matches[0].bankCode, name: matches[0].bankName });
+        setCustomerName(matches[0].accountName);
+      } else if (matches.length > 1) {
+        setBankSuggestions(matches); // let the user pick theirs
+      } else if (selectedBank?.variation_code) {
+        // No auto-detect match, but a bank was already picked manually — verify against it.
+        await verifyBankAccount(selectedBank.variation_code);
+        setIsVerifying(false);
         return;
       }
-      let banksArr = extractVtpassArray(data);
-      if (banksArr && Array.isArray(banksArr) && banksArr.length > 0) setBankVariations(banksArr.sort((a: any, b: any) => (a.name || "").localeCompare(b.name || "")));
-      else throw new Error("Empty");
-    } catch (e) {
-      setBankVariations([{ variation_code: 'access', name: 'ACCESS BANK PLC' }, { variation_code: 'gtb', name: 'GTBANK PLC' }, { variation_code: 'opay', name: 'OPAY' }, { variation_code: 'moniepoint', name: 'MONIEPOINT MICROFINANCE BANK' }, { variation_code: 'zenith', name: 'ZENITH BANK PLC' }]);
-    } finally { setIsFetchingBanks(false); }
+    } catch (e) {}
+    setIsVerifying(false);
   };
 
   const verifyMerchant = async () => {
@@ -668,8 +724,7 @@ export default function Home() {
 
     try {
         let serviceID = ""; let reqType = undefined;
-        if (activeTab === "bank") { serviceID = "bank-deposit"; reqType = selectedBank?.variation_code; } 
-        else if (activeTab === "education" && educationProvider === "jamb") { serviceID = "jamb"; reqType = selectedEducationPlan?.variation_code; } 
+        if (activeTab === "education" && educationProvider === "jamb") { serviceID = "jamb"; reqType = selectedEducationPlan?.variation_code; }
         else { 
           serviceID = activeService.id === "ELECTRICITY" ? elecProvider : activeService.id === "INTERNET" ? internetProvider : cableProvider; 
           reqType = activeService.id === "ELECTRICITY" ? meterType : undefined; 
@@ -706,7 +761,7 @@ export default function Home() {
     if (isInternational) {
         vtpassServiceID = "foreign-airtime"; displayNetwork = selectedIntlOperator.name; finalVariationCode = selectedIntlVariation.variation_code; uiCategory = `INTL ${selectedIntlProduct.name.toUpperCase()}`;
     } else if (activeTab === "bank") {
-      vtpassServiceID = "bank-deposit"; displayNetwork = selectedBank.name; finalVariationCode = selectedBank.variation_code; uiCategory = "BANK";
+      vtpassServiceID = "moniepoint-transfer"; displayNetwork = selectedBank.name; finalVariationCode = selectedBank.variation_code; uiCategory = "BANK";
     } else if (activeTab === "education") {
       vtpassServiceID = educationProvider; displayNetwork = educationProvider; finalVariationCode = selectedEducationPlan?.variation_code || 'none'; uiCategory = "EDUCATION"; payloadBillersCode = educationProvider === "jamb" ? accountNumber : customerPhone;
     } else {
@@ -1926,10 +1981,10 @@ export default function Home() {
 
   useEffect(() => {
     const timeoutId = setTimeout(() => {
-      if (activeTab === "bank") { 
-          if (accountNumber.length === 10 && selectedBank) verifyMerchant(); 
-          else { setCustomerName(null); setMeterAddress(null); setDynamicElecMin(1000); setMeterAccountType(null); } 
-      } 
+      if (activeTab === "bank") {
+          if (accountNumber.length === 10) resolveBankAccount();
+          else { setCustomerName(null); setBankSuggestions([]); setMeterAddress(null); setDynamicElecMin(1000); setMeterAccountType(null); }
+      }
       else if (activeTab === "education" && educationProvider === "jamb") {
          if (accountNumber.length >= 10 && selectedEducationPlan) verifyMerchant(); 
          else { setCustomerName(null); setMeterAddress(null); setDynamicElecMin(1000); setMeterAccountType(null); }
@@ -1942,7 +1997,7 @@ export default function Home() {
       }
     }, 800); 
     return () => clearTimeout(timeoutId);
-  }, [accountNumber, elecProvider, cableProvider, activeService.id, meterType, selectedBank, internetProvider, activeTab, educationProvider, selectedEducationPlan, isInternational]);
+  }, [accountNumber, elecProvider, cableProvider, activeService.id, meterType, internetProvider, activeTab, educationProvider, selectedEducationPlan, isInternational]);
 
   const getCurrentModalValue = () => {
     if (modalType === 'country') return activeCountry.code;
@@ -2336,6 +2391,9 @@ export default function Home() {
                         </div>
                         <ChevronDown size={18} className="text-slate-400 dark:text-slate-500"/>
                     </button>
+                    {!selectedBank && (
+                        <p className="text-[10px] font-bold text-slate-400 dark:text-slate-500 mt-2">Or just type the account number below — we'll detect the bank automatically.</p>
+                    )}
                 </div>
 
                 <div>
@@ -2419,12 +2477,36 @@ export default function Home() {
                         );
                     })()}
 
+                    {/* ⚡ AUTO-DETECT: more than one bank matched this account number — let the
+                        user pick theirs rather than guessing from the full ~25-bank list. */}
+                    {bankSuggestions.length > 0 && (
+                        <div className="mt-3 bg-blue-500/5 dark:bg-blue-900/10 p-4 rounded-xl border border-blue-500/20 dark:border-blue-800/50 animate-in fade-in transition-colors">
+                            <p className="text-[10px] font-black text-blue-600 dark:text-blue-400 uppercase mb-3">Found {bankSuggestions.length} accounts — which is yours?</p>
+                            <div className="flex flex-col gap-2">
+                                {bankSuggestions.map((m: any) => (
+                                    <button
+                                        key={m.bankCode}
+                                        onClick={() => {
+                                            setSelectedBank({ variation_code: m.bankCode, name: m.bankName });
+                                            setCustomerName(m.accountName);
+                                            setBankSuggestions([]);
+                                        }}
+                                        className="w-full text-left bg-white dark:bg-[#1a1a1f] border border-slate-200 dark:border-slate-800 p-3 rounded-xl hover:border-blue-400 dark:hover:border-blue-600 transition-colors active:scale-[0.98]"
+                                    >
+                                        <span className="block text-xs font-black text-slate-900 dark:text-white">{m.accountName}</span>
+                                        <span className="block text-[10px] font-bold text-slate-400 dark:text-slate-500 mt-0.5">{m.bankName}</span>
+                                    </button>
+                                ))}
+                            </div>
+                        </div>
+                    )}
+
                     {customerName && (
                         <div className="mt-2 bg-emerald-500/10 dark:bg-emerald-900/20 p-4 rounded-xl border border-emerald-500/20 dark:border-emerald-800/50 flex items-center gap-3 animate-in fade-in transition-colors">
                             <CheckCircle2 size={18} className="text-emerald-600 dark:text-emerald-500 shrink-0" />
                             <div className="flex-1">
                                 <span className="text-sm font-black text-emerald-800 dark:text-emerald-100 line-clamp-1">{customerName}</span>
-                                <p className="text-[10px] font-black text-emerald-600 dark:text-emerald-500 uppercase mt-0.5">Verified</p>
+                                <p className="text-[10px] font-black text-emerald-600 dark:text-emerald-500 uppercase mt-0.5">{selectedBank?.name ? `Verified · ${selectedBank.name}` : 'Verified'}</p>
                             </div>
                         </div>
                     )}

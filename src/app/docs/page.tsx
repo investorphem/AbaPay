@@ -383,7 +383,14 @@ export default function DocsPage() {
                 q="What services do you support?"
                 a={<>
                   <p>Airtime, mobile data (including SME bundles), electricity (prepaid and postpaid), cable TV (DStv, GOtv, Startimes), education PINs, bank transfers, and international airtime/data.</p>
-                  <p>The providers inside each category are pulled live from our payment provider, so the list only ever shows what can genuinely be bought right now. If a provider disappears from the picker, it isn't purchasable at that moment — which is deliberately better than letting you pay for it and fail afterwards.</p>
+                  <p>The providers inside each category are pulled live from our payment providers, so the list only ever shows what can genuinely be bought right now. If a provider disappears from the picker, it isn't purchasable at that moment — which is deliberately better than letting you pay for it and fail afterwards.</p>
+                </>}
+              />
+              <FAQItem
+                q="How does a bank transfer work?"
+                a={<>
+                  <p>Type the destination account number — we check it against every Nigerian bank automatically and tell you whose account it is, so you don't need to know or select the bank yourself. If more than one bank has an account under that exact number, we show you the short list of matches so you can confirm which one is yours.</p>
+                  <p>Once confirmed, the transfer settles in real time as an actual bank payout, not a top-up voucher.</p>
                 </>}
               />
               <FAQItem

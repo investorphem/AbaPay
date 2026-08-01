@@ -5,7 +5,7 @@ import { humanizeReply } from '@/lib/deai/humanize';
 import { verifyAccount as realVerifyAccount, fetchCryptoBalances as realFetchCryptoBalances, resolveServiceId } from '@/lib/deai/services';
 import { createDeepLink } from '@/lib/deai/deeplink';
 import { relayPayBillFor, getRemainingAllowance } from '@/lib/deai/relayer';
-import { checkServiceAllowed, checkAgentSpendAllowed } from '@/lib/serviceRules';
+import { checkServiceAllowed, checkAgentSpendAllowed, isChannelEnabled } from '@/lib/serviceRules';
 import { assessFeasibility, describeCapabilities, getCapability, capabilityForIntent } from '@/lib/deai/capabilities';
 import { checkParity, checkAccountNumber, checkAmountLive, isDuplicateElectricity, formatConversion, REQ, requiresVariation, supportsRenew, requiresVerifiedName } from '@/lib/parity';
 import { sendTelegramAlert } from '@/lib/telegram';
@@ -749,6 +749,18 @@ async function handleCore(req: Request, ctx: HumanizeCtx): Promise<NextResponse>
     }
 
     const channel = platform === 'TELEGRAM' ? 'TELEGRAM' : platform === 'WHATSAPP' ? 'WHATSAPP' : 'X';
+
+    // 🔴 OPERATOR EMERGENCY BRAKE — pause a single channel (e.g. WhatsApp is being
+    // rate-limited by Meta, or is mid-maintenance) without touching Telegram/X/MCP users.
+    // Checked before anything else so a paused channel never reaches intent parsing, PIN
+    // handling, or spending.
+    if (!(await isChannelEnabled(channel as any))) {
+      return NextResponse.json({
+        action: 'REPLY',
+        message: `${channel === 'WHATSAPP' ? 'WhatsApp' : channel === 'TELEGRAM' ? 'Telegram' : 'X'} payments are temporarily paused for maintenance. Please try again shortly, or use the AbaPay app.`,
+      });
+    }
+
     // Only Telegram's webhook currently sends this — WhatsApp/X callers omit it, which
     // defaults to 'private' below and preserves their existing (DM-only) behaviour untouched.
     const isGroupChat = typeof chat_type === 'string' && chat_type !== 'private';

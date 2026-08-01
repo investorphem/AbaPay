@@ -147,6 +147,27 @@ export interface RuleCheck {
   reason?: string;
 }
 
+// ⚡ CHANNEL KILL SWITCHES — separate from the service switches above. Those pause a
+// PRODUCT (airtime, electricity...) everywhere at once; these pause an entire CHANNEL
+// (e.g. "WhatsApp is down / being maintained, stop routing traffic through it") without
+// touching the same users' access via Telegram, X, MCP or the web app.
+//
+// Keys live in the same platform_settings.kill_switches jsonb, prefixed CHANNEL_ so they
+// can never collide with a service key. Missing key = enabled, exactly like every other
+// switch in this file — an operator who never touches this section shouldn't have every
+// channel silently go dark.
+const CHANNEL_KEYS: Record<'WHATSAPP' | 'TELEGRAM' | 'X' | 'MCP', string> = {
+  WHATSAPP: 'CHANNEL_WHATSAPP',
+  TELEGRAM: 'CHANNEL_TELEGRAM',
+  X: 'CHANNEL_X',
+  MCP: 'CHANNEL_MCP',
+};
+
+export async function isChannelEnabled(channel: 'WHATSAPP' | 'TELEGRAM' | 'X' | 'MCP'): Promise<boolean> {
+  const rules = await getServiceRules();
+  return rules.killSwitches[CHANNEL_KEYS[channel]] !== false;
+}
+
 /**
  * The gate the agent MUST pass before it promises — or executes — any payment.
  */

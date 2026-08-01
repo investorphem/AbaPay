@@ -85,6 +85,7 @@ export default function PrivacyPolicy() {
             </p>
             <ul className="list-disc pl-5 space-y-2 mb-3">
               <li><strong>Utility Aggregators:</strong> We share necessary vending data with our API partners (e.g., VTpass Global) strictly for the purpose of executing your transaction across borders.</li>
+              <li><strong>Bank Transfer Partner:</strong> For the Transfer feature, we share the destination account number (and, once verified, the account holder's name) with Monnify — Moniepoint Inc.'s API — strictly to identify the receiving bank and execute the payout from our Moniepoint business account.</li>
               <li><strong>Blockchain Networks:</strong> Your public wallet address and transaction amount are permanently broadcasted to the public, immutable Base or Celo blockchains.</li>
               <li><strong>AI Processing Partner:</strong> Chat messages sent to the DeAI agent are transmitted to Anthropic (Claude API) solely to interpret your request. Anthropic never receives your private keys, PIN, or any ability to sign transactions.</li>
               <li><strong>Messaging Platforms:</strong> To operate the agent, we exchange data with Telegram, Meta (WhatsApp), and X's respective bot/webhook infrastructure.</li>
