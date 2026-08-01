@@ -176,21 +176,47 @@ export interface AccountValidation {
   bankCode: string;
 }
 
-export async function validateAccount(accountNumber: string, bankCode: string): Promise<AccountValidation | null> {
+export interface AccountValidationRaw {
+  requestSuccessful: boolean;
+  responseCode: string;
+  responseMessage: string;
+  result: AccountValidation | null;
+}
+
+// ⚡ VERBOSE VARIANT — carries Monnify's own responseCode/responseMessage through, instead of
+// collapsing every failure into a bare null. validateAccount() below is a thin wrapper kept for
+// the auto-detect SWEEP (resolve/route.ts), where a null IS the expected outcome for the vast
+// majority of the ~25 banks tried and the real reason genuinely doesn't matter. But for a
+// SINGLE manual verify (verify/route.ts) — a real user waiting on a real answer — silently
+// returning null on, say, an invalid account number format meant they saw nothing at all
+// instead of Monnify's own (already human-readable) rejection message.
+export async function validateAccountRaw(accountNumber: string, bankCode: string): Promise<AccountValidationRaw> {
   try {
     const data = await monnifyFetch(
       `/api/v1/disbursements/account/validate?accountNumber=${encodeURIComponent(accountNumber)}&bankCode=${encodeURIComponent(bankCode)}`,
       { method: 'GET' }
     );
-    if (!data?.requestSuccessful || !data?.responseBody?.accountName) return null;
+    const requestSuccessful = !!data?.requestSuccessful && !!data?.responseBody?.accountName;
     return {
-      accountNumber: data.responseBody.accountNumber,
-      accountName: data.responseBody.accountName,
-      bankCode: data.responseBody.bankCode || bankCode,
+      requestSuccessful,
+      responseCode: data?.responseCode ?? 'UNKNOWN',
+      responseMessage: data?.responseMessage || 'Could not verify this account.',
+      result: requestSuccessful ? {
+        accountNumber: data.responseBody.accountNumber,
+        accountName: data.responseBody.accountName,
+        bankCode: data.responseBody.bankCode || bankCode,
+      } : null,
     };
-  } catch {
-    return null; // wrong bank for this account, or a transient error — either way, no match
+  } catch (e: any) {
+    // A network-level failure (timeout, connection reset) — distinguishable from Monnify
+    // actively rejecting the request, which callers may want to treat differently.
+    return { requestSuccessful: false, responseCode: 'NETWORK_ERROR', responseMessage: e?.message || 'Could not reach Monnify.', result: null };
   }
+}
+
+export async function validateAccount(accountNumber: string, bankCode: string): Promise<AccountValidation | null> {
+  const raw = await validateAccountRaw(accountNumber, bankCode);
+  return raw.result; // wrong bank for this account, or a transient error — either way, no match
 }
 
 // --- 5. SINGLE TRANSFER (the actual payout) ---

@@ -720,6 +720,15 @@ export default function AdminDashboard() {
 
   // ⚡ SMART REFUND ROUTING ⚡
   const handleRefund = async (tx: any) => {
+    // 🔴 REAL MONEY GUARD — belt-and-braces alongside hiding the button: error_code
+    // 'REVERTED' means the on-chain payBill transaction itself reverted (see CeloScan/the
+    // on-chain verification in /api/pay) — the user's crypto never left their wallet, never
+    // reached the vault. Refunding it would send real vault funds out for a payment that was
+    // never actually received. This must never proceed regardless of how handleRefund got
+    // called (a stale row in a cached list, a future call site, anything).
+    if (tx.error_code === 'REVERTED') {
+      return alert("This transaction reverted on-chain — the crypto never reached the vault, so there is nothing to refund. Refunding it would incorrectly send real vault funds out.");
+    }
     try {
       if (!client || !address) return alert("Connect your Admin Wallet first.");
       setProcessingRefundId(tx.id);
@@ -790,16 +799,20 @@ export default function AdminDashboard() {
   const handleRequery = async (tx: any) => {
     if (!tx.request_id) return alert("This transaction has no Provider Request ID to query.");
     setIsRequeryingId(tx.id);
+    // ⚡ BANK transfers settle through Monnify, not VTpass — /api/requery only ever knows how
+    // to ask VTpass, so a bank row needs its own endpoint (see monnify-requery/route.ts).
+    const endpoint = tx.service_category === 'BANK' ? '/api/admin/monnify-requery' : '/api/requery';
     try {
-      const res = await fetch('/api/requery', { method: 'POST', headers: { 'Content-Type': 'application/json', ...adminHeaders }, body: JSON.stringify({ request_id: tx.request_id, tx_hash: tx.tx_hash }) });
+      const res = await fetch(endpoint, { method: 'POST', headers: { 'Content-Type': 'application/json', ...adminHeaders }, body: JSON.stringify({ request_id: tx.request_id, tx_hash: tx.tx_hash }) });
       const data = await res.json();
       if (data.success) {
         if (data.status === 'SUCCESS') alert("✅ Transaction was successfully delivered by the provider!");
         else if (data.status === 'FAILED_VENDING') alert("❌ Provider rejected the transaction. It is now marked for a refund.");
+        else if (data.noRecord) alert(`⚠️ ${data.message}`);
         else alert("⏳ Provider is still processing it. Check back later.");
-        refreshAllData(); 
+        refreshAllData();
       } else alert(`Error: ${data.message}`);
-    } catch (error) { alert("Network error while checking status."); } 
+    } catch (error) { alert("Network error while checking status."); }
     finally { setIsRequeryingId(null); }
   };
 
@@ -1353,7 +1366,14 @@ export default function AdminDashboard() {
                           </td>
 
                           <td className="py-4 px-2 min-w-[180px]">
-                            <p className="text-slate-300 font-mono text-[10px] tracking-wider mb-0.5">ID: {tx.request_id || 'N/A'}</p>
+                            {/* ⚡ For BANK rows this IS the Monnify reference (see initiateTransfer's
+                                `reference` param) — labeled explicitly so an admin can paste it
+                                straight into Monnify's own dashboard search rather than guessing
+                                which generic "ID" field to use. */}
+                            <p className="text-slate-300 font-mono text-[10px] tracking-wider mb-0.5">{tx.service_category === 'BANK' ? 'Monnify Ref' : 'ID'}: {tx.request_id || 'N/A'}</p>
+                            {tx.service_category === 'BANK' && tx.customer_name && (
+                              <p className="text-[9px] text-emerald-500 font-bold mb-1">✓ {tx.customer_name}</p>
+                            )}
                             {(tx.service_category === 'ELECTRICITY' || tx.service_category === 'EDUCATION') && tx.status === 'SUCCESS' ? (
                                 <div className="text-[9px]">
                                     <p className="text-orange-400 font-bold tracking-widest">{tx.purchased_code ? tx.purchased_code.replace(/token\s*[:\-]*\s*/gi, '').trim() : 'N/A'}</p>
@@ -1370,9 +1390,9 @@ export default function AdminDashboard() {
                           <td className="py-4 px-2">
                             <div className="flex flex-col items-start gap-2">
                                 <span className={`text-[9px] font-black px-2 py-1 rounded tracking-widest uppercase ${
-                                  tx.status === 'SUCCESS' ? 'bg-emerald-500/10 text-emerald-500' : 
+                                  tx.status === 'SUCCESS' ? 'bg-emerald-500/10 text-emerald-500' :
                                   tx.status === 'REFUNDED' ? 'bg-blue-500/10 text-blue-400' :
-                                  tx.status === 'PENDING' ? 'bg-orange-500/10 text-orange-400' : 
+                                  (tx.status === 'PENDING' || tx.status === 'PROCESSING') ? 'bg-orange-500/10 text-orange-400' :
                                   'bg-red-500/10 text-red-500'
                                 }`}>
                                   {tx.status}
@@ -1384,7 +1404,14 @@ export default function AdminDashboard() {
                                     </span>
                                 )}
 
-                              {tx.status === 'PENDING' && (
+                              {/* 🔴 THE GAP THIS FIXES: PROCESSING rows (locked by /api/pay's atomic
+                                  lock right before the vend/transfer call) had NO admin action at
+                                  all — Check Status only ever appeared for PENDING. A transaction
+                                  stuck at PROCESSING (e.g. the server crashed mid-vend, or Monnify
+                                  never confirmed) was invisible to any recovery tool in the UI even
+                                  though reconcileStuckProcessing already treats PENDING and
+                                  PROCESSING identically as "stuck". */}
+                              {(tx.status === 'PENDING' || tx.status === 'PROCESSING') && (
                                 <button
                                   onClick={() => handleRequery(tx)}
                                   disabled={isRequeryingId === tx.id}
@@ -1395,14 +1422,15 @@ export default function AdminDashboard() {
                                 </button>
                               )}
 
-                              {/* 🔴 THE GAP THIS FIXES: a PENDING row (e.g. Check Status confirms the
-                                  provider has no record of it — never actually delivered, funds
-                                  already on-chain) previously had NO way to refund it — Refund only
-                                  ever appeared once something had transitioned to FAILED_*. The
-                                  underlying /api/admin/refund endpoint never required that status
-                                  anyway (it verifies the on-chain refund tx itself, not the row's
-                                  prior status), so this was a UI gap, not a real safeguard. */}
-                              {tx.status === 'PENDING' && (
+                              {/* 🔴 THE GAP THIS FIXES: a PENDING/PROCESSING row (e.g. Check Status
+                                  confirms the provider has no record of it — never actually
+                                  delivered, funds already on-chain) previously had NO way to refund
+                                  it — Refund only ever appeared once something had transitioned to
+                                  FAILED_*. The underlying /api/admin/refund endpoint never required
+                                  that status anyway (it verifies the on-chain refund tx itself, not
+                                  the row's prior status), so this was a UI gap, not a real
+                                  safeguard. */}
+                              {(tx.status === 'PENDING' || tx.status === 'PROCESSING') && tx.error_code !== 'REVERTED' && (
                                 <button
                                   onClick={() => handleRefund(tx)}
                                   disabled={processingRefundId === tx.id}
@@ -1413,8 +1441,16 @@ export default function AdminDashboard() {
                                 </button>
                               )}
 
-                              {tx.status?.startsWith('FAILED') && (
-                                <button 
+                              {/* 🔴 THE BUG THIS FIXES — REAL MONEY AT RISK: error_code === 'REVERTED'
+                                  means the on-chain payBill/payment transaction itself reverted (see
+                                  /api/pay's on-chain verification step) — the user's crypto NEVER
+                                  left their wallet, NEVER reached the vault. Showing Refund here is
+                                  actively dangerous: clicking it sends REAL vault funds out for a
+                                  payment that was never actually received. Refund must only ever be
+                                  offered for a failure where funds DID land on-chain and the VEND
+                                  (VTpass/Monnify) is what failed afterward. */}
+                              {tx.status?.startsWith('FAILED') && tx.error_code !== 'REVERTED' && (
+                                <button
                                   onClick={() => handleRefund(tx)}
                                   disabled={processingRefundId === tx.id}
                                   className="bg-slate-800 hover:bg-slate-700 border border-slate-700 text-white text-[9px] font-bold uppercase tracking-widest px-3 py-1.5 rounded-lg flex items-center gap-1.5 transition-colors disabled:opacity-50"
@@ -1762,10 +1798,21 @@ function WithdrawControl({ tokenSymbol, network, hoverClass, queued, busy, onWit
         </div>
       );
     }
+    // 🔴 THE BUG THIS FIXES: Cancel only ever rendered in the !isReady branch above — once the
+    // 24h timelock elapsed, this fell through to an Execute-only view with NO way to cancel at
+    // all. That's a genuine dead end for exactly the case that needs it most: a queued amount
+    // that's gone stale (e.g. a refund paid out of the vault after queueing, so it now exceeds
+    // the current balance — see the InsufficientVaultBalance check in handleWithdrawal) has no
+    // path forward once ready except Execute, which will just keep reverting/failing forever.
     return (
-      <button onClick={() => onWithdraw(tokenSymbol, network)} disabled={busy} className={`${baseBtn} bg-emerald-600 hover:bg-emerald-500 text-white`}>
-        {busy ? <Loader2 size={16} className="animate-spin" /> : <ArrowDownToLine size={16} />} Execute Withdrawal
-      </button>
+      <div className="mt-8 space-y-2">
+        <button onClick={() => onWithdraw(tokenSymbol, network)} disabled={busy} className={`${baseBtn} bg-emerald-600 hover:bg-emerald-500 text-white`}>
+          {busy ? <Loader2 size={16} className="animate-spin" /> : <ArrowDownToLine size={16} />} Execute Withdrawal
+        </button>
+        <button onClick={() => onCancel(tokenSymbol, network)} disabled={busy} className="w-full text-[10px] font-bold uppercase tracking-widest text-red-400 hover:text-red-300 disabled:opacity-50">
+          Cancel Queued Withdrawal
+        </button>
+      </div>
     );
   }
 

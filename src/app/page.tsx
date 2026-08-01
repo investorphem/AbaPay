@@ -33,6 +33,19 @@ import {
 import { HistoryTab } from "@/components/HistoryTab";
 import AppTour, { hasSeenTour, type TourTab } from "@/components/AppTour";
 
+// 🔴 THE BUG THIS FIXES: a wallet interaction (approve/payBill/sendCalls/allowance calls) that
+// never actually prompts — a locked extension, a dead WalletConnect session, a mobile wallet
+// that failed to deep-link back — spun the "Please approve..." status indefinitely, with no
+// way for the user to tell "still waiting on you" apart from "something is actually broken".
+// Wrapping every wallet-signature call in a bounded timeout turns silence into a clear message.
+// 90s is generous for a human to actually review and approve, not for a wallet that never woke up.
+function withWalletTimeout<T>(promise: Promise<T>, ms = 90_000): Promise<T> {
+  return new Promise<T>((resolve, reject) => {
+    const timer = setTimeout(() => reject(new Error("Your wallet didn't respond in time. Check that it's unlocked and connected, then try again.")), ms);
+    promise.then((v) => { clearTimeout(timer); resolve(v); }, (e) => { clearTimeout(timer); reject(e); });
+  });
+}
+
 export default function Home() {
   const { address: wagmiAddress, isConnected: isWagmiConnected, chain: wagmiChain } = useAccount();
   const { connectors, connect, status: connectStatus } = useConnect();
@@ -683,12 +696,27 @@ export default function Home() {
   // Single-bank verify — used when the user manually (re)picks a bank, either because
   // auto-detect found no match or they're overriding an auto-detected suggestion.
   const verifyBankAccount = async (bankCode: string) => {
+    // 🔴 THE BUG THIS FIXES: no offline check, no request timeout, and a failure response was
+    // silently swallowed — a bad account number, or a dropped connection, both just spun the
+    // "Verifying..." indicator forever with no feedback at all.
+    if (typeof navigator !== 'undefined' && navigator.onLine === false) {
+      showToast("You're Offline", "Check your internet connection and try again.", "error");
+      return;
+    }
     setIsVerifying(true); setCustomerName(null);
     try {
-      const res = await fetch('/api/monnify/verify', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ accountNumber, bankCode }) });
+      const res = await fetch('/api/monnify/verify', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ accountNumber, bankCode }),
+        signal: AbortSignal.timeout(15000),
+      });
       const data = await res.json();
       if (data.success) setCustomerName(data.accountName);
-    } catch (e) {}
+      else showToast("Verification Failed", data.message || "Could not verify this account.", "error");
+    } catch (e: any) {
+      const timedOut = e?.name === 'TimeoutError' || e?.name === 'AbortError';
+      showToast("Verification Failed", timedOut ? "This is taking too long — check your connection and try again." : "Network error — check your connection and try again.", "error");
+    }
     setIsVerifying(false);
   };
 
@@ -697,9 +725,20 @@ export default function Home() {
   // Paystack/Mono-style "auto-detect" actually works — there's no way to derive the bank
   // from a NUBAN's digits alone.
   const resolveBankAccount = async () => {
+    if (typeof navigator !== 'undefined' && navigator.onLine === false) {
+      showToast("You're Offline", "Check your internet connection and try again.", "error");
+      return;
+    }
     setIsVerifying(true); setCustomerName(null); setBankSuggestions([]);
     try {
-      const res = await fetch('/api/monnify/resolve', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ accountNumber }) });
+      // ⚡ Generous timeout — this fans out to every bank in parallel batches (see
+      // /api/monnify/resolve), so it's naturally slower than a single verify, but it must
+      // still fail with a clear message rather than spin the UI forever on a genuine outage.
+      const res = await fetch('/api/monnify/resolve', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ accountNumber }),
+        signal: AbortSignal.timeout(45000),
+      });
       const data = await res.json();
       const matches = data.matches || [];
 
@@ -713,24 +752,36 @@ export default function Home() {
         await verifyBankAccount(selectedBank.variation_code);
         setIsVerifying(false);
         return;
+      } else if (!data.success) {
+        showToast("Couldn't Detect Bank", data.message || "Please select your bank manually.", "error");
       }
-    } catch (e) {}
+    } catch (e: any) {
+      const timedOut = e?.name === 'TimeoutError' || e?.name === 'AbortError';
+      showToast("Couldn't Detect Bank", timedOut ? "This is taking too long — please select your bank manually." : "Network error — please select your bank manually.", "error");
+    }
     setIsVerifying(false);
   };
 
   const verifyMerchant = async () => {
+    // 🔴 THE BUG THIS FIXES: no offline check, no request timeout, and the catch block was
+    // completely empty — a dropped connection while verifying an electricity meter, cable
+    // smartcard, or JAMB profile just spun "Verifying..." forever with zero feedback.
+    if (typeof navigator !== 'undefined' && navigator.onLine === false) {
+      showToast("You're Offline", "Check your internet connection and try again.", "error");
+      return;
+    }
     setIsVerifying(true); setCustomerName(null); setCableCurrentBouquet(null); setCableRenewAmount(null); setInternetAccountId(null);
-    setMeterAddress(null); setDynamicElecMin(1000); setMeterAccountType(null); 
+    setMeterAddress(null); setDynamicElecMin(1000); setMeterAccountType(null);
 
     try {
         let serviceID = ""; let reqType = undefined;
         if (activeTab === "education" && educationProvider === "jamb") { serviceID = "jamb"; reqType = selectedEducationPlan?.variation_code; }
-        else { 
-          serviceID = activeService.id === "ELECTRICITY" ? elecProvider : activeService.id === "INTERNET" ? internetProvider : cableProvider; 
-          reqType = activeService.id === "ELECTRICITY" ? meterType : undefined; 
+        else {
+          serviceID = activeService.id === "ELECTRICITY" ? elecProvider : activeService.id === "INTERNET" ? internetProvider : cableProvider;
+          reqType = activeService.id === "ELECTRICITY" ? meterType : undefined;
         }
 
-        const res = await fetch(`/api/verify`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ billersCode: accountNumber, serviceID: serviceID, type: reqType }) });
+        const res = await fetch(`/api/verify`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ billersCode: accountNumber, serviceID: serviceID, type: reqType }), signal: AbortSignal.timeout(20000) });
         const data = await res.json();
 
         if (data.code === '000') {
@@ -748,7 +799,10 @@ export default function Home() {
             }
           }
         } else { setStatus("Account could not be verified."); }
-    } catch (e) {}
+    } catch (e: any) {
+      const timedOut = e?.name === 'TimeoutError' || e?.name === 'AbortError';
+      showToast("Verification Failed", timedOut ? "This is taking too long — check your connection and try again." : "Network error — check your connection and try again.", "error");
+    }
     setIsVerifying(false);
   };
 
@@ -934,7 +988,7 @@ export default function Home() {
       if (!usingBasePaymaster && currentAllowance < valueInWei) {
           setStatus("Awaiting token approval...");
           try {
-              const appHash = await client.writeContract({
+              const appHash = await withWalletTimeout(client.writeContract({
                   chain: activeChain,
                   address: tokenAddress as `0x${string}`,
                   abi: ERC20_ABI,
@@ -942,7 +996,7 @@ export default function Home() {
                   args: [ABAPAY_CONTRACT, parseUnits("100000", selectedToken.decimals)],
                   ...txConfig,
                   dataSuffix: celoAttributionSuffix(activeChain), // Celo attribution only; no-op on Base
-              });
+              }));
               setStatus("Confirming approval on-chain...");
               await publicClient.waitForTransactionReceipt({ hash: appHash, confirmations: 1 });
               
@@ -950,9 +1004,12 @@ export default function Home() {
               await new Promise(resolve => setTimeout(resolve, 1000));
               
           } catch (appError: any) {
-              // User rejected approval OR wallet glitched. 
+              // User rejected approval, wallet glitched, OR withWalletTimeout gave up waiting
+              // on a wallet that never responded — that last case has no `.shortMessage`
+              // (it's a plain Error, not a viem one), so fall back to `.message` rather than
+              // mislabeling a genuine timeout as "User rejected.".
               // Stop everything. Do NOT touch the database.
-              setStatus(`Approval Cancelled: ${appError.shortMessage?.slice(0, 40) || "User rejected."}`);
+              setStatus(`Approval Cancelled: ${appError.shortMessage?.slice(0, 60) || appError.message?.slice(0, 80) || "User rejected."}`);
               setIsProcessing(false);
               return; // 🛑 EXIT FUNCTION IMMEDIATELY
           }
@@ -983,9 +1040,24 @@ export default function Home() {
         return; // 🛑 EXIT FUNCTION IMMEDIATELY — nothing was signed, nothing to clean up
       }
 
+      // 🔴 THE BUG THIS FIXES: hasEnoughBalanceOnChain() only ran ONCE, before the approve
+      // step — but on a chain where gas can be paid from the SAME token balance (Celo's
+      // feeCurrency mechanism — visible on-chain as small internal token transfers alongside
+      // the main one), the approve() transaction just above can itself consume a sliver of
+      // that balance. A user paying with close to their full balance passed the initial
+      // check, then reverted on-chain with "ERC20: transfer amount exceeds balance" once
+      // approve's own gas cost ate into an already-thin margin. Re-checking fresh right
+      // before the actual signed payBill call catches that instead of burning more gas on a
+      // transaction that's already doomed to revert.
+      if (!(await hasEnoughBalanceOnChain())) {
+          setStatus(`Insufficient ${selectedToken.symbol} balance — a prior step used some of it for network fees. You need ${cryptoToCharge} ${selectedToken.symbol}. Top up and try again.`);
+          setIsProcessing(false);
+          return;
+      }
+
       setStatus("Please sign the final payment...");
 
-      const callData = encodeFunctionData({ 
+      const callData = encodeFunctionData({
           abi: ABAPAY_ABI, 
           functionName: 'payBill', 
           args: [tokenAddress, vtpassServiceID, payloadBillersCode, valueInWei] 
@@ -1015,12 +1087,12 @@ export default function Home() {
               calls.push({ to: ABAPAY_CONTRACT as `0x${string}`, data: attributedData });
 
               setStatus("Please sign the sponsored transaction...");
-              const sendCallsResult: any = await client.sendCalls({
+              const sendCallsResult: any = await withWalletTimeout(client.sendCalls({
                   account: address as `0x${string}`,
                   chain: activeChain,
                   calls,
                   capabilities: { paymasterService: { url: paymasterProxyUrl! } },
-              });
+              }));
               callsId = typeof sendCallsResult === 'string' ? sendCallsResult : sendCallsResult?.id;
               if (!callsId) throw new Error("Wallet did not return a calls identifier.");
           } catch (sendCallsError: any) {
@@ -1088,14 +1160,14 @@ export default function Home() {
                   ...txConfig // ⚡ FIX 2: Removed forced nonce so wallets don't block the transaction
               });
           } else {
-              rawHash = await client.writeContract({
+              rawHash = await withWalletTimeout(client.writeContract({
                   address: ABAPAY_CONTRACT,
                   abi: ABAPAY_ABI,
                   functionName: 'payBill',
                   args: [tokenAddress, vtpassServiceID, payloadBillersCode, valueInWei],
                   ...txConfig, // ⚡ FIX 2: Removed forced nonce
                   dataSuffix: celoAttributionSuffix(activeChain), // Celo Builders attribution (Celo path only)
-              });
+              }));
           }
       }
 
@@ -1128,8 +1200,10 @@ export default function Home() {
     } catch (e: any) { 
         // ⚡ THE FATAL FLAW FIX: Did the user reject, or did the network timeout? ⚡
         if (!txHasBeenSigned) {
-            // SAFE: User rejected the wallet popup BEFORE signing. Wipe the database.
-            setStatus(`Cancelled: ${e.shortMessage?.slice(0, 40) || "User rejected."}`); 
+            // SAFE: User rejected the wallet popup BEFORE signing (or withWalletTimeout gave up
+            // on a wallet that never responded — a plain Error with no `.shortMessage`, so fall
+            // back to `.message` rather than mislabeling a timeout as "User rejected.").
+            setStatus(`Cancelled: ${e.shortMessage?.slice(0, 60) || e.message?.slice(0, 80) || "User rejected."}`);
             if (preflightHash) {
                  fetch('/api/pay', { 
                      method: 'POST', 
@@ -1397,7 +1471,7 @@ export default function Home() {
 
         if (current < amountWei) {
           setStatus("Approve the token spend in your wallet...");
-          const h = await client.writeContract({
+          const h = await withWalletTimeout(client.writeContract({
             chain: targetChain,
             address: tokenInfo.address as `0x${string}`,
             abi: ERC20_ABI,
@@ -1405,14 +1479,14 @@ export default function Home() {
             args: [contract, amountWei],
             account: address as `0x${string}`,
             dataSuffix: celoAttributionSuffix(targetChain), // Celo attribution only; no-op on Base
-          });
+          }));
           await pc.waitForTransactionReceipt({ hash: h, confirmations: 1 });
         }
       }
 
       // 2) The on-chain agent cap — this is the security boundary.
       setStatus(amt === 0 ? "Revoking agent access..." : "Setting your agent spend limit...");
-      const hash = await client.writeContract({
+      const hash = await withWalletTimeout(client.writeContract({
         chain: targetChain,
         address: contract,
         abi: AGENT_ABI,
@@ -1420,7 +1494,7 @@ export default function Home() {
         args: [tokenInfo.address as `0x${string}`, amountWei],
         account: address as `0x${string}`,
         dataSuffix: celoAttributionSuffix(targetChain), // Celo attribution only; no-op on Base
-      });
+      }));
       await pc.waitForTransactionReceipt({ hash, confirmations: 1 });
 
       await checkAgentAllowanceFor(tokenSymbol, chainName);
@@ -1429,7 +1503,7 @@ export default function Home() {
       return { success: true, message: successMsg };
     } catch (e: any) {
       console.error('Agent allowance failed:', e);
-      const errMsg = e?.shortMessage?.slice(0, 60) || "Could not set the agent limit. Is the contract AbaPayV3?";
+      const errMsg = e?.shortMessage?.slice(0, 60) || e?.message?.slice(0, 80) || "Could not set the agent limit. Is the contract AbaPayV3?";
       setStatus(errMsg);
       return { success: false, message: errMsg };
     } finally {
@@ -1782,7 +1856,13 @@ export default function Home() {
     async function fetchCloudHistory() {
       try {
         const sixMonthsAgo = new Date(); sixMonthsAgo.setMonth(sixMonthsAgo.getMonth() - 6);
-        const { data } = await supabase.from('transactions').select('*').ilike('wallet_address', address!).gte('created_at', sixMonthsAgo.toISOString()).order('created_at', { ascending: false });
+        // 🔴 THE BUG THIS FIXES: this had no filter at all, so an abandoned pre-flight intent
+        // (created before the wallet even signs — see buildBackendPayload's intent_only call)
+        // showed up in the user's own History exactly like a real transaction, even though no
+        // crypto was ever charged for it. cleanupStalePreflights marks these EXPIRED after 20
+        // minutes rather than deleting them (so nothing here can ever accidentally erase a
+        // real payment), which means excluding them has to happen at the READ side instead.
+        const { data } = await supabase.from('transactions').select('*').ilike('wallet_address', address!).gte('created_at', sixMonthsAgo.toISOString()).not('tx_hash', 'like', 'preflight_%').neq('status', 'EXPIRED').order('created_at', { ascending: false });
         if (data && data.length > 0) {
           const cloudHistory = data.map((tx: any) => ({ 
              id: tx.tx_hash.slice(0, 8), date: new Date(tx.created_at).toLocaleString(), status: tx.status, 
@@ -2006,7 +2086,16 @@ export default function Home() {
   useEffect(() => {
     const timeoutId = setTimeout(() => {
       if (activeTab === "bank") {
-          if (accountNumber.length === 10) resolveBankAccount();
+          // 🔴 THE BUG THIS FIXES: this always ran the full auto-detect sweep (~25 banks in
+          // parallel) regardless of whether a bank was ALREADY manually selected — so picking
+          // a bank first, then typing the account number, ran the slow multi-bank resolve
+          // instead of a single fast verify against the bank already chosen. That's exactly
+          // backwards: a manual pick is the user telling us which bank it is, so there's
+          // nothing left to detect. Only run the full sweep when no bank is selected yet.
+          if (accountNumber.length === 10) {
+            if (selectedBank?.variation_code) verifyBankAccount(selectedBank.variation_code);
+            else resolveBankAccount();
+          }
           else { setCustomerName(null); setBankSuggestions([]); setMeterAddress(null); setDynamicElecMin(1000); setMeterAccountType(null); }
       }
       else if (activeTab === "education" && educationProvider === "jamb") {

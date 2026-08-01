@@ -81,10 +81,20 @@ export async function reconcileStuckProcessing(opts: { force?: boolean } = {}) {
 
   for (const record of stuck as any[]) {
     try {
+      // 🔴 THE BUG THIS FIXES: every "genuinely ambiguous, alert the operator" branch below
+      // fired on EVERY sweep run for as long as a row stayed stuck — with no memory of having
+      // already alerted, a row nobody has acted on yet just re-sends the identical Telegram
+      // message every 5 minutes forever. STUCK_ALERTED is a sentinel, not a real error code —
+      // it only ever means "an operator has already been notified about this exact row",
+      // checked here and set right after each alert below. It never touches `status`, so it
+      // has no effect on refund eligibility or any other admin tooling.
+      if (record.error_code === 'STUCK_ALERTED') continue;
+
       if (!record.request_id) {
         await sendTelegramAlert(
           `🚨 *STUCK PAYMENT — NO REQUEST ID*\n\nTx \`${record.tx_hash}\` has been ${record.status} for over ${STUCK_MINUTES} min with no request_id to requery. Funds are on-chain; nothing was ever sent to VTpass. Needs manual review in the admin dashboard.\n\n👤 Wallet: \`${record.wallet_address || 'unknown'}\`\n💰 ${record.amount_usdt} ${record.token_used || 'USD₮'} (₦${record.amount_naira})`
         );
+        await supabase.from('transactions').update({ error_code: 'STUCK_ALERTED' }).eq('id', record.id);
         alerted++;
         continue;
       }
@@ -110,6 +120,7 @@ export async function reconcileStuckProcessing(opts: { force?: boolean } = {}) {
           await sendTelegramAlert(
             `🚨 *STUCK TRANSFER — MONNIFY HAS NO RECORD*\n\nTx \`${record.tx_hash}\` has been ${record.status} for over ${STUCK_MINUTES} min. Funds are already on-chain, but Monnify shows no record of reference \`${record.request_id}\`. Needs a manual decision in the admin dashboard: retry the transfer, or refund.\n\n👤 Wallet: \`${record.wallet_address || 'unknown'}\`\n💰 ₦${record.amount_naira} to ${record.network} (${record.account_number})`
           );
+          await supabase.from('transactions').update({ error_code: 'STUCK_ALERTED' }).eq('id', record.id);
           alerted++;
         }
         // else: still PENDING/PENDING_AUTHORIZATION at Monnify — leave it, checked again next sweep.
@@ -240,6 +251,7 @@ export async function reconcileStuckProcessing(opts: { force?: boolean } = {}) {
           await sendTelegramAlert(
             `🚨 *STUCK PAYMENT — VTPASS HAS NO RECORD*\n\nTx \`${record.tx_hash}\` has been ${record.status} for over ${STUCK_MINUTES} min. Funds are already on-chain, but VTpass's requery shows no record of request_id \`${record.request_id}\` — our server likely crashed BEFORE ever calling VTpass. This needs a manual decision in the admin dashboard: retry the vend, or refund.\n\n👤 Wallet: \`${record.wallet_address || 'unknown'}\`\n💰 ${record.amount_usdt} ${record.token_used || 'USD₮'} (₦${record.amount_naira})\n🛒 ${record.network} ${record.service_category}`
           );
+          await supabase.from('transactions').update({ error_code: 'STUCK_ALERTED' }).eq('id', record.id);
           alerted++;
         }
         // else: genuinely still processing at VTpass — leave alone, checked again next sweep.

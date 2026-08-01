@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server';
-import { validateAccount } from '@/lib/monnify';
+import { validateAccountRaw } from '@/lib/monnify';
 import { enforceRateLimit } from '@/lib/rateLimit';
 
 // Manual single-bank verify — used when auto-detect (/api/monnify/resolve) found no match
@@ -15,14 +15,17 @@ export async function POST(req: Request) {
       return NextResponse.json({ success: false, message: 'Account number and bank are required.' }, { status: 400 });
     }
 
-    const result = await validateAccount(accountNumber, bankCode);
-    if (!result) {
-      return NextResponse.json({ success: false, message: 'Could not verify this account for the selected bank.' });
+    // ⚡ Surface Monnify's OWN responseCode/responseMessage rather than a generic "could not
+    // verify" — this is the one real user waiting on a real answer, unlike the auto-detect
+    // sweep where a null result for any given bank is the expected default outcome.
+    const raw = await validateAccountRaw(accountNumber, bankCode);
+    if (!raw.result) {
+      return NextResponse.json({ success: false, code: raw.responseCode, message: raw.responseMessage });
     }
 
-    return NextResponse.json({ success: true, accountName: result.accountName });
+    return NextResponse.json({ success: true, accountName: raw.result.accountName });
   } catch (error: any) {
     console.error('[Monnify] verify route failed:', error.message);
-    return NextResponse.json({ success: false, message: 'Verification failed.' }, { status: 500 });
+    return NextResponse.json({ success: false, code: 'SERVER_ERROR', message: 'Verification failed.' }, { status: 500 });
   }
 }
