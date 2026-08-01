@@ -224,35 +224,45 @@ VTpass pays the underlying telco/disco/etc. out of your float balance.
 ## 9b. Monnify (Moniepoint's API — Bank Transfer Provider)
 
 ```
-MONNIFY_API_KEY=MK_...
+MONNIFY_MODE=sandbox
+MONNIFY_API_KEY=MK_TEST_...
 MONNIFY_SECRET_KEY=...
 MONNIFY_CONTRACT_CODE=...
 MONNIFY_SOURCE_ACCOUNT_NUMBER=...
 ```
-**Business relationship, same shape as VTpass above** — your money sits at **Moniepoint
-Microfinance Bank** (that's the actual bank holding the current/business account), but the API
-that triggers transfers, verifies account numbers, and lists banks is **Monnify** — Moniepoint
-Inc.'s own API product, not a separate company. Your Moniepoint business dashboard's
-"Developers"/API section is where this all comes from.
-1. Log into your Moniepoint business dashboard → **Developers** (this is Monnify, same login).
-2. Get **sandbox** credentials first for `MONNIFY_API_KEY` / `MONNIFY_SECRET_KEY` /
-   `MONNIFY_CONTRACT_CODE` — test with `NEXT_PUBLIC_APP_MODE=sandbox` (base URL
-   `sandbox.monnify.com`), same switch VTpass uses.
+Your money sits at **Moniepoint Microfinance Bank** (the actual bank holding the current/
+business account), but the API that triggers transfers, verifies account numbers, and lists
+banks is **Monnify** — Moniepoint Inc.'s own API product, same parent company, but **NOT the
+same login as your Moniepoint business app**. Confirmed the hard way: a Moniepoint app
+username/password gets "Invalid username or password combination" on Monnify — you need a
+separate Monnify merchant account.
+1. Sign up directly at [app.monnify.com](https://app.monnify.com) (or monnify.com's "Get
+   Started" flow) — a fresh registration, not your Moniepoint app credentials. Expect a KYB
+   step (CAC registration, BVN, etc.) before live/disbursement access is approved.
+2. Once in, get **sandbox** credentials first from **Settings → API Keys & Webhooks** (or a
+   "Developers" menu item) for `MONNIFY_API_KEY` / `MONNIFY_SECRET_KEY`; the Contract Code is
+   under **Settings → Contracts** → `MONNIFY_CONTRACT_CODE`.
 3. `MONNIFY_SOURCE_ACCOUNT_NUMBER` is the wallet/account number disbursements are debited
-   from — shown on the dashboard as your settlement/wallet account number.
-4. **Turn OFF transaction MFA/OTP approval for this API credential.** With it on, every
+   from — shown on the same developer page as "Wallet Account Number."
+4. `MONNIFY_MODE` is Monnify's **own** sandbox/live switch, deliberately separate from
+   `NEXT_PUBLIC_APP_MODE` (which governs VTpass) — this lets you test Monnify sandbox
+   credentials while VTpass keeps running live in production, and vice versa. Falls back to
+   `NEXT_PUBLIC_APP_MODE` if unset. Set `MONNIFY_MODE=sandbox` for testing (base URL
+   `sandbox.monnify.com`).
+5. **Turn OFF transaction MFA/OTP approval for this API credential.** With it on, every
    transfer sits at `PENDING_AUTHORIZATION` until a human clicks an email approval link —
    incompatible with AbaPay's automated flow. Look for this under the API credential's
    security settings; the app sends a Telegram alert if it ever hits this state anyway, as a
    safety net.
-5. Register a webhook pointed at `https://www.abapays.com/api/monnify/webhook` (verify your
-   canonical domain first — Monnify does not follow redirects, same trap as every other
-   webhook in this app) so completed/failed transfers get confirmed asynchronously. The
-   webhook is signed with `MONNIFY_SECRET_KEY` (HMAC-SHA512, `monnify-signature` header) —
-   nothing extra to generate.
-6. Once ready for real money, apply for/fund a **live** account, get live keys, and switch
-   `NEXT_PUBLIC_APP_MODE=live` (base URL becomes `api.monnify.com`) — same switch as VTpass,
-   shared across both providers.
+6. Register a webhook — **Developers → Webhook URLs** has separate fields for *Transaction
+   completion*, *Refund completion*, *Disbursement*, and *Settlement*. Put
+   `https://www.abapays.com/api/monnify/webhook` specifically in the **Disbursement** field
+   (verify your canonical domain first — Monnify does not follow redirects, same trap as every
+   other webhook in this app). The webhook is signed with `MONNIFY_SECRET_KEY`
+   (HMAC-SHA512, `monnify-signature` header) — nothing extra to generate.
+7. Once ready for real money: apply for/fund a **live** Monnify account, rotate all four values
+   above to the live equivalents, and set `MONNIFY_MODE=live` (or just delete it, since it then
+   falls back to `NEXT_PUBLIC_APP_MODE`, which is already `live`).
 
 ---
 

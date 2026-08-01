@@ -15,8 +15,15 @@ import { BANK_SEED } from '@/lib/providerFallback';
 // the vtpass.js / vend.ts split.
 
 function baseUrl(): string {
-  const appMode = process.env.NEXT_PUBLIC_APP_MODE || 'sandbox';
-  return appMode === 'live' ? 'https://api.monnify.com' : 'https://sandbox.monnify.com';
+  // ⚡ MONNIFY_MODE is deliberately its OWN switch, independent of NEXT_PUBLIC_APP_MODE (which
+  // governs VTpass). The two providers get set up, tested and rotated to live on completely
+  // different timelines — forcing them to share one switch would mean testing Monnify sandbox
+  // credentials requires dropping VTpass to sandbox too (breaking real production bill
+  // payments), or testing Monnify live-only with no safe way to try it first. Falls back to
+  // NEXT_PUBLIC_APP_MODE when unset, so an install that never sets MONNIFY_MODE keeps the
+  // simpler single-switch behaviour.
+  const mode = process.env.MONNIFY_MODE || process.env.NEXT_PUBLIC_APP_MODE || 'sandbox';
+  return mode === 'live' ? 'https://api.monnify.com' : 'https://sandbox.monnify.com';
 }
 
 // --- 1. OAUTH2 TOKEN (Basic login -> Bearer token, cached until near-expiry) ---
