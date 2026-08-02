@@ -405,7 +405,15 @@ export default function Home() {
   const { cryptoToCharge, currentFee } = useMemo(() => {
     const bill = parseFloat(calculatedNairaAmount) || 0;
     const fee = (activeTab === "bank" || activeService.id === "ELECTRICITY" || activeService.id === "CABLE" || activeTab === "education") ? 100 : 0;
-    const crypto = (bill + fee - discountNgn) / exchangeRate;
+    // ⚡ CBN STAMP DUTY — ₦50 fixed, mandated on electronic transfers of ₦10,000 and above.
+    // Deliberately NOT folded into `currentFee`: that value is shown to the user everywhere
+    // (checkout total, receipts, history) as "+₦100 FEE", and stamp duty is a regulatory
+    // pass-through, not a fee we're charging — it's silently absorbed into the crypto amount
+    // charged instead. Server-side (/api/pay, /api/pay/x402) computes the identical amount
+    // and is the one that actually enforces/records it; this is only the on-screen estimate,
+    // kept in sync so the preview matches what gets charged.
+    const stampDuty = (activeTab === "bank" && bill >= 10000) ? 50 : 0;
+    const crypto = (bill + fee + stampDuty - discountNgn) / exchangeRate;
     return { cryptoToCharge: crypto.toFixed(4), currentFee: fee };
   }, [calculatedNairaAmount, exchangeRate, activeService, activeTab, discountNgn]);
 

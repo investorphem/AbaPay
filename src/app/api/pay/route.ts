@@ -34,7 +34,12 @@ export async function POST(req: Request) {
     const isForeign = serviceID === 'foreign-airtime';
     const needsVerification = !isForeign && (serviceCategory === 'ELECTRICITY' || serviceCategory === 'BANK' || (serviceCategory === 'EDUCATION' && serviceID === 'jamb') || (serviceCategory === 'CABLE' && network !== 'SHOWMAX'));
     const serviceFee = (needsVerification || serviceCategory === 'EDUCATION') ? 100 : 0;
-    const vendAmount = requestedNaira; 
+    const vendAmount = requestedNaira;
+    // ⚡ CBN STAMP DUTY — ₦50 fixed, mandated on electronic transfers of ₦10,000 and above.
+    // Charged into the crypto amount like serviceFee, but tracked in its own column
+    // (stamp_duty_ngn) rather than fee_naira — it's a regulatory pass-through, not revenue,
+    // and never surfaced in any receipt/history UI (see page.tsx's cryptoToCharge comment).
+    const stampDutyNgn = (serviceCategory === 'BANK' && vendAmount >= 10000) ? 50 : 0;
     const vtRequestId = getStrictRequestId();
 
     // ⚡ SMART EXPLORER URL GENERATOR ⚡
@@ -68,7 +73,7 @@ export async function POST(req: Request) {
     const activeDiscount = await getActiveDiscountForService(discountServiceKey);
     const { discountNgn, discountPhone } = await computeDiscountNgn(vendAmount, activeDiscount, wallet_address, destinationAccount);
 
-    const requiredCrypto = (vendAmount + serviceFee - discountNgn) / baseRate;
+    const requiredCrypto = (vendAmount + serviceFee + stampDutyNgn - discountNgn) / baseRate;
 
     if (parseFloat(amount) < parseFloat(requiredCrypto.toFixed(4))) {
         return NextResponse.json({ success: false, status: 'FAILED_VENDING', message: "Insufficient crypto paid." }, { status: 400 });
@@ -85,7 +90,7 @@ export async function POST(req: Request) {
     const dbPayload = {
       tx_hash: txHash, request_id: vtRequestId, service_category: serviceCategory, service_id: serviceID, variation_code: variation_code, network: network,
       blockchain: blockchain || "CELO", account_number: destinationAccount, phone: phone || null, amount_usdt: parseFloat(amount),
-      amount_naira: vendAmount, fee_naira: serviceFee, discount_ngn: discountNgn, discount_campaign_id: activeDiscount?.id || null,
+      amount_naira: vendAmount, fee_naira: serviceFee, stamp_duty_ngn: stampDutyNgn, discount_ngn: discountNgn, discount_campaign_id: activeDiscount?.id || null,
       discount_phone: discountPhone, client_ip: clientIp,
       status: 'PENDING', wallet_address: (wallet_address || "UNKNOWN").toLowerCase(),
       customer_name: customer_name || null, customer_address: customer_address || null,

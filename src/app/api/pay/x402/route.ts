@@ -210,6 +210,9 @@ async function handleX402Request(req: Request) {
   const needsVerification = !isForeign && (serviceCategory === 'ELECTRICITY' || serviceCategory === 'BANK' || (serviceCategory === 'EDUCATION' && serviceID === 'jamb') || (serviceCategory === 'CABLE' && network !== 'SHOWMAX'));
   const serviceFee = (needsVerification || serviceCategory === 'EDUCATION') ? 100 : 0;
   const vendAmount = Number.isFinite(requestedNaira) && requestedNaira > 0 ? requestedNaira : null;
+  // ⚡ CBN STAMP DUTY — ₦50 fixed, mandated on electronic transfers of ₦10,000 and above. See
+  // /api/pay's identical comment — same rule, tracked in stamp_duty_ngn, never shown to the user.
+  const stampDutyNgn = (serviceCategory === 'BANK' && vendAmount !== null && vendAmount >= 10000) ? 50 : 0;
   const vtRequestId = getStrictRequestId();
 
   // ⚡ CHAIN ROUTING — Celo (Celo facilitator) vs Base (Coinbase CDP facilitator). Base is
@@ -265,7 +268,7 @@ async function handleX402Request(req: Request) {
   if (vendAmount !== null) {
     const rules = await getServiceRules();
     baseRate = rules.exchangeRate;
-    requiredCrypto = (vendAmount + serviceFee) / baseRate;
+    requiredCrypto = (vendAmount + serviceFee + stampDutyNgn) / baseRate;
     requiredWei = BigInt(Math.round(requiredCrypto * 10 ** usdc.decimals));
   } else {
     requiredCrypto = Number(FALLBACK_MIN_USDC);
@@ -467,7 +470,7 @@ async function handleX402Request(req: Request) {
     tx_hash: txHash, request_id: vtRequestId, service_category: serviceCategory || 'UNKNOWN', service_id: serviceID || 'UNKNOWN',
     variation_code: variation_code, network: network || 'UNKNOWN', blockchain: chainKey,
     account_number: billersCode || phone || 'N/A', phone: phone || null,
-    amount_usdt: requiredCrypto, amount_naira: vendAmount, fee_naira: serviceFee, status: 'PENDING',
+    amount_usdt: requiredCrypto, amount_naira: vendAmount, fee_naira: serviceFee, stamp_duty_ngn: stampDutyNgn, status: 'PENDING',
     wallet_address: settledWallet,
     customer_name: customer_name || null, customer_address: customer_address || null,
     source_channel: source_channel || 'WEB', token_used: requestedTokenSymbol,

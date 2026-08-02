@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
-import { getBanks, validateAccount } from '@/lib/monnify';
+import { getBanks, validateAccountRaw } from '@/lib/monnify';
 import { enforceRateLimit } from '@/lib/rateLimit';
+import { sendTelegramAlert } from '@/lib/telegram';
 
 // ⚡ AUTO-DETECT: "here's an account number, which bank is it?" ⚡
 //
@@ -36,14 +37,42 @@ export async function POST(req: Request) {
 
     const { banks } = await getBanks();
 
+    // 🔴 THE BUG THIS FIXES: validateAccount() (the old call here) collapses TWO completely
+    // different outcomes into the same `null` — "Monnify checked and this isn't the right
+    // bank" and "the Name Enquiry call itself failed" (rate-limited, network blip, bad
+    // credentials). That meant a real problem (e.g. Monnify's sandbox throttling this route's
+    // concurrent batch of NETWORK_ERROR every single call) was indistinguishable from a clean
+    // "genuinely no match" — and since this route ALSO always returned `success: true` even
+    // with zero matches, the frontend's own fallback ("Couldn't Detect Bank — please select
+    // manually") never fired either. The user saw nothing: no suggestion chips, no error toast,
+    // just silence — read as "auto-detect doesn't work" with zero signal as to why.
+    // Using validateAccountRaw directly keeps responseCode/requestSuccessful visible so this
+    // route can tell a real outage apart from an honest non-match and respond accordingly.
     const attempts = await mapWithConcurrency(banks, BATCH_SIZE, async (bank) => {
-      const result = await validateAccount(accountNumber, bank.code);
-      return result ? { bankCode: bank.code, bankName: bank.name, accountName: result.accountName } : null;
+      const raw = await validateAccountRaw(accountNumber, bank.code);
+      return { bank, raw };
     });
 
-    const matches = attempts.filter((m): m is NonNullable<typeof m> => m !== null);
+    const matches = attempts
+      .filter((a) => a.raw.result)
+      .map((a) => ({ bankCode: a.bank.code, bankName: a.bank.name, accountName: a.raw.result!.accountName }));
 
-    return NextResponse.json({ success: true, matches });
+    const errorCount = attempts.filter((a) => a.raw.responseCode === 'NETWORK_ERROR').length;
+
+    if (matches.length === 0 && banks.length > 0 && errorCount >= banks.length * 0.5) {
+      // Most of the sweep failed outright rather than cleanly rejecting — Monnify itself is
+      // having an issue (or this route is getting rate-limited by them), not "wrong bank".
+      // Alert once per call (best-effort, never blocks the response) so this is visible
+      // without the user having to notice anything beyond a normal-looking toast.
+      sendTelegramAlert(`⚠️ *BANK AUTO-DETECT DEGRADED*\n\n${errorCount}/${banks.length} Name Enquiry calls failed outright during resolve — Monnify may be rate-limiting or unreachable.`).catch(() => {});
+      return NextResponse.json({
+        success: false,
+        matches: [],
+        message: "Couldn't check your bank right now — please select it manually.",
+      });
+    }
+
+    return NextResponse.json({ success: matches.length > 0, matches });
   } catch (error: any) {
     console.error('[Monnify] resolve route failed:', error.message);
     return NextResponse.json({ success: false, matches: [], message: 'Could not resolve this account right now.' }, { status: 500 });

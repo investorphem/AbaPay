@@ -4,9 +4,9 @@ import { useState, useEffect, useMemo } from "react";
 import { createWalletClient, createPublicClient, custom, http, formatUnits, parseUnits } from "viem";
 import { celo, celoSepolia, base, baseSepolia } from "viem/chains"; 
 import { 
-  Lock, ArrowDownToLine, Wallet, ShieldAlert, Activity, 
-  Database, RefreshCcw, Globe, Zap, ExternalLink, 
-  Search, Download, Users, BarChart3, Banknote,
+  Lock, ArrowDownToLine, Wallet, ShieldAlert, Activity,
+  Database, RefreshCcw, Globe, Zap, ExternalLink,
+  Search, Download, Users, BarChart3, Banknote, Landmark,
   ChevronLeft, ChevronRight, Loader2, Save, Gauge, RefreshCw, Smartphone, Star, Edit3, Power
 } from "lucide-react";
 import { supabase } from "@/utils/supabase";
@@ -839,6 +839,9 @@ export default function AdminDashboard() {
     return {
       vol: successTx.reduce((acc, tx) => acc + Number(tx.amount_naira || 0), 0),
       fees: successTx.reduce((acc, tx) => acc + Number(tx.fee_naira || 0), 0),
+      // CBN stamp duty (₦50/bank transfer ≥₦10,000) — tracked separately from fees/profit:
+      // it's a regulatory pass-through we collect on the CBN's behalf, not our own revenue.
+      stampDuty: successTx.reduce((acc, tx) => acc + Number(tx.stamp_duty_ngn || 0), 0),
       count: successTx.length,
       users: new Set(successTx.map(tx => tx.wallet_address)).size,
       totalDeposited,
@@ -1040,11 +1043,12 @@ export default function AdminDashboard() {
           <div className="space-y-6">
 
             {/* STATS */}
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-4">
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-6 gap-4">
               <StatBox label="VTpass Wallet" value={`₦${vtBalance}`} sub="Live Naira Float" color="text-white" icon={<Banknote size={16}/>} />
               <StatBox label="Monnify Wallet" value={monnifyBalance !== null ? `₦${monnifyBalance}` : "Not set up"} sub="Moniepoint Transfer Float" color="text-white" icon={<Banknote size={16}/>} />
               <StatBox label={`Global Vaults (${timeFilter})`} value={`$${currentVaultTotal.toFixed(2)}`} sub="Base & Celo Combined" color="text-emerald-500" icon={<Wallet size={16}/>} />
               <StatBox label={`Profit (${timeFilter})`} value={`₦${analytics.fees.toLocaleString()}`} sub="Service Fees Accrued" color="text-blue-400" icon={<BarChart3 size={16}/>} />
+              <StatBox label={`Stamp Duty (${timeFilter})`} value={`₦${analytics.stampDuty.toLocaleString()}`} sub="CBN ₦50 Levy Collected" color="text-purple-400" icon={<Landmark size={16}/>} />
               <StatBox label="SMS Health" value={`${smsBalance} Units`} sub="Messaging Units" color="text-orange-400" icon={<Activity size={16}/>} />
             </div>
 
