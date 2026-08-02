@@ -511,6 +511,7 @@ async function handleX402Request(req: Request) {
         blockchain: chainKey,
         reason,
         vtpassError: errorCode,
+        userMessage: "There was an issue processing your payment.",
         serviceCategory: serviceCategory || undefined,
         sourceChannel: source_channel || 'WEB',
       });

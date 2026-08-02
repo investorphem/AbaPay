@@ -25,7 +25,13 @@ export interface EnqueueParams {
   amountNaira?: number;
   blockchain?: string;
   reason: string;
+  /** Admin-only detail — goes to the Telegram alert and the refund_queue DB row (admin
+   * dashboard), never to the customer. May be a raw provider code/JSON/technical string. */
   vtpassError?: string;
+  /** Customer-safe explanation — goes in the SMS/email/Telegram-DM sent to the user. Must
+   * never contain an internal fact (our balance, our config, a raw code). Falls back to a
+   * generic reassurance when omitted. */
+  userMessage?: string;
   serviceCategory?: string;
   sourceChannel?: string;
   transactionId?: string;
@@ -100,9 +106,10 @@ export async function enqueueRefund(p: EnqueueParams): Promise<{ queued: boolean
  */
 async function notifyUserOfPendingRefund(p: EnqueueParams) {
   const amount = p.amountNaira ? `₦${p.amountNaira.toLocaleString()}` : `${p.amountCrypto} ${p.tokenUsed}`;
+  const safeMessage = p.userMessage || 'The provider could not complete it.';
   const msg =
     `⚠️ *Your ${p.serviceCategory || ''} payment didn't go through.*\n\n` +
-    `${p.vtpassError || 'The provider could not complete it.'}\n\n` +
+    `${safeMessage}\n\n` +
     `💰 *${amount}* is being refunded to your wallet. You'll get a confirmation as soon as it's sent.\n\n` +
     `_You don't need to do anything._`;
 
@@ -137,7 +144,7 @@ async function notifyUserOfPendingRefund(p: EnqueueParams) {
         subject: 'Your AbaPay payment failed — refund on the way',
         html: `<div style="font-family:-apple-system,Segoe UI,Roboto,sans-serif;padding:24px;">
           <h2 style="margin:0 0 12px;">⚠️ Payment couldn't be completed</h2>
-          <p style="color:#334155;">${p.vtpassError || 'Our provider could not complete your payment.'}</p>
+          <p style="color:#334155;">${p.userMessage || 'Our provider could not complete your payment.'}</p>
           <p style="color:#334155;"><strong>${amount}</strong> is being refunded to your wallet. You'll receive a confirmation once it's sent.</p>
           <p style="color:#64748b;font-size:13px;">You don't need to do anything. Reply to this email if you have any questions.</p>
         </div>`,

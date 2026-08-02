@@ -257,6 +257,7 @@ export async function executeVend(input: VendInput): Promise<VendResult> {
         blockchain: blockchain || 'CELO',
         reason: 'VTpass vend rejected',
         vtpassError: `${payData.code}: ${payData.response_description}`,
+        userMessage: friendlyMessage,
         serviceCategory,
         sourceChannel: source_channel || 'WEB',
       });

@@ -485,6 +485,7 @@ export async function POST(req: Request) {
                     blockchain: record.blockchain || 'CELO',
                     reason: 'VTpass vend rejected (webhook)',
                     vtpassError: `${payData.code}: ${rawTechnicalError}`,
+                    userMessage: friendlyMessage,
                     serviceCategory: record.service_category,
                     sourceChannel: record.source_channel || 'WEB',
                 });

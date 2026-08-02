@@ -3,7 +3,7 @@ import { supabaseAdmin as supabase } from '@/utils/supabase';
 import { sendTelegramAlert } from '@/lib/telegram';
 import { buildReceiptEmail } from '@/lib/receiptEmail';
 import { enqueueRefund } from '@/lib/refunds';
-import { initiateTransfer, getTransferStatus, classifyTransferStatus, extractMonnifyFailureReason, friendlyMonnifyError, isInsufficientBalanceError } from '@/lib/monnify';
+import { initiateTransfer, getTransferStatus, classifyTransferStatus, extractMonnifyFailureReason, extractMonnifyUserFailureReason, friendlyMonnifyError, isInsufficientBalanceError } from '@/lib/monnify';
 import { checkProviderBalances } from '@/lib/balanceAlerts';
 import type { VendInput, VendResult } from '@/lib/vend';
 import { Resend } from 'resend';
@@ -204,6 +204,10 @@ export async function finalizeMonnifyTransfer(p: FinalizeParams): Promise<VendRe
       blockchain: record.blockchain || 'CELO',
       reason: 'Monnify transfer rejected',
       vtpassError: reason,
+      // Derived straight from p.raw (not from `reason` above) so an operational fact like
+      // D04's "Your Moniepoint balance is too low" can never leak to the customer — only the
+      // subset of Monnify's errors that are actually about THEIR account/bank ever reach them.
+      userMessage: extractMonnifyUserFailureReason(p.raw),
       serviceCategory: record.service_category,
       sourceChannel: record.source_channel || 'WEB',
     });

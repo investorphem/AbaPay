@@ -237,6 +237,7 @@ export async function reconcileStuckProcessing(opts: { force?: boolean } = {}) {
             blockchain: record.blockchain || 'CELO',
             reason: `Stuck ${record.status} row reconciled — VTpass confirmed the vend failed`,
             vtpassError: JSON.stringify(requeryData).slice(0, 300),
+            userMessage: "This didn't go through in the end.",
             serviceCategory: record.service_category,
             sourceChannel: record.source_channel || 'WEB',
           });

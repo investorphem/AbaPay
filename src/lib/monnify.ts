@@ -299,28 +299,74 @@ export const MONNIFY_DISBURSEMENT_ERRORS: Record<string, string> = {
 };
 
 /** Best-effort friendly text for a Monnify disbursement failure — falls back to their own
- * responseMessage/error text when we don't have a specific mapping, never a bare code. */
+ * responseMessage/error text when we don't have a specific mapping, never a bare code.
+ * ADMIN-FACING ONLY — see userFacingMonnifyError() for what's safe to show the customer. */
 export function friendlyMonnifyError(codeOrMessage: string | undefined | null): string {
   if (!codeOrMessage) return 'The transfer could not be completed.';
   return MONNIFY_DISBURSEMENT_ERRORS[codeOrMessage] || codeOrMessage;
 }
 
+// 🔴 Of MONNIFY_DISBURSEMENT_ERRORS, only these are actually about the RECIPIENT's account or
+// bank — safe and useful for the customer to hear ("your beneficiary's account is dormant").
+// Everything else (D01/D02/D04/D05/D06/D07, '99', "Sender not permitted to credit
+// beneficiary", "Supplied account number does not belong to merchant", "Suspected fraud") is
+// about OUR side — our float, our reference/IP/merchant-account setup, or a
+// fraud-investigation flag that shouldn't be relayed externally. A user was nearly told
+// "Your Moniepoint balance is too low" for a D04 before this split existed.
+const USER_SAFE_MONNIFY_ERRORS = new Set([
+  'D03',
+  'Invalid destination account number',
+  'Dormant beneficiary account',
+  'Beneficiary account name mismatch',
+  'Unknown destination bank code',
+  'Transaction timed out while waiting for destination bank',
+  'Invalid amount',
+  'Delayed processing from NIP',
+  'Post No Credit restriction on beneficiary account',
+  'Beneficiary bank not available',
+  'Rejected by destination institution',
+  'System malfunction by destination institution',
+  'Beneficiary account limit exceeded',
+  'Account number could not be validated',
+]);
+
 /**
- * Pulls the human-readable failure reason out of whichever Monnify response shape we're
- * holding — the synchronous initiate/status response nests it under `responseBody.
- * transactionDescription`, a webhook payload nests it under `eventData.transactionDescription`
- * (see FAILED_DISBURSEMENT's sample body), and a hard rejection may only ever have a top-level
- * `responseMessage`. Tries all three before falling back to a generic message, then runs the
- * result through friendlyMonnifyError so a raw D0x code never reaches a user or Telegram alert
- * unexplained.
+ * The customer-safe counterpart to friendlyMonnifyError() — only ever returns text about the
+ * recipient's own account/bank, never an internal/operational fact (our float, our setup,
+ * a fraud flag). Anything not on the safe allowlist collapses to one generic, reassuring
+ * line, same as VTpass's failure path already does for the user-facing side.
  */
-export function extractMonnifyFailureReason(raw: any): string {
-  const candidate = raw?.responseBody?.transactionDescription
+export function userFacingMonnifyError(codeOrMessage: string | undefined | null): string {
+  const key = codeOrMessage || '';
+  if (USER_SAFE_MONNIFY_ERRORS.has(key)) return MONNIFY_DISBURSEMENT_ERRORS[key];
+  return "This transfer couldn't be completed.";
+}
+
+/**
+ * Pulls the raw failure text out of whichever Monnify response shape we're holding — the
+ * synchronous initiate/status response nests it under `responseBody.transactionDescription`,
+ * a webhook payload nests it under `eventData.transactionDescription` (see
+ * FAILED_DISBURSEMENT's sample body), and a hard rejection may only ever have a top-level
+ * `responseMessage`. Shared by both the admin-facing and user-facing formatters below so a
+ * code/message is only ever looked up once.
+ */
+function extractMonnifyRawFailureText(raw: any): string | undefined {
+  return raw?.responseBody?.transactionDescription
     || raw?.eventData?.transactionDescription
     || raw?.responseMessage
     || raw?.error
-    || raw?.message;
-  return friendlyMonnifyError(candidate || undefined);
+    || raw?.message
+    || undefined;
+}
+
+export function extractMonnifyFailureReason(raw: any): string {
+  return friendlyMonnifyError(extractMonnifyRawFailureText(raw));
+}
+
+/** Customer-safe counterpart to extractMonnifyFailureReason() — see userFacingMonnifyError()
+ * for what's actually safe to relay. */
+export function extractMonnifyUserFailureReason(raw: any): string {
+  return userFacingMonnifyError(extractMonnifyRawFailureText(raw));
 }
 
 /**
