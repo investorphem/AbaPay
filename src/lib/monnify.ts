@@ -237,6 +237,109 @@ export interface TransferResult {
   raw: any;
 }
 
+// ⚡ MONNIFY'S FULL DISBURSEMENT STATUS VOCABULARY — sourced directly from their own
+// "Transaction Status Reference" docs. The code previously only recognized SUCCESS and
+// FAILED as terminal outcomes; everything else (COMPLETED, REVERSED, EXPIRED,
+// PENDING_AUTHORIZATION, OTP_EMAIL_DISPATCH_FAILED) silently fell into "still processing" —
+// meaning a transfer that was actually done, or actually dead, or actually stuck waiting on
+// a human OTP step, just sat there forever looking identical to one genuinely in flight.
+export type TransferOutcome = 'SUCCESS' | 'FAILED' | 'PROCESSING' | 'NEEDS_AUTH';
+
+/**
+ * Classifies a raw Monnify status string into one of four outcomes:
+ *   SUCCESS    — SUCCESS, COMPLETED: delivered.
+ *   FAILED     — FAILED, REVERSED (bounced back to OUR wallet, not the recipient),
+ *                EXPIRED (never authorized within its validity window): definitively did NOT
+ *                reach the recipient — the user is owed a refund.
+ *   NEEDS_AUTH — PENDING_AUTHORIZATION (MFA/OTP required), OTP_EMAIL_DISPATCH_FAILED
+ *                (Monnify couldn't even send the OTP email): stuck on a human step that a
+ *                silent retry can never resolve — needs an operator.
+ *   PROCESSING — PENDING, AWAITING_PROCESSING, IN_PROGRESS, or anything unrecognized: still
+ *                genuinely in flight, check again later.
+ */
+export function classifyTransferStatus(status: string | undefined | null): TransferOutcome {
+  const s = String(status || '').toUpperCase();
+  if (s === 'SUCCESS' || s === 'COMPLETED') return 'SUCCESS';
+  if (s === 'FAILED' || s === 'REVERSED' || s === 'EXPIRED') return 'FAILED';
+  if (s === 'PENDING_AUTHORIZATION' || s === 'OTP_EMAIL_DISPATCH_FAILED') return 'NEEDS_AUTH';
+  return 'PROCESSING';
+}
+
+// ⚡ DISBURSEMENT ERROR REFERENCE — verbatim from Monnify's own "Error Codes" documentation
+// (their /docs/error-codes page is a JS-rendered SPA our fetch tooling couldn't execute, so
+// this was transcribed directly from the source rather than guessed). Mirrors the shape of
+// vend.ts's VTpass error_messages map. Keyed by whatever Monnify puts in the error/message
+// field of a failed disbursement — their own docs use the full message text as the "code" for
+// most of these (not a short enum), only D01–D07 and 99 are short codes.
+export const MONNIFY_DISBURSEMENT_ERRORS: Record<string, string> = {
+  '99': "Monnify hit an unexpected error processing this transfer — we'll re-check the status shortly.",
+  D01: "Monnify couldn't process this transfer.",
+  D02: "Monnify has no record of this transfer request.",
+  D03: 'The account details supplied were invalid.',
+  D04: "Your Moniepoint balance is too low to complete this transfer — please top it up.",
+  D05: 'That transfer reference was already used — this should not normally happen.',
+  D06: "This server's IP address isn't whitelisted with Monnify yet.",
+  D07: 'A transfer to this exact account for this exact amount was already made in the last 2 minutes.',
+  'Invalid destination account number': "The recipient's account number didn't pass validation.",
+  'Dormant beneficiary account': "The recipient's account is dormant — they'll need to contact their bank.",
+  'Beneficiary account name mismatch': "The account name didn't match the account number.",
+  'Unknown destination bank code': "The recipient's bank code isn't recognized by Monnify.",
+  'Transaction timed out while waiting for destination bank': "The recipient's bank didn't respond in time — this often resolves on its own.",
+  'Invalid amount': 'The transfer amount was invalid.',
+  'Delayed processing from NIP': 'The interbank network is delaying this transfer — it often still completes.',
+  'Post No Credit restriction on beneficiary account': "The recipient's account can't be credited (bank-side restriction) — they'll need to contact their bank.",
+  'Beneficiary bank not available': "The recipient's bank is currently unavailable.",
+  'Rejected by destination institution': "The recipient's bank rejected the credit.",
+  'Suspected fraud': "The recipient's account is flagged for a fraud investigation.",
+  'System malfunction by destination institution': "The recipient's bank is having a system issue.",
+  'Beneficiary account limit exceeded': "The recipient's account tier can't receive this amount.",
+  'Sender not permitted to credit beneficiary': "The recipient's account has a restriction blocking this credit.",
+  'Account number could not be validated': "The recipient's account number couldn't be validated.",
+  'Supplied account number does not belong to merchant': 'The configured Moniepoint source account number is wrong — this is a setup issue, not the recipient\'s.',
+};
+
+/** Best-effort friendly text for a Monnify disbursement failure — falls back to their own
+ * responseMessage/error text when we don't have a specific mapping, never a bare code. */
+export function friendlyMonnifyError(codeOrMessage: string | undefined | null): string {
+  if (!codeOrMessage) return 'The transfer could not be completed.';
+  return MONNIFY_DISBURSEMENT_ERRORS[codeOrMessage] || codeOrMessage;
+}
+
+/**
+ * Pulls the human-readable failure reason out of whichever Monnify response shape we're
+ * holding — the synchronous initiate/status response nests it under `responseBody.
+ * transactionDescription`, a webhook payload nests it under `eventData.transactionDescription`
+ * (see FAILED_DISBURSEMENT's sample body), and a hard rejection may only ever have a top-level
+ * `responseMessage`. Tries all three before falling back to a generic message, then runs the
+ * result through friendlyMonnifyError so a raw D0x code never reaches a user or Telegram alert
+ * unexplained.
+ */
+export function extractMonnifyFailureReason(raw: any): string {
+  const candidate = raw?.responseBody?.transactionDescription
+    || raw?.eventData?.transactionDescription
+    || raw?.responseMessage
+    || raw?.error
+    || raw?.message;
+  return friendlyMonnifyError(candidate || undefined);
+}
+
+/**
+ * D04 specifically means our own Moniepoint float is dry — every other disbursement error
+ * code is about the recipient's account/bank. Detected by responseCode where present, and by
+ * the description text (the code doesn't always survive into the webhook/status-check shapes,
+ * but the wording "sufficient balance" does — see the FAILED_DISBURSEMENT sample in Monnify's
+ * docs) so a low-float failure can trigger an immediate operator alert instead of waiting for
+ * the next scheduled balance sweep.
+ */
+export function isInsufficientBalanceError(raw: any): boolean {
+  const code = raw?.responseBody?.responseCode || raw?.responseCode;
+  if (code === 'D04') return true;
+  const text = String(
+    raw?.responseBody?.transactionDescription || raw?.eventData?.transactionDescription || raw?.responseMessage || ''
+  ).toLowerCase();
+  return text.includes('sufficient balance');
+}
+
 export async function initiateTransfer(params: InitiateTransferParams): Promise<TransferResult> {
   const sourceAccountNumber = process.env.MONNIFY_SOURCE_ACCOUNT_NUMBER || '';
 

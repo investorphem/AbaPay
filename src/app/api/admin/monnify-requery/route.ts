@@ -3,6 +3,7 @@ import { supabaseAdmin as supabase } from '@/utils/supabase';
 import { verifyAdminRequest } from '@/utils/adminAuth';
 import { enforceRateLimit } from '@/lib/rateLimit';
 import { requeryMonnifyTransfer, finalizeMonnifyTransfer } from '@/lib/monnifyVend';
+import { classifyTransferStatus, extractMonnifyFailureReason } from '@/lib/monnify';
 
 // ⚡ Admin-triggered "Check Status" for a BANK transfer — the Monnify equivalent of
 // /api/requery (VTpass). Kept as its own route rather than branching inside /api/requery
@@ -44,17 +45,28 @@ export async function POST(req: Request) {
       });
     }
 
-    if (monnifyStatus.status === 'SUCCESS') {
+    const outcome = classifyTransferStatus(monnifyStatus.status);
+
+    if (outcome === 'SUCCESS') {
       await finalizeMonnifyTransfer({ txHash: record.tx_hash, reference: record.request_id, outcome: 'SUCCESS', raw: monnifyStatus.raw });
       return NextResponse.json({ success: true, status: 'SUCCESS' });
     }
 
-    if (monnifyStatus.status === 'FAILED') {
-      await finalizeMonnifyTransfer({ txHash: record.tx_hash, reference: record.request_id, outcome: 'FAILED', raw: monnifyStatus.raw, failureReason: 'Monnify confirmed failure via admin-triggered requery' });
-      return NextResponse.json({ success: true, status: 'FAILED_VENDING' });
+    if (outcome === 'FAILED') {
+      const failureReason = extractMonnifyFailureReason(monnifyStatus.raw);
+      await finalizeMonnifyTransfer({ txHash: record.tx_hash, reference: record.request_id, outcome: 'FAILED', raw: monnifyStatus.raw, failureReason });
+      return NextResponse.json({ success: true, status: 'FAILED_VENDING', message: failureReason });
     }
 
-    // PENDING / PENDING_AUTHORIZATION / IN_PROGRESS — genuinely still processing at Monnify.
+    if (outcome === 'NEEDS_AUTH') {
+      return NextResponse.json({
+        success: true,
+        status: 'PENDING',
+        message: `Monnify is waiting on OTP/email authorization for this transfer (status: ${monnifyStatus.status}) — approve it from the Moniepoint/Monnify dashboard, or turn off transaction MFA for this API credential to avoid this going forward.`,
+      });
+    }
+
+    // PROCESSING (PENDING / AWAITING_PROCESSING / IN_PROGRESS) — genuinely still processing.
     return NextResponse.json({ success: true, status: 'PENDING', message: `Monnify reports: ${monnifyStatus.status}. Still processing.` });
   } catch (error: any) {
     console.error('[Admin] Monnify requery failed:', error.message);

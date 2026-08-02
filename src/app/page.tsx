@@ -109,6 +109,19 @@ export default function Home() {
   const pressTimer = useRef<NodeJS.Timeout | null>(null);
   const isLongPress = useRef(false);
 
+  // ⚡ THE BUG THIS FIXES: resolveBankAccount (the slow ~25-bank auto-detect sweep) and
+  // verifyBankAccount (a single fast manual verify) are two independent async calls with no
+  // way to know about each other. If a user gets impatient waiting on auto-detect and manually
+  // picks a bank — which verifies successfully — the STILL-IN-FLIGHT auto-detect call has no
+  // idea that happened. When it finally resolves (0 matches, or times out), it unconditionally
+  // shows "Couldn't Detect Bank — select manually", even though the user already did exactly
+  // that and it already verified. A plain `if (customerName) return` check doesn't work here —
+  // customerName is read from a stale closure captured when the async call STARTED, not its
+  // value when the awaited fetch finally resolves. This generation counter is bumped at the
+  // start of every verify/resolve attempt; each call captures its own generation number and
+  // discards its result entirely if a newer attempt has since started.
+  const bankVerifyGenerationRef = useRef(0);
+
   const [meterAddress, setMeterAddress] = useState<string | null>(null);
   const [dynamicElecMin, setDynamicElecMin] = useState<number>(1000);
   const [meterAccountType, setMeterAccountType] = useState<string | null>(null);
@@ -703,6 +716,8 @@ export default function Home() {
       showToast("You're Offline", "Check your internet connection and try again.", "error");
       return;
     }
+    // Claims the generation for THIS attempt — see bankVerifyGenerationRef's own comment.
+    const myGeneration = ++bankVerifyGenerationRef.current;
     setIsVerifying(true); setCustomerName(null);
     try {
       const res = await fetch('/api/monnify/verify', {
@@ -711,13 +726,15 @@ export default function Home() {
         signal: AbortSignal.timeout(15000),
       });
       const data = await res.json();
+      if (bankVerifyGenerationRef.current !== myGeneration) return; // superseded — discard
       if (data.success) setCustomerName(data.accountName);
       else showToast("Verification Failed", data.message || "Could not verify this account.", "error");
     } catch (e: any) {
+      if (bankVerifyGenerationRef.current !== myGeneration) return;
       const timedOut = e?.name === 'TimeoutError' || e?.name === 'AbortError';
       showToast("Verification Failed", timedOut ? "This is taking too long — check your connection and try again." : "Network error — check your connection and try again.", "error");
     }
-    setIsVerifying(false);
+    if (bankVerifyGenerationRef.current === myGeneration) setIsVerifying(false);
   };
 
   // Auto-detect: "here's an account number, which bank is it?" — tries the number against
@@ -729,6 +746,12 @@ export default function Home() {
       showToast("You're Offline", "Check your internet connection and try again.", "error");
       return;
     }
+    // Claims the generation for THIS sweep — see bankVerifyGenerationRef's own comment. This
+    // is the fix for "choose bank manually" popping up again after a manual pick already
+    // verified successfully: that manual pick's verifyBankAccount() call claims a NEWER
+    // generation, so when this (now-stale) sweep's slow response finally arrives, it notices
+    // it's been superseded and discards its result entirely instead of overriding it.
+    const myGeneration = ++bankVerifyGenerationRef.current;
     setIsVerifying(true); setCustomerName(null); setBankSuggestions([]);
     try {
       // ⚡ Generous timeout — this fans out to every bank in parallel batches (see
@@ -740,6 +763,8 @@ export default function Home() {
         signal: AbortSignal.timeout(45000),
       });
       const data = await res.json();
+      if (bankVerifyGenerationRef.current !== myGeneration) return; // superseded — discard
+
       const matches = data.matches || [];
 
       if (matches.length === 1) {
@@ -750,16 +775,16 @@ export default function Home() {
       } else if (selectedBank?.variation_code) {
         // No auto-detect match, but a bank was already picked manually — verify against it.
         await verifyBankAccount(selectedBank.variation_code);
-        setIsVerifying(false);
-        return;
+        return; // verifyBankAccount manages its own isVerifying lifecycle (and generation)
       } else if (!data.success) {
         showToast("Couldn't Detect Bank", data.message || "Please select your bank manually.", "error");
       }
     } catch (e: any) {
+      if (bankVerifyGenerationRef.current !== myGeneration) return;
       const timedOut = e?.name === 'TimeoutError' || e?.name === 'AbortError';
       showToast("Couldn't Detect Bank", timedOut ? "This is taking too long — please select your bank manually." : "Network error — please select your bank manually.", "error");
     }
-    setIsVerifying(false);
+    if (bankVerifyGenerationRef.current === myGeneration) setIsVerifying(false);
   };
 
   const verifyMerchant = async () => {

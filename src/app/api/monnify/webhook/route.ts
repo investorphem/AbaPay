@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server';
 import { supabaseAdmin as supabase } from '@/utils/supabase';
-import { verifyWebhookSignature } from '@/lib/monnify';
+import { verifyWebhookSignature, extractMonnifyFailureReason } from '@/lib/monnify';
 import { finalizeMonnifyTransfer } from '@/lib/monnifyVend';
 
 // ⚡ MONNIFY DISBURSEMENT WEBHOOK — the async completion signal for a bank transfer submitted
@@ -36,7 +36,7 @@ export async function POST(req: Request) {
     if (eventType === 'SUCCESSFUL_DISBURSEMENT') {
       await finalizeMonnifyTransfer({ txHash: record.tx_hash, reference, outcome: 'SUCCESS', raw: body });
     } else if (eventType === 'FAILED_DISBURSEMENT' || eventType === 'REVERSED_DISBURSEMENT') {
-      await finalizeMonnifyTransfer({ txHash: record.tx_hash, reference, outcome: 'FAILED', raw: body, failureReason: eventData.responseMessage || eventType });
+      await finalizeMonnifyTransfer({ txHash: record.tx_hash, reference, outcome: 'FAILED', raw: body, failureReason: extractMonnifyFailureReason(body) });
     }
     // Other event types (e.g. SETTLEMENT) aren't relevant to a single transfer's lifecycle — acknowledged, ignored.
 

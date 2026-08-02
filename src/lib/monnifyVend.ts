@@ -3,7 +3,8 @@ import { supabaseAdmin as supabase } from '@/utils/supabase';
 import { sendTelegramAlert } from '@/lib/telegram';
 import { buildReceiptEmail } from '@/lib/receiptEmail';
 import { enqueueRefund } from '@/lib/refunds';
-import { initiateTransfer, getTransferStatus } from '@/lib/monnify';
+import { initiateTransfer, getTransferStatus, classifyTransferStatus, extractMonnifyFailureReason, friendlyMonnifyError, isInsufficientBalanceError } from '@/lib/monnify';
+import { checkProviderBalances } from '@/lib/balanceAlerts';
 import type { VendInput, VendResult } from '@/lib/vend';
 import { Resend } from 'resend';
 
@@ -64,26 +65,30 @@ export async function initiateMonnifyBankTransfer(input: VendInput): Promise<Ven
     return { success: true, status: 'TIMEOUT', message: 'Your transfer is being confirmed — you will be notified once it completes.' };
   }
 
-  if (result.status === 'SUCCESS') {
+  const outcome = classifyTransferStatus(result.status);
+
+  if (outcome === 'SUCCESS') {
     return finalizeMonnifyTransfer({ txHash, reference: vtRequestId, outcome: 'SUCCESS', raw: result.raw });
   }
 
-  if (result.status === 'FAILED') {
-    return finalizeMonnifyTransfer({ txHash, reference: vtRequestId, outcome: 'FAILED', raw: result.raw });
+  if (outcome === 'FAILED') {
+    return finalizeMonnifyTransfer({ txHash, reference: vtRequestId, outcome: 'FAILED', raw: result.raw, failureReason: extractMonnifyFailureReason(result.raw) });
   }
 
-  if (result.status === 'PENDING_AUTHORIZATION') {
-    // MFA/OTP approval is turned on for this Monnify credential — the transfer will not move
-    // until a human clicks the email approval link. That's incompatible with an unattended
-    // flow; alert the operator loudly rather than leaving the user guessing.
+  if (outcome === 'NEEDS_AUTH') {
+    // Covers both PENDING_AUTHORIZATION (MFA/OTP approval turned on for this Monnify credential
+    // — won't move until a human clicks the email approval link) and OTP_EMAIL_DISPATCH_FAILED
+    // (Monnify couldn't even send the OTP email). Either way it's stuck on a human step,
+    // incompatible with an unattended flow; alert the operator loudly rather than leaving the
+    // user guessing.
     await sendTelegramAlert(
-      `⚠️ *TRANSFER NEEDS MANUAL APPROVAL*\n\nMonnify is asking for OTP/email authorization on this disbursement — turn off transaction MFA for this API credential in the Moniepoint/Monnify dashboard to automate this.\n\n🛒 *Transfer:* ₦${vendAmount} to ${network} (${billersCode})\n👤 *User:* ${customer_name}\n🧾 *Ref:* ${vtRequestId}`
+      `⚠️ *TRANSFER NEEDS MANUAL APPROVAL*\n\nMonnify is asking for OTP/email authorization on this disbursement (status: ${result.status}) — turn off transaction MFA for this API credential in the Moniepoint/Monnify dashboard to automate this.\n\n🛒 *Transfer:* ₦${vendAmount} to ${network} (${billersCode})\n👤 *User:* ${customer_name}\n🧾 *Ref:* ${vtRequestId}`
     );
     return { success: true, status: 'TIMEOUT', message: "Your transfer is awaiting authorization and may take a little longer than usual — we'll notify you once it completes." };
   }
 
-  // PENDING / IN_PROGRESS — the normal async case. Row stays PROCESSING; webhook or the
-  // reconcile sweep finishes it.
+  // PROCESSING (PENDING / AWAITING_PROCESSING / IN_PROGRESS) — the normal async case. Row
+  // stays PROCESSING; webhook or the reconcile sweep finishes it.
   return { success: true, status: 'TIMEOUT', message: 'Transfer submitted — you will be notified once it completes.' };
 }
 
@@ -161,10 +166,14 @@ export async function finalizeMonnifyTransfer(p: FinalizeParams): Promise<VendRe
     return { success: true, status: 'SUCCESS', request_id: record.request_id };
   }
 
-  // FAILED
+  // FAILED — run whatever the caller passed through friendlyMonnifyError centrally, so a raw
+  // D0x code or unmapped Monnify string never reaches the DB/Telegram/user unexplained even if
+  // a caller (webhook, reconcile sweep) forgot to pre-format it.
+  const reason = friendlyMonnifyError(p.failureReason);
+
   const { data: claimed } = await supabase
     .from('transactions')
-    .update({ status: 'FAILED_VENDING', error_code: 'MONNIFY_FAILED', api_response: p.failureReason || 'Monnify transfer failed' })
+    .update({ status: 'FAILED_VENDING', error_code: 'MONNIFY_FAILED', api_response: reason })
     .eq('tx_hash', p.txHash)
     .in('status', ['PROCESSING', 'PENDING'])
     .select();
@@ -173,9 +182,16 @@ export async function finalizeMonnifyTransfer(p: FinalizeParams): Promise<VendRe
 
   try {
     await sendTelegramAlert(
-      `❌ *TRANSFER FAILED*\n💰 *Amount:* ₦${record.amount_naira}\n🏦 *Bank:* ${record.network}\n👤 *Account:* ${record.account_number}\n🚨 *Reason:* ${p.failureReason || 'Monnify rejected the transfer'}\n🔗 \`${record.tx_hash}\`\nFunds are being refunded automatically.`
+      `❌ *TRANSFER FAILED*\n💰 *Amount:* ₦${record.amount_naira}\n🏦 *Bank:* ${record.network}\n👤 *Account:* ${record.account_number}\n🚨 *Reason:* ${reason}\n🔗 \`${record.tx_hash}\`\nFunds are being refunded automatically.`
     );
   } catch {}
+
+  // D04 (insufficient Moniepoint float) means every other in-flight and future transfer is
+  // about to fail the same way — don't wait for the next scheduled balance sweep to tell the
+  // operator, alert now, bypassing the normal 6h cooldown.
+  if (isInsufficientBalanceError(p.raw)) {
+    checkProviderBalances({ force: true }).catch(() => {});
+  }
 
   try {
     await enqueueRefund({
@@ -187,7 +203,7 @@ export async function finalizeMonnifyTransfer(p: FinalizeParams): Promise<VendRe
       amountNaira: Number(record.amount_naira),
       blockchain: record.blockchain || 'CELO',
       reason: 'Monnify transfer rejected',
-      vtpassError: p.failureReason || 'Monnify transfer failed',
+      vtpassError: reason,
       serviceCategory: record.service_category,
       sourceChannel: record.source_channel || 'WEB',
     });

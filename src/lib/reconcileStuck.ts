@@ -6,6 +6,7 @@ import { getHeaders } from '@/lib/vtpass';
 import { enqueueRefund } from '@/lib/refunds';
 import { buildReceiptEmail } from '@/lib/receiptEmail';
 import { requeryMonnifyTransfer, finalizeMonnifyTransfer } from '@/lib/monnifyVend';
+import { classifyTransferStatus, extractMonnifyFailureReason } from '@/lib/monnify';
 import { Resend } from 'resend';
 
 const resend = new Resend(process.env.RESEND_API_KEY || 're_dummy_key_for_build');
@@ -107,13 +108,7 @@ export async function reconcileStuckProcessing(opts: { force?: boolean } = {}) {
       if (record.service_category === 'BANK') {
         const monnifyStatus = await requeryMonnifyTransfer(record.request_id);
 
-        if (monnifyStatus?.status === 'SUCCESS') {
-          await finalizeMonnifyTransfer({ txHash: record.tx_hash, reference: record.request_id, outcome: 'SUCCESS', raw: monnifyStatus.raw });
-          reconciled++;
-        } else if (monnifyStatus?.status === 'FAILED') {
-          await finalizeMonnifyTransfer({ txHash: record.tx_hash, reference: record.request_id, outcome: 'FAILED', raw: monnifyStatus.raw, failureReason: 'Monnify confirmed failure via reconciliation requery' });
-          reconciled++;
-        } else if (!monnifyStatus) {
+        if (!monnifyStatus) {
           // Monnify has no record of this reference at all — our crash happened before the
           // initiate call ever went out (or Monnify itself is unreachable right now). Funds
           // are already on-chain; genuinely ambiguous, so alert rather than guess.
@@ -122,8 +117,20 @@ export async function reconcileStuckProcessing(opts: { force?: boolean } = {}) {
           );
           await supabase.from('transactions').update({ error_code: 'STUCK_ALERTED' }).eq('id', record.id);
           alerted++;
+          continue;
         }
-        // else: still PENDING/PENDING_AUTHORIZATION at Monnify — leave it, checked again next sweep.
+
+        const outcome = classifyTransferStatus(monnifyStatus.status);
+
+        if (outcome === 'SUCCESS') {
+          await finalizeMonnifyTransfer({ txHash: record.tx_hash, reference: record.request_id, outcome: 'SUCCESS', raw: monnifyStatus.raw });
+          reconciled++;
+        } else if (outcome === 'FAILED') {
+          await finalizeMonnifyTransfer({ txHash: record.tx_hash, reference: record.request_id, outcome: 'FAILED', raw: monnifyStatus.raw, failureReason: extractMonnifyFailureReason(monnifyStatus.raw) });
+          reconciled++;
+        }
+        // else: PROCESSING, or NEEDS_AUTH (already alerted once at initiation) — leave it,
+        // checked again next sweep.
         continue;
       }
 
