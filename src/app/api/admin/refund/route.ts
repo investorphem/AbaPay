@@ -44,6 +44,21 @@ export async function POST(req: Request) {
       return NextResponse.json({ success: false, message: "Transaction record not found" }, { status: 404 });
     }
 
+    // 🔴 MONEY-LOSS GUARD — server-side, not just the Ledger tab's button hiding/handleRefund
+    // check. error_code REVERTED means the on-chain payBill/approve call itself reverted, so
+    // the user's crypto never left their wallet, let alone reached the vault — there is
+    // nothing to refund. A client-side-only guard is trivially bypassed (stale tab, direct API
+    // call), and in fact already was: real vault payouts went out against REVERTED rows before
+    // this check existed here. This is the same rule as refunds.ts's own header comment —
+    // "refund on VEND failure, never on PAYMENT failure" — enforced at the one place that can't
+    // be skipped.
+    if (record.error_code === 'REVERTED') {
+      return NextResponse.json({
+        success: false,
+        message: "This transaction's on-chain payment reverted — the user's crypto never reached the vault, so there is nothing to refund.",
+      }, { status: 400 });
+    }
+
     // 🔐 ON-CHAIN VERIFICATION (Audit v2, M-3)
     // Previously this endpoint flipped status to REFUNDED using an admin-supplied hash that
     // was NEVER checked against the chain — so a refund could be recorded that never actually
