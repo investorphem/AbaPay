@@ -56,10 +56,17 @@ export async function initiateMonnifyBankTransfer(input: VendInput): Promise<Ven
     // actual rejection reason attached. Alerting immediately, with the real error, gets the
     // operator to a manual retry-or-refund decision faster and better-informed.
     console.error('[Monnify] initiateTransfer threw:', e.message);
-    await supabase.from('transactions').update({ status: 'PENDING' }).eq('tx_hash', txHash);
+    // 🔴 THE BUG THIS FIXES: this only ever told the OPERATOR the real reason (Telegram +
+    // console) — the DATABASE row got nothing but a bare status reset, leaving error_code and
+    // api_response empty until the reconcile sweep's generic "no record" guess caught up
+    // 5+ minutes later, if ever. Persist the real error immediately so "Check Status"/the
+    // admin ledger reflects what actually happened from the very first attempt, not just
+    // after a delay.
+    const initiateError = String(e?.message || 'Monnify did not confirm receiving this transfer request').slice(0, 300);
+    await supabase.from('transactions').update({ status: 'PENDING', error_code: 'INITIATE_FAILED', api_response: initiateError }).eq('tx_hash', txHash);
     try {
       await sendTelegramAlert(
-        `🚨 *TRANSFER INITIATE FAILED*\n\nMonnify never confirmed receiving this transfer request — funds are already on-chain, but nothing was submitted for delivery. Needs a manual retry-or-refund decision in the admin dashboard.\n\n💰 ₦${vendAmount} to ${network} (${billersCode})\n👤 *Account:* ${customer_name}\n🧾 *Ref:* ${vtRequestId}\n🛑 *Error:* ${e.message}\n🔗 \`${txHash}\``
+        `🚨 *TRANSFER INITIATE FAILED*\n\nMonnify never confirmed receiving this transfer request — funds are already on-chain, but nothing was submitted for delivery. Needs a manual retry-or-refund decision in the admin dashboard.\n\n💰 ₦${vendAmount} to ${network} (${billersCode})\n👤 *Account:* ${customer_name}\n🧾 *Ref:* ${vtRequestId}\n🛑 *Error:* ${initiateError}\n🔗 \`${txHash}\``
       );
     } catch {}
     return { success: true, status: 'TIMEOUT', message: 'Your transfer is being confirmed — you will be notified once it completes.' };

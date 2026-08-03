@@ -1888,6 +1888,8 @@ function describeFailure(tx: any): { icon: string; label: string; text: string }
       return { icon: '🌐', label: 'Network', text: reason || 'Timed out reaching the provider.' };
     case 'MONNIFY_FAILED':
       return { icon: '🏦', label: 'Monnify', text: reason || 'Transfer rejected.' };
+    case 'INITIATE_FAILED':
+      return { icon: '🏦', label: 'Monnify', text: reason || 'Transfer request was never confirmed as received.' };
     case 'MISSING_BANK_DETAILS':
       return { icon: '🏦', label: 'Setup', text: reason || 'Missing verified bank details.' };
     case 'RECONCILED_FAILED':

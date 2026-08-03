@@ -37,11 +37,18 @@ export async function POST(req: Request) {
     const monnifyStatus = await requeryMonnifyTransfer(record.request_id);
 
     if (!monnifyStatus) {
+      // 🔴 THE BUG THIS FIXES: this returned the "no record" message to the admin's browser
+      // but never wrote it to the row — clicking Check Status and seeing this alert left
+      // error_code/api_response exactly as blank as before. Confirmed live: rows existed with
+      // status REFUNDED and zero recorded reason after an admin had already seen this exact
+      // message. Persist it immediately so the reason survives past the alert dismissing.
+      const noRecordReason = 'Monnify has no record of this transfer reference — the initiate request may never have reached them.';
+      await supabase.from('transactions').update({ error_code: 'STUCK_ALERTED', api_response: noRecordReason }).eq('tx_hash', record.tx_hash);
       return NextResponse.json({
         success: true,
         status: 'PENDING',
         noRecord: true,
-        message: "Monnify has no record of this reference — the transfer was never actually submitted to them. This needs a manual retry or refund; it will not resolve on its own.",
+        message: `${noRecordReason} This needs a manual retry or refund; it will not resolve on its own.`,
       });
     }
 

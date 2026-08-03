@@ -95,7 +95,10 @@ export async function reconcileStuckProcessing(opts: { force?: boolean } = {}) {
         await sendTelegramAlert(
           `🚨 *STUCK PAYMENT — NO REQUEST ID*\n\nTx \`${record.tx_hash}\` has been ${record.status} for over ${STUCK_MINUTES} min with no request_id to requery. Funds are on-chain; nothing was ever sent to VTpass. Needs manual review in the admin dashboard.\n\n👤 Wallet: \`${record.wallet_address || 'unknown'}\`\n💰 ${record.amount_usdt} ${record.token_used || 'USD₮'} (₦${record.amount_naira})`
         );
-        await supabase.from('transactions').update({ error_code: 'STUCK_ALERTED' }).eq('id', record.id);
+        await supabase.from('transactions').update({
+          error_code: 'STUCK_ALERTED',
+          api_response: 'No request_id was ever recorded — nothing was submitted to the provider before this got stuck.',
+        }).eq('id', record.id);
         alerted++;
         continue;
       }
@@ -115,7 +118,10 @@ export async function reconcileStuckProcessing(opts: { force?: boolean } = {}) {
           await sendTelegramAlert(
             `🚨 *STUCK TRANSFER — MONNIFY HAS NO RECORD*\n\nTx \`${record.tx_hash}\` has been ${record.status} for over ${STUCK_MINUTES} min. Funds are already on-chain, but Monnify shows no record of reference \`${record.request_id}\`. Needs a manual decision in the admin dashboard: retry the transfer, or refund.\n\n👤 Wallet: \`${record.wallet_address || 'unknown'}\`\n💰 ₦${record.amount_naira} to ${record.network} (${record.account_number})`
           );
-          await supabase.from('transactions').update({ error_code: 'STUCK_ALERTED' }).eq('id', record.id);
+          await supabase.from('transactions').update({
+            error_code: 'STUCK_ALERTED',
+            api_response: 'Monnify has no record of this transfer reference — the initiate request may never have reached them.',
+          }).eq('id', record.id);
           alerted++;
           continue;
         }
