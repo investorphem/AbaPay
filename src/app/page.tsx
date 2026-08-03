@@ -39,6 +39,20 @@ import AppTour, { hasSeenTour, type TourTab } from "@/components/AppTour";
 // way for the user to tell "still waiting on you" apart from "something is actually broken".
 // Wrapping every wallet-signature call in a bounded timeout turns silence into a clear message.
 // 90s is generous for a human to actually review and approve, not for a wallet that never woke up.
+// ⚡ THE BUG THIS FIXES: AbortSignal.timeout() (used for every fetch timeout in this file) is
+// a relatively recent Web API — unsupported in older mobile WebViews / in-app browsers (some
+// Android Telegram/WhatsApp in-app browsers, older embedded Chromium builds). Calling it in an
+// environment that lacks it throws SYNCHRONOUSLY, before fetch() is ever invoked — the request
+// never leaves the browser, but the surrounding try/catch still catches the throw and shows a
+// normal-looking error toast, making this indistinguishable from a real network failure. This
+// manual AbortController + setTimeout equivalent works in every browser that supports fetch at
+// all (which every browser here already requires), removing that whole class of silent failure.
+function timeoutSignal(ms: number): AbortSignal {
+  const controller = new AbortController();
+  setTimeout(() => controller.abort(), ms);
+  return controller.signal;
+}
+
 function withWalletTimeout<T>(promise: Promise<T>, ms = 90_000): Promise<T> {
   return new Promise<T>((resolve, reject) => {
     const timer = setTimeout(() => reject(new Error("Your wallet didn't respond in time. Check that it's unlocked and connected, then try again.")), ms);
@@ -731,7 +745,7 @@ export default function Home() {
       const res = await fetch('/api/monnify/verify', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ accountNumber, bankCode }),
-        signal: AbortSignal.timeout(15000),
+        signal: timeoutSignal(15000),
       });
       const data = await res.json();
       if (bankVerifyGenerationRef.current !== myGeneration) return; // superseded — discard
@@ -768,7 +782,7 @@ export default function Home() {
       const res = await fetch('/api/monnify/resolve', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ accountNumber }),
-        signal: AbortSignal.timeout(45000),
+        signal: timeoutSignal(45000),
       });
       const data = await res.json();
       if (bankVerifyGenerationRef.current !== myGeneration) return; // superseded — discard
@@ -814,7 +828,7 @@ export default function Home() {
           reqType = activeService.id === "ELECTRICITY" ? meterType : undefined;
         }
 
-        const res = await fetch(`/api/verify`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ billersCode: accountNumber, serviceID: serviceID, type: reqType }), signal: AbortSignal.timeout(20000) });
+        const res = await fetch(`/api/verify`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ billersCode: accountNumber, serviceID: serviceID, type: reqType }), signal: timeoutSignal(20000) });
         const data = await res.json();
 
         if (data.code === '000') {
