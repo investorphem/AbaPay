@@ -11,6 +11,7 @@ import {
 } from "lucide-react";
 import { supabase } from "@/utils/supabase";
 import { celoAttributionSuffix } from "@/lib/attribution";
+import { getPublicClient as getResilientPublicClient } from "@/lib/chain";
 import { AdminAgentPanel } from "@/components/AdminAgentPanel";
 import { AdminDiscountsPanel } from "@/components/AdminDiscountsPanel";
 import { AdminOpsPanel } from "@/components/AdminOpsPanel";
@@ -358,8 +359,18 @@ export default function AdminDashboard() {
   // ⚡ CONTRACT CONTROLS — reads relayer/paused/token-support/caps for both chains.
   // Same "call reverts => V1, no such function" detection as readPendingWithdrawal.
   const fetchContractControls = async () => {
-    const celoPublic = createPublicClient({ chain: isMainnet ? celo : celoSepolia, transport: http() });
-    const basePublic = createPublicClient({ chain: isMainnet ? base : baseSepolia, transport: http() });
+    // 🔴 THE BUG THIS FIXES: these used a bare http() transport — viem's single DEFAULT RPC
+    // endpoint for each chain, no failover — for a batch of ~8 reads per chain (relayer,
+    // paused, isSupportedToken/maxAgentPaymentPerTx/maxRefundPerTx per token, withdrawalDelay).
+    // Confirmed live: the real Base contract (0xC0A4dAA...) genuinely exposes every one of
+    // these functions (verified directly on-chain), yet this panel showed "not configured" —
+    // the single default endpoint being momentarily rate-limited/unavailable under that many
+    // concurrent calls was enough to fail the whole batch and hit the catch-all fallback.
+    // src/lib/chain.ts's getPublicClient() already solves exactly this with a multi-RPC
+    // fallback() transport for every other on-chain read in the app; reusing it here instead
+    // of a second, more fragile client construction.
+    const celoPublic = getResilientPublicClient('CELO');
+    const basePublic = getResilientPublicClient('BASE');
 
     const readOneChain = async (
       publicClient: any,
