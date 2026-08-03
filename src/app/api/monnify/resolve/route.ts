@@ -8,20 +8,21 @@ import { sendTelegramAlert } from '@/lib/telegram';
 // Nigerian NUBAN account numbers don't encode the bank — there's no algorithm to derive it
 // from the digits. The only real way to find out (same approach Paystack/Mono use) is to try
 // the number against Monnify's free Name Enquiry endpoint for each bank until one returns a
-// real account name. Run in small concurrent batches rather than 25+ parallel requests at
-// once, so this stays polite to Monnify's rate limits.
-
-const BATCH_SIZE = 8;
-
-async function mapWithConcurrency<T, R>(items: T[], size: number, fn: (item: T) => Promise<R>): Promise<R[]> {
-  const results: R[] = [];
-  for (let i = 0; i < items.length; i += size) {
-    const batch = items.slice(i, i + size);
-    const batchResults = await Promise.all(batch.map(fn));
-    results.push(...batchResults);
-  }
-  return results;
-}
+// real account name.
+//
+// 🔴 THE BUG THIS FIXES: this used to sweep in sequential batches of 8 (a "polite pacing"
+// guess, never a documented Monnify limit) — awaiting each batch's Promise.all before starting
+// the next. Monnify's real bank list runs to 40-100+ entries (every NIBSS-registered bank, MFB,
+// and fintech, not just the ~23-bank offline seed), so that meant 5-13+ sequential rounds, each
+// capped at 8s per call. Measured live against a real account: 185 SECONDS end to end — far
+// past the frontend's own timeout (which then aborted every single attempt, indistinguishable
+// from the feature simply not working). Firing every bank in ONE parallel Promise.all, with a
+// tighter per-call timeout tuned for an interactive wait rather than a batch job, cuts the
+// worst case down to roughly one timeout's worth regardless of how many banks exist. Our own
+// enforceRateLimit call above already caps how often a whole sweep can be triggered at all, so
+// this doesn't remove throttling — it removes the SELF-IMPOSED serialization that was strictly
+// internal to this route.
+const RESOLVE_CALL_TIMEOUT_MS = 6_000;
 
 export async function POST(req: Request) {
   // Expensive: up to ~25 Name Enquiry calls per hit. Throttle harder than a single verify.
@@ -48,10 +49,10 @@ export async function POST(req: Request) {
     // just silence — read as "auto-detect doesn't work" with zero signal as to why.
     // Using validateAccountRaw directly keeps responseCode/requestSuccessful visible so this
     // route can tell a real outage apart from an honest non-match and respond accordingly.
-    const attempts = await mapWithConcurrency(banks, BATCH_SIZE, async (bank) => {
-      const raw = await validateAccountRaw(accountNumber, bank.code);
+    const attempts = await Promise.all(banks.map(async (bank) => {
+      const raw = await validateAccountRaw(accountNumber, bank.code, RESOLVE_CALL_TIMEOUT_MS);
       return { bank, raw };
-    });
+    }));
 
     const matches = attempts
       .filter((a) => a.raw.result)

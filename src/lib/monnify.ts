@@ -190,11 +190,13 @@ export interface AccountValidationRaw {
 // SINGLE manual verify (verify/route.ts) — a real user waiting on a real answer — silently
 // returning null on, say, an invalid account number format meant they saw nothing at all
 // instead of Monnify's own (already human-readable) rejection message.
-export async function validateAccountRaw(accountNumber: string, bankCode: string): Promise<AccountValidationRaw> {
+export async function validateAccountRaw(accountNumber: string, bankCode: string, timeoutMs?: number): Promise<AccountValidationRaw> {
   try {
     const data = await monnifyFetch(
       `/api/v1/disbursements/account/validate?accountNumber=${encodeURIComponent(accountNumber)}&bankCode=${encodeURIComponent(bankCode)}`,
-      { method: 'GET' }
+      { method: 'GET' },
+      false,
+      timeoutMs
     );
     const requestSuccessful = !!data?.requestSuccessful && !!data?.responseBody?.accountName;
     return {
