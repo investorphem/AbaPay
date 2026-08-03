@@ -729,6 +729,26 @@ export default function AdminDashboard() {
     if (tx.error_code === 'REVERTED') {
       return alert("This transaction reverted on-chain — the crypto never reached the vault, so there is nothing to refund. Refunding it would incorrectly send real vault funds out.");
     }
+
+    // 🔴 THE BUG THIS FIXES: a PENDING/PROCESSING row could be refunded with ZERO recorded
+    // reason — nothing in error_code or api_response — if the admin already knew externally
+    // (e.g. Monnify support/dashboard said it failed) and refunded straight from here without
+    // ever clicking Check Status first. The refund itself went through fine, but the ledger
+    // permanently lost WHY: no way to later tell "Monnify confirmed failure" from "VTpass
+    // rejected it" from "we just guessed". Require an explicit reason in that specific gap —
+    // Check Status already fills this in automatically for the vast majority of cases; this
+    // prompt only fires when that hasn't happened yet.
+    let manualReason: string | null = null;
+    if (!tx.error_code && !tx.api_response && (tx.status === 'PENDING' || tx.status === 'PROCESSING')) {
+      manualReason = window.prompt(
+        "No failure reason is recorded for this transaction yet. If you haven't already, consider clicking Check Status first — it fills this in automatically.\n\nOtherwise, explain here why you're refunding it (e.g. \"Monnify support confirmed by phone this transfer failed\"). This will be saved as the official reason."
+      );
+      if (!manualReason || !manualReason.trim()) {
+        return alert("Refund cancelled — a reason is required so this shows up correctly for future review.");
+      }
+      manualReason = manualReason.trim();
+    }
+
     try {
       if (!client || !address) return alert("Connect your Admin Wallet first.");
       setProcessingRefundId(tx.id);
@@ -769,7 +789,7 @@ export default function AdminDashboard() {
       // relies on that for its V3-then-V2 fallback), so this call needs its own inline V3 ABI
       // — using the shared one here silently sent a wrong function selector, which the vault
       // rejects with no matching function (bare "execution reverted", no decodable reason).
-      const refundReason = String(tx.api_response || tx.error_code || 'Failed vend').slice(0, 100);
+      const refundReason = String(manualReason || tx.api_response || tx.error_code || 'Failed vend').slice(0, 100);
       const refundHash = await client.writeContract({
           chain: targetChain,
           address: targetContract as `0x${string}`,
@@ -789,7 +809,7 @@ export default function AdminDashboard() {
       const receipt = await publicClient.waitForTransactionReceipt({ hash: refundHash });
       if (receipt.status !== 'success') throw new Error("Transaction reverted. Vault does not have enough balance.");
 
-      const dbRes = await fetch('/api/admin/refund', { method: 'POST', headers: { 'Content-Type': 'application/json', ...adminHeaders }, body: JSON.stringify({ id: tx.id, refundHash }) });
+      const dbRes = await fetch('/api/admin/refund', { method: 'POST', headers: { 'Content-Type': 'application/json', ...adminHeaders }, body: JSON.stringify({ id: tx.id, refundHash, manualReason }) });
       if (dbRes.ok) { alert(`Refund confirmed on-chain! Hash: ${refundHash}`); refreshAllData(); } 
       else alert("Crypto refunded successfully, but backend failed to update the database status.");
     } catch (error: any) { alert(`Refund Failed: ${error.message || "Execution Reverted."}`); } 
@@ -1402,11 +1422,26 @@ export default function AdminDashboard() {
                                   {tx.status}
                                 </span>
 
-                                {tx.error_code && (
-                                    <span className="text-[8px] font-mono text-red-400 bg-red-500/5 border border-red-500/10 px-1.5 py-0.5 rounded">
-                                        API Code: {tx.error_code}
-                                    </span>
-                                )}
+                                {(() => {
+                                  const failure = describeFailure(tx);
+                                  if (failure) {
+                                    return (
+                                      <span className="text-[8px] font-mono text-red-400 bg-red-500/5 border border-red-500/10 px-1.5 py-0.5 rounded max-w-[220px] leading-tight">
+                                        {failure.icon} {failure.label}: {failure.text}
+                                      </span>
+                                    );
+                                  }
+                                  // Nothing recorded yet — nudge toward Check Status rather than
+                                  // letting a PENDING/PROCESSING row look silently unexplained.
+                                  if (tx.status === 'PENDING' || tx.status === 'PROCESSING') {
+                                    return (
+                                      <span className="text-[8px] font-mono text-orange-400/80 bg-orange-500/5 border border-orange-500/10 px-1.5 py-0.5 rounded">
+                                        ⚠️ No reason yet — Check Status
+                                      </span>
+                                    );
+                                  }
+                                  return null;
+                                })()}
 
                               {/* 🔴 THE GAP THIS FIXES: PROCESSING rows (locked by /api/pay's atomic
                                   lock right before the vend/transfer call) had NO admin action at
@@ -1825,6 +1860,58 @@ function WithdrawControl({ tokenSymbol, network, hoverClass, queued, busy, onWit
       {busy ? <Loader2 size={16} className="animate-spin" /> : <ArrowDownToLine size={16} />} Withdraw {tokenSymbol}
     </button>
   );
+}
+
+// ⚡ EXPLICIT FAILURE REASON — one row's error_code/api_response says almost nothing on its
+// own ("API Code: STUCK_ALERTED" tells an admin nothing about WHO failed or WHY). This maps
+// every error_code this app actually writes to a labeled source (on-chain / VTpass / Monnify /
+// x402 settlement / admin note) plus whatever detail api_response carries, so an admin can
+// decide whether to refund without opening Monnify's or VTpass's own dashboard first.
+function describeFailure(tx: any): { icon: string; label: string; text: string } | null {
+  const code = tx.error_code;
+  const reason = tx.api_response;
+  if (!code && !reason) return null;
+
+  const isBank = tx.service_category === 'BANK';
+
+  switch (code) {
+    case 'REVERTED':
+      return { icon: '⛓️', label: 'On-chain', text: reason || 'Transaction reverted — crypto never left the wallet.' };
+    case 'NO_CONTRACT_EVENT':
+    case 'SENDER_MISMATCH':
+    case 'TOKEN_MISMATCH':
+    case 'AMOUNT_MISMATCH':
+    case 'AMOUNT_UNVERIFIABLE':
+    case 'ACCOUNT_MISMATCH':
+      return { icon: '⛓️', label: 'On-chain mismatch', text: reason || code };
+    case '502_TIMEOUT':
+      return { icon: '🌐', label: 'Network', text: reason || 'Timed out reaching the provider.' };
+    case 'MONNIFY_FAILED':
+      return { icon: '🏦', label: 'Monnify', text: reason || 'Transfer rejected.' };
+    case 'MISSING_BANK_DETAILS':
+      return { icon: '🏦', label: 'Setup', text: reason || 'Missing verified bank details.' };
+    case 'RECONCILED_FAILED':
+      return { icon: '💳', label: 'VTpass', text: reason || 'Confirmed failed on reconciliation.' };
+    case 'PAYER_MISMATCH':
+    case 'SETTLED_MISSING_BILL_DETAILS':
+      return { icon: '⚠️', label: 'x402 settlement', text: reason || code };
+    case 'PREFLIGHT_UNCONFIRMED':
+      return { icon: '⏳', label: 'Expired', text: reason || 'Never confirmed on-chain in time.' };
+    case 'MANUAL_ADMIN_REFUND':
+      return { icon: '📝', label: 'Admin note', text: reason || 'Manually refunded.' };
+    case 'STUCK_ALERTED':
+      return {
+        icon: '⏳',
+        label: isBank ? 'Monnify' : 'VTpass',
+        text: reason || (isBank ? 'No record of this transfer at Monnify — needs manual review.' : 'No request ID recorded — needs manual review.'),
+      };
+    default:
+      // Bare VTpass numeric codes ('011', '014', '016', '018', '030', '400') land here.
+      if (!isBank && code && /^\d+$/.test(String(code))) {
+        return { icon: '💳', label: 'VTpass', text: reason || `Error code ${code}` };
+      }
+      return { icon: isBank ? '🏦' : '💳', label: isBank ? 'Monnify' : (code ? 'Error' : 'Note'), text: reason || String(code) || 'No detail recorded.' };
+  }
 }
 
 function StatBox({ label, value, sub, color, icon }: any) {

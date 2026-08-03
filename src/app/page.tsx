@@ -2684,6 +2684,18 @@ export default function Home() {
                             </p>
                         </div>
                     )}
+                    {/* ⚡ CBN STAMP DUTY NOTICE — informational only, shown here in the transfer
+                        form so the user isn't surprised by the crypto total; never repeated in
+                        the checkout fee line, receipt, or history (see cryptoToCharge's own
+                        comment for why it's folded silently into the charged amount instead). */}
+                    {nairaAmount && parseFloat(nairaAmount) >= 10000 && (
+                        <div className="bg-slate-50 dark:bg-slate-800/30 border border-slate-200 dark:border-slate-700/50 p-3 rounded-xl mt-2 flex items-center gap-2 animate-in fade-in transition-colors">
+                            <Landmark size={14} className="text-slate-400 dark:text-slate-500 shrink-0" />
+                            <p className="text-[10px] font-bold text-slate-500 dark:text-slate-400">
+                                A ₦50 CBN stamp duty applies to transfers of ₦10,000 and above — already included in the amount above.
+                            </p>
+                        </div>
+                    )}
                 </div>
 
                 <div className="animate-in fade-in">

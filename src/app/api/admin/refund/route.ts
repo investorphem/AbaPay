@@ -27,7 +27,7 @@ export async function POST(req: Request) {
   }
 
   try {
-    const { id, refundHash } = await req.json();
+    const { id, refundHash, manualReason } = await req.json();
 
     if (!id || !refundHash) {
       return NextResponse.json({ success: false, message: "Missing transaction ID or refund hash" }, { status: 400 });
@@ -56,6 +56,21 @@ export async function POST(req: Request) {
       return NextResponse.json({
         success: false,
         message: "This transaction's on-chain payment reverted — the user's crypto never reached the vault, so there is nothing to refund.",
+      }, { status: 400 });
+    }
+
+    // 🔴 THE BUG THIS FIXES: this endpoint could mark ANY PENDING/PROCESSING row REFUNDED with
+    // zero recorded reason — no error_code, no api_response — if a caller (the Ledger tab's
+    // handleRefund, or a direct API call) never ran Check Status first. The refund itself still
+    // completed correctly (verified on-chain below), but the ledger permanently lost WHY: no
+    // way to later tell a Monnify failure from a VTpass rejection from an on-chain issue.
+    // Require an explicit reason in exactly that gap — every other path (webhook, reconcile
+    // sweep, Check Status) already sets one automatically before a row ever reaches here.
+    const needsReason = !record.error_code && !record.api_response && (record.status === 'PENDING' || record.status === 'PROCESSING');
+    if (needsReason && (!manualReason || typeof manualReason !== 'string' || !manualReason.trim())) {
+      return NextResponse.json({
+        success: false,
+        message: "This transaction has no recorded failure reason. Run Check Status first, or supply a reason for this refund.",
       }, { status: 400 });
     }
 
@@ -111,9 +126,16 @@ export async function POST(req: Request) {
     }
 
     // Verified — record it. Guard against double-refunding a record already marked REFUNDED.
+    // When a manual reason was required above, persist it now so the ledger never ends up with
+    // a REFUNDED row and zero explanation of why.
+    const updatePayload: Record<string, any> = { status: 'REFUNDED', refund_hash: refundHash };
+    if (needsReason) {
+      updatePayload.error_code = 'MANUAL_ADMIN_REFUND';
+      updatePayload.api_response = manualReason.trim();
+    }
     const { data: updated, error } = await supabaseAdmin
       .from('transactions')
-      .update({ status: 'REFUNDED', refund_hash: refundHash })
+      .update(updatePayload)
       .eq('id', id)
       .neq('status', 'REFUNDED')
       .select();
