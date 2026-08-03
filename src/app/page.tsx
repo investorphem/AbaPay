@@ -789,11 +789,18 @@ export default function Home() {
 
       const matches = data.matches || [];
 
-      if (matches.length === 1) {
-        setSelectedBank({ variation_code: matches[0].bankCode, name: matches[0].bankName });
-        setCustomerName(matches[0].accountName);
-      } else if (matches.length > 1) {
-        setBankSuggestions(matches); // let the user pick theirs
+      // 🔴 THE BUG THIS FIXES: a single match used to auto-select and auto-verify silently —
+      // no confirmation step at all. A brute-force Name Enquiry sweep can occasionally return
+      // a REAL match at an unintended bank (a coincidental valid NUBAN for a different person
+      // — Monnify's sandbox in particular has shown this for well-known banks that don't
+      // actually use phone-number-style accounts, like GTBank matching a number the user
+      // intended as a phone number for a different, neobank-style provider). Silently
+      // committing to that match risked sending money to the wrong person with nothing for
+      // the user to catch before it happened. Now ANY match (one or many) requires an
+      // explicit tap to confirm, showing the real verified name so the user can recognize
+      // "that's not me/not who I meant" before anything is selected.
+      if (matches.length >= 1) {
+        setBankSuggestions(matches); // let the user pick/confirm theirs, even if there's only one
       } else if (selectedBank?.variation_code) {
         // No auto-detect match, but a bank was already picked manually — verify against it.
         await verifyBankAccount(selectedBank.variation_code);
@@ -2646,11 +2653,15 @@ export default function Home() {
                         );
                     })()}
 
-                    {/* ⚡ AUTO-DETECT: more than one bank matched this account number — let the
-                        user pick theirs rather than guessing from the full ~25-bank list. */}
+                    {/* ⚡ AUTO-DETECT RESULTS — always requires a tap to confirm, even a single
+                        match (see resolveBankAccount's own comment on why silent auto-select
+                        was removed): the account name is shown so the user can catch a
+                        coincidental wrong match before committing to it. */}
                     {bankSuggestions.length > 0 && (
                         <div className="mt-3 bg-blue-500/5 dark:bg-blue-900/10 p-4 rounded-xl border border-blue-500/20 dark:border-blue-800/50 animate-in fade-in transition-colors">
-                            <p className="text-[10px] font-black text-blue-600 dark:text-blue-400 uppercase mb-3">Found {bankSuggestions.length} accounts — which is yours?</p>
+                            <p className="text-[10px] font-black text-blue-600 dark:text-blue-400 uppercase mb-3">
+                                {bankSuggestions.length === 1 ? 'Is this you?' : `Found ${bankSuggestions.length} accounts — which is yours?`}
+                            </p>
                             <div className="flex flex-col gap-2">
                                 {bankSuggestions.map((m: any) => (
                                     <button
