@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server';
 import { getBanks, validateAccountRaw } from '@/lib/monnify';
 import { enforceRateLimit } from '@/lib/rateLimit';
 import { sendTelegramAlert } from '@/lib/telegram';
+import { BANK_SEED } from '@/lib/providerFallback';
 
 // ⚡ AUTO-DETECT: "here's an account number, which bank is it?" ⚡
 //
@@ -10,18 +11,24 @@ import { sendTelegramAlert } from '@/lib/telegram';
 // the number against Monnify's free Name Enquiry endpoint for each bank until one returns a
 // real account name.
 //
-// 🔴 THE BUG THIS FIXES: this used to sweep in sequential batches of 8 (a "polite pacing"
-// guess, never a documented Monnify limit) — awaiting each batch's Promise.all before starting
-// the next. Monnify's real bank list runs to 40-100+ entries (every NIBSS-registered bank, MFB,
-// and fintech, not just the ~23-bank offline seed), so that meant 5-13+ sequential rounds, each
-// capped at 8s per call. Measured live against a real account: 185 SECONDS end to end — far
-// past the frontend's own timeout (which then aborted every single attempt, indistinguishable
-// from the feature simply not working). Firing every bank in ONE parallel Promise.all, with a
-// tighter per-call timeout tuned for an interactive wait rather than a batch job, cuts the
-// worst case down to roughly one timeout's worth regardless of how many banks exist. Our own
-// enforceRateLimit call above already caps how often a whole sweep can be triggered at all, so
-// this doesn't remove throttling — it removes the SELF-IMPOSED serialization that was strictly
-// internal to this route.
+// This has gone through two real-world-measured iterations:
+//   1. Sequential batches of 8 (a "polite pacing" guess, never a documented Monnify limit),
+//      sweeping ALL ~373 of Monnify's real registered banks/MFBs/fintechs. Measured live: 185
+//      SECONDS end to end — the frontend's own timeout aborted every attempt long before the
+//      server finished, indistinguishable from the feature not working at all.
+//   2. Fired all 373 in one parallel Promise.all instead. Much faster, but overwhelmed
+//      Monnify's sandbox: 265-275 of 373 calls failed outright on consecutive real tests, and
+//      the handful that DID respond in time were effectively random — explaining why
+//      suggestions surfaced obscure banks nobody intended, on top of tripping the
+//      "DEGRADED" alert below on every attempt.
+// Root cause of both: sweeping the FULL list at all. Nobody needs their bank auto-detected
+// against 373 institutions — restricting the sweep to the ~23 banks/fintechs people actually
+// bank with (the same curated set BANK_SEED already maintains as the offline catalogue
+// fallback) fixes both problems at once: a small, fast, reliable concurrent burst, and any
+// match found is inherently one of the banks a real customer is likely to intend. If none of
+// those match, we say so and let the user pick manually rather than falling back to a slow,
+// unreliable sweep of the remaining ~350.
+const POPULAR_BANK_CODES = new Set(BANK_SEED.map((b) => b.code));
 const RESOLVE_CALL_TIMEOUT_MS = 6_000;
 
 export async function POST(req: Request) {
@@ -36,7 +43,8 @@ export async function POST(req: Request) {
       return NextResponse.json({ success: false, message: 'A valid 10-digit account number is required.' }, { status: 400 });
     }
 
-    const { banks } = await getBanks();
+    const { banks: allBanks } = await getBanks();
+    const banks = allBanks.filter((b) => POPULAR_BANK_CODES.has(b.code));
 
     // 🔴 THE BUG THIS FIXES: validateAccount() (the old call here) collapses TWO completely
     // different outcomes into the same `null` — "Monnify checked and this isn't the right

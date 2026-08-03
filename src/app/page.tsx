@@ -2143,7 +2143,16 @@ export default function Home() {
             if (selectedBank?.variation_code) verifyBankAccount(selectedBank.variation_code);
             else resolveBankAccount();
           }
-          else { setCustomerName(null); setBankSuggestions([]); setMeterAddress(null); setDynamicElecMin(1000); setMeterAccountType(null); }
+          else {
+            setCustomerName(null); setBankSuggestions([]); setMeterAddress(null); setDynamicElecMin(1000); setMeterAccountType(null);
+            // 🔴 THE BUG THIS FIXES: clearing the account number left `selectedBank` (auto-
+            // detected or manually picked) untouched — so retyping a fresh number routed to
+            // verifyBankAccount() against the STALE bank instead of re-running auto-detect,
+            // and the "Select Bank" button kept showing the old bank as if the user had
+            // chosen it again. Only reset on a full clear (not mid-edit backspacing), so a
+            // manual pick made before typing digits still survives a typo correction.
+            if (accountNumber.length === 0) setSelectedBank(null);
+          }
       }
       else if (activeTab === "education" && educationProvider === "jamb") {
          if (accountNumber.length >= 10 && selectedEducationPlan) verifyMerchant(); 
