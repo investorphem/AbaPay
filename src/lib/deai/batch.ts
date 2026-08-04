@@ -36,6 +36,11 @@ export interface BatchItem {
   operatorId?: string | number;
   countryCode?: string;
   productTypeId?: string | number;
+  // ⚡ DATA plans are fixed-price VTpass products, not an arbitrary amount like airtime — a
+  // batch DATA item needs its own variation_code same as a single-recipient one does. Optional
+  // because AIRTIME/ELECTRICITY/TV items never set it; when absent, executeAgentPayment falls
+  // back to its existing params.variationCode/meterType logic exactly as before.
+  variationCode?: string;
 }
 
 export async function checkAutonomousCapacity(
@@ -193,7 +198,8 @@ export async function executeAgentPayment(params: {
       // electricity — so every MCP/scheduled electricity vend reached VTpass with no meter
       // type, AFTER the on-chain payment had already settled. Only electricity falls back;
       // data/cable/international all populate params.variationCode themselves.
-      const vendVariationCode = params.variationCode
+      const vendVariationCode = item.variationCode
+        || params.variationCode
         || (item.serviceCategory === 'ELECTRICITY' ? item.meterType : undefined)
         || undefined;
 

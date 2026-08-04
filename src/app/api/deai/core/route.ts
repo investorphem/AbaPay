@@ -739,7 +739,7 @@ async function handleCore(req: Request, ctx: HumanizeCtx): Promise<NextResponse>
       return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
     }
 
-    let { platform, platform_id, text, chat_type } = await req.json();
+    let { platform, platform_id, text, chat_type, chat_id } = await req.json();
     ctx.userText = typeof text === 'string' ? text : '';
     ctx.channel = platform;
 
@@ -1259,6 +1259,32 @@ async function handleCore(req: Request, ctx: HumanizeCtx): Promise<NextResponse>
               remaining: '',
             });
           } catch { /* never block on alerting */ }
+
+          // ⚡ GROUP BULK RECHARGE — this batch was built from numbers picked out of a Telegram
+          // group's own chat (see the GROUP_BULK_RECHARGE intent above), so the group gets a
+          // report too, not just the requester's DM. `groupMessage` deliberately carries only
+          // recipient numbers/amounts/status — never a balance, wallet address, or PIN — since
+          // it's about to be posted somewhere everyone in the group can read it.
+          if (pb.groupChatId) {
+            return NextResponse.json({
+              action: 'GROUP_BULK_RECHARGE_REPORT',
+              groupChatId: pb.groupChatId,
+              message: [
+                okCount === pb.items.length
+                  ? `✅ *All ${pb.items.length} payments sent — ₦${pb.totalNgn.toLocaleString()}*`
+                  : `👥 *Batch finished — ${okCount} of ${pb.items.length} went through*`,
+                ``,
+                ...lines,
+              ].join('\n'),
+              groupMessage: [
+                `🎲 *Bulk recharge complete* — picked ${pb.items.length} number${pb.items.length === 1 ? '' : 's'} from the last chat here`,
+                ``,
+                ...lines,
+                ``,
+                `💰 Total: ₦${pb.totalNgn.toLocaleString()}`,
+              ].join('\n'),
+            });
+          }
 
           return NextResponse.json({
             action: 'REPLY',
@@ -2532,6 +2558,217 @@ async function handleCore(req: Request, ctx: HumanizeCtx): Promise<NextResponse>
     // into the app — the user answers four questions and gets a dead end. Gate on the intent
     // we are actually about to ACT on, not on the AI's opinion of it.
     if (APP_ONLY_INTENTS.includes(intentData.intent)) return await appOnlyRedirect(intentData.intent);
+
+    // ⚡ 4b-quater. GROUP BULK RECHARGE — "recharge 5 random numbers from the last 30 minutes,
+    // 200 each". Telegram-group-only: picks phone numbers OTHER members recently posted in the
+    // group (captured as they arrive by the webhook — see telegram_group_messages), confirms +
+    // PINs like any other batch, then reports proof back to the SAME group (never a DM-only
+    // feature — that's the whole point). See the groupChatId branch in the PIN-confirmed batch
+    // execution above, and the GROUP_BULK_RECHARGE_REPORT handler in the Telegram webhook.
+    if (aiParsed?.intent === 'GROUP_BULK_RECHARGE') {
+        if (platform !== 'TELEGRAM' || !isGroupChat) {
+            return NextResponse.json({
+                action: 'REPLY',
+                message: `👥 This only works when you tag me inside a Telegram group — try it there.`,
+            });
+        }
+
+        // Same reasoning as the multi-recipient batch gate above — this spends from a
+        // pre-approved on-chain allowance, which doesn't exist for a guest.
+        if (isGuest) {
+            return NextResponse.json({
+                action: 'REPLY',
+                message: `🔒 *Bulk recharge needs a linked wallet* (it spends from your approved agent limit). Link once at https://abapays.com, then ask me again in the group.`,
+            });
+        }
+
+        if (!chat_id) {
+            return NextResponse.json({ action: 'REPLY', message: `⚠️ Couldn't tell which group this is — please try again.` });
+        }
+
+        // ⚠️ ELECTRICITY/TV ARE DELIBERATELY NOT SUPPORTED HERE — checked on the raw text
+        // (not just aiParsed.group_service) so this fires even if the model's classification
+        // is fuzzy. Unlike a phone number, a meter/smartcard number has no fixed, checkable
+        // prefix format — there's no reliable way to tell one apart from any other digit string
+        // someone posts, and no way to infer WHICH electricity company serves a given meter.
+        // Picking one at random risks paying a complete stranger's bill with real money, not a
+        // mis-dialed airtime top-up. A NAMED batch ("pay ₦2000 to ikeja-electric meter
+        // 12345678901") already works today via the ordinary multi-recipient batch below —
+        // that's the safe version of "several bills in one message" for this service.
+        if (/electric|\bmeter\b|\bnepa\b|dstv|gotv|startimes|\bcable\b|\btv\b/i.test(text)) {
+            return NextResponse.json({
+                action: 'REPLY',
+                message: [
+                    `⚡ Bulk recharge from group numbers only works for *airtime* and *data* right now.`,
+                    ``,
+                    `Electricity/TV need a specific meter or smartcard number plus which company it belongs to. There's no way to tell a meter number apart from any other number someone posts, or to guess which disco serves it — picking one at random risks paying a complete stranger's bill.`,
+                    ``,
+                    `If you already know the meters, I can still batch them — just name them directly: _"pay ₦2000 to ikeja-electric meter 12345678901 and ₦3000 to eko-electric meter 98765432109"_.`,
+                ].join('\n'),
+            });
+        }
+
+        const groupService: 'AIRTIME' | 'DATA' = aiParsed.group_service === 'DATA' ? 'DATA' : 'AIRTIME';
+
+        // Defaults match what's described to the user (see capabilities.ts) — only an EXPLICIT
+        // number from the message ever overrides these. Bounds already enforced in
+        // intentEngine.ts's normalize(), so no re-clamping needed here. For DATA, amountEach is
+        // a per-number BUDGET CAP (data plans are fixed-price), not the literal charge.
+        const count = aiParsed.group_recipient_count || 5;
+        const lookbackMinutes = aiParsed.group_lookback_minutes || 30;
+        const amountEach = aiParsed.group_amount_ngn || 200;
+
+        const { data: recentMessages } = await supabase
+            .from('telegram_group_messages')
+            .select('text')
+            .eq('chat_id', String(chat_id))
+            .gte('created_at', new Date(Date.now() - lookbackMinutes * 60_000).toISOString())
+            .limit(500);
+
+        // Matches an 11-digit Nigerian mobile number (0-leading, or its +234/234 form) as a
+        // standalone token. Negative lookaround on both sides (not \b) deliberately — \b alone
+        // would wrongly accept "+234803..." right at the start of a message (the transition
+        // from nothing/whitespace to the non-word "+" character isn't a \b boundary), and would
+        // wrongly accept an 11-digit run embedded inside a longer digit string (an account
+        // number, a tx-adjacent number). (?<!\d)/(?!\d) excludes both correctly.
+        const PHONE_RE = /(?<!\d)(?:\+?234|0)([789][01]\d{8})(?!\d)/g;
+        const found = new Set<string>();
+        for (const row of (recentMessages || []) as { text: string }[]) {
+            const t = String(row.text || '');
+            let m: RegExpExecArray | null;
+            PHONE_RE.lastIndex = 0;
+            while ((m = PHONE_RE.exec(t))) found.add(`0${m[1]}`);
+        }
+
+        if (found.size === 0) {
+            return NextResponse.json({
+                action: 'REPLY',
+                message: `📭 No phone numbers were posted in this group in the last ${lookbackMinutes} minute${lookbackMinutes === 1 ? '' : 's'}.`,
+            });
+        }
+
+        // Only numbers on a real, recognized Nigerian prefix — an unrecognized one has no
+        // network to vend it through anyway, so it's dropped from the pool rather than failing
+        // the whole request over it.
+        const candidates = Array.from(found)
+            .map((num) => ({ num, network: detectNetwork(num) }))
+            .filter((c): c is { num: string; network: string } => !!c.network);
+
+        if (candidates.length === 0) {
+            return NextResponse.json({
+                action: 'REPLY',
+                message: `📭 Found number-like text in the last ${lookbackMinutes} minutes, but none matched a real Nigerian mobile prefix.`,
+            });
+        }
+
+        // Fisher-Yates — an unbiased random sample, shuffled once so both branches below can
+        // draw from the same order (DATA may need to walk past a number or two that has no
+        // affordable plan on its network).
+        for (let i = candidates.length - 1; i > 0; i--) {
+            const j = Math.floor(Math.random() * (i + 1));
+            [candidates[i], candidates[j]] = [candidates[j], candidates[i]];
+        }
+
+        const items: BatchItem[] = [];
+        // Parallel to `items` (same indices) — plan name for DATA, empty for AIRTIME. Kept
+        // separate from BatchItem itself so that type stays exactly what executeAgentPayment
+        // needs, with no display-only fields leaking into the money-moving path.
+        const planLabels: string[] = [];
+
+        if (groupService === 'DATA') {
+            // Fetched once per NETWORK, not per number — several picked numbers commonly share
+            // a network, and each fetch is a live VTpass call.
+            const planCache = new Map<string, Option[]>();
+            for (const c of candidates) {
+                if (items.length >= count) break;
+                const dataServiceId = resolveServiceId('VEND_DATA', c.network) || `${c.network}-data`;
+                if (!planCache.has(dataServiceId)) {
+                    planCache.set(dataServiceId, await fetchVariations(dataServiceId));
+                }
+                const plans = planCache.get(dataServiceId) || [];
+                // Best value = the priciest plan that still fits the per-number budget cap.
+                // A network with nothing under budget is skipped for THIS number — the number
+                // itself is dropped, not the whole request.
+                const affordable = plans.filter((p) => (p.price || 0) > 0 && (p.price as number) <= amountEach);
+                if (affordable.length === 0) continue;
+                const best = affordable.reduce((a, b) => ((b.price as number) > (a.price as number) ? b : a));
+                items.push({
+                    serviceCategory: 'DATA',
+                    serviceID: dataServiceId,
+                    provider: c.network,
+                    billersCode: c.num,
+                    amountNgn: best.price as number,
+                    variationCode: best.id,
+                    chain: (intentData.chain || globalUser?.approved_chain || 'CELO').toUpperCase(),
+                    tokenSymbol: intentData.selected_token || globalUser?.approved_token || 'USD₮',
+                });
+                planLabels.push(best.label);
+            }
+            if (items.length === 0) {
+                return NextResponse.json({
+                    action: 'REPLY',
+                    message: `📭 Found numbers, but no data plan for their networks fits ₦${amountEach.toLocaleString()} each. Try asking with a higher amount.`,
+                });
+            }
+        } else {
+            const picked = candidates.slice(0, Math.min(count, candidates.length));
+            for (const c of picked) {
+                items.push({
+                    serviceCategory: 'AIRTIME',
+                    serviceID: resolveServiceId('VEND_AIRTIME', c.network) || c.network,
+                    provider: c.network,
+                    billersCode: c.num,
+                    amountNgn: amountEach,
+                    chain: (intentData.chain || globalUser?.approved_chain || 'CELO').toUpperCase(),
+                    tokenSymbol: intentData.selected_token || globalUser?.approved_token || 'USD₮',
+                });
+                planLabels.push('');
+            }
+        }
+
+        const totalNgn = items.reduce((s, it) => s + it.amountNgn, 0);
+
+        const gate = await checkAgentSpendAllowed(supabase, globalUser?.wallet_address || '', totalNgn);
+        if (!gate.allowed) {
+            return NextResponse.json({ action: 'REPLY', message: `⚠️ ${gate.reason}` });
+        }
+
+        const grRate = await getExchangeRate();
+        const grGroups = groupByChainToken(items);
+        const groupLines: string[] = [];
+        for (const [key, groupItems] of grGroups) {
+            const [gChain, gToken] = key.split('|');
+            const gTotal = groupItems.reduce((s, it) => s + it.amountNgn, 0);
+            const capacity = await checkAutonomousCapacity(globalUser?.wallet_address || '', gChain, gToken, gTotal, grRate);
+            if (!capacity.ok) {
+                return NextResponse.json({ action: 'REPLY', message: `⚠️ ${capacity.reason}` });
+            }
+            groupLines.push(`• *${gToken} on ${gChain}* — ${groupItems.length} payment${groupItems.length === 1 ? '' : 's'}, ₦${gTotal.toLocaleString()} (${capacity.neededCrypto.toFixed(4)} ${gToken})`);
+        }
+
+        // groupChatId rides along on the session so the LATER PIN-entry turn (a separate,
+        // private-chat request with no chat_id of its own) still knows where to report back.
+        intentData.pending_batch = { items, totalNgn, groupChatId: String(chat_id) };
+        await supabase.from('deai_sessions').upsert({
+            chat_id: platform_id, platform, intent_data: intentData,
+            status: 'AWAITING_PIN', expires_at: new Date(Date.now() + 300000).toISOString(),
+        }, { onConflict: 'chat_id' });
+
+        return NextResponse.json({
+            action: 'REPLY',
+            message: [
+                `🎲 *Picked ${items.length} number${items.length === 1 ? '' : 's'} from the group (${groupService.toLowerCase()}) — ₦${totalNgn.toLocaleString()} total*`,
+                ``,
+                ...items.map((it, i) => `*${i + 1}.* ${(it.provider || '').toUpperCase()}${planLabels[i] ? ` ${planLabels[i]}` : ''} — ₦${it.amountNgn.toLocaleString()} → ${it.billersCode}`),
+                ``,
+                ...groupLines,
+                ``,
+                `I'll post the result back in the group once these go through.`,
+                ``,
+                `🔒 Reply with your *PIN* to send all ${items.length}.`,
+            ].join('\n'),
+        });
+    }
 
     // ⚡ 4b-bis. MULTI-RECIPIENT (BATCH) PAYMENTS ⚡
     //

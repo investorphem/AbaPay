@@ -1,6 +1,7 @@
 // src/app/api/telegram/webhook/route.ts
 import { NextResponse } from 'next/server';
 import { internalAuthHeaders } from '@/utils/internalAuth';
+import { supabaseAdmin as supabase } from '@/utils/supabase';
 
 // ⚡ CHANGED: Now explicitly uses the DEAI token, completely ignoring the Admin token
 const DEAI_BOT_TOKEN = process.env.DEAI_TELEGRAM_BOT_TOKEN as string;
@@ -41,6 +42,31 @@ export async function POST(req: Request) {
 
     if (!text || !senderId) return NextResponse.json({ success: true });
 
+    // ⚡ GROUP MESSAGE LOG — feeds "recharge 5 random numbers from the last 30 minutes"
+    // (GROUP_BULK_RECHARGE in core/route.ts). There is no Bot API call to fetch a group's
+    // past messages on demand, so the only way to "look back X minutes" is to have already
+    // been capturing them as they arrived. Logged BEFORE the @mention gate below — this must
+    // capture ordinary chatter from OTHER members too, not just messages directed at the bot,
+    // since those are exactly the numbers the feature is meant to find. Best-effort: a logging
+    // failure must never block the bot from replying.
+    if (chatType && chatType !== 'private' && body.message?.from?.is_bot !== true) {
+      const senderName = [body.message?.from?.first_name, body.message?.from?.last_name].filter(Boolean).join(' ')
+        || body.message?.from?.username || null;
+      try {
+        await supabase.from('telegram_group_messages').insert({
+          chat_id: chatId, sender_id: senderId, sender_name: senderName, text,
+        });
+        // Opportunistic prune — roughly 1 in 20 inserts also sweeps anything older than 48h,
+        // so the table stays bounded without a dedicated cron job. Awaited (not fire-and-forget)
+        // because Vercel can freeze the function the moment the response is sent.
+        if (Math.random() < 0.05) {
+          await supabase.from('telegram_group_messages').delete().lt('created_at', new Date(Date.now() - 48 * 3600_000).toISOString());
+        }
+      } catch (err) {
+        console.error('[Telegram] Group message log insert failed:', err);
+      }
+    }
+
     // ⚡ GROUP/CHANNEL GATING — only act on a group message that's clearly addressed to the
     // bot (mentions @<bot username> or replies to one of the bot's own messages). Telegram's
     // default "privacy mode" already limits what a group forwards to a bot, but this is a
@@ -80,6 +106,11 @@ export async function POST(req: Request) {
         platform_id: senderId,
         text: text,
         chat_type: chatType || 'private',
+        // ⚡ Needed by GROUP_BULK_RECHARGE — the PIN confirmation that finalizes a bulk recharge
+        // arrives in a LATER, separate request (a private DM), where chat_type is 'private' and
+        // this chat_id is absent. The engine persists the ORIGINATING group's id on the session
+        // itself the first time around, specifically so it still knows where to report back.
+        chat_id: chatId,
       })
     });
 
@@ -166,6 +197,30 @@ export async function POST(req: Request) {
           const errBody = await sendRes.text();
           console.error('[Telegram] Failed to send reply:', sendRes.status, errBody);
         }
+      }
+    } else if (engineData.action === 'GROUP_BULK_RECHARGE_REPORT') {
+      // ⚡ THE ONE DELIBERATE EXCEPTION to "never post financial detail into a group" above —
+      // the user explicitly asked for proof of what got recharged to land back in the SAME
+      // group that requested it. engineData.groupMessage is pre-built by core/route.ts to hold
+      // only recipient numbers/amounts/status — never a balance, wallet address, or PIN — so
+      // this is safe to post in the open, unlike engineData.message (full detail, DM-only).
+      const dmRes = await fetch(`https://api.telegram.org/bot${DEAI_BOT_TOKEN}/sendMessage`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ chat_id: senderId, text: engineData.message, parse_mode: 'Markdown' }),
+      });
+      if (!dmRes.ok) {
+        const errBody = await dmRes.text();
+        console.error('[Telegram] Failed to DM bulk-recharge result:', dmRes.status, errBody);
+      }
+      const groupRes = await fetch(`https://api.telegram.org/bot${DEAI_BOT_TOKEN}/sendMessage`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ chat_id: engineData.groupChatId, text: engineData.groupMessage, parse_mode: 'Markdown' }),
+      });
+      if (!groupRes.ok) {
+        const errBody = await groupRes.text();
+        console.error('[Telegram] Failed to post bulk-recharge report to group:', groupRes.status, errBody);
       }
     }
 

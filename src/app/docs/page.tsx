@@ -347,6 +347,13 @@ export default function DocsPage() {
                 </>}
               />
               <FAQItem
+                q="Can I use AbaPay's agent in a Telegram group?"
+                a={<>
+                  <p>Yes — add the bot to a group and tag it (<code>@AbaPayAgentBot</code>) to use it there. Anything sensitive (balances, receipts, PINs) is always sent to you privately, never posted where the group can see it.</p>
+                  <p>One group-only trick: ask it to pick a few phone numbers that were posted in the chat recently and recharge them — e.g. <em>"recharge 5 random numbers from the last 30 minutes, 200 each"</em>, or the same with data instead of airtime. It confirms the total and asks for your PIN by DM first, then posts the result (numbers, amounts, proof) back in the group once it's done. Electricity and cable aren't included in this — there's no safe way to tell a meter or smartcard number apart from any other number someone posts, so those still need you to name the account directly.</p>
+                </>}
+              />
+              <FAQItem
                 q="What wallets and apps can I use?"
                 a={<>
                   <p>MiniPay (Opera Mini's Celo wallet), Valora, MetaMask, Coinbase Smart Wallet / Base Account, and any other wallet reachable over WalletConnect or injected into your browser. AbaPay also runs as a Farcaster Mini App.</p>

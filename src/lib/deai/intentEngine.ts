@@ -24,6 +24,7 @@ export type DeAIIntent =
   | 'SCHEDULE_BILL'
   | 'LIST_SCHEDULES'
   | 'CANCEL_SCHEDULE'
+  | 'GROUP_BULK_RECHARGE'
   | 'HELP'
   | 'UNKNOWN';
 
@@ -72,6 +73,18 @@ export interface ParsedIntent {
   chain: 'CELO' | 'BASE' | null;
   token: string | null;
 
+  // ⚡ GROUP_BULK_RECHARGE — "recharge 5 random numbers from the last 30 minutes, 200 each",
+  // Telegram-group-only. Null on every other intent. Sane defaults are applied in core/route.ts
+  // (5 numbers, 30 minutes, ₦200) when the user doesn't state one — these three fields only
+  // carry an EXPLICIT override.
+  group_recipient_count: number | null;
+  group_lookback_minutes: number | null;
+  group_amount_ngn: number | null;
+  // ⚡ Which service to bulk-buy — "recharge" alone means AIRTIME; an explicit "data"/"MB"/"GB"
+  // means DATA. Electricity/TV are NOT supported here (see the rule below for why) — if the
+  // user asks for either, this stays null and core/route.ts explains why in plain language.
+  group_service: 'AIRTIME' | 'DATA' | null;
+
   // ⚡ Detected language of the user's message (e.g. "en", "pcm", "ha", "yo", "ig", "fr").
   // The reply layer can use this to answer in the user's own language. Purely advisory —
   // never affects how money is parsed or moved.
@@ -85,7 +98,7 @@ You must respond with a single valid JSON object and NOTHING else — no prose, 
 
 Schema:
 {
-  "intent": "VEND_AIRTIME" | "VEND_DATA" | "PAY_ELECTRICITY" | "PAY_CABLE" | "BANK_TRANSFER" | "EDUCATION" | "INTERNATIONAL" | "CHECK_BALANCE" | "TRANSACTION_HISTORY" | "SCHEDULE_BILL" | "LIST_SCHEDULES" | "CANCEL_SCHEDULE" | "HELP" | "UNKNOWN",
+  "intent": "VEND_AIRTIME" | "VEND_DATA" | "PAY_ELECTRICITY" | "PAY_CABLE" | "BANK_TRANSFER" | "EDUCATION" | "INTERNATIONAL" | "CHECK_BALANCE" | "TRANSACTION_HISTORY" | "SCHEDULE_BILL" | "LIST_SCHEDULES" | "CANCEL_SCHEDULE" | "GROUP_BULK_RECHARGE" | "HELP" | "UNKNOWN",
   "provider": string | null,
   "amount_ngn": number | null,
   "destination_account": string | null,
@@ -101,6 +114,10 @@ Schema:
   "recipients": [{ "provider": string | null, "amount_ngn": number | null, "destination_account": string | null, "chain": "CELO" | "BASE" | null, "token": string | null }] | null,
   "chain": "CELO" | "BASE" | null,
   "token": string | null,
+  "group_recipient_count": number | null,
+  "group_lookback_minutes": number | null,
+  "group_amount_ngn": number | null,
+  "group_service": "AIRTIME" | "DATA" | null,
   "language": string | null
 }
 
@@ -204,7 +221,32 @@ Rules:
    Celo-only — never pair it with "BASE"). Leave null when the user doesn't name one; the
    app falls back to whatever chain/token the user currently has selected.
 
-16. LANGUAGE — set "language" to the BCP-47-ish code of the language the user actually wrote
+16b. GROUP_BULK_RECHARGE — Telegram-group-only. The user asks to pick random phone numbers
+   that were POSTED IN THE CHAT recently and buy them airtime or data, rather than naming a
+   specific account themselves:
+   - "recharge 5 random numbers from the last 30 minutes, 200 each" ->
+     intent GROUP_BULK_RECHARGE, group_service "AIRTIME", group_recipient_count 5, group_lookback_minutes 30, group_amount_ngn 200
+   - "pick some numbers from this group in the last hour and top them up 100 naira" ->
+     intent GROUP_BULK_RECHARGE, group_service "AIRTIME", group_recipient_count null, group_lookback_minutes 60, group_amount_ngn 100
+   - "grab a few numbers people dropped here and recharge them" ->
+     intent GROUP_BULK_RECHARGE, group_service "AIRTIME", all three group_number fields null (defaults apply downstream)
+   - "give 5 random numbers from the last 20 minutes data, up to 300 each" ->
+     intent GROUP_BULK_RECHARGE, group_service "DATA", group_recipient_count 5, group_lookback_minutes 20, group_amount_ngn 300
+   "recharge"/"top up"/"credit"/unstated -> group_service "AIRTIME". "data"/"MB"/"GB"/"browsing" ->
+   group_service "DATA". For DATA, group_amount_ngn is a BUDGET CAP per number (the app picks
+   the best plan at or under it), not a literal charge — data plans are fixed-price products.
+   Leave group_recipient_count/group_lookback_minutes/group_amount_ngn null whenever the user
+   didn't state that specific number — never guess a figure they didn't say.
+   ⚠️ Electricity and TV are NOT supported by this intent, even if asked for that way — there is
+   no reliable way to tell a meter/smartcard number apart from any other digit string someone
+   posts (unlike phone numbers, which have a fixed, checkable prefix table), and no way to infer
+   WHICH electricity company serves a given meter. If the user asks to bulk-pay electricity/TV
+   from group numbers, still return GROUP_BULK_RECHARGE with group_service null — core/route.ts
+   explains why that specific pairing isn't supported and what to do instead.
+   This intent is fundamentally different from rule 14 (recipients): here the user does NOT name
+   any destination_account themselves, so destination_account/amount_ngn/recipients stay null.
+
+17. LANGUAGE — set "language" to the BCP-47-ish code of the language the user actually wrote
    in, so the app can reply in kind: "en" (English), "pcm" (Nigerian Pidgin), "ha" (Hausa),
    "yo" (Yoruba), "ig" (Igbo), "fr" (French), "sw" (Swahili), "ar" (Arabic), etc. For plain
    English or a bare number/command, use "en". Judge by the message's own words, not the
@@ -316,6 +358,10 @@ function fallbackIntent(): ParsedIntent {
     recipients: null,
     chain: null,
     token: null,
+    group_recipient_count: null,
+    group_lookback_minutes: null,
+    group_amount_ngn: null,
+    group_service: null,
     language: null,
   };
 }
@@ -365,7 +411,8 @@ function normalize(p: any): ParsedIntent {
   const validIntents: DeAIIntent[] = [
     'VEND_AIRTIME', 'VEND_DATA', 'PAY_ELECTRICITY', 'PAY_CABLE',
     'CHECK_BALANCE', 'TRANSACTION_HISTORY', 'SCHEDULE_BILL', 'LIST_SCHEDULES',
-    'CANCEL_SCHEDULE', 'BANK_TRANSFER', 'EDUCATION', 'INTERNATIONAL', 'HELP', 'UNKNOWN',
+    'CANCEL_SCHEDULE', 'BANK_TRANSFER', 'EDUCATION', 'INTERNATIONAL',
+    'GROUP_BULK_RECHARGE', 'HELP', 'UNKNOWN',
   ];
 
   const intent: DeAIIntent = validIntents.includes(p?.intent) ? p.intent : 'UNKNOWN';
@@ -391,6 +438,16 @@ function normalize(p: any): ParsedIntent {
       ? Math.min(Math.round(Number(p.schedule_in_minutes)), MAX_SCHEDULE_MINUTES)
       : null,
     recipients: normalizeRecipients(p?.recipients),
+    // Clamped here (not just downstream) so a wildly wrong model output — "500 numbers", "3
+    // days back" — can never even reach core/route.ts's own clamp as a starting point that's
+    // already implausible. Downstream still applies the real defaults when these are null.
+    group_recipient_count: Number.isFinite(Number(p?.group_recipient_count)) && Number(p.group_recipient_count) > 0
+      ? Math.min(Math.round(Number(p.group_recipient_count)), 5) : null,
+    group_lookback_minutes: Number.isFinite(Number(p?.group_lookback_minutes)) && Number(p.group_lookback_minutes) > 0
+      ? Math.min(Math.round(Number(p.group_lookback_minutes)), 360) : null,
+    group_amount_ngn: Number.isFinite(Number(p?.group_amount_ngn)) && Number(p.group_amount_ngn) > 0
+      ? Math.min(Math.round(Number(p.group_amount_ngn)), 500) : null,
+    group_service: p?.group_service === 'AIRTIME' || p?.group_service === 'DATA' ? p.group_service : null,
     chain: normalizeChain(p?.chain),
     token: (() => {
       const t = normalizeToken(p?.token);
