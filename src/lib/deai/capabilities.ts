@@ -363,8 +363,15 @@ export async function assessFeasibility(params: {
 
 /**
  * A human-readable capability menu — what the agent tells the user it can do.
+ *
+ * `channel` matters for the automations section: recurring/one-time schedules are only
+ * creatable from chat (Telegram/WhatsApp/X, via natural language) — the MCP tool surface
+ * (src/app/api/mcp/route.ts) has no schedule-creation tool at all, only pay_bill/check_balance/
+ * list_plans/list_international_options/transaction_history/describe_capabilities. Promising
+ * "ask me to set up a recurring automation" to an MCP-connected agent would be a dead end: it
+ * has no tool to actually do that.
  */
-export async function describeCapabilities(): Promise<string> {
+export async function describeCapabilities(channel: 'CHAT' | 'MCP' = 'CHAT'): Promise<string> {
   const rules = await getServiceRules();
 
   const lines: string[] = ['*Here\'s what I can do:*', ''];
@@ -394,14 +401,29 @@ export async function describeCapabilities(): Promise<string> {
     lines.push(`• ${c.label}`);
   }
 
-  lines.push(
-    '',
-    '🔁 *Automations:*',
-    '_"Every Tuesday buy ₦200 airtime for 08012345678"_',
-    '_"Pay my meter ₦5,000 on the 28th every month"_',
-    '',
-    '💳 Say *balance* to see your funds, *history* for past payments, or *schedules* to manage automations.'
-  );
+  // 🔴 THE BUG THIS FIXES: nothing here ever said a ONE-TIME future-dated payment ("send this
+  // in 40 minutes") isn't just "paid instantly instead" — an agent reading only recurring
+  // examples had no signal that a delay request needs handling before defaulting to instant
+  // execution. Confirmed live: real money moved on an explicit "in the next 40 minutes"
+  // instruction with no clarifying question asked first. pay_bill itself has no queue/delay
+  // parameter — every call executes immediately, on every channel.
+  if (channel === 'MCP') {
+    lines.push(
+      '',
+      '⚠️ *Every payment here executes immediately* — there is no tool on this connection to delay, queue, or schedule one. If asked to pay "in 40 minutes" or "tomorrow", don\'t default to paying now: ask the human to confirm paying immediately, or tell them recurring/delayed automations are only settable from the AbaPay app or by messaging the AbaPay agent on Telegram/WhatsApp/X.'
+    );
+  } else {
+    lines.push(
+      '',
+      '🔁 *Automations (recurring only):*',
+      '_"Every Tuesday buy ₦200 airtime for 08012345678"_',
+      '_"Pay my meter ₦5,000 on the 28th every month"_',
+      '',
+      '⚠️ *No one-time delayed payments* — "in 40 minutes" or "tomorrow at 3pm" isn\'t something I can queue on its own. Every payment executes immediately once confirmed. If you want it to happen later, ask me to set up an automation instead (even a "just once" cadence works there) — otherwise I should ask before paying now.',
+      '',
+      '💳 Say *balance* to see your funds, *history* for past payments, or *schedules* to manage automations.'
+    );
+  }
 
   return lines.join('\n');
 }

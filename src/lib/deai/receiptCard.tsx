@@ -1,7 +1,6 @@
 import 'server-only';
 import { ImageResponse } from 'next/og';
-import { readFile } from 'node:fs/promises';
-import { join } from 'node:path';
+import { LOGO_DATA_URL } from './logoDataUrl';
 
 // ⚡ PREMIUM MCP RECEIPTS — rendered server-side with next/og's ImageResponse (Satori +
 // Resvg, bundled with Next.js — no extra dependency) and returned as an `image` content
@@ -20,14 +19,19 @@ function imgSafe(s: string): string {
   return String(s || '').replace(/₦/g, 'NGN ').replace(/₮/g, 'T');
 }
 
-let logoDataUrlPromise: Promise<string> | null = null;
-function getLogoDataUrl(): Promise<string> {
-  if (!logoDataUrlPromise) {
-    logoDataUrlPromise = readFile(join(process.cwd(), 'public/logo.png')).then(
-      (buf) => `data:image/png;base64,${buf.toString('base64')}`
-    );
-  }
-  return logoDataUrlPromise;
+// 🔴 THE BUG THIS FIXES: this used to read public/logo.png from the filesystem at request
+// time via node:fs. Next.js does NOT automatically bundle public/ assets into a serverless API
+// route's own filesystem (they're served separately via the CDN, not expected to be read back
+// by function code) — so this could throw ENOENT in production despite working locally. Worse,
+// the failed promise was cached in a module-level variable and NEVER reset on rejection, so
+// once it failed once, every subsequent receipt/history image render in that warm serverless
+// instance failed identically until a cold start — silently, since both call sites wrap this
+// in a try/catch that falls back to plain text. This is very likely why MCP receipts and
+// transaction_history were never showing the "rich card" image, only a plain link, exactly as
+// reported live. Embedding the logo as a build-time base64 constant (logoDataUrl.ts) removes
+// the filesystem dependency — and therefore this whole failure class — entirely.
+function getLogoDataUrl(): string {
+  return LOGO_DATA_URL;
 }
 
 const BG = '#0b0b0e';
@@ -76,7 +80,7 @@ export interface ReceiptCardData {
 // export of an opengraph-image.tsx file convention, or converted to a Buffer for the MCP
 // `image` content block (see renderReceiptImage below).
 export async function receiptImageResponse(data: ReceiptCardData): Promise<ImageResponse> {
-  const logo = await getLogoDataUrl();
+  const logo = getLogoDataUrl();
   const ok = data.status === 'SUCCESS';
   const accent = ok ? EMERALD : RED;
   const isElectricity = /electric/i.test(data.serviceLabel);
@@ -211,7 +215,7 @@ export interface HistoryRow {
 }
 
 export async function renderHistoryStatementImage(rows: HistoryRow[], wallet: string): Promise<Buffer> {
-  const logo = await getLogoDataUrl();
+  const logo = getLogoDataUrl();
   const shown = rows.slice(0, 8);
 
   const image = new ImageResponse(
