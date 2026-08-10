@@ -123,5 +123,9 @@ describe('MERGE GATE — the real mcpTools module still loads and exports its co
       expect(tool.description).toBeTruthy();
       expect(tool.inputSchema).toBeTruthy();
     }
-  });
+    // Generous timeout: this is the one test that imports the real module, which pulls in the
+    // whole payment dependency tree (supabase, viem, the vend/relayer stack). That took ~97s on
+    // the machine this was written on and blew vitest's 5s default — a slow import is not a
+    // failing contract, so the timeout is raised rather than the assertion weakened.
+  }, 300_000);
 });
