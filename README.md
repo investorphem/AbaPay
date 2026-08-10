@@ -47,7 +47,7 @@ Designed for low fees, cross-border utility vending (Nigeria + every country VTp
 * **Receipts:** html2canvas (image capture), jsPDF (PDF export)
 * **AI:** Claude (Anthropic API) for the DeAI conversational agent and in-app chat widget
 * **Agent Identity & Payments:** ERC-8004 (on-chain agent identity, Celo + Base) and x402 (`thirdweb` SDK) for HTTP-native, facilitator-settled payments in the main app
-* **Agent Tool Access:** MCP (Model Context Protocol) — Streamable HTTP/JSON-RPC server at `/api/mcp` exposing balance-check and bill-pay tools to any MCP client
+* **Agent Tool Access:** MCP (Model Context Protocol) — Streamable HTTP/JSON-RPC server at `/api/mcp` exposing balance-check and bill-pay tools to any MCP client — and A2A (Agent2Agent) at `/api/a2a`, card at `/.well-known/agent-card.json`, exposing the same tools to peer agents
 * **Utility Provider:** VTpass API (bills, airtime, data, education, international airtime)
 * **Bank Transfer Provider:** Monnify API (Moniepoint Inc.) — account auto-detect, Name Enquiry verification, and the real NUBAN payout, debited from a Moniepoint Microfinance Bank business account
 * **Database / Ledger:** Supabase (PostgreSQL) — transactions, platform settings, points, refunds
@@ -639,6 +639,64 @@ organizational submission through Anthropic, not a code change:
   and reviewer test-account credentials) — not code.
 - Until submitted/approved, "Add custom connector" with the URL (above) is a fully working,
   unrestricted way to use it today — the directory only adds discoverability, not capability.
+
+<a id="a2a"></a>
+
+#### A2A Server (Agent2Agent)
+
+The same tools, reachable by *other agents* over [A2A](https://a2a-protocol.org) instead of MCP.
+Two files, no new capability:
+
+| Surface | Path |
+|---|---|
+| Agent Card (discovery) | `/.well-known/agent-card.json` — `src/app/.well-known/agent-card.json/route.ts` |
+| JSON-RPC endpoint | `/api/a2a` — `src/app/api/a2a/route.ts` |
+
+**One implementation, two protocols.** The tool definitions and their implementations were moved
+out of `src/app/api/mcp/route.ts` into **`src/lib/deai/mcpTools.ts`**, which both routes import.
+`/api/mcp` and `/api/a2a` are now transport shims over one `callTool()`. That is deliberate:
+A2A has no private path to money — the PIN gate, escalating lockout, on-chain allowance ceiling,
+kill switches and operator spend caps all live *below* both routes, so a new protocol changes how
+an agent asks, never what it may do. (The move was mechanical; tool logic is byte-identical.)
+
+**⚠️ `/.well-known/agent-card.json` is not `/.well-known/agent.json`.** The latter is AbaPay's
+**ERC-8004 registration card** — the on-chain identity 8004scan and Aigora read. The two specs
+collided on the `agent.json` filename historically, which is exactly why A2A moved its card to
+`agent-card.json`. Different documents, different consumers; overwriting one with the other
+silently breaks the agent's on-chain listing.
+
+**No LLM in the invocation path.** Chat channels route free text through `parseIntent()` because a
+human typed it. A2A is machine-to-machine, so invocation is a structured `DataPart` carrying
+`{ skill, args }`, validated against the same `TOOLS` schema MCP publishes. A text part gets the
+skill catalogue back rather than a guess — re-interpreting "send 5000" with a language model in an
+agent-to-agent *payment* path adds a failure mode with no upside.
+
+**Synchronous by design.** Every skill completes inside the request, so `message/send` returns a
+final `Message` (spec-legal) and no `Task` is created. The card therefore declares
+`streaming: false` and `pushNotifications: false`, and `tasks/*` + `message/stream` return
+`-32004 UnsupportedOperation` rather than being half-implemented — there is no task store to
+query, and declaring capabilities we don't have would strand a peer waiting on updates that never
+arrive.
+
+**Auth.** `Authorization: Bearer …` accepts either credential MCP accepts, by prefix: an
+`aba_mcp_…` Agent Hub key, or an OAuth 2.1 access token. A2A has no per-call `api_key` argument,
+so the header is the only place a credential can arrive. A *missing* credential and a *wrong* one
+stay distinct conditions, same rule as MCP. `pay_bill` still requires the PIN on every call.
+
+**Operator control.** `CHANNEL_A2A` in `platform_settings.kill_switches` — separate from
+`CHANNEL_MCP` so pausing one surface doesn't pause the other. No migration needed; the column is
+free-form JSONB and a missing key reads as enabled.
+
+Call it:
+
+```bash
+curl -X POST https://www.abapays.com/api/a2a \
+  -H "Authorization: Bearer aba_mcp_…" \
+  -H "Content-Type: application/json" \
+  -d '{"jsonrpc":"2.0","id":1,"method":"message/send","params":{"message":{
+        "kind":"message","role":"user","messageId":"1",
+        "parts":[{"kind":"data","data":{"skill":"check_balance","args":{}}}]}}}'
+```
 
 #### x402 Settlement (main app only)
 

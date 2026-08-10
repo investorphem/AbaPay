@@ -156,14 +156,18 @@ export interface RuleCheck {
 // can never collide with a service key. Missing key = enabled, exactly like every other
 // switch in this file — an operator who never touches this section shouldn't have every
 // channel silently go dark.
-const CHANNEL_KEYS: Record<'WHATSAPP' | 'TELEGRAM' | 'X' | 'MCP', string> = {
+const CHANNEL_KEYS: Record<'WHATSAPP' | 'TELEGRAM' | 'X' | 'MCP' | 'A2A', string> = {
   WHATSAPP: 'CHANNEL_WHATSAPP',
   TELEGRAM: 'CHANNEL_TELEGRAM',
   X: 'CHANNEL_X',
   MCP: 'CHANNEL_MCP',
+  // A2A is a separate agent surface from MCP with its own blast radius — pausing one must not
+  // pause the other. No migration needed: kill_switches is a free-form JSONB map and a missing
+  // key reads as enabled (see below), so this switch simply starts on.
+  A2A: 'CHANNEL_A2A',
 };
 
-export async function isChannelEnabled(channel: 'WHATSAPP' | 'TELEGRAM' | 'X' | 'MCP'): Promise<boolean> {
+export async function isChannelEnabled(channel: 'WHATSAPP' | 'TELEGRAM' | 'X' | 'MCP' | 'A2A'): Promise<boolean> {
   const rules = await getServiceRules();
   return rules.killSwitches[CHANNEL_KEYS[channel]] !== false;
 }
