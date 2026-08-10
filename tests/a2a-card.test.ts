@@ -88,6 +88,14 @@ describe('A2A agent card', () => {
 
 describe('MERGE GATE — the real mcpTools module still loads and exports its contract', () => {
   it('loads unmocked and exposes everything /api/mcp and /api/a2a import from it', async () => {
+    // src/utils/supabase.ts calls createClient() at module scope, and vitest does not read
+    // .env.local — without these the import dies on "supabaseUrl is required" before it can
+    // tell us anything about the extraction. Dummies are correct here: this test asserts the
+    // module's export SHAPE, and never issues a query, so no real credentials are wanted.
+    process.env.NEXT_PUBLIC_SUPABASE_URL ||= 'https://example.supabase.co';
+    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY ||= 'test-anon-key';
+    process.env.SUPABASE_SERVICE_ROLE_KEY ||= 'test-service-role-key';
+
     vi.doUnmock('@/lib/deai/mcpTools');
     vi.resetModules();
 
