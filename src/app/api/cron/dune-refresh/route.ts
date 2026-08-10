@@ -82,14 +82,38 @@ async function handle(req: Request) {
     return NextResponse.json({ error: 'DUNE_API_KEY is not set.' }, { status: 500 });
   }
 
+  // ⚡ STAGES — because the two halves have very different time profiles and hosting plans cap
+  // function duration (Vercel Hobby 60s, Pro 300s; cron-job.org's free tier disconnects at 30s).
+  //
+  //   ?stage=base        start the base query, return immediately   (fast)
+  //   ?stage=dependents  start the six aggregates, return           (fast)
+  //   (no stage)         base -> wait -> dependents in one call     (slow, needs ~4 min)
+  //
+  // Two short crons 15 minutes apart is the robust setup and works on any plan. The combined
+  // mode is kept for manual runs and for hosts that allow a long invocation.
+  const stage = new URL(req.url).searchParams.get('stage');
+
+  if (stage === 'dependents') {
+    const dependents: Record<number, string | null> = {};
+    for (const id of DEPENDENT_QUERIES) dependents[id] = await execute(apiKey, id);
+    const n = Object.values(dependents).filter(Boolean).length;
+    return NextResponse.json({ ok: n === DEPENDENT_QUERIES.length, stage, dependents, startedDependents: `${n}/${DEPENDENT_QUERIES.length}` });
+  }
+
   const baseExec = await execute(apiKey, BASE_QUERY);
   if (!baseExec) {
     return NextResponse.json({ error: 'Base query failed to start.', base: BASE_QUERY }, { status: 502 });
   }
 
-  // Give the base most of the budget. If it overruns we still refresh the dependents — a
-  // dashboard one run behind beats a dashboard six days behind — but we say so in the response
-  // so a stale-looking dashboard is explainable rather than mysterious.
+  if (stage === 'base') {
+    // Deliberately no wait: the dependents run from their own cron 15 minutes later, by which
+    // time this has long since finished. Keeps the invocation well inside any plan's ceiling.
+    return NextResponse.json({ ok: true, stage, base: { queryId: BASE_QUERY, executionId: baseExec } });
+  }
+
+  // Combined mode. Give the base most of the budget. If it overruns we still refresh the
+  // dependents — a dashboard one run behind beats a dashboard six days behind — but we say so in
+  // the response so a stale-looking dashboard is explainable rather than mysterious.
   const baseState = await waitFor(apiKey, baseExec, 210_000);
   const baseCompleted = baseState === 'QUERY_STATE_COMPLETED';
 
