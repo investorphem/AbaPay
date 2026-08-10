@@ -393,6 +393,25 @@ Free — not issued by anyone, just protects the manual `/api/cleanup` endpoint.
 
 ---
 
+## 15. Dune Analytics (dashboard refresh)
+
+```
+DUNE_API_KEY=<from dune.com → Settings → API>
+```
+**Free** on the Community plan. Required only by `/api/cron/dune-refresh`, which re-runs the
+seven AbaPay analytics queries so the public dashboard doesn't go stale.
+
+Needed because Dune's own query scheduler only runs on the **medium/large** engines, which the
+Community plan cannot use (`medium` returns *"Performance medium is not supported for this
+dataset"*). The API path works on `small`, so an external cron calling this route is the only
+way to get automatic refreshes on a free plan. Register it at cron-job.org alongside the
+schedule runners, using the same `CRON_SECRET`.
+
+Budget: ~12 credits per full refresh against a 2,500/month quota, so a daily run costs roughly
+360 credits/month — comfortably inside the free tier.
+
+---
+
 ## Quick checklist: what's actually paid
 
 | Provider | Free tier? | Paid requirement |

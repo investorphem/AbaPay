@@ -353,6 +353,25 @@ Without registering these, users can still create schedules (recurring or one-of
 chat, but nothing will ever execute them — they'll sit `is_active` forever with no cron to
 pick them up.
 
+**Dune dashboard refresh — also needs an external cron:**
+```
+DUNE_API_KEY=your_dune_api_key        # Required by /api/cron/dune-refresh
+```
+`/api/cron/dune-refresh` re-runs the seven AbaPay analytics queries (team `abapay`) so the
+public Dune dashboard stays current. Register a daily cron-job.org job hitting
+`POST https://<your-domain>/api/cron/dune-refresh` with the same `CRON_SECRET` header as above.
+
+**Why not use Dune's own scheduler?** Because it cannot work on this account. Dune's built-in
+query scheduler runs only on the **medium and large** engines, and the `community_fluid_engine_v2`
+plan has neither — requesting `medium` returns *"Performance medium is not supported for this
+dataset"*. The in-app schedule therefore never fires however it is configured, which is exactly
+what happened: the dashboard sat six days stale until someone pressed Run by hand. The API path
+has no such restriction (`small` executes fine), so this route does what the scheduler cannot.
+
+The route runs the base query first and waits for it, because the other six aggregate its rows;
+if the base overruns its budget the dependents still run and the JSON response says so, so a
+dashboard that looks one run behind is explainable rather than mysterious.
+
 ---
 
 ## 🚀 Installation & Setup
