@@ -396,19 +396,31 @@ Free — not issued by anyone, just protects the manual `/api/cleanup` endpoint.
 ## 15. Dune Analytics (dashboard refresh)
 
 ```
-DUNE_API_KEY=<from dune.com → Settings → API>
+DUNE_API_KEY=<from dune.com → abapay team → Settings → API keys>
+ABAPAY_BASE_CONTRACTS="0xC0A4…=AbaPayV4 (current),0xF3AeFF…=AbaPay V1 (original)"
 ```
-**Free** on the Community plan. Required only by `/api/cron/dune-refresh`, which re-runs the
-seven AbaPay analytics queries so the public dashboard doesn't go stale.
+**Free** on the Community plan. `DUNE_API_KEY` is required by `/api/cron/dune-refresh`, which
+re-runs the analytics queries behind the two public dashboards so neither goes stale:
+
+* `?dashboard=main` — the original combined Celo + Base dashboard (7 queries)
+* `?dashboard=base` — **Base mainnet only** (9 queries), SQL in `dune/base-chain/`
 
 Needed because Dune's own query scheduler only runs on the **medium/large** engines, which the
 Community plan cannot use (`medium` returns *"Performance medium is not supported for this
-dataset"*). The API path works on `small`, so an external cron calling this route is the only
-way to get automatic refreshes on a free plan. Register it at cron-job.org alongside the
-schedule runners, using the same `CRON_SECRET`.
+dataset"*). The API path works on `small`, so a cron calling this route is the only way to get
+automatic refreshes on a free plan. `.github/workflows/dune-refresh.yml` does that daily —
+set the repository secrets `APP_URL` and `CRON_SECRET` (Settings → Secrets and variables →
+Actions) and it runs itself; nothing to register at cron-job.org.
 
-Budget: ~12 credits per full refresh against a 2,500/month quota, so a daily run costs roughly
-360 credits/month — comfortably inside the free tier.
+`ABAPAY_BASE_CONTRACTS` is only read by `scripts/dune-base-setup.mjs`, which renders and deploys
+the Base dashboard's SQL. It lists **every** AbaPay deployment on Base, not just the current one,
+so a redeploy doesn't truncate the dashboard's history. Format is `address=label`, comma-separated.
+⚠️ Make sure the API key belongs to the **abapay team**, not your personal account, or the queries
+are created in the wrong place.
+
+Budget: ~12 credits per full refresh of the main dashboard against a 2,500/month quota; the Base
+dashboard adds a similar amount. A daily run of both costs roughly 700–800 credits/month —
+still inside the free tier.
 
 ---
 

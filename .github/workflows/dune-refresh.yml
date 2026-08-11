@@ -1,0 +1,116 @@
+name: Dune dashboard refresh
+
+# ⚡ Re-runs both public Dune dashboards every day so neither goes stale.
+#
+# 🔴 WHY GITHUB ACTIONS AND NOT DUNE'S SCHEDULER: Dune's built-in query scheduler only runs
+# on the medium/large engines, which the Community plan does not have — the in-app schedule
+# never fires however it is configured. That is how the dashboard once sat six days stale
+# until someone pressed Run by hand. See src/app/api/cron/dune-refresh/route.ts.
+#
+# 🔴 WHY NOT A VERCEL CRON: Vercel's Hobby plan allows two cron jobs at daily granularity and
+# caps a function at 60s — not enough for the "wait for the root query, then run the
+# dependents" sequence. Actions can sleep between calls for free, which is what the two-stage
+# API actually needs, and it keeps the schedule reviewable in the repo.
+
+on:
+  schedule:
+    # 03:15 UTC daily (04:15 WAT). Off the hour on purpose: GitHub queues scheduled runs and
+    # the top of the hour is its most congested slot, so :15 tends to start closer to on time.
+    - cron: '15 3 * * *'
+  # Kept so a refresh can still be forced after a backfill or a query edit — the schedule is
+  # what makes the daily run automatic, this is just an escape hatch.
+  workflow_dispatch:
+
+concurrency:
+  group: dune-refresh
+  cancel-in-progress: false
+
+jobs:
+  refresh:
+    name: Refresh Dune dashboards
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    env:
+      APP_URL: ${{ secrets.APP_URL }}
+      CRON_SECRET: ${{ secrets.CRON_SECRET }}
+
+    steps:
+      - name: Check required secrets
+        run: |
+          # Fail loudly rather than firing unauthenticated requests at production, which would
+          # just 401 and look like a working cron in the Actions UI.
+          missing=""
+          [ -n "$APP_URL" ]     || missing="$missing APP_URL"
+          [ -n "$CRON_SECRET" ] || missing="$missing CRON_SECRET"
+          if [ -n "$missing" ]; then
+            echo "::error::Missing repository secret(s):$missing — add them under Settings → Secrets and variables → Actions."
+            exit 1
+          fi
+          case "$APP_URL" in
+            */) echo "::error::APP_URL must not end in a slash (it is concatenated with /api/...)."; exit 1 ;;
+          esac
+
+          # ⚠️ APP_URL must be the CANONICAL host. abapays.com 307-redirects to www.abapays.com,
+          # and curl drops the Authorization header across a host change — so the apex would send
+          # an unauthenticated request and get a 401 that looks like a broken secret rather than a
+          # wrong URL. Following redirects would not fix it; using the right host is what fixes it.
+          # An unknown ?dashboard= is rejected with 400 *after* the auth check but *before* any
+          # Dune call, so this proves URL + secret without executing a single query. Do not probe
+          # with a bogus ?stage= instead: an unrecognised stage falls through to the combined
+          # mode and would run the whole refresh on every preflight.
+          code=$(curl -sS -o /dev/null -w '%{http_code}' -X POST \
+            -H "Authorization: Bearer $CRON_SECRET" \
+            "$APP_URL/api/cron/dune-refresh?dashboard=__preflight__" || echo 000)
+          case "$code" in
+            400) echo "Reachable and authenticated: $APP_URL" ;;
+            3*)  echo "::error::$APP_URL redirects (HTTP $code). Use the canonical host it points at, or curl strips the auth header."; exit 1 ;;
+            401) echo "::error::CRON_SECRET is rejected by $APP_URL (401). Check it matches the deployed value."; exit 1 ;;
+            000) echo "::error::Could not reach $APP_URL at all."; exit 1 ;;
+            *)   echo "::warning::Unexpected preflight status $code from $APP_URL; continuing." ;;
+          esac
+
+      # Both root queries first. They are the expensive half: each one rescans the chain log
+      # tables and materialises the rows every other query on its dashboard reads.
+      - name: Start root queries
+        run: |
+          set -euo pipefail
+          for dashboard in main base; do
+            echo "── $dashboard: root"
+            code=$(curl -sS -o /tmp/out.json -w '%{http_code}' -X POST \
+              -H "Authorization: Bearer $CRON_SECRET" \
+              "$APP_URL/api/cron/dune-refresh?dashboard=$dashboard&stage=root")
+            cat /tmp/out.json; echo
+            # 503 = that dashboard has no query ids deployed yet. Not a failure of the refresh
+            # itself, so don't fail the run — but make it visible instead of silently skipped.
+            if [ "$code" = "503" ]; then
+              echo "::warning::$dashboard dashboard is not deployed to Dune yet — skipping."
+            elif [ "$code" != "200" ]; then
+              echo "::error::$dashboard root query failed (HTTP $code)"
+              exit 1
+            fi
+          done
+
+      # The dependents read the rows the root queries just wrote, so they must not start until
+      # those have finished. The root query has run close to the free engine's 2-minute ceiling
+      # before, and there are now two of them queued on the same small engine — 6 minutes is
+      # slack, not an estimate.
+      - name: Wait for the root queries to finish
+        run: sleep 360
+
+      - name: Start dependent queries
+        run: |
+          set -euo pipefail
+          for dashboard in main base; do
+            echo "── $dashboard: dependents"
+            code=$(curl -sS -o /tmp/out.json -w '%{http_code}' -X POST \
+              -H "Authorization: Bearer $CRON_SECRET" \
+              "$APP_URL/api/cron/dune-refresh?dashboard=$dashboard&stage=dependents")
+            cat /tmp/out.json; echo
+            if [ "$code" = "503" ]; then
+              echo "::warning::$dashboard dashboard is not deployed to Dune yet — skipping."
+            elif [ "$code" != "200" ]; then
+              echo "::error::$dashboard dependent queries failed (HTTP $code)"
+              exit 1
+            fi
+          done

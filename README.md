@@ -353,13 +353,29 @@ Without registering these, users can still create schedules (recurring or one-of
 chat, but nothing will ever execute them — they'll sit `is_active` forever with no cron to
 pick them up.
 
-**Dune dashboard refresh — also needs an external cron:**
+**Dune dashboards — refreshed daily, automatically:**
 ```
 DUNE_API_KEY=your_dune_api_key        # Required by /api/cron/dune-refresh
 ```
-`/api/cron/dune-refresh` re-runs the seven AbaPay analytics queries (team `abapay`) so the
-public Dune dashboard stays current. Register a daily cron-job.org job hitting
-`POST https://<your-domain>/api/cron/dune-refresh` with the same `CRON_SECRET` header as above.
+There are **two** public dashboards on the `abapay` Dune team, and `/api/cron/dune-refresh`
+re-runs both:
+
+| `?dashboard=` | What it covers | Queries |
+|---|---|---|
+| `main` (default) | The original combined dashboard — Celo **and** Base, split by chain | 7 |
+| `base` | **Base mainnet only**, both AbaPay deployments and both settlement rails (contract calls **and x402**) — [dune.com/abapay/abapay-on-base](https://dune.com/abapay/abapay-on-base) | 9 |
+
+The Base-only dashboard exists because on the combined one every Base figure is a *slice* of a
+Celo+Base total, so per-chain user counts, DAU and new-vs-returning are all mixed. The Base
+dashboard is scoped to Base at the source, and it tracks **both** Base contracts —
+`0xC0A4dAA04DEd9c54D1239507B5A5E645761ef488` (AbaPayV4, current) and
+`0xF3AeFF0c326B1277A2D8623b7694aEB5E6A565e5` (the original AbaPay V1) — so the history doesn't
+restart at the redeploy. Its SQL is version-controlled in [`dune/base-chain/`](dune/base-chain/)
+and deployed with `node scripts/dune-base-setup.mjs`; see that directory's README.
+
+**Automatic daily refresh:** [`.github/workflows/dune-refresh.yml`](.github/workflows/dune-refresh.yml)
+runs at 03:15 UTC every day and refreshes both dashboards — no manual run, no external cron
+service. It needs two repository secrets: `APP_URL` and `CRON_SECRET`.
 
 **Why not use Dune's own scheduler?** Because it cannot work on this account. Dune's built-in
 query scheduler runs only on the **medium and large** engines, and the `community_fluid_engine_v2`
@@ -368,9 +384,10 @@ dataset"*. The in-app schedule therefore never fires however it is configured, w
 what happened: the dashboard sat six days stale until someone pressed Run by hand. The API path
 has no such restriction (`small` executes fine), so this route does what the scheduler cannot.
 
-The route runs the base query first and waits for it, because the other six aggregate its rows;
-if the base overruns its budget the dependents still run and the JSON response says so, so a
-dashboard that looks one run behind is explainable rather than mysterious.
+Each dashboard has a **root query** that materialises the rows the rest aggregate, so the
+workflow starts the roots, waits, then starts the dependents. In the single-call mode the route
+waits itself; if the root overruns its budget the dependents still run and the JSON response says
+so, so a dashboard that looks one run behind is explainable rather than mysterious.
 
 ---
 
@@ -423,13 +440,13 @@ calldata decoder, and the webhook's event cross-validation all work with no back
 | `ReentrancyGuard` | `setTokenSupport` can whitelist *any* token; a hook-bearing token would otherwise make `payBill` reentrant. |
 | `Pausable` | V1 had no kill switch — a post-deploy vulnerability could not be stopped. Refunds stay live while paused so users can be made whole. |
 | `Ownable2Step` | Prevents permanently bricking the contract by transferring ownership to a typo'd address. |
-| **Timelocked withdrawals** | **The biggest V1 risk:** a single compromised owner key could drain the entire pooled vault instantly. Withdrawals must now be queued, then executed after a 24h delay — alert on `WithdrawalQueued` and cancel if it wasn't you. |
+| **Timelocked withdrawals** | **The biggest V1 risk:** a single compromised owner key could drain the entire pooled vault instantly. Withdrawals must now be queued, then executed after a delay — alert on `WithdrawalQueued` and cancel if it wasn't you. Fixed at 24h in V2/V3; **owner-adjustable in V4** (see below). |
 | **Capped refunds** | V1's `refundUser` was an unrestricted "send any amount anywhere" path that bypassed any withdrawal control. Now bounded per-token (and fails closed until a cap is set). |
 | Balance-delta accounting | Emits the amount *actually received*, so fee-on-transfer tokens can't cause the backend to over-vend. |
 
 **Before mainnet:**
 1. **Get a professional audit.** This contract holds pooled customer funds; a static review is not sufficient.
-2. **Set `ABAPAY_OWNER` to a multisig (Safe), not an EOA.** The timelock buys detection time — it only *stops* an attacker if a stolen key can't unilaterally cancel and re-queue.
+2. **Set `ABAPAY_OWNER` to a multisig (Safe), not an EOA.** The timelock buys detection time — it only *stops* an attacker if a stolen key can't unilaterally cancel and re-queue, and it buys nothing at all if the delay has been set to 0 (see V4 below).
 3. Deploy to testnet and run the full payment flow end-to-end first.
 4. Call `setMaxRefund` for each token — **refunds revert until a cap is configured.**
 
@@ -465,6 +482,34 @@ defaults to a $10-equivalent per token) until a professional audit is done, then
 `payBillFor` emits the same `PaymentReceived` event as V1/V2 (so the webhook needs no changes),
 plus an additional `AgentPayment` event so the backend/any observer can distinguish "the user
 signed" from "the agent spent an allowance."
+
+#### `AbaPayV4.sol` — adjustable withdrawal delay
+
+V4 is V3 plus one change: the withdrawal timelock is no longer a hardcoded 24 hours. It is a
+variable, `withdrawalDelay`, that the owner can raise, lower, or set to **0** via
+`setWithdrawalDelay(n)`. It still defaults to 24h, so nothing changes unless the owner
+deliberately changes it. V4 is what is deployed on **Base mainnet** at
+`0xC0A4dAA04DEd9c54D1239507B5A5E645761ef488`.
+
+The queue itself is not removable — it is compiled into the bytecode and there is no direct
+`withdraw()`. At delay 0 a withdrawal is `queueWithdrawal` then `executeWithdrawal` back to
+back: two transactions, no waiting.
+
+⚠️ **Changing the delay is not retroactive.** A withdrawal's `executableAt` is stamped when it is
+queued, so lowering the delay does not free one that is already sitting in the queue — you have
+to `cancelWithdrawal` and re-queue it under the new delay. Cancelling moves no money; the tokens
+never leave the vault.
+
+⚠️ **A delay of 0 removes the protection the timelock exists for.** It is the reason a stolen
+owner key cannot drain the vault before anyone notices. At 0, whoever holds the key can queue and
+execute in the same minute. Treat it as an emergency setting and raise it back afterwards.
+
+```bash
+node scripts/base-instant-withdrawals.mjs                  # show the live state, change nothing
+node scripts/base-instant-withdrawals.mjs --apply          # delay -> 0, clear a stuck queue entry
+node scripts/base-instant-withdrawals.mjs --apply --withdraw   # …and push the queued one through
+node scripts/base-instant-withdrawals.mjs --restore-delay 86400  # put the 24h timelock back
+```
 
 #### ERC-8004 Agent Identity
 

@@ -123,8 +123,10 @@ Then, **from the owner wallet**:
 - `setMaxAgentPayment(token, cap)` — **agent payments revert until this is set**
 - `setRelayer(<relayer address>)` — enables agent payments
 
-⚠️ **Set `ABAPAY_OWNER` to a multisig (Safe).** With a single EOA, the 24h withdrawal timelock
-only buys detection time — an attacker with the key simply waits it out.
+⚠️ **Set `ABAPAY_OWNER` to a multisig (Safe).** With a single EOA, the withdrawal timelock
+(24h by default) only buys detection time — an attacker with the key simply waits it out. On
+**V4** the delay is owner-adjustable and can be set to 0, in which case it buys nothing at all;
+check the live value with `node scripts/base-instant-withdrawals.mjs` before relying on it.
 
 ---
 
