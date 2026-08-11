@@ -488,8 +488,16 @@ signed" from "the agent spent an allowance."
 V4 is V3 plus one change: the withdrawal timelock is no longer a hardcoded 24 hours. It is a
 variable, `withdrawalDelay`, that the owner can raise, lower, or set to **0** via
 `setWithdrawalDelay(n)`. It still defaults to 24h, so nothing changes unless the owner
-deliberately changes it. V4 is what is deployed on **Base mainnet** at
-`0xC0A4dAA04DEd9c54D1239507B5A5E645761ef488`.
+deliberately changes it. V4 is what is deployed on **both mainnets**:
+
+| Chain | AbaPayV4 |
+|---|---|
+| Base | `0xC0A4dAA04DEd9c54D1239507B5A5E645761ef488` |
+| Celo | `0x5df8aE2B963165b735B18Ca86B1ea448d2AA032C` |
+
+⚠️ The **previous Celo contract `0x42Fa4637…` is a V3** — it has no `setWithdrawalDelay`, so its
+24h timelock is fixed and it can never be made instant. That is why Celo was redeployed rather
+than reconfigured.
 
 The queue itself is not removable — it is compiled into the bytecode and there is no direct
 `withdraw()`. At delay 0 a withdrawal is `queueWithdrawal` then `executeWithdrawal` back to
@@ -505,10 +513,11 @@ owner key cannot drain the vault before anyone notices. At 0, whoever holds the 
 execute in the same minute. Treat it as an emergency setting and raise it back afterwards.
 
 ```bash
-node scripts/base-instant-withdrawals.mjs                  # show the live state, change nothing
-node scripts/base-instant-withdrawals.mjs --apply          # delay -> 0, clear a stuck queue entry
-node scripts/base-instant-withdrawals.mjs --apply --withdraw   # …and push the queued one through
-node scripts/base-instant-withdrawals.mjs --restore-delay 86400  # put the 24h timelock back
+# --chain defaults to base; pass --chain celo for the Celo vault
+node scripts/instant-withdrawals.mjs --chain celo                    # show live state, change nothing
+node scripts/instant-withdrawals.mjs --chain celo --apply            # delay -> 0, clear a stuck queue entry
+node scripts/instant-withdrawals.mjs --apply --withdraw              # …and push the queued one through
+node scripts/instant-withdrawals.mjs --chain celo --restore-delay 86400   # put the 24h timelock back
 ```
 
 #### ERC-8004 Agent Identity

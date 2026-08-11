@@ -126,7 +126,7 @@ Then, **from the owner wallet**:
 ⚠️ **Set `ABAPAY_OWNER` to a multisig (Safe).** With a single EOA, the withdrawal timelock
 (24h by default) only buys detection time — an attacker with the key simply waits it out. On
 **V4** the delay is owner-adjustable and can be set to 0, in which case it buys nothing at all;
-check the live value with `node scripts/base-instant-withdrawals.mjs` before relying on it.
+check the live value with `node scripts/instant-withdrawals.mjs --chain base` before relying on it.
 
 ---
 

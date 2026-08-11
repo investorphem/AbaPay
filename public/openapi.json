@@ -76,7 +76,7 @@
               "scheme": "exact",
               "network": "eip155:42220",
               "asset": "0xcebA9300f2b948710d2653dD7B07f33A8B32118C",
-              "payTo": "0x42Fa463798Ed129a9B5Ee51721CB6db1bfCBe3b9"
+              "payTo": "0x5df8aE2B963165b735B18Ca86B1ea448d2AA032C"
             },
             {
               "protocol": "x402",
@@ -84,7 +84,7 @@
               "scheme": "exact",
               "network": "eip155:42220",
               "asset": "0x48065fbBE25f71C9282ddf5e1cD6D6A887483D5e",
-              "payTo": "0x42Fa463798Ed129a9B5Ee51721CB6db1bfCBe3b9"
+              "payTo": "0x5df8aE2B963165b735B18Ca86B1ea448d2AA032C"
             },
             {
               "protocol": "x402",
