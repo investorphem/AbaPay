@@ -41,14 +41,21 @@ Built via: open `https://dune.com/queries/<id>` → **New** → chart type → *
 
 The root query (8284395) is the data source and has no chart of its own.
 
-**Deployed but deliberately off the dashboard:** `13_by_service` (8284399), `14_by_contract`
-(8284400) and `15_by_rail` (8284401). They were judged too internal for the audience this
-dashboard is published for — a viewer does not need the V1-vs-V4 migration or the relayer
-split. The SQL and the Dune queries are kept, so putting one back is a dashboard edit rather
-than a rewrite, but they are excluded from `dependentQueryIds` and the daily cron does not
-run them: a query with no panel costs credits to update nothing. See `OFF_DASHBOARD` in
-`scripts/dune-base-setup.mjs`, and take a file out of that set in the same change that adds
-its chart back.
+**Retired — off the dashboard and archived on Dune:** `13_by_service` (8284399),
+`14_by_contract` (8284400) and `15_by_rail` (8284401). They were judged too internal for the
+audience this dashboard is published for — a viewer does not need the V1-vs-V4 migration or
+the relayer split. The SQL is kept here so the work is not lost, but the script neither
+deploys nor runs them (see `RETIRED` in `scripts/dune-base-setup.mjs`): PATCHing an archived
+query would resurrect it, and a query with no panel costs credits to update nothing.
+
+⚠️ Archived is not private. The Community plan caps private queries
+(`max_number_of_private_queries_reached`), so these could not be made private — archiving
+removes them from the team library and from search, but the `dune.com/queries/<id>` URL still
+resolves for anyone who has it. Treat archive as "unlisted", not "hidden", and do not put
+anything in a query that would matter if a stranger opened it.
+
+To bring one back: unarchive it on Dune, give it a `DESCRIPTIONS` entry, add its chart to the
+dashboard, and remove it from `RETIRED` — all four, or it half-works.
 
 ⚠️ **Query descriptions are viewer-facing.** They show under the title on every query page and
 on the dashboard. Keep them a plain sentence about what the numbers mean — no repo paths, no
@@ -94,10 +101,15 @@ Money reaches the vault two different ways, and **both are counted**:
 | `x402` | **bare ERC-20 transfer** to the vault, settled by the CDP facilitator | inbound `erc20_base.evt_Transfer` with no `PaymentReceived` in that tx |
 
 ⚠️ **x402 emits no `PaymentReceived` at all.** Anything that reads only that event misses it
-entirely — which is exactly what happened here at first, and it was not a rounding error: x402
-was **13 payments worth $260 of a $280 total**, about 93% of Base USD volume, while the 10,000+
-contract-call payments accounted for under $20. Never assume the contract event is the whole
-picture.
+entirely — which is exactly what happened here at first, and it is not a rounding error. As of
+2026-08-12 on Base, x402 is **21 payments worth $352.75 of a $373 total — about 95% of USD
+volume**, while the 10,000+ contract-call payments account for under $21. The same holds on
+the combined dashboard: **x402 is $20,289 of $26,917 (75%)** across Celo and Base, from 1,019
+of 18,531 transactions. Never assume the contract event is the whole picture.
+
+The asymmetry is real, not a bug: contract-call payments are numerous and tiny (airtime and
+data top-ups), while x402 settlements are few and large. Counting transactions alone makes
+x402 look negligible; counting volume shows it is most of the money.
 
 x402 rows carry `service_type = 'unknown (x402)'` because the item paid for lives in the
 off-chain payment requirements, not in any on-chain event. That bucket is honest, not a bug.
