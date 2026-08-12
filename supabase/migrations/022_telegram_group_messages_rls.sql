@@ -1,0 +1,25 @@
+-- 🔴 SECURITY FIX. `telegram_group_messages` (created in 021) was the only table in the
+-- public schema left without row-level security. Everything in `public` is exposed to
+-- PostgREST, so with RLS off the table was readable AND writable by anyone holding the
+-- project URL and the anon key — both of which ship in the browser bundle by design.
+--
+-- What was exposed: `chat_id`, `sender_id`, `sender_name` and `text` — the content and
+-- authorship of messages posted by OTHER PEOPLE in any Telegram group the bot has joined.
+-- Of every table here, this is the one that should least have been open. Caught by
+-- Supabase's `rls_disabled_in_public` linter, not by us, which is the lesson worth keeping:
+-- 021 added a table and no one checked the advisors afterwards.
+--
+-- ⚠️ NO POLICIES, DELIBERATELY. Enabling RLS with no policy denies anon and authenticated
+-- everything, which is exactly right — nothing legitimate reaches this table with the anon
+-- key. All three access paths use the service-role client, which bypasses RLS entirely:
+--
+--   src/app/api/telegram/webhook/route.ts  insert, and the 1-in-20 48h prune delete
+--   src/app/api/deai/core/route.ts         select feeding "recharge N numbers from the
+--                                          last M minutes" in a group
+--
+-- So do NOT "fix" the follow-up `rls_enabled_no_policy` advisory by adding a policy here.
+-- That advisory is INFO, not an error, and it describes the intended end state. Adding a
+-- permissive policy would re-open precisely what this migration closes. The same applies to
+-- the sixteen other tables that report it — `agent_links` holds PIN hashes,
+-- `mcp_oauth_tokens` holds live access tokens, `deai_identities` holds DeAI PINs.
+alter table telegram_group_messages enable row level security;
