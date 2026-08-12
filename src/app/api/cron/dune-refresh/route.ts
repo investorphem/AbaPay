@@ -5,21 +5,47 @@ import baseChainQueryIds from '@/lib/dune/base-query-ids.json';
 // ⚡ DUNE DASHBOARD REFRESH — re-runs the AbaPay analytics queries so the public dashboards
 // stop going stale.
 //
-// 🔴 WHY THIS EXISTS RATHER THAN DUNE'S OWN SCHEDULER: Dune's built-in query scheduler only
-// runs on the **medium and large** engines (docs.dune.com/web-app/query-editor/query-scheduler),
-// and this account's plan (community_fluid_engine_v2) cannot use them — asking for `medium`
-// returns "Performance medium is not supported for this dataset". So the in-app schedule can
-// never fire no matter how it is configured, which is exactly what we saw: the dashboard sat
-// six days stale (newest row 2026-08-04) until someone pressed Run by hand.
+// ─── HOW THE TWO HALVES OF A DASHBOARD STAY FRESH ──────────────────────────────
 //
-// The API path has no such restriction — `small` executes fine — so a plain cron hitting this
-// route does what the scheduler cannot. Same CRON_SECRET convention as /api/cleanup and
-// /api/schedules/run. `.github/workflows/dune-refresh.yml` drives it daily; any external cron
-// (cron-job.org, Vercel cron) works just as well.
+// These are NOT the same mechanism, and conflating them is what broke this route once
+// already:
 //
-// ⚠️ NAMING: "root query" below means the query that materialises the rows every other query
-// in the same dashboard reads. It has nothing to do with the Base *chain* — one of the two
-// dashboards happens to be Base-only, which makes "base query" hopelessly ambiguous here.
+//   1. The DATA behind a dashboard lives in a materialized view (one per root query,
+//      `dune.abapay.result_abapay_*`). Dune refreshes those on its own cron — set at
+//      creation time, 02:00 UTC daily. Nothing in this repo needs to trigger them, and
+//      this route deliberately does not.
+//
+//   2. A dashboard PANEL renders the *last execution result* of the query behind it.
+//      Refreshing a materialized view does NOT count as an execution of that query —
+//      verified: the root query's `latest_execution_id` stays pinned to the last API
+//      execution while its matview races ahead. So panels only move when something
+//      calls /execute on the query itself. That something is this route.
+//
+// 🔴 THAT DISTINCTION IS THE WHOLE BUG HISTORY. The combined dashboard sat six days
+// stale (newest row 2026-08-04) *while its matviews were refreshing every six hours*,
+// because nobody was executing the queries. Adding matviews does not remove the need
+// for this route; removing this route does not get compensated for by the matviews.
+//
+// ─── WHY NOT DUNE'S OWN QUERY SCHEDULER ────────────────────────────────────────
+//
+// Dune's built-in *query* scheduler only runs on the medium and large engines
+// (docs.dune.com/web-app/query-editor/query-scheduler), and this account's plan
+// (community_fluid_engine_v2) cannot use them — asking for `medium` returns
+// "Performance medium is not supported for this dataset". Matview crons are the one
+// piece of Dune-native scheduling that *does* work on this plan, which is why the data
+// layer uses them and the panel layer uses this route.
+//
+// ─── WHAT THIS ROUTE COSTS ─────────────────────────────────────────────────────
+//
+// Every query it executes reads a matview, never the raw chain tables: ~0.07 credits
+// each, ~1 credit for all fourteen. It used to execute the root queries too, which cost
+// ~41 credits a run and updated no panel at all, because neither root has a widget on
+// either dashboard. Do not add them back. If a root needs re-running, refresh its
+// matview — that is what the matview cron is for.
+//
+// ⚠️ NAMING: "root query" means the query whose matview every other query in the same
+// dashboard reads. It has nothing to do with the Base *chain* — one of the two
+// dashboards happens to be Base-only, which makes "base query" hopelessly ambiguous.
 
 export const maxDuration = 300;
 
@@ -27,16 +53,17 @@ const DUNE_API = 'https://api.dune.com/api/v1';
 
 type Dashboard = {
   label: string;
-  /** Materialises the rows the dependents read; must finish BEFORE they run. */
-  rootQuery: number;
-  dependents: number[];
+  /** The matview these all read. Refreshed by Dune's cron, never by this route. */
+  sourceTable: string;
+  /** The queries with panels on the dashboard. These are what actually get executed. */
+  panelQueries: number[];
 };
 
 // ─── The combined Celo + Base dashboard (the original one) ──────────────────────
 const MAIN_DASHBOARD: Dashboard = {
   label: 'AbaPay — Unified Payments (Celo + Base)',
-  rootQuery: 8178700, // AbaPay - Unified Payments (base table)
-  dependents: [
+  sourceTable: 'dune.abapay.result_abapay_unified_payments',
+  panelQueries: [
     8178726, // KPI Summary (all-time)
     8178727, // Volume & Tx by Rail
     8178728, // Volume & Tx by Chain
@@ -57,8 +84,8 @@ const BASE_CHAIN_DASHBOARD: Dashboard | null =
   typeof baseChainQueryIds.rootQueryId === 'number'
     ? {
         label: 'AbaPay on Base (Base mainnet only)',
-        rootQuery: baseChainQueryIds.rootQueryId,
-        dependents: baseChainQueryIds.dependentQueryIds as number[],
+        sourceTable: 'dune.abapay.result_abapay_base_events',
+        panelQueries: baseChainQueryIds.dependentQueryIds as number[],
       }
     : null;
 
@@ -67,38 +94,66 @@ const DASHBOARDS: Record<string, Dashboard | null> = {
   base: BASE_CHAIN_DASHBOARD,
 };
 
-// `small` is deliberate, not a cost saving: the free engine has a 2-minute ceiling that the
-// root query already exceeded once as the chain log tables grew (see the comment in the query
-// itself), and medium/large are unavailable on this plan.
+// `small` is not a cost saving, it is the only engine this plan has: medium/large return
+// "Performance medium is not supported for this dataset". Every query here reads a matview,
+// so `small` is ample — none of them go near the engine's 2-minute ceiling.
 const PERFORMANCE = 'small';
 
-async function execute(apiKey: string, queryId: number): Promise<string | null> {
-  const res = await fetch(`${DUNE_API}/query/${queryId}/execute`, {
-    method: 'POST',
-    headers: { 'X-DUNE-API-KEY': apiKey, 'Content-Type': 'application/json' },
-    body: JSON.stringify({ performance: PERFORMANCE }),
-  });
-  if (!res.ok) {
-    console.error(`[dune-refresh] execute ${queryId} failed:`, res.status, (await res.text()).slice(0, 200));
-    return null;
-  }
-  const json = await res.json();
-  return json?.execution_id ?? null;
-}
+/**
+ * Gap between consecutive /execute calls.
+ *
+ * 🔴 NOT POLITENESS — THIS IS THE FIX FOR A REAL OUTAGE. The first scheduled run fired
+ * fourteen /execute calls in about three seconds. Dune refused most of them: four of the
+ * six combined-dashboard queries started, and none of the eight Base ones did. The route
+ * reported HTTP 200 anyway (see the status code note below), so the workflow went green
+ * while the entire Base dashboard refreshed nothing.
+ */
+const SPACING_MS = 1500;
 
-/** Poll an execution until it leaves the pending/executing states, or we run out of budget. */
-async function waitFor(apiKey: string, executionId: string, budgetMs: number): Promise<string> {
-  const deadline = Date.now() + budgetMs;
-  while (Date.now() < deadline) {
-    const res = await fetch(`${DUNE_API}/execution/${executionId}/status`, {
-      headers: { 'X-DUNE-API-KEY': apiKey },
-    });
-    if (!res.ok) return 'STATUS_ERROR';
-    const state = (await res.json())?.state ?? 'UNKNOWN';
-    if (state !== 'QUERY_STATE_PENDING' && state !== 'QUERY_STATE_EXECUTING') return state;
-    await new Promise((r) => setTimeout(r, 5000));
+const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+
+type Started = { queryId: number; executionId: string | null; error?: string };
+
+/**
+ * Start one query, backing off through Dune's rate limiter.
+ *
+ * 429 is the expected failure here, not an exceptional one, so it is retried rather than
+ * recorded as a loss. Anything else (a deleted query, a bad key) will not improve on a
+ * retry and is returned immediately so the caller can report it.
+ */
+async function execute(apiKey: string, queryId: number): Promise<Started> {
+  const backoffs = [2000, 6000, 15_000];
+  for (let attempt = 0; ; attempt++) {
+    let res: Response;
+    try {
+      res = await fetch(`${DUNE_API}/query/${queryId}/execute`, {
+        method: 'POST',
+        headers: { 'X-DUNE-API-KEY': apiKey, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ performance: PERFORMANCE }),
+      });
+    } catch (err) {
+      // A dropped connection is worth one more go for the same reason a 429 is.
+      if (attempt < backoffs.length) {
+        await sleep(backoffs[attempt]);
+        continue;
+      }
+      return { queryId, executionId: null, error: `fetch failed: ${(err as Error)?.message}` };
+    }
+
+    if (res.status === 429 && attempt < backoffs.length) {
+      await sleep(backoffs[attempt]);
+      continue;
+    }
+
+    if (!res.ok) {
+      const body = (await res.text()).slice(0, 200);
+      console.error(`[dune-refresh] execute ${queryId} failed:`, res.status, body);
+      return { queryId, executionId: null, error: `HTTP ${res.status}: ${body}` };
+    }
+
+    const json = await res.json();
+    return { queryId, executionId: json?.execution_id ?? null };
   }
-  return 'TIMEOUT';
 }
 
 async function handle(req: Request) {
@@ -138,78 +193,40 @@ async function handle(req: Request) {
     );
   }
 
-  // ⚡ STAGES — because the two halves have very different time profiles and hosting plans cap
-  // function duration (Vercel Hobby 60s, Pro 300s; cron-job.org's free tier disconnects at 30s).
-  //
-  //   ?stage=root        start the root query, return immediately   (fast)
-  //   ?stage=dependents  start the aggregates, return               (fast)
-  //   (no stage)         root -> wait -> dependents in one call     (slow, needs ~4 min)
-  //
-  // Two short crons 15 minutes apart is the robust setup and works on any plan. The combined
-  // mode is kept for manual runs and for hosts that allow a long invocation.
-  //
-  // `stage=base` is the old spelling of `stage=root`, still accepted so the crons registered
-  // before the Base-only dashboard existed keep working. Do not reuse that word for the Base
-  // chain — see the naming note at the top.
-  const stageParam = params.get('stage');
-  const stage = stageParam === 'base' ? 'root' : stageParam;
+  // ⚠️ `?stage=` is accepted and ignored. It used to split this route into "start the root
+  // query" and "start the dependents", with a wait in between, because the dependents read
+  // the root's freshly-written rows. They no longer do — they read a matview on its own
+  // cron — so there is nothing to sequence and nothing to wait for. Old crons that still
+  // pass ?stage=root or ?stage=dependents get the same full refresh either way; a stage
+  // that silently did nothing would be a worse answer than doing the work twice.
+  const legacyStage = params.get('stage');
 
-  const { rootQuery, dependents: dependentQueries } = dashboard;
+  const started: Started[] = [];
+  for (const [i, queryId] of dashboard.panelQueries.entries()) {
+    if (i > 0) await sleep(SPACING_MS);
+    started.push(await execute(apiKey, queryId));
+  }
 
-  if (stage === 'dependents') {
-    const dependents: Record<number, string | null> = {};
-    for (const id of dependentQueries) dependents[id] = await execute(apiKey, id);
-    const n = Object.values(dependents).filter(Boolean).length;
-    return NextResponse.json({
-      ok: n === dependentQueries.length,
+  const ok = started.every((s) => s.executionId !== null);
+  const okCount = started.filter((s) => s.executionId !== null).length;
+
+  // 🔴 THE STATUS CODE MUST TRACK `ok`. This used to return 200 unconditionally, with the
+  // real outcome buried in an `ok: false` field that the workflow never read — so a run
+  // that started zero of eight queries was indistinguishable from a clean one, and the
+  // Base dashboard silently stopped refreshing the day it was wired up. Any caller that
+  // only checks the HTTP status must still be able to notice this failing.
+  return NextResponse.json(
+    {
+      ok,
       dashboard: dashboardKey,
-      stage: 'dependents',
-      dependents,
-      startedDependents: `${n}/${dependentQueries.length}`,
-    });
-  }
-
-  const rootExec = await execute(apiKey, rootQuery);
-  if (!rootExec) {
-    return NextResponse.json(
-      { error: 'Root query failed to start.', dashboard: dashboardKey, rootQuery },
-      { status: 502 },
-    );
-  }
-
-  if (stage === 'root') {
-    // Deliberately no wait: the dependents run from their own cron 15 minutes later, by which
-    // time this has long since finished. Keeps the invocation well inside any plan's ceiling.
-    return NextResponse.json({
-      ok: true,
-      dashboard: dashboardKey,
-      stage: 'root',
-      root: { queryId: rootQuery, executionId: rootExec },
-    });
-  }
-
-  // Combined mode. Give the root query most of the budget. If it overruns we still refresh the
-  // dependents — a dashboard one run behind beats a dashboard six days behind — but we say so in
-  // the response so a stale-looking dashboard is explainable rather than mysterious.
-  const rootState = await waitFor(apiKey, rootExec, 210_000);
-  const rootCompleted = rootState === 'QUERY_STATE_COMPLETED';
-
-  const dependents: Record<number, string | null> = {};
-  for (const id of dependentQueries) {
-    dependents[id] = await execute(apiKey, id);
-  }
-
-  const started = Object.values(dependents).filter(Boolean).length;
-  return NextResponse.json({
-    ok: rootCompleted && started === dependentQueries.length,
-    dashboard: dashboardKey,
-    root: { queryId: rootQuery, executionId: rootExec, state: rootState },
-    dependents,
-    startedDependents: `${started}/${dependentQueries.length}`,
-    note: rootCompleted
-      ? undefined
-      : `Root query did not complete within the budget (state: ${rootState}); dependents may aggregate the previous run's rows.`,
-  });
+      label: dashboard.label,
+      sourceTable: dashboard.sourceTable,
+      started: `${okCount}/${dashboard.panelQueries.length}`,
+      queries: started,
+      ...(legacyStage ? { note: `Ignored legacy ?stage=${legacyStage}; this route no longer has stages.` } : {}),
+    },
+    { status: ok ? 200 : 502 },
+  );
 }
 
 export const GET = handle;

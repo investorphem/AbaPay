@@ -14,8 +14,9 @@
  * no way to diff or review it. Run this instead — it is idempotent: query IDs recorded
  * in `src/lib/dune/base-query-ids.json` are PATCHed, anything missing is created.
  *
- * ⚠️ The dependent queries read the root query through Dune's `query_<id>` syntax, so
- * the root MUST exist before they can be rendered. This script handles that ordering.
+ * ⚠️ The dependent queries read the root query's MATERIALIZED VIEW by name, not through
+ * Dune's `query_<id>` syntax. That distinction is load-bearing — see ROOT_TABLE below.
+ * The matview is created once, out of band; this script only deploys SQL.
  *
  * ⚠️ Creating queries over the API is a PAID Dune feature. On the Community plan the
  * create call comes back 402/403 — the script detects that and falls back to printing
@@ -39,6 +40,24 @@ const SQL_DIR = join(REPO, 'dune', 'base-chain');
 const IDS_FILE = join(REPO, 'src', 'lib', 'dune', 'base-query-ids.json');
 
 const DUNE_API = 'https://api.dune.com/api/v1';
+
+/**
+ * The materialized view of the root query, which all eight dependents read.
+ *
+ * 🔴 IT MUST BE THIS AND NOT `query_<root id>`. Dune's `query_<id>` syntax looks like it
+ * reads the root query's cached result; it does not. It is a view, and Dune re-executes
+ * the entire root query inline for every dependent that names it. The dependents were
+ * originally written that way and each one cost ~41 credits per run instead of ~0.07 —
+ * about 350 credits a day for one dashboard, against a 2,500/month plan quota.
+ *
+ * Creating the matview is a one-time step and is NOT done by this script (query CRUD over
+ * the API is a paid feature on some plans and matview creation is a separate endpoint
+ * again). If it does not exist yet, create it once against the deployed root query with
+ * the name below, engine `small`, cron `0 2 * * *`, then run this script. Dune refreshes
+ * it on that cron from then on — it is the only Dune-native scheduling the Community plan
+ * can actually use.
+ */
+const ROOT_TABLE = 'dune.abapay.result_abapay_base_events';
 
 /** `--verify`: skip deployment, just run the already-deployed queries and report. */
 let VERIFY_ONLY = false;
@@ -119,7 +138,7 @@ const TITLES = {
   '17_new_vs_returning.sql': 'AbaPay (Base) — New vs Returning Payers',
 };
 
-function render(file, contracts, rootQueryId) {
+function render(file, contracts) {
   let sql = readFileSync(join(SQL_DIR, file), 'utf8');
 
   sql = sql.replaceAll('__CONTRACT_LIST__', contracts.map((c) => c.address).join(', '));
@@ -138,18 +157,28 @@ function render(file, contracts, rootQueryId) {
     ].join('\n')
   );
 
-  if (sql.includes('__ROOT_QUERY_ID__')) {
-    if (!rootQueryId) {
-      fail(
-        `${file} reads the root query, but no root query id is known yet.\n` +
-          'Deploy 00_events.sql first (this script does that automatically when it can create queries).'
-      );
-    }
-    sql = sql.replaceAll('__ROOT_QUERY_ID__', String(rootQueryId));
-  }
+  sql = sql.replaceAll('__ROOT_TABLE__', ROOT_TABLE);
 
   const leftover = sql.match(/__[A-Z_]+__/);
   if (leftover) fail(`${file} still contains the placeholder ${leftover[0]} after rendering.`);
+
+  // 🔴 REGRESSION GUARD. `query_<id>` re-executes the root query inline for every
+  // dependent that names it — the mistake this dashboard shipped with, worth ~350
+  // credits a day. It is a silent one: the SQL is valid, the numbers are right, and
+  // only the bill and the rate limiter ever complain. Refuse to deploy it.
+  //
+  // Comments are stripped first: 00_events.sql documents this very trap by name, and
+  // matching inside comments would make the file that explains the rule fail the rule.
+  const queryRef = sql.replace(/--[^\n]*/g, '').match(/\bquery_\d+\b/);
+  if (queryRef) {
+    fail(
+      `${file} reads the root query as \`${queryRef[0]}\`.\n\n` +
+        `  That is a view, not a cached result — Dune re-runs the whole root query inline\n` +
+        `  every time this one executes (~41 credits instead of ~0.07). Read the\n` +
+        `  materialized view instead: write __ROOT_TABLE__, which renders to\n` +
+        `  ${ROOT_TABLE}.`
+    );
+  }
 
   return sql;
 }
@@ -316,14 +345,14 @@ async function main() {
 
   if (printOnly) {
     const file = files.find((f) => f.startsWith(printOnly)) ?? printOnly;
-    console.log(render(file, contracts, ids[rootFile] ?? 'ROOT_QUERY_ID_HERE'));
+    console.log(render(file, contracts));
     return;
   }
 
   if (dryRun) {
     for (const file of files) {
       console.log(`\n${'═'.repeat(78)}\n── ${file} — ${TITLES[file] ?? file}\n${'═'.repeat(78)}`);
-      console.log(render(file, contracts, ids[rootFile] ?? 'ROOT_QUERY_ID_HERE'));
+      console.log(render(file, contracts));
     }
     return;
   }
@@ -336,12 +365,14 @@ async function main() {
     'dune/base-chain/ in github.com/investorphem/AbaPay — edit there and re-run ' +
     'scripts/dune-base-setup.mjs rather than editing here.';
 
-  // Root first: the dependents cannot even be rendered without its id.
+  // Root first. The dependents no longer need its id to render — they name its matview —
+  // but deploying the source of the data before the things that read it is still the order
+  // that leaves the dashboard coherent if the run dies partway.
   // `--verify` skips straight to the run-and-check below: re-PATCHing nine unchanged queries
   // just to confirm they work burns the write rate limit for nothing.
   for (const file of VERIFY_ONLY ? [] : [rootFile, ...files.filter((f) => f !== rootFile)]) {
     const name = TITLES[file] ?? file;
-    const sql = render(file, contracts, ids[rootFile]);
+    const sql = render(file, contracts);
     const existing = ids[file];
 
     const res = existing
@@ -418,8 +449,12 @@ async function main() {
   console.log(
     '\nDone. Dashboard: https://dune.com/abapay/abapay-on-base\n' +
       'Charts are added in the web UI — open a query, add a visualization, then "Add to\n' +
-      'dashboard". Dune has no API for creating visualizations, so this script cannot do it.\n' +
-      'The daily refresh is already wired: .github/workflows/dune-refresh.yml runs every day.\n'
+      'dashboard". Dune has no API for creating visualizations, so this script cannot do it.\n\n' +
+      'Refresh is already wired, in two halves that are easy to confuse:\n' +
+      `  data   ${ROOT_TABLE}\n` +
+      '         refreshed by Dune\'s own matview cron at 02:00 UTC.\n' +
+      '  panels .github/workflows/dune-refresh.yml executes the 8 dependent queries daily.\n' +
+      '         A matview refresh does NOT update a panel — both halves are required.\n'
   );
 }
 

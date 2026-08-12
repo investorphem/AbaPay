@@ -1,5 +1,5 @@
 -- AbaPay on Base — agent rail vs direct wallet payments, daily
--- Reads the root query; never touches base.logs. See 00_events.sql.
+-- Reads the root query's materialized view; never touches base.logs. See 00_events.sql.
 --
 -- "Agent (relayer)" means the transaction also carried an AgentPayment event, i.e.
 -- the relayer spent a spending allowance the user had granted — a payment made from
@@ -12,6 +12,6 @@ SELECT
     COUNT(*)                        AS payments,
     SUM(amount_usd)                 AS volume_usd,
     COUNT(DISTINCT user_address)    AS unique_payers
-FROM query___ROOT_QUERY_ID__
+FROM __ROOT_TABLE__
 GROUP BY 1, 2
 ORDER BY 1, 2

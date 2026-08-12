@@ -373,21 +373,31 @@ dashboard is scoped to Base at the source, and it tracks **both** Base contracts
 restart at the redeploy. Its SQL is version-controlled in [`dune/base-chain/`](dune/base-chain/)
 and deployed with `node scripts/dune-base-setup.mjs`; see that directory's README.
 
-**Automatic daily refresh:** [`.github/workflows/dune-refresh.yml`](.github/workflows/dune-refresh.yml)
-runs at 03:15 UTC every day and refreshes both dashboards — no manual run, no external cron
-service. It needs two repository secrets: `APP_URL` and `CRON_SECRET`.
+**Automatic daily refresh — two mechanisms, both required:**
 
-**Why not use Dune's own scheduler?** Because it cannot work on this account. Dune's built-in
-query scheduler runs only on the **medium and large** engines, and the `community_fluid_engine_v2`
-plan has neither — requesting `medium` returns *"Performance medium is not supported for this
-dataset"*. The in-app schedule therefore never fires however it is configured, which is exactly
-what happened: the dashboard sat six days stale until someone pressed Run by hand. The API path
-has no such restriction (`small` executes fine), so this route does what the scheduler cannot.
+| Layer | What keeps it fresh | When |
+|---|---|---|
+| **Data** — one materialized view per dashboard (`dune.abapay.result_abapay_unified_payments`, `dune.abapay.result_abapay_base_events`) | Dune's own matview cron | 02:00 UTC daily |
+| **Panels** — the 14 queries that have charts | [`.github/workflows/dune-refresh.yml`](.github/workflows/dune-refresh.yml) → `/api/cron/dune-refresh` | 03:15 UTC daily |
 
-Each dashboard has a **root query** that materialises the rows the rest aggregate, so the
-workflow starts the roots, waits, then starts the dependents. In the single-call mode the route
-waits itself; if the root overruns its budget the dependents still run and the JSON response says
-so, so a dashboard that looks one run behind is explainable rather than mysterious.
+No manual run and no external cron service. The workflow needs two repository secrets, `APP_URL`
+and `CRON_SECRET`.
+
+A dashboard panel renders the **last execution** of the query behind it, and refreshing a matview
+does *not* count as an execution of that query. So the matview cron alone never moves a panel —
+the combined dashboard sat six days stale while its matviews were refreshing every six hours —
+and executing the queries alone would only re-aggregate a stale table. Both halves, every day.
+
+**Why not use Dune's own scheduler?** Its built-in **query** scheduler runs only on the medium
+and large engines, and the `community_fluid_engine_v2` plan has neither — requesting `medium`
+returns *"Performance medium is not supported for this dataset"*, so the in-app schedule never
+fires however it is configured. Matview crons are the one piece of Dune-native scheduling that
+*does* work on this plan, which is why the data layer uses them and the panel layer uses the API.
+
+Each dashboard has a **root query** that feeds the matview the rest aggregate. The cron
+deliberately does **not** execute the roots: neither has a chart of its own, so running one costs
+credits to update nothing. Every query the cron does execute reads a matview rather than raw
+chain tables — about **1 credit for all fourteen**, against a 2,500/month quota.
 
 ---
 

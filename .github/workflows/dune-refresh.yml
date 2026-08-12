@@ -2,23 +2,37 @@ name: Dune dashboard refresh
 
 # ⚡ Re-runs both public Dune dashboards every day so neither goes stale.
 #
-# 🔴 WHY GITHUB ACTIONS AND NOT DUNE'S SCHEDULER: Dune's built-in query scheduler only runs
-# on the medium/large engines, which the Community plan does not have — the in-app schedule
-# never fires however it is configured. That is how the dashboard once sat six days stale
-# until someone pressed Run by hand. See src/app/api/cron/dune-refresh/route.ts.
+# 🔴 WHAT THIS IS AND IS NOT RESPONSIBLE FOR. A Dune dashboard has two independent
+# freshness mechanisms and this workflow only drives one of them:
 #
-# 🔴 WHY NOT A VERCEL CRON: Vercel's Hobby plan allows two cron jobs at daily granularity and
-# caps a function at 60s — not enough for the "wait for the root query, then run the
-# dependents" sequence. Actions can sleep between calls for free, which is what the two-stage
-# API actually needs, and it keeps the schedule reviewable in the repo.
+#   * The DATA lives in materialized views that Dune refreshes on its own cron at
+#     02:00 UTC. Nothing here triggers them.
+#   * A PANEL shows the last *execution* of the query behind it, and a matview refresh
+#     does not count as one. Executing those queries is this workflow's entire job.
+#
+# The combined dashboard once sat six days stale while its matviews were refreshing
+# every six hours, because nothing was executing the queries. See
+# src/app/api/cron/dune-refresh/route.ts for the long version.
+#
+# 🔴 WHY GITHUB ACTIONS AND NOT DUNE'S SCHEDULER: Dune's built-in *query* scheduler only
+# runs on the medium/large engines, which the Community plan does not have — the in-app
+# schedule never fires however it is configured. Matview crons are the one bit of
+# Dune-native scheduling that works on this plan, and the data layer already uses them.
+#
+# 🔴 WHY NOT A VERCEL CRON: Vercel's Hobby plan allows two cron jobs at daily
+# granularity. Two dashboards fits today, but Actions keeps the schedule reviewable in
+# the repo and leaves room for a third.
 
 on:
   schedule:
-    # 03:15 UTC daily (04:15 WAT). Off the hour on purpose: GitHub queues scheduled runs and
-    # the top of the hour is its most congested slot, so :15 tends to start closer to on time.
+    # 03:15 UTC daily (04:15 WAT), an hour after the 02:00 UTC matview refresh so the
+    # panels render data that is already current. GitHub queues scheduled runs and can
+    # start them well over an hour late — the first real run fired at 04:58 — so that
+    # gap is a floor, not a target. Off the hour on purpose: the top of the hour is
+    # GitHub's most congested slot.
     - cron: '15 3 * * *'
-  # Kept so a refresh can still be forced after a backfill or a query edit — the schedule is
-  # what makes the daily run automatic, this is just an escape hatch.
+  # Kept so a refresh can still be forced after a backfill or a query edit — the schedule
+  # is what makes the daily run automatic, this is just an escape hatch.
   workflow_dispatch:
 
 concurrency:
@@ -29,7 +43,7 @@ jobs:
   refresh:
     name: Refresh Dune dashboards
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 10
 
     env:
       APP_URL: ${{ secrets.APP_URL }}
@@ -56,9 +70,7 @@ jobs:
           # an unauthenticated request and get a 401 that looks like a broken secret rather than a
           # wrong URL. Following redirects would not fix it; using the right host is what fixes it.
           # An unknown ?dashboard= is rejected with 400 *after* the auth check but *before* any
-          # Dune call, so this proves URL + secret without executing a single query. Do not probe
-          # with a bogus ?stage= instead: an unrecognised stage falls through to the combined
-          # mode and would run the whole refresh on every preflight.
+          # Dune call, so this proves URL + secret without executing a single query.
           code=$(curl -sS -o /dev/null -w '%{http_code}' -X POST \
             -H "Authorization: Bearer $CRON_SECRET" \
             "$APP_URL/api/cron/dune-refresh?dashboard=__preflight__" || echo 000)
@@ -70,47 +82,44 @@ jobs:
             *)   echo "::warning::Unexpected preflight status $code from $APP_URL; continuing." ;;
           esac
 
-      # Both root queries first. They are the expensive half: each one rescans the chain log
-      # tables and materialises the rows every other query on its dashboard reads.
-      - name: Start root queries
+      # One call per dashboard. Every query executed here reads a matview rather than the
+      # raw chain tables, so the whole thing costs about a credit and takes a few seconds
+      # — the route spaces the calls out internally to stay under Dune's rate limiter.
+      #
+      # ⚠️ Both dashboards are refreshed even if the first one fails, so a Base-side
+      # problem cannot silently cost the combined dashboard its daily run. The failure is
+      # recorded and re-raised after the loop.
+      - name: Refresh dashboards
         run: |
-          set -euo pipefail
+          set -uo pipefail
+          failed=""
           for dashboard in main base; do
-            echo "── $dashboard: root"
+            echo "── $dashboard"
             code=$(curl -sS -o /tmp/out.json -w '%{http_code}' -X POST \
               -H "Authorization: Bearer $CRON_SECRET" \
-              "$APP_URL/api/cron/dune-refresh?dashboard=$dashboard&stage=root")
+              "$APP_URL/api/cron/dune-refresh?dashboard=$dashboard" || echo 000)
             cat /tmp/out.json; echo
-            # 503 = that dashboard has no query ids deployed yet. Not a failure of the refresh
-            # itself, so don't fail the run — but make it visible instead of silently skipped.
-            if [ "$code" = "503" ]; then
-              echo "::warning::$dashboard dashboard is not deployed to Dune yet — skipping."
-            elif [ "$code" != "200" ]; then
-              echo "::error::$dashboard root query failed (HTTP $code)"
-              exit 1
-            fi
+            case "$code" in
+              200)
+                echo "$dashboard: all panel queries started."
+                ;;
+              503)
+                # That dashboard has no query ids deployed yet. Not a failure of the
+                # refresh itself, so don't fail the run — but make it visible.
+                echo "::warning::$dashboard dashboard is not deployed to Dune yet — skipping."
+                ;;
+              *)
+                # 🔴 502 means the route started SOME BUT NOT ALL of the queries — the
+                # dashboard is now half-refreshed and half-stale. That used to be
+                # reported as 200 with the truth hidden in the body, which is how the
+                # Base dashboard went a full day refreshing nothing while this workflow
+                # showed a green tick. Never soften this back into a warning.
+                echo "::error::$dashboard refresh failed (HTTP $code) — see the JSON above for which queries did not start."
+                failed="$failed $dashboard"
+                ;;
+            esac
           done
-
-      # The dependents read the rows the root queries just wrote, so they must not start until
-      # those have finished. The root query has run close to the free engine's 2-minute ceiling
-      # before, and there are now two of them queued on the same small engine — 6 minutes is
-      # slack, not an estimate.
-      - name: Wait for the root queries to finish
-        run: sleep 360
-
-      - name: Start dependent queries
-        run: |
-          set -euo pipefail
-          for dashboard in main base; do
-            echo "── $dashboard: dependents"
-            code=$(curl -sS -o /tmp/out.json -w '%{http_code}' -X POST \
-              -H "Authorization: Bearer $CRON_SECRET" \
-              "$APP_URL/api/cron/dune-refresh?dashboard=$dashboard&stage=dependents")
-            cat /tmp/out.json; echo
-            if [ "$code" = "503" ]; then
-              echo "::warning::$dashboard dashboard is not deployed to Dune yet — skipping."
-            elif [ "$code" != "200" ]; then
-              echo "::error::$dashboard dependent queries failed (HTTP $code)"
-              exit 1
-            fi
-          done
+          if [ -n "$failed" ]; then
+            echo "::error::Dashboards that did not fully refresh:$failed"
+            exit 1
+          fi

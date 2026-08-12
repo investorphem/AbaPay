@@ -2,9 +2,16 @@
 -- AbaPay — Base chain payments  (ROOT QUERY of the Base-only dashboard)
 -- ═══════════════════════════════════════════════════════════════════════════════
 --
--- One row per AbaPay bill payment on **Base mainnet only**. Every other query in this
--- dashboard reads this one via `query_<id>`, so this is the only query that ever
--- touches the raw chain tables — which is what keeps the other eight cheap and fast.
+-- One row per AbaPay bill payment on **Base mainnet only**. This is the only query that
+-- ever touches the raw chain tables; the other eight read its **materialized view**
+-- (`dune.abapay.result_abapay_base_events`), which is what keeps them cheap and fast.
+--
+-- 🔴 THEY MUST NOT READ IT VIA `query_8284395`. That syntax is a view, not a cached
+-- result: Dune re-executes this entire query inline for every dependent that uses it.
+-- The eight dependents were originally written that way, and each one cost ~41 credits
+-- per run instead of ~0.07 — roughly 350 credits a day against a 2,500/month quota,
+-- which is a week of budget for one dashboard. The materialized view is the fix, and it
+-- only works if the dependents name the table. See `dune/base-chain/README.md`.
 --
 -- ⚡ TWO SETTLEMENT RAILS, BOTH COUNTED. A payment reaches the vault two different ways:
 --
@@ -58,6 +65,9 @@ WITH abapay_logs AS (
           0x8c69ba65ac630960f1d90c9a12eb143096fa71019450181b7fb5c299f03a6357, -- PaymentReceived(address,address,string,string,uint256)
           0x90619b8207d57f0cc87c98e7c2fdb86c6f12683d8a29412b02d558b3be68e6cd  -- AgentPayment(address,address,uint256,uint256)
       )
+      -- See the note on the x402 scan below: AbaPay did not exist before this date, so
+      -- the floor excludes nothing real and lets Dune skip most of the chain's history.
+      AND block_time >= TIMESTAMP '2026-04-01 00:00:00'
 ),
 
 -- AgentPayment is emitted *in addition to* PaymentReceived in the same transaction
@@ -131,6 +141,15 @@ vault_inflows AS (
           0x833589fcd6edb6e08f4c7c32d4f71b54bda02913, -- USDC
           0xfde4c96c8593536e31f229ea8f37b2ada2699bb2  -- USDT
       )
+      -- 🔴 WITHOUT THIS FLOOR THIS SCAN READS EVERY USDC/USDT TRANSFER ON BASE SINCE
+      -- GENESIS before narrowing to the vault. The contract-call scan above is filtered
+      -- to AbaPay's own addresses so it was always cheap, but the token contracts are
+      -- used by the entire chain — this CTE was ~95% of the query's cost. The combined
+      -- Celo+Base dashboard hit the same wall and was fixed the same way; this query
+      -- was written afterwards and never got the floor. AbaPay's first Base payment was
+      -- 2026-05-01, so 2026-04-01 is a month of buffer rather than a rolling window
+      -- that needs maintenance — nothing real is excluded, and never will be.
+      AND t.evt_block_time >= TIMESTAMP '2026-04-01 00:00:00'
 ),
 
 -- A transaction that emitted PaymentReceived is already counted by rail 1; its inbound
