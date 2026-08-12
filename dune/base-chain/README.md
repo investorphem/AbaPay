@@ -58,21 +58,39 @@ payment, services used, first and latest payment date, active days.
 
 The root query (8284395) is the data source and has no chart of its own.
 
-**Retired — off the dashboard and archived on Dune:** `13_by_service` (8284399),
+**Retired — off the dashboard and hidden on Dune:** `13_by_service` (8284399),
 `14_by_contract` (8284400) and `15_by_rail` (8284401). They were judged too internal for the
 audience this dashboard is published for — a viewer does not need the V1-vs-V4 migration or
 the relayer split. The SQL is kept here so the work is not lost, but the script neither
-deploys nor runs them (see `RETIRED` in `scripts/dune-base-setup.mjs`): PATCHing an archived
-query would resurrect it, and a query with no panel costs credits to update nothing.
+deploys nor runs them (see `RETIRED` in `scripts/dune-base-setup.mjs`): a query with no panel
+costs credits to update nothing.
 
-⚠️ Archived is not private. The Community plan caps private queries
-(`max_number_of_private_queries_reached`), so these could not be made private — archiving
-removes them from the team library and from search, but the `dune.com/queries/<id>` URL still
-resolves for anyone who has it. Treat archive as "unlisted", not "hidden", and do not put
-anything in a query that would matter if a stranger opened it.
+### How to actually hide a query on the Community plan
 
-To bring one back: unarchive it on Dune, give it a `DESCRIPTIONS` entry, add its chart to the
-dashboard, and remove it from `RETIRED` — all four, or it half-works.
+Three flags look like they do this and only one works here:
+
+| Flag | Result |
+|---|---|
+| `is_archived: true` | Delists from library and search. **The URL still resolves** — unlisted, not hidden. |
+| `is_private: true` | Genuinely hidden, but rejected: `max_number_of_private_queries_reached`. The plan caps private queries. |
+| `is_temp: true` | ✅ Not in the library and not accessible to anyone but the owner. No plan cap. |
+
+`is_temp` is the one that works. Two things to know before using it:
+
+* 🔴 **A query cannot be both temp and archived** — the database rejects it with
+  `violates check constraint "not_temp_and_archived"`. Send `is_archived: false` and
+  `is_temp: true` in the **same** call, or the update fails.
+* 🔴 **A temp query cannot own a materialized view** — `updateMaterializedView` returns
+  *"Cannot materialize a temporary query."* If the query has one, delete the matview first,
+  or you strand it: it keeps its refresh cron and can no longer be reconfigured. This is
+  exactly what happened to `dune.abapay.result_abapay_by_rail`.
+
+Verified rather than assumed: fetching `dune.com/queries/8284399` unauthenticated returns a
+page titled just `Dune`, while a still-public query returns `AbaPay (Base) — KPI Summary |
+Dune`. The server stops resolving the name for anonymous visitors.
+
+To bring one back: set `is_temp: false` on Dune, give it a `DESCRIPTIONS` entry, add its chart
+to the dashboard, and remove it from `RETIRED` — all four, or it half-works.
 
 ⚠️ **Query descriptions are viewer-facing.** They show under the title on every query page and
 on the dashboard. Keep them a plain sentence about what the numbers mean — no repo paths, no
