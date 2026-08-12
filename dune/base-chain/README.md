@@ -5,22 +5,24 @@
 The SQL behind the **Base-only** public dashboard on the `abapay` Dune team. This directory is
 the source of truth: the copies living on dune.com are deployed from here.
 
-## ⚠️ Charts can only be created in the Dune web UI
+## Charts can be created programmatically — via the MCP server, not the REST API
 
-**The dashboard is fully built — all 5 charts are live.** This section explains why any *future*
-chart also has to be made in the browser.
+**The dashboard is fully built.** An earlier version of this file said charts could only be made
+in the browser. That was wrong, and worth correcting rather than deleting: it was true of the
+paths that had been probed, and false of the one that had not.
 
-The API does queries and dashboards, and it takes markdown `text_widgets` — but it **cannot
-create a visualization**, so it cannot put a chart on a dashboard. Established by probing, not
-assumed:
+Probing the public REST API finds nothing that mints a visualization — `POST /visualizations`,
+`POST /visualization`, `POST /query/{id}/visualizations`, `POST /dashboards/{id}/widgets` and
+every neighbouring spelling return 404. The conclusion drawn from that ("so it is a UI step")
+did not hold: the **Dune MCP server** exposes `generateVisualization`, which creates one against
+an existing query and returns its id. The three counters on this dashboard were made that way.
 
-* `visualization_widgets` entries require a `visualization_id`. Send one with only a `query_id`
-  and the API 500s; send a valid id and it 200s.
-* Nothing creates a visualization: `POST /visualizations`, `POST /visualization`,
-  `POST /query/{id}/visualizations`, `POST /dashboards/{id}/widgets` and every neighbouring
-  spelling all return 404.
+So the real constraints are narrower than they looked:
 
-Visualizations are minted by the query editor and belong to a query, so this is a UI step.
+* A visualization belongs to a query and needs that query to have **completed at least one
+  execution** before a chart can be built from it.
+* `visualization_widgets` entries require a real `visualization_id` — send one with only a
+  `query_id` and the API 500s.
 
 ⚠️ **`PATCH /dashboards/{id}` replaces the widget lists wholesale.** Sending only
 `visualization_widgets` deletes every text widget, and vice versa. Always send both, or you will
@@ -28,8 +30,20 @@ silently wipe the half you left out.
 
 ### What is on the dashboard
 
-Built via: open `https://dune.com/queries/<id>` → **New** → chart type → **···** →
+Either via `generateVisualization` on the MCP server, or in the browser: open
+`https://dune.com/queries/<id>` → **New** → chart type → **···** →
 **Add to dashboard → AbaPay on Base**.
+
+Top of the page is the three headline numbers, shown as plain counters rather than a chart —
+someone landing here should read the totals without interpreting a graph:
+
+| Counter | id | Column |
+|---|---|---|
+| Total volume (USD) | 12306215 | `volume_usd` |
+| Total transactions | 12306217 | `payments` |
+| Total users | 12306220 | `unique_payers` |
+
+All three come from row 1 of the KPI query (8284396), which returns exactly one row. Below them:
 
 | Query | id | Visualization |
 |---|---|---|
@@ -38,6 +52,9 @@ Built via: open `https://dune.com/queries/<id>` → **New** → chart type → *
 | Volume by Token | 8284398 | Donut — USDC vs USDT |
 | DAU / WAU / MAU | 8284434 | Line — all three series |
 | New vs Returning Payers | 8284436 | Bar |
+
+The KPI table repeats the three counters and adds what they leave out — median and largest
+payment, services used, first and latest payment date, active days.
 
 The root query (8284395) is the data source and has no chart of its own.
 
