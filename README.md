@@ -378,7 +378,7 @@ and deployed with `node scripts/dune-base-setup.mjs`; see that directory's READM
 | Layer | What keeps it fresh | When |
 |---|---|---|
 | **Data** — one materialized view per dashboard (`dune.abapay.result_abapay_unified_payments`, `dune.abapay.result_abapay_base_events`) | Dune's own matview cron | 02:00 UTC daily |
-| **Panels** — the 14 queries that have charts | [`.github/workflows/dune-refresh.yml`](.github/workflows/dune-refresh.yml) → `/api/cron/dune-refresh` | 03:15 UTC daily |
+| **Panels** — the 10 queries that have charts (5 per dashboard) | [`.github/workflows/dune-refresh.yml`](.github/workflows/dune-refresh.yml) → `/api/cron/dune-refresh` | 03:15 UTC daily |
 
 No manual run and no external cron service. The workflow needs two repository secrets, `APP_URL`
 and `CRON_SECRET`.
@@ -397,7 +397,9 @@ fires however it is configured. Matview crons are the one piece of Dune-native s
 Each dashboard has a **root query** that feeds the matview the rest aggregate. The cron
 deliberately does **not** execute the roots: neither has a chart of its own, so running one costs
 credits to update nothing. Every query the cron does execute reads a matview rather than raw
-chain tables — about **1 credit for all fourteen**, against a 2,500/month quota.
+chain tables — well under **1 credit for all ten**, against a 2,500/month quota. A few queries
+are deployed but kept off the dashboards; the cron deliberately skips those, because executing
+a query with no panel spends credits updating something nobody can see.
 
 ---
 

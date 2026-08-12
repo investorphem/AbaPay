@@ -59,6 +59,21 @@ const DUNE_API = 'https://api.dune.com/api/v1';
  */
 const ROOT_TABLE = 'dune.abapay.result_abapay_base_events';
 
+/**
+ * Deployed to Dune, but deliberately NOT shown on the dashboard.
+ *
+ * These were taken off the published dashboard as too internal for the audience it is for.
+ * The SQL and the Dune queries are kept — nothing is lost, and putting one back is a
+ * dashboard edit rather than a rewrite — but they are excluded from `dependentQueryIds`,
+ * which is what the daily cron executes.
+ *
+ * ⚠️ The rule the cron follows is "execute exactly what has a panel". Executing a query
+ * with no panel spends credits to update something nobody can look at, which is the habit
+ * that made the old refresh cost ~41 credits a day for nothing. If you add one of these
+ * back to the dashboard, take it out of this set in the same change.
+ */
+const OFF_DASHBOARD = new Set(['13_by_service.sql', '14_by_contract.sql', '15_by_rail.sql']);
+
 /** `--verify`: skip deployment, just run the already-deployed queries and report. */
 let VERIFY_ONLY = false;
 
@@ -312,8 +327,10 @@ function writeIds(queries, { quiet = false } = {}) {
       'Dune query id. /api/cron/dune-refresh imports this to know what to re-run daily. Safe to ' +
       'hand-edit only when the queries were created manually on dune.com (free-plan fallback).',
     rootQueryId: queries[rootFile] ?? null,
+    // Only the queries with a panel on the dashboard — see OFF_DASHBOARD. `queries` below
+    // still maps every file, so nothing is forgotten, it just is not run daily.
     dependentQueryIds: Object.entries(queries)
-      .filter(([f]) => f !== rootFile)
+      .filter(([f]) => f !== rootFile && !OFF_DASHBOARD.has(f))
       .sort(([a], [b]) => a.localeCompare(b))
       .map(([, id]) => id),
     queries,

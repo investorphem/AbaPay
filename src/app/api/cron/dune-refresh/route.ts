@@ -38,7 +38,7 @@ import baseChainQueryIds from '@/lib/dune/base-query-ids.json';
 // ─── WHAT THIS ROUTE COSTS ─────────────────────────────────────────────────────
 //
 // Every query it executes reads a matview, never the raw chain tables: ~0.07 credits
-// each, ~1 credit for all fourteen. It used to execute the root queries too, which cost
+// each, well under 1 credit for all ten. It used to execute the root queries too, which cost
 // ~41 credits a run and updated no panel at all, because neither root has a widget on
 // either dashboard. Do not add them back. If a root needs re-running, refresh its
 // matview — that is what the matview cron is for.
@@ -63,9 +63,12 @@ type Dashboard = {
 const MAIN_DASHBOARD: Dashboard = {
   label: 'AbaPay — Unified Payments (Celo + Base)',
   sourceTable: 'dune.abapay.result_abapay_unified_payments',
+  // ⚠️ Exactly the queries WITH A PANEL on the dashboard, which is not the same as every
+  // query that exists. 8178727 (Volume & Tx by Rail) is still deployed and still works,
+  // but it was taken off the dashboard, so executing it would spend credits updating
+  // something nobody can see. Add a query here only when it has a widget.
   panelQueries: [
-    8178726, // KPI Summary (all-time)
-    8178727, // Volume & Tx by Rail
+    8178726, // KPI Summary (all-time) — 4 counters + the summary table
     8178728, // Volume & Tx by Chain
     8178729, // Volume & Tx by Token (chain-scoped)
     8178732, // DAU and WAU

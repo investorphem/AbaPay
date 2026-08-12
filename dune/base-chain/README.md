@@ -7,7 +7,7 @@ the source of truth: the copies living on dune.com are deployed from here.
 
 ## ⚠️ Charts can only be created in the Dune web UI
 
-**The dashboard is fully built — all 8 charts are live.** This section explains why any *future*
+**The dashboard is fully built — all 5 charts are live.** This section explains why any *future*
 chart also has to be made in the browser.
 
 The API does queries and dashboards, and it takes markdown `text_widgets` — but it **cannot
@@ -36,13 +36,23 @@ Built via: open `https://dune.com/queries/<id>` → **New** → chart type → *
 | KPI Summary | 8284396 | Table (10 metrics in one row) |
 | Daily Volume & Transactions | 8284397 | Bar — `day` × `payments` |
 | Volume by Token | 8284398 | Donut — USDC vs USDT |
-| Volume by Service | 8284399 | Bar — `service_type` × `volume_usd` |
-| Volume by Contract | 8284400 | Results table — V1 vs V4 |
-| Payment rails | 8284401 | Bar — `day` × `payments`, grouped by `rail` (direct / agent / x402) |
-| DAU / WAU / MAU | 8284434 | Line |
+| DAU / WAU / MAU | 8284434 | Line — all three series |
 | New vs Returning Payers | 8284436 | Bar |
 
 The root query (8284395) is the data source and has no chart of its own.
+
+**Deployed but deliberately off the dashboard:** `13_by_service` (8284399), `14_by_contract`
+(8284400) and `15_by_rail` (8284401). They were judged too internal for the audience this
+dashboard is published for — a viewer does not need the V1-vs-V4 migration or the relayer
+split. The SQL and the Dune queries are kept, so putting one back is a dashboard edit rather
+than a rewrite, but they are excluded from `dependentQueryIds` and the daily cron does not
+run them: a query with no panel costs credits to update nothing. See `OFF_DASHBOARD` in
+`scripts/dune-base-setup.mjs`, and take a file out of that set in the same change that adds
+its chart back.
+
+⚠️ **Query descriptions are viewer-facing.** They show under the title on every query page and
+on the dashboard. Keep them a plain sentence about what the numbers mean — no repo paths, no
+"re-run the script" instructions. Those belong here, in the README, where only maintainers look.
 
 ⚠️ **Always check the axes after creating a chart.** Dune auto-picks X and Y, and it picks badly
 whenever the query has trailing date or text columns — `Volume by Service` defaulted to
