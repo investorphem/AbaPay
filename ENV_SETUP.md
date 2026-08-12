@@ -405,12 +405,19 @@ re-runs the analytics queries behind the two public dashboards so neither goes s
 * `?dashboard=main` — the original combined Celo + Base dashboard (7 queries)
 * `?dashboard=base` — **Base mainnet only** (9 queries), SQL in `dune/base-chain/`
 
-Needed because Dune's own query scheduler only runs on the **medium/large** engines, which the
+Needed because Dune's own **query** scheduler only runs on the **medium/large** engines, which the
 Community plan cannot use (`medium` returns *"Performance medium is not supported for this
-dataset"*). The API path works on `small`, so a cron calling this route is the only way to get
-automatic refreshes on a free plan. `.github/workflows/dune-refresh.yml` does that daily —
+dataset"*). The API path works on `small`, so a cron calling this route is the only way to update
+the dashboard **panels** on a free plan. `.github/workflows/dune-refresh.yml` does that daily —
 set the repository secrets `APP_URL` and `CRON_SECRET` (Settings → Secrets and variables →
 Actions) and it runs itself; nothing to register at cron-job.org.
+
+⚠️ That cron is only half of the refresh. The **data** behind both dashboards lives in
+materialized views, which Dune refreshes on its own matview cron at 02:00 UTC — matview crons
+*do* work on the Community plan, unlike the query scheduler. A matview refresh does not count as
+an execution of the query, so it never updates a panel on its own; and the cron above only
+re-aggregates whatever the matviews last wrote. Both halves are required. See
+`dune/base-chain/README.md`.
 
 `ABAPAY_BASE_CONTRACTS` is only read by `scripts/dune-base-setup.mjs`, which renders and deploys
 the Base dashboard's SQL. It lists **every** AbaPay deployment on Base, not just the current one,

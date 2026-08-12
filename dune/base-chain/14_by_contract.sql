@@ -1,5 +1,5 @@
 -- AbaPay on Base — activity split across the two deployed contracts
--- Reads the root query; never touches base.logs. See 00_events.sql.
+-- Reads the root query's materialized view; never touches base.logs. See 00_events.sql.
 --
 -- This is the query that justifies tracking both addresses instead of only the
 -- current one: without it a redeploy looks like the product died and a new one
@@ -15,7 +15,7 @@ WITH totals AS (
         COUNT(DISTINCT user_address)    AS unique_payers,
         MIN(block_date)                 AS first_activity,
         MAX(block_date)                 AS last_activity
-    FROM query___ROOT_QUERY_ID__
+    FROM __ROOT_TABLE__
     GROUP BY 1, 2
 )
 

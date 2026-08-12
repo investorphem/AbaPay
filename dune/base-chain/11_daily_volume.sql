@@ -1,5 +1,5 @@
 -- AbaPay on Base — daily volume & transaction count
--- Reads the root query; never touches base.logs. See 00_events.sql.
+-- Reads the root query's materialized view; never touches base.logs. See 00_events.sql.
 
 SELECT
     block_date                                              AS day,
@@ -10,6 +10,6 @@ SELECT
     -- Running total so the dashboard can show a cumulative-volume line without a
     -- second query over the same rows.
     SUM(SUM(amount_usd)) OVER (ORDER BY block_date)         AS cumulative_volume_usd
-FROM query___ROOT_QUERY_ID__
+FROM __ROOT_TABLE__
 GROUP BY 1
 ORDER BY 1

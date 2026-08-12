@@ -1,5 +1,5 @@
 -- AbaPay on Base — new vs returning payers, daily
--- Reads the root query; never touches base.logs. See 00_events.sql.
+-- Reads the root query's materialized view; never touches base.logs. See 00_events.sql.
 --
 -- "New" is first-ever payment ON BASE. A wallet that has paid on Celo before but is
 -- paying on Base for the first time counts as new here, which is the right reading
@@ -7,7 +7,7 @@
 
 WITH activity AS (
     SELECT DISTINCT block_date AS day, user_address
-    FROM query___ROOT_QUERY_ID__
+    FROM __ROOT_TABLE__
 ),
 
 first_seen AS (

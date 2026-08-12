@@ -1,5 +1,5 @@
 -- AbaPay on Base — DAU / WAU / MAU
--- Reads the root query; never touches base.logs. See 00_events.sql.
+-- Reads the root query's materialized view; never touches base.logs. See 00_events.sql.
 --
 -- Because this dashboard is Base-scoped at the source, a wallet that pays on Celo
 -- does NOT inflate these counts — which is exactly why the Base numbers are worth
@@ -7,7 +7,7 @@
 
 WITH activity AS (
     SELECT DISTINCT block_date AS day, user_address
-    FROM query___ROOT_QUERY_ID__
+    FROM __ROOT_TABLE__
 ),
 
 days AS (

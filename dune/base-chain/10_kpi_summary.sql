@@ -1,5 +1,5 @@
 -- AbaPay on Base — KPI summary (all-time)
--- Reads the root query; never touches base.logs. See 00_events.sql.
+-- Reads the root query's materialized view; never touches base.logs. See 00_events.sql.
 
 SELECT
     COUNT(*)                             AS payments,
@@ -12,4 +12,4 @@ SELECT
     MIN(block_date)                      AS first_payment_date,
     MAX(block_date)                      AS latest_payment_date,
     COUNT(DISTINCT block_date)           AS active_days
-FROM query___ROOT_QUERY_ID__
+FROM __ROOT_TABLE__

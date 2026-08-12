@@ -109,8 +109,24 @@ merge services that only look related.
 ## Layout
 
 `00_events.sql` is the **root query** — one row per payment, and the only query that touches
-`base.logs`. The other eight read it through Dune's `query_<id>` syntax, which is what keeps them
-cheap and is why the root must finish before they run.
+`base.logs`. The other eight read its **materialized view**,
+`dune.abapay.result_abapay_base_events`, which is what keeps them cheap.
+
+### ⚠️ The dependents must read the matview, never `query_8284395`
+
+They originally read the root through Dune's `query_<id>` syntax. That syntax **is not a cached
+result** — it is a view, and Dune re-executes the entire root query inline for every dependent
+that names it. Each of the eight cost **~41 credits** per run instead of **~0.07**: roughly 350
+credits a day for one dashboard, against a 2,500/month plan quota. It fails silently — the SQL
+is valid and the numbers are correct; only the bill and the rate limiter ever object.
+
+Write `__ROOT_TABLE__` in the SQL and let `scripts/dune-base-setup.mjs` render it. The script
+refuses to deploy any file that names a `query_<id>` outside a comment.
+
+The root query also carries a `>= 2026-04-01` floor on **both** of its scans. Without it the
+x402 half reads every USDC/USDT transfer on Base since genesis before narrowing to the vault,
+which was ~95% of its cost (41.9 → 7.6 credits). AbaPay's first Base payment was 2026-05-01, so
+the floor is a month of buffer, not a rolling window that needs maintenance.
 
 | File | Dune id | Query |
 |---|---|---|
@@ -148,6 +164,23 @@ that first manual pass it can update them over the API normally.
 
 ## Refresh
 
-`/api/cron/dune-refresh?dashboard=base`, driven daily by
-`.github/workflows/dune-refresh.yml`. Dune's own scheduler cannot do this — it requires the
-medium/large engines, which the Community plan does not have.
+Two mechanisms, and **both are required**. Confusing them is what left this dashboard
+refreshing nothing for a day while CI showed a green tick.
+
+| Layer | What keeps it fresh | When |
+|---|---|---|
+| **Data** — `dune.abapay.result_abapay_base_events` | Dune's own matview cron | 02:00 UTC daily |
+| **Panels** — the 8 dependent queries | `/api/cron/dune-refresh?dashboard=base`, from `.github/workflows/dune-refresh.yml` | 03:15 UTC daily |
+
+A dashboard panel renders the **last execution** of the query behind it. Refreshing a matview
+does *not* count as an execution of that query, so the matview cron alone will never move a
+panel — the combined dashboard sat six days stale while its matviews refreshed every six hours.
+Equally, executing the queries alone would just re-aggregate a stale table.
+
+Dune's built-in **query** scheduler cannot help: it requires the medium/large engines, which the
+Community plan does not have. Matview crons are the one piece of Dune-native scheduling that
+does work on this plan, which is why the data layer uses them.
+
+The root query (8284395) is deliberately **not** executed by the cron. It has no panel on the
+dashboard, so executing it would cost ~7.6 credits to update nothing; its matview cron is what
+re-runs it.
