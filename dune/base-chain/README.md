@@ -84,9 +84,22 @@ whenever the query has trailing date or text columns — `Volume by Service` def
 put the text column `rail` on Y. Both were corrected by hand under **Chart options → Result
 data**. A chart that renders is not the same as a chart that is right.
 
-⚠️ Widget positions are set from `scripts/`-side API calls, not by dragging: Dune drops every new
-widget at `row 0, col 0, size_x 3`, which stacks them into one narrow column. The current grid
-was applied with a `PATCH /dashboards/{id}` that sends **both** widget lists together.
+### ⚠️ The dashboard grid is 6 columns wide
+
+`col` and `sizeX` are in units of **one sixth of the page**, so a full-width widget is
+`sizeX: 6` and three side by side are `sizeX: 2` at `col` 0, 2 and 4. Dune's default for a new
+widget is `col 0, size_x 3` — half width — which is why widgets added without explicit
+positions stack into one narrow column.
+
+🔴 **Out-of-range positions do not error, they silently wrap.** The counters were first placed
+at `col` 0/8/16 with `sizeX: 8`, on the assumption of a 24-column grid — the API accepted it,
+stored it verbatim, and returned 200. Nothing complained; the three counters simply rendered
+underneath each other instead of in a row, because every one of those columns is past the end
+of a 6-wide grid. If a layout comes out stacked when you meant it side by side, check the
+column arithmetic before anything else: `col + sizeX` must be ≤ 6 for every widget.
+
+Positions are set from API calls, not by dragging, via a `PATCH /dashboards/{id}` that sends
+**both** widget lists together.
 
 ## Why a second dashboard
 
