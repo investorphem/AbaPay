@@ -7,8 +7,8 @@ import { verifyWalletOwnership } from '@/utils/walletAuth';
 
 // ⚡ SCHEDULED BILLS — in-app CRUD (the "Bill Pay & Autopay Agent")
 //
-// Scoped by wallet address. A user can only see/modify schedules for the wallet they
-// supply; there is no cross-wallet read.
+// Scoped by wallet address, and every verb — GET included — requires a signature proving the
+// caller controls that wallet (see src/utils/walletAuth.ts). There is no cross-wallet read.
 
 export async function GET(req: Request) {
   const limited = await enforceRateLimit(req, 'schedules-read', 60, 60);
@@ -19,6 +19,22 @@ export async function GET(req: Request) {
 
   if (!/^0x[a-f0-9]{40}$/.test(wallet)) {
     return NextResponse.json({ success: false, message: 'Valid wallet address required' }, { status: 400 });
+  }
+
+  // 🔐 PROVE OWNERSHIP BEFORE READING.
+  //
+  // 🔴 THE BUG THIS FIXES: the comment at the top of this file claimed "a user can only
+  // see/modify schedules for the wallet they supply; there is no cross-wallet read" — but this
+  // GET only validated that the address was well-FORMED, never that the caller controlled it.
+  // A wallet address is public on-chain data, so anyone could read any user's full
+  // scheduled_bills rows: `billers_code` (their meter or phone number), `customer_name`,
+  // `customer_address` (the verified name and PHYSICAL ADDRESS returned by the electricity
+  // merchant-verify step), amounts and cadence. For electricity that is a name-and-home-address
+  // record retrievable from a public address alone — personal data disclosed without
+  // authorisation. POST and DELETE on this same route already proved ownership; GET did not.
+  const auth = await verifyWalletOwnership(req, wallet, 'GET:/api/schedules');
+  if (!auth.ok) {
+    return NextResponse.json({ success: false, message: auth.message }, { status: 401 });
   }
 
   const { data, error } = await supabaseAdmin

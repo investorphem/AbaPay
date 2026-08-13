@@ -27,9 +27,21 @@ export async function GET(req: Request) {
     return NextResponse.json({ success: false, message: 'Valid wallet address required' }, { status: 400 });
   }
 
+  // 🔐 DELIBERATELY DOES NOT RETURN `channel_user_id`.
+  //
+  // 🔴 THE LEAK THIS CLOSES: this endpoint is unauthenticated (the Agent Hub calls it on mount,
+  // before any signature exists) and takes a wallet address — which is PUBLIC data, visible on
+  // any block explorer to anyone watching the vault. It used to return `channel_user_id`, which
+  // for a chat channel is the user's RAW TELEGRAM CHAT ID. That turned a public address into a
+  // social identity: scrape payers off Celoscan, call this, and you have the Telegram account
+  // behind each wallet — a deanonymisation primitive and a ready-made target list for phishing
+  // the PIN that authorises agent spending.
+  //
+  // Nothing in the UI ever used it: AgentHub renders `channel`, `link_verified` and
+  // `mcp_key_label` only, and every mutation is keyed on `id`. So it simply should not be sent.
   const { data } = await supabaseAdmin
     .from('agent_links')
-    .select('id, channel, channel_user_id, link_verified, approved_token, approved_chain, is_active, created_at, mcp_key_label')
+    .select('id, channel, link_verified, approved_token, approved_chain, is_active, created_at, mcp_key_label')
     .ilike('wallet_address', wallet);
 
   return NextResponse.json({ success: true, links: data || [] });
