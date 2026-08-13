@@ -32,13 +32,37 @@ export interface RateLimitResult {
 }
 
 /**
- * Derive a best-effort client identifier. Vercel sets x-forwarded-for.
- * Not spoof-proof, but adequate for abuse throttling.
+ * Derive a client identifier that the client cannot choose for itself.
+ *
+ * 🔴 THE BUG THIS FIXES: this used to read `x-forwarded-for.split(',')[0]` — the LEFTMOST
+ * entry. In a forwarded-for chain the leftmost value is the one the ORIGINAL CALLER supplied,
+ * so any client could send its own `X-Forwarded-For: <anything>` header and the proxy would
+ * simply append the real address to the right of it. Rotating that value per request gave
+ * every request a brand-new bucket, which defeated the throttle completely — on the billable
+ * VTpass lookups, on the OTP send path (an SMS-bomb vector), and on every other endpoint this
+ * is supposed to protect.
+ *
+ * Order of preference, most trustworthy first:
+ *   1. `x-vercel-forwarded-for` — set by Vercel's edge; a client-supplied copy is overwritten.
+ *   2. `x-real-ip`             — likewise set by the platform, single value.
+ *   3. RIGHTMOST `x-forwarded-for` entry — the hop nearest our trusted proxy, i.e. the part of
+ *      the chain the caller could not have forged. (Never the leftmost.)
  */
 export function getClientKey(req: Request, scope: string): string {
-  const fwd = req.headers.get('x-forwarded-for') || '';
-  const ip = fwd.split(',')[0].trim() || req.headers.get('x-real-ip') || 'unknown';
-  return `${scope}:${ip}`;
+  const vercelIp = (req.headers.get('x-vercel-forwarded-for') || '').trim();
+  const realIp = (req.headers.get('x-real-ip') || '').trim();
+
+  let ip = vercelIp || realIp;
+
+  if (!ip) {
+    const chain = (req.headers.get('x-forwarded-for') || '')
+      .split(',')
+      .map((s) => s.trim())
+      .filter(Boolean);
+    ip = chain.length ? chain[chain.length - 1] : '';
+  }
+
+  return `${scope}:${ip || 'unknown'}`;
 }
 
 /**
@@ -49,6 +73,42 @@ export function getClientKey(req: Request, scope: string): string {
  */
 export async function rateLimit(key: string, limit: number, windowSeconds: number): Promise<RateLimitResult> {
   const now = Date.now();
+
+  // ⚡ ATOMIC PATH (preferred) — one statement, incremented under a row lock inside Postgres.
+  //
+  // 🔴 THE RACE THIS FIXES: the legacy path below reads the counter, decides in JS, then
+  // writes. Concurrent requests all read the same value and all conclude they're under the
+  // limit, so a burst — precisely what a throttle exists to stop — sails through. See
+  // supabase/migrations/023_rate_limit_atomic_increment.sql.
+  //
+  // Falls back to the legacy read-modify-write if the function isn't deployed yet, so shipping
+  // this code before running the migration degrades to the old behaviour rather than breaking.
+  try {
+    const { data, error } = await supabaseAdmin.rpc('rate_limit_hit', {
+      p_key: key,
+      p_window_seconds: windowSeconds,
+    });
+
+    if (!error && data) {
+      const row = Array.isArray(data) ? data[0] : data;
+      const used = Number((row as any)?.used);
+      if (Number.isFinite(used)) {
+        if (used > limit) {
+          const windowStart = new Date((row as any).window_start).getTime();
+          const elapsed = now - windowStart;
+          const retryAfterSeconds = Math.max(1, Math.ceil((windowSeconds * 1000 - elapsed) / 1000));
+          return { allowed: false, remaining: 0, retryAfterSeconds };
+        }
+        return { allowed: true, remaining: Math.max(0, limit - used), retryAfterSeconds: 0 };
+      }
+    }
+
+    if (error) {
+      console.warn('[rateLimit] rate_limit_hit RPC unavailable, falling back to non-atomic path:', error.message);
+    }
+  } catch (rpcErr) {
+    console.warn('[rateLimit] rate_limit_hit RPC threw, falling back to non-atomic path:', (rpcErr as Error).message);
+  }
 
   try {
     const { data } = await supabaseAdmin
