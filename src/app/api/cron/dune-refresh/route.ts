@@ -1,6 +1,7 @@
 import 'server-only';
 import { NextResponse } from 'next/server';
 import baseChainQueryIds from '@/lib/dune/base-query-ids.json';
+import { verifyCronRequest } from '@/utils/cronAuth';
 
 // ⚡ DUNE DASHBOARD REFRESH — re-runs the AbaPay analytics queries so the public dashboards
 // stop going stale.
@@ -160,15 +161,10 @@ async function execute(apiKey: string, queryId: number): Promise<Started> {
 }
 
 async function handle(req: Request) {
-  const cronSecret = process.env.CRON_SECRET;
-  if (cronSecret) {
-    const auth = req.headers.get('authorization') || '';
-    const headerSecret = req.headers.get('x-cron-secret') || '';
-    const provided = auth.startsWith('Bearer ') ? auth.slice(7) : headerSecret;
-    if (provided !== cronSecret) {
-      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
-    }
-  }
+  // 🔐 Fail-closed — see src/utils/cronAuth.ts. Unauthenticated this burns paid Dune API
+  // credits on demand for anyone who finds the URL.
+  const unauthorized = verifyCronRequest(req);
+  if (unauthorized) return unauthorized;
 
   const apiKey = process.env.DUNE_API_KEY;
   if (!apiKey) {

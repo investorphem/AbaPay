@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server';
 import { runScheduledBills } from '@/lib/scheduler';
+import { verifyCronRequest } from '@/utils/cronAuth';
 
 // ⚡ ONE-OFF SCHEDULE RUNNER — "buy me MTN airtime in the next 10 minutes."
 //
@@ -10,15 +11,10 @@ import { runScheduledBills } from '@/lib/scheduler';
 // /api/cleanup. Scoped to `frequency = 'once'` rows only, so it stays cheap even at that
 // frequency: most ticks will find nothing due and exit immediately.
 async function handle(req: Request) {
-  const cronSecret = process.env.CRON_SECRET;
-  if (cronSecret) {
-    const auth = req.headers.get('authorization') || '';
-    const headerSecret = req.headers.get('x-cron-secret') || '';
-    const provided = auth.startsWith('Bearer ') ? auth.slice(7) : headerSecret;
-    if (provided !== cronSecret) {
-      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
-    }
-  }
+  // 🔐 Fail-closed — see src/utils/cronAuth.ts. Same reasoning as /api/schedules/run: this
+  // fires autonomous payments, so a missing CRON_SECRET must refuse, never skip the check.
+  const unauthorized = verifyCronRequest(req);
+  if (unauthorized) return unauthorized;
 
   const result = await runScheduledBills({ scope: 'oneoff' });
   return NextResponse.json({ success: true, ...result });

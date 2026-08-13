@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server';
 import { cleanupStalePreflights } from '@/lib/cleanupPreflights';
 import { reconcileStuckProcessing } from '@/lib/reconcileStuck';
 import { checkProviderBalances } from '@/lib/balanceAlerts';
+import { verifyCronRequest } from '@/utils/cronAuth';
 
 // ⚡ Manual / optional-cron trigger for the stale-preflight + stuck-PROCESSING sweeps.
 //
@@ -16,15 +17,10 @@ import { checkProviderBalances } from '@/lib/balanceAlerts';
 // If CRON_SECRET is set, callers must present it (Bearer or x-cron-secret header).
 
 async function handle(req: Request) {
-  const cronSecret = process.env.CRON_SECRET;
-  if (cronSecret) {
-    const auth = req.headers.get('authorization') || '';
-    const headerSecret = req.headers.get('x-cron-secret') || '';
-    const provided = auth.startsWith('Bearer ') ? auth.slice(7) : headerSecret;
-    if (provided !== cronSecret) {
-      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
-    }
-  }
+  // Fail-closed cron auth — see src/utils/cronAuth.ts. Previously an unset CRON_SECRET
+  // silently disabled the check entirely.
+  const unauthorized = verifyCronRequest(req);
+  if (unauthorized) return unauthorized;
 
   // ⚡ Balance checks deliberately do NOT get force:true — checkProviderBalances runs its
   // check every call, but the ALERT itself keeps its own 6h per-provider cooldown regardless

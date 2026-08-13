@@ -30,9 +30,17 @@ export async function POST(req: Request) {
     // X signs webhook deliveries with HMAC-SHA256 of the raw body using the consumer
     // secret, sent as `x-twitter-webhooks-signature: sha256=<base64>`. Without this,
     // anyone can POST fake DM events impersonating ANY X user id.
+    //
+    // 🔴 FAIL CLOSED: this used to be `if (consumerSecret) { ...verify... }`, so an unset
+    // X_CONSUMER_SECRET skipped verification and left the impersonation hole described above
+    // open. A missing secret is a misconfiguration — refuse rather than silently disable.
     const rawBody = await req.text();
     const consumerSecret = process.env.X_CONSUMER_SECRET;
-    if (consumerSecret) {
+    if (!consumerSecret) {
+      console.error('[SECURITY] X_CONSUMER_SECRET is not configured — refusing webhook traffic.');
+      return NextResponse.json({ error: 'Webhook not configured' }, { status: 503 });
+    }
+    {
       const providedSig = req.headers.get('x-twitter-webhooks-signature') || '';
       const expectedSig = 'sha256=' + crypto.createHmac('sha256', consumerSecret).update(rawBody).digest('base64');
       const a = Buffer.from(providedSig);

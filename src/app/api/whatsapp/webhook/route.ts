@@ -39,9 +39,18 @@ export async function POST(req: Request) {
     // App Secret, sent as `X-Hub-Signature-256: sha256=<hex>`. Without verifying it,
     // anyone on the internet can POST a fake "message" impersonating ANY sender
     // number and interact with that user's DeAI identity.
+    //
+    // 🔴 FAIL CLOSED: this used to be `if (appSecret) { ...verify... }`, so an unset
+    // WHATSAPP_APP_SECRET skipped verification entirely and left exactly the impersonation
+    // hole the comment above describes wide open. A missing secret is a misconfiguration —
+    // refuse, don't silently disable the check.
     const rawBody = await req.text();
     const appSecret = process.env.WHATSAPP_APP_SECRET;
-    if (appSecret) {
+    if (!appSecret) {
+      console.error('[SECURITY] WHATSAPP_APP_SECRET is not configured — refusing webhook traffic.');
+      return NextResponse.json({ error: 'Webhook not configured' }, { status: 503 });
+    }
+    {
       const providedSig = req.headers.get('x-hub-signature-256') || '';
       const expectedSig = 'sha256=' + crypto.createHmac('sha256', appSecret).update(rawBody).digest('hex');
       const a = Buffer.from(providedSig);

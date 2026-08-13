@@ -12,14 +12,24 @@ const BOT_USERNAME = 'abapayagentbot';
 
 export async function POST(req: Request) {
   try {
-    // 🔐 WEBHOOK AUTH: verify Telegram's secret token. Register it once with:
-    // setWebhook?url=...&secret_token=<TELEGRAM_WEBHOOK_SECRET>. Enforced when configured.
+    // 🔐 WEBHOOK AUTH — FAIL CLOSED. Register the secret once with:
+    // setWebhook?url=...&secret_token=<TELEGRAM_WEBHOOK_SECRET>
+    //
+    // 🔴 THE BUG THIS FIXES: this used to be `if (webhookSecret) { ...verify... }`, so an
+    // unset TELEGRAM_WEBHOOK_SECRET skipped the check entirely rather than refusing traffic.
+    // With no secret configured, anyone on the internet could POST a forged update carrying an
+    // arbitrary `message.from.id` and be resolved to THAT user's linked wallet identity —
+    // reading their balance and history, and driving the agent as them (the PIN still gates the
+    // spend itself, but nothing else did). A missing secret is a misconfiguration, and a
+    // misconfiguration must never silently disable authentication. Same rule as
+    // src/utils/internalAuth.ts and src/utils/cronAuth.ts.
     const webhookSecret = process.env.TELEGRAM_WEBHOOK_SECRET;
-    if (webhookSecret) {
-      const providedSecret = req.headers.get('x-telegram-bot-api-secret-token');
-      if (providedSecret !== webhookSecret) {
-        return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
-      }
+    if (!webhookSecret) {
+      console.error('[SECURITY] TELEGRAM_WEBHOOK_SECRET is not configured — refusing webhook traffic.');
+      return NextResponse.json({ error: 'Webhook not configured' }, { status: 503 });
+    }
+    if (req.headers.get('x-telegram-bot-api-secret-token') !== webhookSecret) {
+      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
     }
 
     // Dynamically grab your live domain (works on localhost AND Vercel automatically)
