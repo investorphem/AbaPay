@@ -1,7 +1,7 @@
 import 'server-only';
-import { createWalletClient, http, publicActions, parseUnits, formatUnits } from 'viem';
+import { createWalletClient, publicActions, parseUnits, formatUnits } from 'viem';
 import { privateKeyToAccount } from 'viem/accounts';
-import { resolveChain, getPublicClient, isMainnetEnv } from '@/lib/chain';
+import { resolveChain, getPublicClient, getChainTransport, isMainnetEnv } from '@/lib/chain';
 import { resolveTokenOnChain } from '@/constants';
 import { sendTelegramAlert } from '@/lib/telegram';
 import { celoAttributionSuffix, baseAttributionSuffix } from '@/lib/attribution';
@@ -194,7 +194,10 @@ export async function relayPayBillFor(params: {
     const wallet = createWalletClient({
       account,
       chain,
-      transport: http(),
+      // Same multi-endpoint failover transport the read path uses (src/lib/chain.ts). This was
+      // a bare `http()` — viem's single default RPC, no backup — so one endpoint outage stopped
+      // every agent and autonomous payment while balance reads carried on working.
+      transport: getChainTransport(blockchain),
     }).extend(publicActions);
 
     const hash = await wallet.writeContract({

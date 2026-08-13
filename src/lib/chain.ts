@@ -38,14 +38,28 @@ function rpcUrlsFor(chainId: number): string[] {
   }
 }
 
-export function getPublicClient(blockchain: string | null | undefined): PublicClient {
+// Shared failover transport for a chain.
+//
+// 🔴 THE GAP THIS CLOSES: getPublicClient() below has had RPC failover since Audit v2, but
+// src/lib/deai/relayer.ts built its WALLET client with a bare `http()` and no URL — i.e. viem's
+// single default endpoint for the chain, with no backup. Every agent payment, every autonomous
+// scheduled payment and every MCP pay_bill was submitted through that one unmonitored endpoint,
+// so a single RPC outage silently stopped all autonomous spending while balance READS (which do
+// have failover) kept working — a confusing, hard-to-diagnose split failure. Exporting the
+// transport means the read and write paths can no longer drift apart.
+export function getChainTransport(blockchain: string | null | undefined) {
   const { chain } = resolveChain(blockchain);
   const urls = rpcUrlsFor(chain.id);
   const transports = urls.length
     ? urls.map((u) => http(u))
     : [http(chain.rpcUrls.default.http[0])];
   // fallback() tries each transport in order, rolling over on failure.
-  return createPublicClient({ chain, transport: fallback(transports) }) as PublicClient;
+  return fallback(transports);
+}
+
+export function getPublicClient(blockchain: string | null | undefined): PublicClient {
+  const { chain } = resolveChain(blockchain);
+  return createPublicClient({ chain, transport: getChainTransport(blockchain) }) as PublicClient;
 }
 
 export function explorerBaseFor(blockchain: string | null | undefined): string {
