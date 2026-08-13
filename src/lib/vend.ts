@@ -7,45 +7,42 @@ import { getHeaders } from '@/lib/vtpass';
 import { buildReceiptEmail } from '@/lib/receiptEmail';
 import { enqueueRefund } from '@/lib/refunds';
 import { initiateMonnifyBankTransfer } from '@/lib/monnifyVend';
+import { checkProviderBalances } from '@/lib/balanceAlerts';
 import { Resend } from 'resend';
 
 const resend = new Resend(process.env.RESEND_API_KEY || 're_dummy_key_for_build');
 
-// 🔐 SECURITY: request_id is the lookup key for a transaction's `purchased_code`
-// (electricity token / exam PIN — a bearer secret). It MUST NOT be predictable.
-// crypto.randomInt() is a CSPRNG and unbiased. 12 chars over a 36-char alphabet
-// = 36^12 ≈ 4.7e18 — not brute-forceable.
-//
-// NOTE: this duplicates generateRequestId() in src/lib/vtpass.js. Both are now secure,
-// but the duplication should be removed (see AUDIT_REPORT_V2.md, item M-2 / #7).
-const ID_ALPHABET = 'abcdefghijklmnopqrstuvwxyz0123456789';
-
-export function getStrictRequestId(): string {
-  const date = new Date();
-  const lagosTime = new Intl.DateTimeFormat('en-GB', { timeZone: 'Africa/Lagos', year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', hour12: false }).format(date);
-  const [datePart, timePart] = lagosTime.split(', ');
-  const [day, month, year] = datePart.split('/');
-  const [hour, minute] = timePart.split(':');
-  const safeHour = hour === '24' ? '00' : hour;
-
-  let randomString = '';
-  for (let i = 0; i < 12; i++) {
-    randomString += ID_ALPHABET[crypto.randomInt(0, ID_ALPHABET.length)];
-  }
-
-  return `${year}${month}${day}${safeHour}${minute}${randomString}`;
-}
+// 🔐 request_id generation now lives in ONE place — src/lib/requestId.ts. It used to be
+// implemented here AND (identically) as generateRequestId() in src/lib/vtpass.js: two copies
+// of a security-critical primitive, which is how one copy silently rots while the other is
+// fixed. Re-exported so every existing `import { getStrictRequestId } from '@/lib/vend'`
+// keeps working unchanged.
+export { getStrictRequestId } from '@/lib/requestId';
 
 // Human, reassuring phrasings — a failed vend already triggers an automatic refund, so the
 // tone is "here's what happened, and you're covered," never a bare error code.
+//
+// 🔴 018 — THE MESSAGE THIS FIXES: 018 is VTpass's "LOW WALLET BALANCE", i.e. OUR merchant
+// float is empty. It used to read "This service is briefly unavailable — please try again in
+// a few minutes." Every word of that was wrong: it isn't brief, it isn't the service, and
+// retrying CANNOT succeed until an operator tops the float up. In the 15 Jul - 12 Aug 2026
+// incident that message invited users to re-pay on-chain over and over (87 attempts on one
+// electricity provider alone), each retry costing them gas and another refund cycle. Never
+// invite a retry for a condition the user cannot possibly clear.
 const error_messages: Record<string, string> = {
   '011': "That didn't go through — please double-check the phone or meter number.",
   '014': "You've hit the provider's daily limit for this service. Try again tomorrow.",
   '016': "The provider's network is a bit shaky right now — worth trying again shortly.",
-  '018': 'This service is briefly unavailable — please try again in a few minutes.',
+  '018': "We couldn't complete this one on our side. Your payment is being refunded in full — please don't retry, we're on it.",
   '030': "The provider's network is down at the moment. Please try again soon.",
   '400': 'Something went wrong on the provider side while processing this.',
 };
+
+// VTpass codes that mean OUR float is the problem, not the user and not the provider's
+// network. These are the ones that will keep failing, identically, for every single customer
+// until an operator acts — so they must escalate immediately rather than blend into the
+// per-transaction failure stream.
+const FLOAT_EXHAUSTED_CODES = new Set(['018']);
 
 // ⚡ Where did this transaction come from? Operators need to distinguish a web payment
 // from an agent payment from an unattended autonomous schedule — very different risk.
@@ -238,8 +235,29 @@ export async function executeVend(input: VendInput): Promise<VendResult> {
   } else {
     const friendlyMessage = error_messages[payData.code as string] || "The provider couldn't complete this one right now.";
     await supabase.from('transactions').update({ status: 'FAILED_VENDING', error_code: payData.code, api_response: payData.response_description }).eq('tx_hash', txHash);
+
+    // 🔴 THE MONITORING GAP THIS FIXES: when the VTpass float ran dry on 15 Jul 2026, this
+    // branch fired 226 times over four weeks and nobody noticed — because each occurrence
+    // looked like an ordinary per-transaction "VENDING REJECTED" alert among many, and the one
+    // function that would have said "YOUR FLOAT IS EMPTY, TOP IT UP" (checkProviderBalances)
+    // only ran if an external cron happened to hit /api/cleanup. The Monnify rail already got
+    // this right — src/lib/monnifyVend.ts force-triggers the balance check the moment it sees
+    // an insufficient-balance error, bypassing the 6h cooldown. The VTpass rail, which handles
+    // every airtime/data/electricity/cable/education payment, did not. Now it does.
+    //
+    // Fire-and-forget: a monitoring call must never delay or break the refund below.
+    if (FLOAT_EXHAUSTED_CODES.has(String(payData.code))) {
+      checkProviderBalances({ force: true }).catch(() => {});
+    }
+
     try {
-      await sendTelegramAlert(`❌ *VENDING REJECTED*\n📲 *Source:* ${channelBadge(source_channel)}\n⛓️ *Chain:* ${blockchain || 'CELO'}\n🛒 *Product:* ${network} ${serviceCategory}\n👤 *User:* ${billersCode}\n🚨 *Admin Error:* Code ${payData.code} - ${payData.response_description}\n🗣 *User Message:* ${friendlyMessage}\n🔍 *Explorer:* ${explorerUrl}`);
+      // Float exhaustion is an OPERATOR emergency, not a customer support ticket — label it as
+      // such so it can't be skimmed past as one more routine rejection.
+      const isFloatIssue = FLOAT_EXHAUSTED_CODES.has(String(payData.code));
+      const header = isFloatIssue
+        ? `🔴 *FLOAT EXHAUSTED — VENDING HALTED*\n\n_Every ${serviceCategory} payment will keep failing and auto-refunding until the VTpass wallet is topped up._\n`
+        : `❌ *VENDING REJECTED*`;
+      await sendTelegramAlert(`${header}\n📲 *Source:* ${channelBadge(source_channel)}\n⛓️ *Chain:* ${blockchain || 'CELO'}\n🛒 *Product:* ${network} ${serviceCategory}\n👤 *User:* ${billersCode}\n🚨 *Admin Error:* Code ${payData.code} - ${payData.response_description}\n🗣 *User Message:* ${friendlyMessage}\n🔍 *Explorer:* ${explorerUrl}`);
     } catch (tgError) {
       console.error('Telegram Failure Alert Error:', tgError);
     }

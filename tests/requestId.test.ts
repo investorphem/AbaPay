@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import crypto from 'crypto';
+import { randomIdSuffix, getStrictRequestId } from '@/lib/requestId';
 
 /**
  * Regression tests for the request_id generator (Audit v2, finding H-1).
@@ -17,20 +17,20 @@ import crypto from 'crypto';
  * from a handful of observed outputs. Combined with a timestamp prefix and (at the time) no
  * rate limit and no auth on /api/requery, another customer's token was reachable by guessing.
  *
- * These tests lock in the fixed properties. The generator logic is reproduced here in the
- * same shape used by src/lib/vtpass.js and src/app/api/pay/route.ts (both of which are now
- * CSPRNG-based) — the duplication itself is tracked as a separate cleanup item.
+ * These tests lock in the fixed properties.
+ *
+ * 🔴 THEY NOW TEST THE SHIPPED CODE. This file used to re-implement the generator locally and
+ * assert against that copy — so it verified the IDEA of a CSPRNG suffix while the function
+ * actually running in production was never executed by the suite. (Audit v2 raised exactly
+ * this: "tests the idea, not the shipped code.") Both the generator and its duplicate have
+ * since been collapsed into src/lib/requestId.ts, which imports nothing but `crypto`, so the
+ * real function can be imported and exercised directly.
  */
 
 const ID_ALPHABET = 'abcdefghijklmnopqrstuvwxyz0123456789';
 
-function generateSuffix(length = 12): string {
-  let s = '';
-  for (let i = 0; i < length; i++) {
-    s += ID_ALPHABET[crypto.randomInt(0, ID_ALPHABET.length)];
-  }
-  return s;
-}
+// The real, shipped generator — not a copy of it.
+const generateSuffix = (length = 12) => randomIdSuffix(length);
 
 describe('request_id generation (H-1 regression)', () => {
   it('produces a suffix of the expected length', () => {
@@ -65,6 +65,21 @@ describe('request_id generation (H-1 regression)', () => {
       expect(n).toBeGreaterThan(expected * 0.5);
       expect(n).toBeLessThan(expected * 1.5);
     }
+  });
+
+  it('getStrictRequestId returns a 24-char id: 12-digit Lagos timestamp + 12 random chars', () => {
+    // VTpass mandates YYYYMMDDHHmm as the first 12 characters, then alphanumerics. The length
+    // also matters historically: 20-char ids are the legacy Math.random() generation, so a
+    // regression to that shape is visible here.
+    const id = getStrictRequestId();
+    expect(id).toHaveLength(24);
+    expect(id).toMatch(/^\d{12}[a-z0-9]{12}$/);
+  });
+
+  it('getStrictRequestId does not collide across many generations', () => {
+    const seen = new Set<string>();
+    for (let i = 0; i < 2000; i++) seen.add(getStrictRequestId());
+    expect(seen.size).toBe(2000);
   });
 
   it('DOES NOT use Math.random (the vulnerable primitive)', () => {
