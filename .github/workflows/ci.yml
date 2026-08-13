@@ -112,7 +112,12 @@ jobs:
           cache: npm
 
       - name: Install dependencies
-        run: npm ci --no-audit --no-fund
+        # Same resilient install the other three jobs use. This job originally ran a bare
+        # `npm ci`, which failed on its first run after ~2s while the identical step in the
+        # sibling Unit Tests job succeeded in ~63s — the signature of a transient npm cache
+        # restore problem rather than a bad lockfile (npm ci installs cleanly from this
+        # lockfile locally; its only complaint is a non-fatal ERESOLVE peer warning).
+        run: npm ci --no-audit --no-fund || (echo "::warning::npm ci failed — falling back to 'npm install'. If this recurs, regenerate package-lock.json." && npm install --no-audit --no-fund)
 
       - name: Compile contracts
         run: npx hardhat compile
