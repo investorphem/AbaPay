@@ -4,12 +4,36 @@ import { sendTelegramAlert } from '@/lib/telegram';
 import { executeVend, getStrictRequestId } from '@/lib/vend';
 import { getActiveDiscountForService, computeDiscountNgn } from '@/lib/discounts';
 import { isDuplicateElectricity } from '@/lib/parity';
-import { createPublicClient, http, decodeFunctionData, parseUnits } from 'viem';
+import { enforceRateLimit } from '@/lib/rateLimit';
+import { createPublicClient, http, decodeFunctionData, decodeEventLog, parseUnits } from 'viem';
 import { base, baseSepolia, celo, celoSepolia } from 'viem/chains';
+import { resolveTokenOnChain } from '@/constants';
 
 const ABAPAY_ABI = [{"inputs":[{"internalType":"address","name":"tokenAddress","type":"address"},{"internalType":"string","name":"serviceType","type":"string"},{"internalType":"string","name":"accountNumber","type":"string"},{"internalType":"uint256","name":"amount","type":"uint256"}],"name":"payBill","outputs":[],"stateMutability":"nonpayable","type":"function"}];
 
+// Minimal ERC-20 Transfer ABI — used to decode (not merely pattern-match) the token transfer
+// on the sponsored/smart-wallet settlement path below. Same shape /api/admin/refund uses.
+const ERC20_TRANSFER_ABI = [
+  {
+    anonymous: false,
+    inputs: [
+      { indexed: true, internalType: 'address', name: 'from', type: 'address' },
+      { indexed: true, internalType: 'address', name: 'to', type: 'address' },
+      { indexed: false, internalType: 'uint256', name: 'value', type: 'uint256' },
+    ],
+    name: 'Transfer',
+    type: 'event',
+  },
+] as const;
+
 export async function POST(req: Request) {
+  // 🛡️ THROTTLE — this route had no rate limit at all, despite being the endpoint that writes
+  // ledger rows, reads chain state over RPC, and (below) deletes pre-flight intents. A normal
+  // payment costs 2 calls (intent_only, then the real settle), so 30/min per client is far
+  // above any legitimate pattern while still bounding scripted abuse.
+  const limited = await enforceRateLimit(req, 'pay', 30, 60);
+  if (limited) return limited;
+
   try {
     const body = await req.json();
     const { 
@@ -24,9 +48,32 @@ export async function POST(req: Request) {
     } = body;
 
     // ⚡ FIX 1: INSTANT CANCELLATION INTERCEPTOR ⚡
+    //
+    // 🔴 THE BUG THIS FIXES: this deleted ANY row matching the supplied tx_hash — no
+    // authentication, no ownership check, no status check, and /api/pay has no rate limit.
+    // A tx_hash is PUBLIC on-chain data (anyone can read the vault's transfers on an explorer),
+    // so this was an open endpoint for erasing other people's completed transactions: receipts,
+    // refund_queue linkage, points history, the ledger the admin dashboard reads. Worse, it
+    // could delete a live PENDING row mid-payment, recreating exactly the "crypto moved but the
+    // app has no record of it" failure the preflight guards further down exist to prevent.
+    //
+    // A cancel only ever legitimately means "I backed out before signing," so it is now scoped
+    // to that and only that: an unsigned `preflight_` intent that is still PENDING. A real
+    // transaction hash (0x…) can no longer be touched here at all.
     if (cancel_intent) {
-        const hashToDelete = preflight_hash || txHash;
-        await supabase.from('transactions').delete().eq('tx_hash', hashToDelete);
+        const hashToDelete = String(preflight_hash || txHash || '');
+
+        if (!hashToDelete.startsWith('preflight_')) {
+            console.warn(`[Pay] Refused cancel_intent for non-preflight hash: ${hashToDelete.slice(0, 24)}`);
+            return NextResponse.json({ success: false, status: "CANCELLED", message: "Only an unsigned payment intent can be cancelled." }, { status: 400 });
+        }
+
+        await supabase
+            .from('transactions')
+            .delete()
+            .eq('tx_hash', hashToDelete)
+            .eq('status', 'PENDING');
+
         return NextResponse.json({ success: true, status: "CANCELLED" });
     }
 
@@ -222,33 +269,55 @@ export async function POST(req: Request) {
                  return NextResponse.json({ success: false, status: 'FAILED_VENDING', message: "Amount mismatch detected." }, { status: 400 });
             }
         } else {
-            const paddedExpectedContract = "0x000000000000000000000000" + expectedLower.substring(2);
-            // Find the ERC-20 Transfer log whose recipient (topic[2]) is the AbaPay contract.
-            const transferLog = receipt.logs.find((log: any) => log.topics && log.topics.length >= 3 && log.topics[2]?.toLowerCase() === paddedExpectedContract);
+            // 🔐 SPONSORED / SMART-WALLET SETTLEMENT — WHICH token, to WHOM, for HOW MUCH.
+            //
+            // 🔴 THE BUG THIS FIXES: this used to scan every log in the receipt for one whose
+            // topics[2] happened to equal the padded AbaPay address, and then read the amount
+            // straight out of `log.data`. It never checked WHICH contract emitted that log, nor
+            // that the log was even a Transfer event. Because anyone can route a UserOperation
+            // through the ERC-4337 EntryPoint (which is what puts us on this branch at all), an
+            // attacker could deploy a worthless ERC-20, transfer a huge balance of it to the
+            // vault inside their UserOp, and have that fake amount read back as `paidWei` —
+            // clearing the amount check and earning a real, delivered vend for nothing.
+            //
+            // /api/webhook (which filters on `log.address` before decoding PaymentReceived) and
+            // /api/admin/refund (which filters on the expected token address) both already got
+            // this right; this path was the one left behind. It now resolves the token the
+            // record actually claims was paid, and only accepts a genuine ERC-20 Transfer
+            // emitted BY that token contract, addressed TO the AbaPay vault.
+            const expectedToken = resolveTokenOnChain(tokenSymbol, blockchain || 'CELO', isMainnet);
+            if (!expectedToken) {
+                await sendTelegramAlert(`🚨 *SPONSORED UNKNOWN TOKEN*\nCould not resolve token \`${tokenSymbol}\` on ${blockchain || 'CELO'} — refusing to vend.\nHash: \`${txHash}\`\n🔍 *Explorer:* ${explorerUrl}`);
+                return NextResponse.json({ success: false, status: 'FAILED_VENDING', message: "Unsupported payment token." }, { status: 400 });
+            }
 
-            if (!transferLog) {
-                 await sendTelegramAlert(`🚨 *SMART WALLET FRAUD DETECTED*\nFunds did not reach AbaPay contract.\nHash: \`${txHash}\`\n🔍 *Explorer:* ${explorerUrl}`);
+            let paidWei: bigint | null = null;
+            for (const log of receipt.logs) {
+                // Must have been emitted BY the stablecoin contract itself — this is the check
+                // whose absence made every other check on this branch meaningless.
+                if (log.address?.toLowerCase() !== expectedToken.address) continue;
+                try {
+                    const decoded: any = decodeEventLog({ abi: ERC20_TRANSFER_ABI, data: log.data, topics: log.topics });
+                    if (decoded.eventName !== 'Transfer') continue;
+                    if (String(decoded.args.to).toLowerCase() !== expectedLower) continue;
+                    paidWei = BigInt(decoded.args.value);
+                    break;
+                } catch { /* not a Transfer log from this token */ }
+            }
+
+            if (paidWei === null) {
+                 await sendTelegramAlert(`🚨 *SMART WALLET FRAUD DETECTED*\nNo genuine ${tokenSymbol} transfer to the AbaPay contract found in this transaction.\nHash: \`${txHash}\`\n🔍 *Explorer:* ${explorerUrl}`);
                  return NextResponse.json({ success: false, status: 'FAILED_VENDING', message: "Funds not received." }, { status: 400 });
             }
 
-            // 🔐 AMOUNT ENFORCEMENT FOR SPONSORED/SMART-WALLET PATH
-            // The transfer amount is the non-indexed `value` in the log data. Previously this
-            // path confirmed only that *a* transfer happened — not how much — which let a
-            // sponsored/smart-wallet user pay a trivial amount and request a large vend.
-            try {
-                const tokenDecimals = (tokenSymbol === 'cUSD' || tokenSymbol === 'USDm') ? 18 : 6;
-                const paidWei = BigInt(transferLog.data as string);
-                const requiredWei = parseUnits(requiredCrypto.toFixed(tokenDecimals), tokenDecimals);
-                // Allow a tiny rounding tolerance (matches the EOA path's philosophy).
-                const shortfall = requiredWei > paidWei ? requiredWei - paidWei : BigInt(0);
-                const tolerance = parseUnits("0.01", tokenDecimals); // 1 cent grace for rounding
-                if (shortfall > tolerance) {
-                    await sendTelegramAlert(`🚨 *SPONSORED UNDERPAYMENT BLOCKED*\nUser ${wallet_address} paid less than required via smart wallet.\nHash: \`${txHash}\`\n🔍 *Explorer:* ${explorerUrl}`);
-                    return NextResponse.json({ success: false, status: 'FAILED_VENDING', message: "Amount mismatch detected." }, { status: 400 });
-                }
-            } catch (amountErr) {
-                await sendTelegramAlert(`🚨 *SPONSORED AMOUNT UNVERIFIABLE*\nCould not decode transfer amount — refusing to vend.\nHash: \`${txHash}\`\n🔍 *Explorer:* ${explorerUrl}`);
-                return NextResponse.json({ success: false, status: 'FAILED_VENDING', message: "Could not verify payment amount." }, { status: 400 });
+            // 🔐 AMOUNT ENFORCEMENT — decimals come from the resolved token, not a guess based
+            // on the client-supplied symbol.
+            const requiredWei = parseUnits(requiredCrypto.toFixed(expectedToken.decimals), expectedToken.decimals);
+            const tolerance = parseUnits("0.01", expectedToken.decimals); // 1 cent grace for rounding
+            const shortfall = requiredWei > paidWei ? requiredWei - paidWei : BigInt(0);
+            if (shortfall > tolerance) {
+                await sendTelegramAlert(`🚨 *SPONSORED UNDERPAYMENT BLOCKED*\nUser ${wallet_address} paid less than required via smart wallet.\nHash: \`${txHash}\`\n🔍 *Explorer:* ${explorerUrl}`);
+                return NextResponse.json({ success: false, status: 'FAILED_VENDING', message: "Amount mismatch detected." }, { status: 400 });
             }
         }
     } catch (error) {
