@@ -92,6 +92,34 @@ jobs:
       - name: Run tests
         run: npm test
 
+  contracts:
+    name: Contract Tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    # ⚡ THE GAP THIS CLOSES: `npm run test:contracts` existed and passed 47 tests locally, but
+    # NO workflow ever ran it. The highest-stakes code in the repository — the contract that
+    # custodies user funds — had no automated gate at all, so a change that broke a security
+    # property (timelock, allowance bounds, relayer authorisation) would sail through a green CI.
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci --no-audit --no-fund
+
+      - name: Compile contracts
+        run: npx hardhat compile
+
+      - name: Run contract tests
+        run: npm run test:contracts
+
   security:
     name: Dependency Audit
     runs-on: ubuntu-latest
@@ -115,9 +143,43 @@ jobs:
         #      npm install && git add package-lock.json && git commit
         run: npm ci --no-audit --no-fund || (echo "::warning::package-lock.json is out of sync with package.json — falling back to 'npm install'. Please run 'npm install' locally and commit the updated lockfile." && npm install --no-audit --no-fund)
 
-      # Report known vulnerabilities in production dependencies.
-      # Non-blocking for now (the wallet SDK tree carries a lot of transitive noise),
-      # but it surfaces real issues in the PR log so they don't go unnoticed.
-      - name: npm audit (production deps)
-        run: npm audit --omit=dev --audit-level=high
-        continue-on-error: true
+      # ⚡ Full report — informational. The wallet-SDK tree carries a large, genuinely
+      # unfixable transitive backlog (uuid via MetaMask/Farcaster, @solana/web3.js, jayson),
+      # so this whole list can never be driven to zero and must not block merges.
+      - name: npm audit (production deps, full report)
+        run: npm audit --omit=dev || true
+
+      # 🔴 THE GAP THIS CLOSES: the audit job above used to be the ONLY audit step and it was
+      # `continue-on-error: true` — so it printed advisories nobody acted on. That is exactly
+      # how Next.js sat on 16.2.10 for three months carrying three HIGH advisories (middleware
+      # bypass, SSRF in rewrites, Server Actions DoS) after a previous audit had already caught
+      # the same class of drift.
+      #
+      # This blocks on the case we CAN act on: a high/critical advisory filed against a direct
+      # production dependency ITSELF, which an upgrade of that package fixes.
+      #
+      # In npm's JSON, `via` holds advisory OBJECTS for a package's own advisories, and plain
+      # STRINGS for vulnerability inherited from something further down its tree. That
+      # distinction is the whole point here: Next.js 16.2.10 carried nine advisory objects of
+      # its own (fixed by 16.2.11), whereas Next.js 16.2.11 is still "high" purely because it
+      # bundles postcss/sharp — a string-only `via` we cannot resolve without breaking the
+      # framework. Gating on `via | objects` catches the first and ignores the second, so this
+      # check is both meaningful and actually achievable.
+      - name: Block on high/critical advisories against direct deps
+        run: |
+          npm audit --omit=dev --json > audit.json || true
+          OWN=$(jq -r '
+            [ .vulnerabilities[]
+              | select(.isDirect)
+              | select([.via[] | objects | select(.severity=="high" or .severity=="critical")] | length > 0)
+              | .name ]
+            | unique | join(", ")' audit.json)
+          if [ -n "$OWN" ]; then
+            echo "::error::Direct production dependencies with their own high/critical advisories: $OWN"
+            echo "Upgrade the package, or justify and pin an exception, before merging."
+            jq -r '.vulnerabilities[] | select(.isDirect) | .via[] | objects
+                   | select(.severity=="high" or .severity=="critical")
+                   | "  - \(.name): \(.title) (\(.url))"' audit.json
+            exit 1
+          fi
+          echo "No direct production dependency carries a high/critical advisory of its own."
