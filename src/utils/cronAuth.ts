@@ -28,9 +28,15 @@ export function verifyCronRequest(req: Request): NextResponse | null {
       '[SECURITY] CRON_SECRET is not configured — refusing the request. ' +
       'Set CRON_SECRET in the environment and on the caller; this endpoint will not run unauthenticated.'
     );
+    // 500, deliberately NOT 503. .github/workflows/dune-refresh.yml treats a 503 from
+    // /api/cron/dune-refresh as the benign "that dashboard has no query ids deployed yet"
+    // case and downgrades it to a warning. Returning 503 here would make a missing
+    // CRON_SECRET — a genuine misconfiguration that stops every scheduled job — show up as
+    // a green run with a warning, which is exactly the kind of silent failure this whole
+    // fail-closed change exists to prevent.
     return NextResponse.json(
-      { error: 'Scheduled endpoints are not configured on this deployment.' },
-      { status: 503 }
+      { error: 'Scheduled endpoints are not configured on this deployment (CRON_SECRET missing).' },
+      { status: 500 }
     );
   }
 
