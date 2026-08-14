@@ -361,6 +361,14 @@ export default function DocsPage() {
                 </>}
               />
               <FAQItem
+                q="I tapped Connect and nothing happened. What's wrong?"
+                a={<>
+                  <p>Nine times out of ten this is your mobile network, not AbaPay. Connecting an external wallet like Valora goes through WalletConnect, and some Nigerian networks — MTN most often — block the service it runs on. Because it's a background connection, it fails silently instead of showing an error.</p>
+                  <p>Open <a href="/network-check" className="text-emerald-600 dark:text-emerald-400 underline underline-offset-2">the network check</a> and it will tell you in a few seconds whether something is being blocked, and exactly what.</p>
+                  <p>The quickest fix is to open AbaPay inside <strong>MiniPay</strong>, which connects your wallet directly and needs none of the blocked services. Switching to another network or turning on a VPN also works.</p>
+                </>}
+              />
+              <FAQItem
                 q="Which chains and stablecoins are supported?"
                 a={<>
                   <p>Celo and Base — those two, plus their public test networks, and nothing else. USD₮ and USDC work on both; cUSD/USDm is Celo-only.</p>

@@ -34,6 +34,26 @@ NEXT_PUBLIC_APP_URL=https://abapays.com
 2. Create a new project, name it "AbaPay".
 3. Copy the **Project ID** shown on the project dashboard.
 
+### `NEXT_PUBLIC_WC_RELAY_URL` (optional — blocked networks)
+**Free, and only needed if your users are on a network that filters WalletConnect.**
+
+Some Nigerian mobile networks (MTN most reported) block `relay.walletconnect.org`. The relay
+is a WebSocket, so the block is silent: no QR code, no error, the Connect button just sits
+there. There is only ONE WalletConnect relay network — you can't switch provider — but you
+can change the URL your app reaches it through.
+
+1. Stand up a WebSocket reverse proxy on a subdomain you control, forwarding to
+   `wss://relay.walletconnect.org`. **Vercel cannot do this** — its functions don't proxy
+   long-lived WebSockets. Use Cloudflare Workers (free tier is enough), Fly.io, Railway, or a
+   VPS with nginx `proxy_pass` plus the `Upgrade`/`Connection` headers.
+2. Set `NEXT_PUBLIC_WC_RELAY_URL=wss://relay.yourdomain.com`.
+
+Leave it unset to use WalletConnect's own relay. Relay traffic is end-to-end encrypted
+between wallet and dApp, so the proxy can't read sessions — but it does become an
+availability dependency, so monitor it. Confirm what's actually blocked with `/network-check`
+before building the proxy: if a carrier filters by IP rather than by domain, a proxy on
+different infrastructure is required.
+
 ### `ADMIN_WALLET_ADDRESS`
 Free — this is just the wallet address (yours) that's allowed to sign into `/admin`. No
 account needed, just paste your own `0x...` address.

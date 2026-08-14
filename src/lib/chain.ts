@@ -23,11 +23,19 @@ export function resolveChain(blockchain: string | null | undefined) {
 
 // Primary + backup RPC URLs per chain. Primary matches what the app used before;
 // backups are well-known public endpoints so a single outage doesn't halt verification.
-function rpcUrlsFor(chainId: number): string[] {
+//
+// ⚡ EXPORTED because the BROWSER needs the same list. src/config/wagmi.ts used to build its
+// transports with a bare `http()`, i.e. viem's single default endpoint per chain with no
+// backup — so a user whose network can't reach `forno.celo.org` (some Nigerian mobile
+// networks filter it) got a silently broken balance/allowance read even though the server
+// side had failover. One list, both sides.
+export function rpcUrlsFor(chainId: number): string[] {
   switch (chainId) {
     case celo.id:
       return ['https://forno.celo.org', 'https://rpc.ankr.com/celo'];
     case celoSepolia.id:
+      return ['https://alfajores-forno.celo-testnet.org'];
+    case 44787: // celoAlfajores — the browser config targets Alfajores, not celoSepolia
       return ['https://alfajores-forno.celo-testnet.org'];
     case base.id:
       return ['https://mainnet.base.org', 'https://base.publicnode.com', 'https://base-rpc.publicnode.com'];

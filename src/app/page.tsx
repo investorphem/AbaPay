@@ -26,6 +26,16 @@ import AppFooter from "@/components/AppFooter";
 import { AgentHub } from "@/components/AgentHub";
 import { AIChat } from "@/components/AIChat";
 import {
+  looksLikeRealInjectedWallet,
+  withConnectTimeout,
+  waitForRelayHandshake,
+  describeConnectFailure,
+  ConnectTimeoutError,
+  RelayUnreachableError,
+  INJECTED_CONNECT_TIMEOUT_MS,
+  RELAY_HANDSHAKE_TIMEOUT_MS,
+} from "@/lib/walletEnv";
+import {
   ABAPAY_ABI, ERC20_ABI, SERVICES,
   SUPPORTED_TOKENS, SUPPORTED_COUNTRIES, PRE_SELECT_AMOUNTS,
   ELEC_PRE_SELECT_AMOUNTS, ITEMS_PER_PAGE, extractVtpassArray
@@ -62,8 +72,11 @@ function withWalletTimeout<T>(promise: Promise<T>, ms = 90_000): Promise<T> {
 
 export default function Home() {
   const { address: wagmiAddress, isConnected: isWagmiConnected, chain: wagmiChain } = useAccount();
-  const { connectors, connect, status: connectStatus } = useConnect();
+  const { connectors, connect, connectAsync, status: connectStatus } = useConnect();
   const autoConnectTried = useRef(false);
+  // Surfaces WHY a connect attempt failed. Previously every failure was silent.
+  const [connectError, setConnectError] = useState<string | null>(null);
+  const [isConnecting, setIsConnecting] = useState(false);
   const { disconnect } = useDisconnect();
   // ⚡ ADD THIS: Grabs the live WalletConnect provider securely
   const { data: wagmiWalletClient } = useWalletClient();
@@ -1719,7 +1732,12 @@ export default function Home() {
     // Abort if already connected, explicitly logged out, or not in web mode
     if (address || environment !== 'WEB' || localStorage.getItem('abapay_explicit_logout') === 'true') return;
 
-    const isWeb3Browser = typeof window !== 'undefined' && Boolean((window as any).ethereum);
+    // 🔴 WAS `Boolean(window.ethereum)`. Several extensions and in-app webviews define
+    // `window.ethereum` WITHOUT being a usable wallet — no identity flag, and a request()
+    // that never settles. Those users were auto-routed into the injected path and hung
+    // there forever. looksLikeRealInjectedWallet() requires the provider to actually
+    // identify itself before we hand it a connection attempt.
+    const isWeb3Browser = looksLikeRealInjectedWallet();
     if (!isWeb3Browser || connectors.length === 0) return; // Wait for connectors to load
     if (connectStatus === 'pending') return; // a connection attempt is already in flight
 
@@ -1747,6 +1765,108 @@ export default function Home() {
       }
     );
   }, [address, environment, connectors, connect, connectStatus]);
+
+  // ⚡ THE MANUAL CONNECT PATH ⚡
+  //
+  // The old handler fired `connect()` and walked away: no await, no timeout, no error
+  // handler. Two very different failures therefore looked identical to the user — the
+  // button simply did nothing, forever:
+  //
+  //   • a stub `window.ethereum` (no wallet behind it) swallowed the attempt, AND because
+  //     the old code branched on `Boolean(window.ethereum)` it never tried WalletConnect;
+  //   • a filtered WalletConnect relay (MTN and other Nigerian networks) left the relay
+  //     socket hanging, and a WebSocket that never opens throws nothing to catch.
+  //
+  // Now: attempt injected only when a real wallet is present, ALWAYS fall through to
+  // WalletConnect, race both against a timeout, and say out loud what failed.
+  const handleConnectClick = useCallback(async () => {
+    if (isConnecting) return;
+
+    localStorage.removeItem('abapay_explicit_logout');
+    setConnectError(null);
+    setIsConnecting(true);
+
+    const injectedConnector = connectors.find(c => c.type === 'injected' || c.id === 'injected' || c.id === 'metaMask');
+    const wcConnector = connectors.find(c => c.id === 'walletConnect' || c.type === 'walletConnect');
+
+    try {
+      // 1. A REAL injected wallet is always the best path — no third-party host involved,
+      //    which is exactly why it keeps working on networks that filter the relay.
+      if (injectedConnector && looksLikeRealInjectedWallet()) {
+        try {
+          await withConnectTimeout(
+            connectAsync({ connector: injectedConnector }),
+            INJECTED_CONNECT_TIMEOUT_MS,
+            'injected',
+          );
+          localStorage.setItem('abapay_connected', 'true');
+          return;
+        } catch (injectedErr) {
+          // A wallet that REFUSED (unsupported, locked, user dismissed) must not be a dead
+          // end while WalletConnect is still available — fall through.
+          //
+          // A wallet that TIMED OUT is different: it may still be sitting there waiting for
+          // approval, and stacking a QR modal on top of a live wallet prompt is worse than
+          // saying so. Report and stop.
+          if (injectedErr instanceof ConnectTimeoutError || !wcConnector) {
+            setConnectError(describeConnectFailure(injectedErr));
+            return;
+          }
+        }
+      }
+
+      // 2. WalletConnect — Valora and every other mobile wallet.
+      if (wcConnector) {
+        try {
+          // ⚠️ NO timeout on this promise: it resolves only once the user has scanned the
+          // QR and approved, which legitimately takes minutes.
+          const connectPromise = connectAsync({ connector: wcConnector });
+          // Keep the rejection handled while we watch the handshake, so a relay failure
+          // can't surface as an unhandled promise rejection.
+          let connectFailure: unknown = null;
+          const settled = connectPromise.then(
+            () => 'connected' as const,
+            (err) => { connectFailure = err; return 'failed' as const; },
+          );
+
+          // Race the pairing URI (proof the relay is reachable) against the connection
+          // itself — a user with an existing session connects without ever showing a QR.
+          const outcome = await Promise.race([
+            settled,
+            waitForRelayHandshake(wcConnector, RELAY_HANDSHAKE_TIMEOUT_MS)
+              .then((ok) => (ok ? ('handshake' as const) : ('norelay' as const))),
+          ]);
+
+          if (outcome === 'norelay') {
+            setConnectError(describeConnectFailure(new RelayUnreachableError()));
+            return;
+          }
+          if (outcome === 'failed') {
+            setConnectError(describeConnectFailure(connectFailure));
+            return;
+          }
+          if (outcome === 'handshake') {
+            // Relay is fine and the QR is up. Now wait on the human for as long as it takes.
+            const final = await settled;
+            if (final === 'failed') {
+              setConnectError(describeConnectFailure(connectFailure));
+              return;
+            }
+          }
+
+          localStorage.setItem('abapay_connected', 'true');
+          return;
+        } catch (wcErr) {
+          setConnectError(describeConnectFailure(wcErr));
+          return;
+        }
+      }
+
+      setConnectError('No wallet connector is available in this browser.');
+    } finally {
+      setIsConnecting(false);
+    }
+  }, [connectors, connectAsync, isConnecting]);
 
   // =======================================================================
 
@@ -2466,32 +2586,13 @@ export default function Home() {
 
                                     {/* ⚡ NEW: Dynamic Connect Button / Smart Environment Routing ⚡ */}
             {!address && environment === 'WEB' ? (
-                <button 
-                  onClick={() => {
-                    // 1. Wipe explicit logouts so manual clicks work again
-                    localStorage.removeItem('abapay_explicit_logout'); 
-                    
-                    // 2. Detect environment and available connectors
-                    const isWeb3Browser = typeof window !== "undefined" && Boolean((window as any).ethereum);
-                    const injectedConnector = connectors.find(c => c.type === 'injected' || c.id === 'injected' || c.id === 'metaMask');
-                    const wcConnector = connectors.find(c => c.id === 'walletConnect' || c.type === 'walletConnect');
-                    
-                    // 3. Smart Routing: Native Injected first, WalletConnect second
-                    if (isWeb3Browser && injectedConnector) {
-                      connect({ connector: injectedConnector });
-                    } else if (wcConnector) {
-                      connect({ connector: wcConnector });
-                    } else if (connectors.length > 0) {
-                      connect({ connector: connectors[0] });
-                    }
-                    
-                    localStorage.setItem('abapay_connected', 'true');
-                  }}
-                  disabled={isProcessing}
+                <button
+                  onClick={() => { void handleConnectClick(); }}
+                  disabled={isProcessing || isConnecting}
                   className="bg-emerald-50 dark:bg-emerald-900/20 hover:bg-emerald-100 dark:hover:bg-emerald-900/40 border border-emerald-200 dark:border-emerald-800/50 text-emerald-700 dark:text-emerald-400 font-black text-[10px] px-3 py-1.5 rounded-xl transition-all shadow-sm active:scale-95 disabled:opacity-50 flex shrink-0 items-center gap-1.5 uppercase tracking-widest"
                 >
-                  {isProcessing ? <Loader2 size={12} className="animate-spin"/> : <Zap size={12}/>}
-                  {isProcessing ? "Wait" : "Connect"}
+                  {(isProcessing || isConnecting) ? <Loader2 size={12} className="animate-spin"/> : <Zap size={12}/>}
+                  {isProcessing ? "Wait" : isConnecting ? "Connecting" : "Connect"}
                 </button>
             ) : (
                 <PointsBadge walletAddress={address || undefined} />
@@ -2513,6 +2614,38 @@ export default function Home() {
 
           </div>
         </div>
+
+        {/* ⚡ CONNECT FAILURE BANNER ⚡
+            A failed connection used to be completely invisible — the button just sat there.
+            When the cause is a filtered WalletConnect relay (MTN and other Nigerian
+            networks), the user needs to know it's their network and not the app, and needs
+            a route that works right now: MiniPay touches none of the blocked hosts. */}
+        {connectError && !address && (
+          <div className="mb-4 rounded-2xl border border-amber-300 dark:border-amber-800/60 bg-amber-50 dark:bg-amber-900/20 p-4 shadow-sm">
+            <div className="flex items-start gap-2.5">
+              <AlertTriangle size={16} className="text-amber-600 dark:text-amber-400 shrink-0 mt-0.5" />
+              <div className="min-w-0">
+                <p className="text-[11px] font-bold text-amber-900 dark:text-amber-200 leading-relaxed">
+                  {connectError}
+                </p>
+                <div className="mt-2 flex flex-wrap items-center gap-3">
+                  <button
+                    onClick={() => { void handleConnectClick(); }}
+                    className="text-[10px] font-black uppercase tracking-widest text-amber-800 dark:text-amber-300 underline underline-offset-2"
+                  >
+                    Try again
+                  </button>
+                  <Link
+                    href="/network-check"
+                    className="text-[10px] font-black uppercase tracking-widest text-amber-800 dark:text-amber-300 underline underline-offset-2"
+                  >
+                    Check my network
+                  </Link>
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
 
         {/* THE TABS */}
         <div data-tour="tabs-bar" className="flex gap-2 bg-slate-200/50 dark:bg-[#1a1a1f] p-1.5 rounded-2xl md:rounded-[1.25rem] mb-6 shadow-inner overflow-x-auto no-scrollbar transition-colors">

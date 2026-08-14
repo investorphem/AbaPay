@@ -158,7 +158,30 @@ NEXT_PUBLIC_APP_MODE=sandbox                     # sandbox | production
 NEXT_PUBLIC_NETWORK=celo-sepolia                 # celo-sepolia | celo | base | base-sepolia
 NEXT_PUBLIC_FIXED_RATE=1550.00                    # Fallback NGN exchange rate
 NEXT_PUBLIC_WALLETCONNECT_PROJECT_ID=your_walletconnect_project_id
+NEXT_PUBLIC_WC_RELAY_URL=                         # Optional. Override the WalletConnect relay — see "Blocked networks" below
 ```
+
+#### Blocked networks (Nigeria / MTN)
+
+Connecting an external wallet depends on third-party hosts that some Nigerian mobile
+networks filter — chiefly `relay.walletconnect.org` (the WalletConnect relay) and
+`api.web3modal.org` (the wallet chooser). Because the relay is a WebSocket, a block produces
+**silence** rather than an error, which reads to the user as "the Connect button is broken".
+
+Two things address this:
+
+- **`/network-check`** — a page any user can open that probes each dependency from their own
+  connection and names the ones that fail. It is linked from the connect-failure banner and
+  from the FAQ, and doubles as the evidence to quote in a complaint to the carrier or the NCC.
+- **`NEXT_PUBLIC_WC_RELAY_URL`** — point this at a WebSocket reverse proxy on a domain of
+  yours that isn't filtered (e.g. `wss://relay.abapays.com` forwarding to
+  `wss://relay.walletconnect.org`) and WalletConnect wallets start working on those networks.
+  Relay traffic is end-to-end encrypted, so the proxy is a pipe, not a man-in-the-middle.
+  Note that **Vercel functions cannot proxy long-lived WebSockets** — host it on Cloudflare
+  Workers, Fly.io, or a VPS running nginx with `proxy_pass` and the `Upgrade` headers.
+
+MiniPay needs none of these hosts (it injects a provider directly), so it remains the
+reliable path on a filtered network and is what the app recommends when a connect fails.
 
 ### Smart Contracts (per chain)
 ```
@@ -1010,6 +1033,7 @@ The app ships with Farcaster frame metadata (`public/.well-known/farcaster.json`
 * **Event Cross-Validation:** The webhook decodes the `PaymentReceived` event and requires that its **payer, token, amount, and account number all match the pending record** before vending. This blocks the class of attack where a user has a small pending intent and then manually sends a different (or larger/smaller) transfer to the contract hoping it gets attached to the wrong record.
 * **Stale Intent Expiry:** Pre-flight intents (records created before signing) that never result in an on-chain transaction are automatically expired by a scheduled cleanup (`/api/cleanup`, every 15 min) so they don't linger as `PENDING` forever. This only ever touches `preflight_`-prefixed rows, so a real broadcast transaction can never be expired.
 * **Webhook Acknowledgment:** The webhook always returns 2xx once a request passes signature verification, even when no matching transaction record is found (test pings, unrelated activity, or a payment intent that hasn't synced yet are normal, expected outcomes — not delivery failures). Returning a non-2xx here would cause Alchemy to eventually auto-disable the webhook after repeated "failures" that were never really failures.
+* **VTpass Delayed-Status Webhook:** `/api/webhook/vtpass` replies `{"response": "success"}` immediately — the exact acknowledgement VTpass parses for — and only then does the real work (via `after()`), because VTpass requires a prompt, lightweight reply and retries anything else as an unacknowledged delivery. The push itself is never trusted: the handler re-queries VTpass server-to-server with our API keys and acts only on that confirmed status.
 * **Rate Verification:** The crypto amount paid is checked server-side against the platform's live exchange rate before vending, preventing underpayment exploits even if the client is tampered with.
 * **Smart Contract Vault:** User stablecoins go directly into the immutable `AbaPay.sol` smart contract vault. Only the contract owner's cryptographically signed transaction can withdraw funds — no backend service ever holds custody of user funds directly.
 * **Automatic Refunds:** If a verified on-chain payment fails to vend (provider outage, invalid details, etc.), the transaction is flagged and refunded back to the user's wallet, with the refund transaction hash recorded on the ledger.

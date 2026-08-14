@@ -1,22 +1,55 @@
-import { NextResponse } from 'next/server';
+import { NextResponse, after } from 'next/server';
 import { supabaseAdmin as supabase } from '@/utils/supabase';
 import { sendTelegramAlert } from '@/lib/telegram';
 import { sendAbaPaySms } from '@/lib/messaging';
 import { getHeaders } from '@/lib/vtpass';
-import { Resend } from 'resend'; 
+import { Resend } from 'resend';
 
 const resend = new Resend(process.env.RESEND_API_KEY || "re_dummy_key_for_build");
 
-export async function POST(req: Request) {
-  try {
-    const body = await req.json();
+// ⚡ THE ACKNOWLEDGEMENT VTPASS ACTUALLY LOOKS FOR ⚡
+// VTpass does not just check for a 2xx — it parses the body and expects
+// `{"response": "success"}`. Anything else (we used to send `{received: true}`)
+// is read as "the partner never acknowledged", which makes VTpass retry the same
+// notification repeatedly and eventually flags the endpoint as unhealthy.
+// Every exit path below MUST go through this.
+const ack = () => NextResponse.json({ response: 'success' });
 
+export async function POST(req: Request) {
+  let body: any;
+
+  try {
+    body = await req.json();
+  } catch {
+    // Unparseable body — still acknowledge; retrying it won't help either side.
+    return ack();
+  }
+
+  // ⚡ ACKNOWLEDGE FIRST, WORK AFTER ⚡
+  // VTpass asks that the endpoint stay lightweight and reply promptly, without
+  // heavy operations before responding. Our processing is anything but light: an
+  // authenticated server-to-server requery, a DB write, then Telegram + SMS + email
+  // + points. `after()` runs that once the response has already been flushed, so
+  // VTpass gets its acknowledgement immediately and stops retrying.
+  after(async () => {
+    try {
+      await processNotification(body);
+    } catch (error: any) {
+      console.error("VTpass webhook processing error:", error?.message || error);
+    }
+  });
+
+  return ack();
+}
+
+async function processNotification(body: any) {
     // VTpass sometimes wraps the payload in "data", and sometimes sends it raw. We handle both.
     const payload = body.data || body;
     const { requestId } = payload;
 
     if (!requestId) {
-        return NextResponse.json({ received: true, message: 'No Request ID found in payload.' });
+        console.log("VTpass webhook: no Request ID in payload.");
+        return;
     }
 
     // 1. Fetch the existing pending transaction from the database
@@ -28,7 +61,7 @@ export async function POST(req: Request) {
 
     if (fetchError || !txData) {
        console.log("Webhook: Transaction not found for ID:", requestId);
-       return NextResponse.json({ received: true, message: 'Transaction not found in DB.' });
+       return;
     }
 
     // 🔐 ANTI-FORGERY CHECK: This webhook is unauthenticated, so we NEVER trust the
@@ -49,7 +82,8 @@ export async function POST(req: Request) {
         confirmedStatus = confirmedPayload.content?.transactions?.status || null;
     } catch (e) {
         // If we cannot confirm with the provider, do not act on an unauthenticated push.
-        return NextResponse.json({ received: true, message: 'Could not confirm status with provider. Push ignored.' });
+        console.log("Webhook: could not confirm status with provider. Push ignored.");
+        return;
     }
 
     const trustedTx = confirmedPayload?.content?.transactions || {};
@@ -58,9 +92,7 @@ export async function POST(req: Request) {
     if (confirmedStatus === 'delivered' || confirmedStatus === 'successful') {
 
       // If it's already marked success, avoid duplicate notifications
-      if (txData.status === 'SUCCESS') {
-          return NextResponse.json({ received: true, status: 'already_processed' });
-      }
+      if (txData.status === 'SUCCESS') return;
 
       // Extract the delayed Token, PIN, or Units from the CONFIRMED payload only
       let dbPurchasedCode = confirmedPayload.purchased_code || confirmedPayload.token || confirmedPayload.tokens || confirmedPayload.Pin || trustedTx.token || trustedTx.purchased_code || null;
@@ -78,18 +110,16 @@ export async function POST(req: Request) {
       // 🔐 ATOMIC CLAIM: only one execution transitions the record and sends notifications
       const { data: claimed } = await supabase
         .from('transactions')
-        .update({ 
-            status: 'SUCCESS', 
-            purchased_code: dbPurchasedCode, 
-            units: vendedUnits 
+        .update({
+            status: 'SUCCESS',
+            purchased_code: dbPurchasedCode,
+            units: vendedUnits
         })
         .eq('request_id', requestId)
         .neq('status', 'SUCCESS')
         .select();
 
-      if (!claimed || claimed.length === 0) {
-          return NextResponse.json({ received: true, status: 'already_processed' });
-      }
+      if (!claimed || claimed.length === 0) return;
 
       // ⚡ TRIGGER ALL DELAYED NOTIFICATIONS ⚡
       const notifications = [];
@@ -102,9 +132,9 @@ export async function POST(req: Request) {
       if (txData.service_category === 'ELECTRICITY' || txData.service_category === 'EDUCATION') {
         const typeLabel = txData.service_category === 'ELECTRICITY' ? 'Token' : 'PIN';
         const networkDisplay = txData.network || txData.service_category;
-        
+
         // Use txData.phone first! Fallback to account_number for data/airtime
-        const smsTarget = txData.phone || txData.account_number; 
+        const smsTarget = txData.phone || txData.account_number;
 
         notifications.push(
           sendAbaPaySms(smsTarget, `AbaPay: Your ${networkDisplay} ${typeLabel} is ${alertTokenRef}. Amount: N${txData.amount_naira}. Thank you.`)
@@ -142,23 +172,20 @@ export async function POST(req: Request) {
       // Distribute AbaPoints
       const earnedPoints = Number((txData.amount_naira / 1000).toFixed(2));
       if (earnedPoints > 0 && txData.wallet_address) {
-          notifications.push(supabase.rpc('award_transaction_points', { 
-              target_wallet: txData.wallet_address.toLowerCase(), 
-              points_to_add: earnedPoints 
+          notifications.push(supabase.rpc('award_transaction_points', {
+              target_wallet: txData.wallet_address.toLowerCase(),
+              points_to_add: earnedPoints
           }));
       }
 
       await Promise.allSettled(notifications);
-
-      return NextResponse.json({ received: true, status: 'acknowledged_success' });
+      return;
     }
 
     // --- SCENARIO 2: TRANSACTION REVERSAL (CONFIRMED BY VTPASS) ---
     if (confirmedStatus === 'reversed' || confirmedStatus === 'failed') {
 
-       if (txData.status === 'REVERSED_NEEDS_REFUND' || txData.status === 'REFUNDED') {
-           return NextResponse.json({ received: true, status: 'already_refunded' });
-       }
+       if (txData.status === 'REVERSED_NEEDS_REFUND' || txData.status === 'REFUNDED') return;
 
        // 1. Update the database to flag this for a crypto refund
        await supabase
@@ -173,15 +200,10 @@ export async function POST(req: Request) {
        const alertMessage = `⚠️ *VTPASS REVERSAL ALERT*\n\nVTpass bounced a delayed transaction and refunded your Naira wallet.\n\n🛒 *Req ID:* ${requestId}\n💰 *Naira Refunded:* ₦${txData.amount_naira}\n🛑 *Reason:* ${confirmedPayload.response_description || 'Provider Reversal'}\n\n🚨 *ACTION REQUIRED:* You need to manually refund the user's crypto from the Vault.\n👤 *User Wallet:* \`${userWallet}\`\n🪙 *Crypto Owed:* $${cryptoAmount}`;
 
        await sendTelegramAlert(alertMessage);
-
-       return NextResponse.json({ received: true, status: 'acknowledged_reversal' });
+       return;
     }
 
-    // Acknowledge other webhook types so VTpass doesn't keep retrying
-    return NextResponse.json({ received: true, message: 'Unhandled webhook status ignored.' });
-
-  } catch (error: any) {
-    console.error("Webhook Error:", error.message);
-    return NextResponse.json({ error: "Webhook handler failed" }, { status: 500 });
-  }
+    // Any other status (still pending, etc.) needs no action — the acknowledgement
+    // has already gone out, so VTpass won't retry it.
+    console.log(`VTpass webhook: unhandled status '${confirmedStatus}' for ${requestId}.`);
 }
