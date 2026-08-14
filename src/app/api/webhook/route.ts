@@ -64,18 +64,25 @@ export async function POST(req: Request) {
             return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
         }
 
-        let isValid = false;
-        if (baseSecret) {
-            const hmac = crypto.createHmac('sha256', baseSecret);
-            const digest = hmac.update(rawBody).digest('hex');
-            if (signature === digest) isValid = true;
-        }
+        // 🔐 Constant-time comparison. `===` on a hex digest short-circuits at the first
+        // differing byte, so response time leaks how much of the digest a guess got right —
+        // the standard way to forge an HMAC without knowing the secret. Every other webhook in
+        // this app (WhatsApp, X) and utils/internalAuth.ts already use timingSafeEqual; this
+        // one compared with `===`. Note the payload is only ever a TRIGGER: even a perfectly
+        // forged webhook cannot cause a vend, because everything below re-reads the real
+        // transaction receipt from chain and cross-checks sender/token/amount against the
+        // pending record. This closes the door anyway.
+        const signatureMatches = (secret: string): boolean => {
+            const digest = crypto.createHmac('sha256', secret).update(rawBody).digest('hex');
+            const a = Buffer.from(signature);
+            const b = Buffer.from(digest);
+            if (a.length !== b.length) return false;
+            try { return crypto.timingSafeEqual(a, b); } catch { return false; }
+        };
 
-        if (!isValid && celoSecret) {
-            const hmacCelo = crypto.createHmac('sha256', celoSecret);
-            const digestCelo = hmacCelo.update(rawBody).digest('hex');
-            if (signature === digestCelo) isValid = true;
-        }
+        let isValid = false;
+        if (baseSecret) isValid = signatureMatches(baseSecret);
+        if (!isValid && celoSecret) isValid = signatureMatches(celoSecret);
 
         if (!isValid) {
             return NextResponse.json({ error: "Invalid signature" }, { status: 401 });

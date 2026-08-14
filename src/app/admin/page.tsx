@@ -741,6 +741,29 @@ export default function AdminDashboard() {
       return alert("This transaction reverted on-chain — the crypto never reached the vault, so there is nothing to refund. Refunding it would incorrectly send real vault funds out.");
     }
 
+    // 🔴 DOUBLE-REFUND GUARD — the row already carries a refund transaction.
+    //
+    // THE BUG THIS CLOSES: refundUser() is broadcast from the admin's own wallet, and the DB
+    // is only updated AFTER waitForTransactionReceipt() resolves. If that wait throws — an RPC
+    // timeout, a rate-limited provider (Alchemy 429s are common here), a closed laptop — the
+    // refund is ALREADY ON-CHAIN and may confirm perfectly well, but the catch block below
+    // used to report a flat "Refund Failed" and leave the row untouched. The obvious next move
+    // is to click Refund again, which sends the vault's money a SECOND time. Nothing on-chain
+    // prevents that: refundUser has a per-tx cap but no idea it has already paid this user.
+    //
+    // refund_hash is set by /api/admin/refund only after it has verified the transfer on-chain,
+    // so its presence means a refund provably landed. Never sign a second one.
+    if (tx.refund_hash) {
+      return alert(
+        `This transaction has already been refunded on-chain.\n\nHash: ${tx.refund_hash}\n\n` +
+        `Refunding again would send vault funds a second time. If the ledger still looks wrong, ` +
+        `check the hash on the explorer rather than re-running the refund.`
+      );
+    }
+    if (tx.status === 'REFUNDED') {
+      return alert("This transaction is already marked REFUNDED. Refunding again would double-pay from the vault.");
+    }
+
     // 🔴 THE BUG THIS FIXES: a PENDING/PROCESSING row could be refunded with ZERO recorded
     // reason — nothing in error_code or api_response — if the admin already knew externally
     // (e.g. Monnify support/dashboard said it failed) and refunded straight from here without
@@ -816,14 +839,69 @@ export default function AdminDashboard() {
           dataSuffix: celoAttributionSuffix(targetChain), // Celo attribution only; no-op on Base
       });
 
+      // ⚡ FROM HERE ON THE MONEY MAY ALREADY HAVE MOVED.
+      //
+      // writeContract() has returned a hash, which means the refund is BROADCAST. Everything
+      // below is confirmation and bookkeeping, and none of it can un-send the transaction. So
+      // no failure below may be reported as "Refund Failed" — that phrasing is what invites a
+      // second click and a double payout. Any problem past this line is reported as
+      // "broadcast, not yet recorded — DO NOT retry", with the hash to reconcile from.
       const publicClient = createPublicClient({ chain: targetChain, transport: http() });
-      const receipt = await publicClient.waitForTransactionReceipt({ hash: refundHash });
-      if (receipt.status !== 'success') throw new Error("Transaction reverted. Vault does not have enough balance.");
 
-      const dbRes = await fetch('/api/admin/refund', { method: 'POST', headers: { 'Content-Type': 'application/json', ...adminHeaders }, body: JSON.stringify({ id: tx.id, refundHash, manualReason }) });
-      if (dbRes.ok) { alert(`Refund confirmed on-chain! Hash: ${refundHash}`); refreshAllData(); } 
-      else alert("Crypto refunded successfully, but backend failed to update the database status.");
-    } catch (error: any) { alert(`Refund Failed: ${error.message || "Execution Reverted."}`); } 
+      // Records the refund against the row. /api/admin/refund independently re-verifies the
+      // transfer on-chain (token, recipient, amount) and is idempotent, so retrying is safe.
+      const recordRefund = async () => {
+        const dbRes = await fetch('/api/admin/refund', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', ...adminHeaders },
+          body: JSON.stringify({ id: tx.id, refundHash, manualReason }),
+        });
+        return dbRes.ok;
+      };
+
+      try {
+        const receipt = await publicClient.waitForTransactionReceipt({ hash: refundHash });
+
+        if (receipt.status !== 'success') {
+          // A genuine on-chain revert — nothing left the vault, so this one IS safe to retry.
+          alert(`Refund reverted on-chain — no funds moved, so it is safe to try again.\n\nHash: ${refundHash}\n\nMost likely the vault does not hold enough of this token, or the amount exceeds maxRefundPerTx.`);
+          return;
+        }
+
+        // Confirmed. Record it, retrying a couple of times before falling back to the manual
+        // path — a transient 500 here must not leave a confirmed refund unrecorded.
+        let recorded = await recordRefund();
+        if (!recorded) recorded = await recordRefund();
+
+        if (recorded) {
+          alert(`Refund confirmed on-chain and recorded.\n\nHash: ${refundHash}`);
+          refreshAllData();
+        } else {
+          alert(
+            `⚠️ REFUND SENT AND CONFIRMED ON-CHAIN, BUT NOT RECORDED IN THE LEDGER.\n\n` +
+            `Hash: ${refundHash}\n\n` +
+            `DO NOT click Refund again — the user has been paid. Re-run "Check Status" or record ` +
+            `this hash manually so the row stops showing as owed.`
+          );
+        }
+      } catch (confirmErr: any) {
+        // We never learned the outcome. The transaction is out there and may still confirm.
+        // This is the exact case that used to print "Refund Failed".
+        console.error('[Admin] refund broadcast but unconfirmed:', refundHash, confirmErr);
+        try { await recordRefund(); } catch { /* best-effort; verified server-side anyway */ }
+        alert(
+          `⚠️ REFUND BROADCAST — OUTCOME UNKNOWN. DO NOT RETRY.\n\n` +
+          `Hash: ${refundHash}\n\n` +
+          `We lost the connection while confirming (usually a rate-limited or slow RPC), so we ` +
+          `cannot yet tell whether it succeeded. It may well have. Check the hash on the explorer ` +
+          `before doing anything else — clicking Refund again would pay this user twice.`
+        );
+      }
+    } catch (error: any) {
+      // Only reachable BEFORE the transaction was broadcast (validation, wrong network, user
+      // rejected the signature, insufficient gas). Safe to describe as a failure.
+      alert(`Refund not sent: ${error.message || "Execution reverted."}\n\nNothing was broadcast, so no funds moved.`);
+    }
     finally { setProcessingRefundId(null); }
   };
 
