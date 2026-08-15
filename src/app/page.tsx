@@ -71,6 +71,21 @@ function timeoutSignal(ms: number): AbortSignal {
 // holding a signature prompt that the user can approve a moment later. Anything that reacts to
 // a failure by starting a SECOND payment has to be able to tell the two apart — see the x402
 // catch block, where getting this wrong would mean paying twice.
+/**
+ * Did the USER decline, as opposed to something going wrong?
+ *
+ * EIP-1193 defines 4001 for "user rejected request" and every wallet sets it, but the code
+ * gets buried at a different depth by each library in the stack (viem wraps, thirdweb wraps
+ * again), so the message is checked as well. Worth getting right: a rejection must never be
+ * retried on another rail, or the app appears to ignore "no" and ask a second time.
+ */
+function isUserRejection(e: any): boolean {
+  const code = e?.code ?? e?.cause?.code ?? e?.data?.code ?? e?.cause?.cause?.code;
+  if (code === 4001 || code === 'ACTION_REJECTED') return true;
+  const message = String(e?.shortMessage || e?.message || '').toLowerCase();
+  return /user rejected|user denied|user cancell?ed|rejected the request|request rejected|denied transaction/.test(message);
+}
+
 class WalletTimeoutError extends Error {
   constructor() {
     super("Your wallet didn't respond in time. Check that it's unlocked and connected, then try again.");
@@ -89,6 +104,9 @@ export default function Home() {
   const { address: wagmiAddress, isConnected: isWagmiConnected, chain: wagmiChain, connector: wagmiConnector } = useAccount();
   const { connectors, connect, connectAsync, status: connectStatus } = useConnect();
   const autoConnectTried = useRef(false);
+  // Asked once per session. A wallet on an unsupported chain gets one switch request, never a
+  // loop — declining must leave the app usable, not re-prompt on every render.
+  const chainSwitchAsked = useRef(false);
   // Surfaces WHY a connect attempt failed. Previously every failure was silent.
   const [connectError, setConnectError] = useState<string | null>(null);
   const [isConnecting, setIsConnecting] = useState(false);
@@ -1480,6 +1498,17 @@ export default function Home() {
         return;
       }
 
+      // 🔴 A REJECTION IS AN ANSWER, NOT A FAULT. Falling back here meant that declining the
+      // signature immediately raised a SECOND, different wallet prompt for the same bill —
+      // observed in the wild: the user dismissed a request their wallet had flagged as
+      // malicious, the spinner carried on regardless, and another approval appeared. That
+      // reads as an app ignoring "no" and asking again, which is exactly the behaviour a
+      // suspicious user is watching for. Stop when the user says stop.
+      if (isUserRejection(e)) {
+        setStatus("Payment cancelled.");
+        return;
+      }
+
       console.error('[x402] Settlement failed, falling back to the standard on-chain flow:', e.message);
       setStatus("This payment method is temporarily unavailable — trying the standard payment method instead...");
       await processBlockchainPayment();
@@ -1959,14 +1988,27 @@ export default function Home() {
       // way for them to correct it. The chooser resolves through this same promise, so the
       // rest of the flow (timeouts, error messages, the WalletConnect fallback) is identical
       // however the wallet was chosen.
-      const chosen = usable.length > 1
-        ? await askWhichWallet(usable)
-        : usable[0];
+      //
+      // WalletConnect is offered ALONGSIDE the installed wallets, not merely as what happens
+      // when there are none. Someone with three extensions may still want to pair a phone
+      // wallet, and the first version of this chooser gave them no way to say so — the only
+      // route to WalletConnect was to have no wallet installed at all.
+      const showChooser = usable.length > 1;
+      let chosen: InjectedCandidate | null | undefined = usable[0];
 
-      // Cancelled the chooser — not a failure, just stop. No error banner, no QR code.
-      if (usable.length > 1 && !chosen) return;
+      if (showChooser) {
+        const options: InjectedCandidate[] = wcConnector
+          ? [...usable, { connector: wcConnector, name: 'WalletConnect', status: 'available' as const }]
+          : usable;
+        chosen = await askWhichWallet(options);
+        // Cancelled — not a failure, just stop. No error banner, no QR code.
+        if (!chosen) return;
+      }
 
-      const injectedConnector = chosen?.connector;
+      // Picked WalletConnect from the list: skip the injected attempt and go straight to the
+      // relay flow below, which already handles the QR, the handshake timeout and the errors.
+      const pickedWalletConnect = chosen?.connector === wcConnector;
+      const injectedConnector = pickedWalletConnect ? undefined : chosen?.connector;
 
       if (injectedConnector) {
         try {
@@ -2052,21 +2094,71 @@ export default function Home() {
 
   // ⚡ WAGMI TO ABAPAY BRIDGE ⚡
   useEffect(() => {
-    if (environment === 'WEB' && isWagmiConnected && wagmiAddress) {
-      setAddress(wagmiAddress);
-      localStorage.removeItem('abapay_explicit_logout');
+    if (environment !== 'WEB' || !isWagmiConnected || !wagmiAddress) return;
 
-      const targetChain = wagmiChain || (isMainnet ? base : baseSepolia);
-      setActiveChain(targetChain);
+    setAddress(wagmiAddress);
+    localStorage.removeItem('abapay_explicit_logout');
 
-      // ⚡ THE FIX: Use Wagmi's official WalletClient instead of assuming window.ethereum exists!
-      // This allows WalletConnect sockets to properly sign transactions.
-      if (!client && wagmiWalletClient) {
-          const webClient = (wagmiWalletClient as any).extend(eip5792Actions());
-          setClient(webClient);
-      }
+    const targetChain = wagmiChain || (isMainnet ? base : baseSepolia);
+    setActiveChain(targetChain);
+
+    if (client) return;
+
+    // ⚡ Wagmi's official WalletClient, so WalletConnect sockets can properly sign.
+    if (wagmiWalletClient) {
+      setClient((wagmiWalletClient as any).extend(eip5792Actions()));
+      return;
     }
-  }, [environment, isWagmiConnected, wagmiAddress, wagmiChain, isMainnet, client, wagmiWalletClient]);
+
+    // 🔴 …AND A FALLBACK, BECAUSE `useWalletClient()` CAN SIMPLY NOT RESOLVE.
+    //
+    // It is a query over getConnectorClient, which THROWS when the wallet's current chain
+    // isn't in our `chains` config (ConnectorChainMismatchError, and the chain lookup returns
+    // undefined). A wallet sitting on Ethereum mainnet — the default for a fresh MetaMask —
+    // therefore yields `wagmiWalletClient === undefined` indefinitely.
+    //
+    // Nothing else noticed: `address` still gets set from wagmi and the balance still renders,
+    // because balances are read through a PUBLIC client that needs no wallet. Only `client` was
+    // left null, and the one place that surfaced was the pay button, which read "Connect Wallet
+    // First" at a wallet that was plainly connected and showing a balance.
+    //
+    // Building the client straight from the connector's own provider — the same shape the
+    // MiniPay and Farcaster paths already use — removes the dependency on that query
+    // succeeding at all. The switch-to-a-supported-chain effect below fixes the underlying
+    // mismatch; this makes sure a wallet is usable either way.
+    let cancelled = false;
+    (async () => {
+      try {
+        const provider = await wagmiConnector?.getProvider?.();
+        if (!provider || cancelled) return;
+        const fallbackClient = createWalletClient({
+          account: wagmiAddress as `0x${string}`,
+          chain: targetChain,
+          transport: custom(provider as any),
+        }).extend(eip5792Actions());
+        if (!cancelled) setClient(fallbackClient);
+      } catch (e) {
+        console.error('[wallet] Could not build a wallet client from the connector:', e);
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [environment, isWagmiConnected, wagmiAddress, wagmiChain, isMainnet, client, wagmiWalletClient, wagmiConnector]);
+
+  // ⚡ PUT THE WALLET ON A CHAIN WE ACTUALLY SUPPORT ⚡
+  //
+  // A wallet connects on whatever chain it happened to be on. If that is not one of ours,
+  // `wagmiChain` is undefined, `useWalletClient()` throws, and every signature would be
+  // attempted against the wrong network. Ask once, right after connecting, and let the user
+  // decline — declining leaves them on the fallback client above rather than stuck.
+  useEffect(() => {
+    if (environment !== 'WEB' || !isWagmiConnected || wagmiChain || !switchChain) return;
+    if (chainSwitchAsked.current) return;
+    chainSwitchAsked.current = true;
+    switchChain(
+      { chainId: (isMainnet ? base : baseSepolia).id },
+      { onError: () => { /* declined or unsupported — the fallback client still works */ } },
+    );
+  }, [environment, isWagmiConnected, wagmiChain, switchChain, isMainnet]);
 
   // ⚡ SYNC WAGMI WALLET → THIRDWEB ACTIVE WALLET ⚡
   // Powers x402 settlement (processX402Payment/useFetchWithPayment) without a second
@@ -2595,11 +2687,32 @@ export default function Home() {
                       //     (server-side CDP creds must be configured too — see route.ts).
                       // Everything else (cUSD/USDm, Base while x402 disabled, x402 unconfigured)
                       // uses the normal contract-call flow, unchanged. See README "x402 settlement".
+                      // 🔴 x402 IS NOW OPT-IN, AND OFF BY DEFAULT. It used to be automatic for
+                      // Celo+USDC/USD₮ and Base+USDC, and it was actively hurting users:
+                      //
+                      //  • x402 settles by asking the wallet to SIGN TYPED DATA — an EIP-3009
+                      //    `transferWithAuthorization` that lets a third party move the tokens.
+                      //    That is the same shape as a well-known drainer attack, so wallet
+                      //    security scanners flag it. Zerion showed AbaPay's own request as
+                      //    "Malicious Request — Approving this may risk total asset loss.
+                      //    Proceeding is not advised." on a routine ₦ bill payment. No user
+                      //    should ever be asked to click past that, and most rightly won't.
+                      //  • The very same payment through the normal contract call is shown by
+                      //    the same wallet as an ordinary Send with "No Risks Found".
+                      //  • On other wallets the signature request never surfaced at all, which
+                      //    is what left mobile users on an endless spinner.
+                      //
+                      // The contract-call path is the proven rail: it works everywhere, it is
+                      // what every agent/scheduled payment already uses, and it reads as a
+                      // normal transaction. Set NEXT_PUBLIC_X402_ENABLED=true to opt back in
+                      // (see README "x402 settlement") — the code is unchanged and ready, it
+                      // simply no longer decides on the user's behalf.
+                      const x402OptIn = process.env.NEXT_PUBLIC_X402_ENABLED === 'true';
                       const hasThirdweb = !!process.env.NEXT_PUBLIC_THIRDWEB_CLIENT_ID;
                       // Celo condition kept byte-identical to the original (mainnet, USDC/USD₮).
                       const celoX402 = activeChain?.id === celo.id && (selectedToken.symbol === "USDC" || selectedToken.symbol === "USD₮");
                       const baseX402 = (activeChain?.id === base.id || activeChain?.id === baseSepolia.id) && selectedToken.symbol === "USDC" && process.env.NEXT_PUBLIC_BASE_X402_ENABLED === 'true';
-                      const useX402 = hasThirdweb && (celoX402 || baseX402);
+                      const useX402 = x402OptIn && hasThirdweb && (celoX402 || baseX402);
                       if (useX402) processX402Payment(); else processBlockchainPayment();
                   }}
                   className={`w-full text-white dark:text-slate-900 font-black py-5 rounded-2xl flex items-center justify-center gap-2.5 transition-all active:scale-95 shadow-xl text-lg tracking-tight ${hasPendingDuplicate ? 'bg-orange-500 dark:bg-orange-500 hover:bg-orange-600 dark:hover:bg-orange-600 text-white shadow-orange-500/20' : 'bg-slate-900 dark:bg-white hover:bg-black dark:hover:bg-slate-200 shadow-slate-900/20 dark:shadow-white/10'}`}
