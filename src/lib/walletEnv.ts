@@ -53,14 +53,33 @@ export async function probeInjectedProvider(
   timeoutMs: number = INJECTED_PROBE_TIMEOUT_MS,
 ): Promise<InjectedProbe> {
   if (typeof window === 'undefined') return { status: 'none' };
+  return probeProvider((window as any).ethereum, timeoutMs);
+}
 
-  const eth = (window as any).ethereum;
-  if (!eth || typeof eth.request !== 'function') return { status: 'none' };
+/**
+ * The same probe, against ANY EIP-1193 provider rather than `window.ethereum` specifically.
+ *
+ * 🔴 THE BUG THIS EXISTS FOR: probing only `window.ethereum` is why a real web3 browser fell
+ * through to WalletConnect. Under **EIP-6963** a wallet announces itself over an event instead
+ * of claiming the `window.ethereum` global — which is how modern extensions coexist without
+ * fighting over one slot — so a browser with a perfectly good wallet can have `window.ethereum`
+ * undefined, or pointing at a different wallet than the one the user means. The old probe read
+ * `none` there, the injected path was skipped entirely, and the user was shown a QR code for a
+ * wallet sitting right there in the same browser. Auto-connect died for the same reason.
+ *
+ * wagmi already discovers those wallets (`multiInjectedProviderDiscovery` defaults to true) and
+ * exposes one connector per wallet; this lets us ask each of them the same silent question.
+ */
+export async function probeProvider(
+  provider: any,
+  timeoutMs: number = INJECTED_PROBE_TIMEOUT_MS,
+): Promise<InjectedProbe> {
+  if (!provider || typeof provider.request !== 'function') return { status: 'none' };
 
   let timer: ReturnType<typeof setTimeout>;
   try {
     const accounts = (await Promise.race([
-      Promise.resolve(eth.request({ method: 'eth_accounts' })).finally(() => clearTimeout(timer)),
+      Promise.resolve(provider.request({ method: 'eth_accounts' })).finally(() => clearTimeout(timer)),
       new Promise<never>((_, reject) => {
         timer = setTimeout(() => reject(new Error('injected probe timed out')), timeoutMs);
       }),
@@ -74,6 +93,60 @@ export async function probeInjectedProvider(
     // Threw or never answered — treat as no usable injected wallet.
     return { status: 'none' };
   }
+}
+
+/** One injected wallet wagmi found, plus what it answered when asked about this site. */
+export interface InjectedCandidate {
+  /** wagmi connector — `id` is the EIP-6963 rdns ('io.metamask'), or 'injected' for the generic one. */
+  connector: any;
+  name: string;
+  icon?: string;
+  status: InjectedProbe['status'];
+}
+
+/**
+ * Every injected wallet reachable in THIS browser, each asked (silently) whether it already
+ * has accounts for this site.
+ *
+ * Deliberately probes each connector's own provider rather than the `window.ethereum` global,
+ * so an EIP-6963 wallet is found even when it never claimed that global — see probeProvider.
+ * A connector whose provider doesn't answer is reported as `none` rather than dropped, so the
+ * caller can tell "no wallets here" apart from "a wallet that is wedged".
+ */
+export async function probeInjectedConnectors(
+  connectors: readonly any[],
+  timeoutMs: number = INJECTED_PROBE_TIMEOUT_MS,
+): Promise<InjectedCandidate[]> {
+  // EIP-6963-discovered connectors and the generic injected() connector both report
+  // type 'injected'. Everything else (walletConnect, baseAccount) is a different rail.
+  const injected = connectors.filter((c) => c?.type === 'injected');
+
+  const probed = await Promise.all(
+    injected.map(async (connector): Promise<InjectedCandidate> => {
+      let provider: any = null;
+      try {
+        provider = await connector.getProvider?.();
+      } catch {
+        // A connector that can't even hand over its provider is not usable.
+      }
+      const probe = await probeProvider(provider, timeoutMs);
+      return {
+        connector,
+        name: connector.name || 'Browser wallet',
+        icon: connector.icon,
+        status: probe.status,
+      };
+    }),
+  );
+
+  // 🔴 DEDUPE. When a single extension is both EIP-6963-announced AND parked on
+  // window.ethereum, wagmi lists it twice — once as 'io.metamask', once as the generic
+  // 'injected'. Showing the same wallet twice in a chooser looks broken, and worse, it would
+  // turn the "exactly one wallet, connect it directly" case into a needless chooser. The
+  // named EIP-6963 entry wins; the generic one is only kept when nothing else was found.
+  const named = probed.filter((c) => c.connector.id !== 'injected');
+  const generic = probed.filter((c) => c.connector.id === 'injected');
+  return named.length > 0 ? named : generic;
 }
 
 /**

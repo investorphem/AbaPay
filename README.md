@@ -69,9 +69,39 @@ and `walletConnect()`.
 | **MiniPay** (Opera Mini's built-in Celo wallet) | Detected directly via `window.ethereum.isMiniPay`; the app builds its own viem wallet client and locks to Celo | Gas is paid in a stablecoin (`txConfig.feeCurrency`), so users need no CELO. Network switching is intentionally disabled here. |
 | **Farcaster Mini App** | Detected via `@farcaster/miniapp-sdk`'s `sdk.context`; uses `sdk.wallet.ethProvider`, locked to Base | Addresses are read with a *silent* `getAddresses()` so opening the app never forces a wallet popup. Frame metadata ships in `public/.well-known/farcaster.json`. |
 | **Valora** | Standard WalletConnect connector — **no Valora-specific code exists or is needed** | Valora is pinned to the top of the WalletConnect modal's recommended list via `explorerRecommendedWalletIds`. It is Celo-only, and still works now that `chains` puts Base first: wagmi offers every configured chain as an *optional* namespace and requires none, so Valora simply approves Celo and the app follows it there. It works exactly the way MetaMask does. |
-| **MetaMask** and other injected browser wallets | `injected()` connector (also used for the silent auto-reconnect on desktop) | — |
+| **MetaMask** and other injected browser wallets | Whichever **EIP-6963-discovered** connector the wallet announced, falling back to the generic `injected()` one | wagmi discovers one connector per installed wallet (`multiInjectedProviderDiscovery`, on by default). See "How the Connect button chooses" below — reading `window.ethereum` instead of these is what used to send web3-browser users to a QR code. |
 | **Coinbase Smart Wallet / Base Account** | `baseAccount()` connector | The only wallets that get **sponsored gas** — the app probes EIP-5792 paymaster capability and batches approve + pay into one sponsored call. Everything else falls back to the normal self-paid flow. |
 | **Any other WalletConnect v2 wallet** (Trust, Rainbow, Ledger Live, …) | `walletConnect()` connector with the QR modal | Nothing wallet-specific in the code — if it speaks WalletConnect and supports Celo or Base, it works. |
+
+#### How the Connect button chooses
+
+An injected wallet is always preferred: it touches no third-party host, which is why it keeps
+working on networks that filter the WalletConnect relay. WalletConnect is the fallback for a
+browser that has **no** wallet in it — a plain desktop browser, or a phone browser pairing with
+a wallet app.
+
+Which wallets exist is established by **asking**, never by reading `window.ethereum`:
+`probeInjectedConnectors()` (`src/lib/walletEnv.ts`) takes wagmi's discovered connectors, gets
+each one's own provider, and sends it a timed-out `eth_accounts` — a call that never prompts, so
+it is safe on every page load. Each wallet comes back `authorized` (already approved this site),
+`available` (real, not yet approved) or `none` (absent, or a stub that never answered).
+
+- **Any wallet `authorized`** → silent auto-connect, no popup, no Connect button.
+- **Exactly one usable wallet** → the Connect button uses it directly, so that wallet raises its
+  own approval window.
+- **Several** → a chooser lists them; cancelling ends the attempt rather than falling through to
+  a QR code. One extension that is both EIP-6963-announced and parked on `window.ethereum` is
+  de-duplicated, so it can't turn a single wallet into a pointless choice.
+- **None** → WalletConnect.
+
+🔴 **Why not `window.ethereum`:** under EIP-6963 a wallet announces itself over an event rather
+than claiming that global — which is how several extensions coexist without fighting over one
+slot. So a browser with a perfectly good wallet can have `window.ethereum` undefined, or pointing
+at a different wallet than the user means. Probing only the global reported "no wallet", skipped
+the injected path entirely, and showed a QR code for a wallet sitting in the same browser.
+
+Prompts also say **where** to approve. Over WalletConnect the request lands in a separate app
+that nothing brings to the foreground, so the copy says to open it (`walletApprovalPrompt`).
 
 #### The default chain is Base
 

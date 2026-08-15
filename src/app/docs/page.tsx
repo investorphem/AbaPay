@@ -354,6 +354,14 @@ export default function DocsPage() {
                 </>}
               />
               <FAQItem
+                q="I'm paying from Valora (or another wallet app) and it's stuck loading."
+                a={<>
+                  <p>When your wallet is a <strong>separate app</strong> rather than one built into this browser, AbaPay sends the approval request to it over WalletConnect — but nothing can force that app to open on top of what you&apos;re doing. The request is sitting in your wallet waiting for you.</p>
+                  <p><strong>Switch to your wallet app and approve it there</strong>, then come back. AbaPay now says so on screen rather than leaving you watching a spinner.</p>
+                  <p>If the request never arrives, AbaPay stops waiting after ninety seconds and tells you. Should you then approve it late, the payment can still go through — so check your <strong>History</strong> tab before paying again, to be sure you don&apos;t pay twice.</p>
+                </>}
+              />
+              <FAQItem
                 q="What wallets and apps can I use?"
                 a={<>
                   <p>MiniPay (Opera Mini's Celo wallet), Valora, MetaMask, Coinbase Smart Wallet / Base Account, and any other wallet reachable over WalletConnect or injected into your browser. AbaPay also runs as a Farcaster Mini App.</p>
@@ -363,7 +371,8 @@ export default function DocsPage() {
               <FAQItem
                 q="I tapped Connect and nothing happened. What's wrong?"
                 a={<>
-                  <p>Nine times out of ten this is your network, not AbaPay. Connecting an external wallet like Valora goes through WalletConnect, and some networks block the service it runs on. Because it's a background connection, it fails silently instead of showing an error.</p>
+                  <p>If you have a wallet installed in this browser, AbaPay uses it directly — it opens that wallet&apos;s own approval window, and if several are installed it asks which one you want. No QR code, no third-party service involved.</p>
+                  <p>WalletConnect is only used when there is no wallet in the browser at all. That is where this usually goes wrong: connecting that way goes through a background service that some networks block, and because it&apos;s a WebSocket it fails silently instead of showing an error.</p>
                   <p>Open <a href="/network-check" className="text-emerald-600 dark:text-emerald-400 underline underline-offset-2">the network check</a> and it will tell you in a few seconds whether something is being blocked, and exactly what.</p>
                   <p>The quickest fix is to open AbaPay inside <strong>MiniPay</strong>, <strong>Base App</strong> or <strong>Farcaster</strong> — they connect your wallet directly and need none of the blocked services. Switching to a different network (mobile data instead of Wi-Fi, or the other way round) or turning on a VPN also works.</p>
                 </>}

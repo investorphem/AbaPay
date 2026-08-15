@@ -26,8 +26,9 @@ import AppFooter from "@/components/AppFooter";
 import { AgentHub } from "@/components/AgentHub";
 import { AIChat } from "@/components/AIChat";
 import {
-  probeInjectedProvider,
+  probeInjectedConnectors,
   type InjectedProbe,
+  type InjectedCandidate,
   withConnectTimeout,
   waitForRelayHandshake,
   describeConnectFailure,
@@ -65,15 +66,27 @@ function timeoutSignal(ms: number): AbortSignal {
   return controller.signal;
 }
 
+// A distinct type, because "the wallet never answered" needs different handling from "the
+// wallet said no". Timing out does NOT cancel the underlying request: the wallet may still be
+// holding a signature prompt that the user can approve a moment later. Anything that reacts to
+// a failure by starting a SECOND payment has to be able to tell the two apart — see the x402
+// catch block, where getting this wrong would mean paying twice.
+class WalletTimeoutError extends Error {
+  constructor() {
+    super("Your wallet didn't respond in time. Check that it's unlocked and connected, then try again.");
+    this.name = 'WalletTimeoutError';
+  }
+}
+
 function withWalletTimeout<T>(promise: Promise<T>, ms = 90_000): Promise<T> {
   return new Promise<T>((resolve, reject) => {
-    const timer = setTimeout(() => reject(new Error("Your wallet didn't respond in time. Check that it's unlocked and connected, then try again.")), ms);
+    const timer = setTimeout(() => reject(new WalletTimeoutError()), ms);
     promise.then((v) => { clearTimeout(timer); resolve(v); }, (e) => { clearTimeout(timer); reject(e); });
   });
 }
 
 export default function Home() {
-  const { address: wagmiAddress, isConnected: isWagmiConnected, chain: wagmiChain } = useAccount();
+  const { address: wagmiAddress, isConnected: isWagmiConnected, chain: wagmiChain, connector: wagmiConnector } = useAccount();
   const { connectors, connect, connectAsync, status: connectStatus } = useConnect();
   const autoConnectTried = useRef(false);
   // Surfaces WHY a connect attempt failed. Previously every failure was silent.
@@ -81,6 +94,33 @@ export default function Home() {
   const [isConnecting, setIsConnecting] = useState(false);
   // What the browser's injected wallet actually is — see the silent probe effect below.
   const [injectedProbe, setInjectedProbe] = useState<InjectedProbe | null>(null);
+  // Every injected wallet wagmi discovered (EIP-6963 included), each with what it answered
+  // when asked about this site. Drives auto-connect and the Connect button's routing.
+  const [injectedCandidates, setInjectedCandidates] = useState<InjectedCandidate[]>([]);
+  // Open only while the user is picking between multiple installed wallets. `resolve` is the
+  // waiting handleConnectClick — calling it with a candidate continues the connect, calling
+  // it with null cancels cleanly (no error banner, no WalletConnect fallback).
+  const [walletChoice, setWalletChoice] = useState<
+    { options: InjectedCandidate[]; resolve: (c: InjectedCandidate | null) => void } | null
+  >(null);
+
+  /**
+   * Present the installed wallets and wait for the user to pick one.
+   *
+   * Promise-based rather than a callback chain so handleConnectClick reads top to bottom and
+   * keeps ONE error/timeout path for every route into a connection — the chooser is a pause in
+   * that flow, not a second flow.
+   */
+  const askWhichWallet = useCallback(
+    (options: InjectedCandidate[]) =>
+      new Promise<InjectedCandidate | null>((resolve) => {
+        setWalletChoice({
+          options,
+          resolve: (choice) => { setWalletChoice(null); resolve(choice); },
+        });
+      }),
+    [],
+  );
   const { disconnect } = useDisconnect();
   // ⚡ ADD THIS: Grabs the live WalletConnect provider securely
   const { data: wagmiWalletClient } = useWalletClient();
@@ -98,6 +138,38 @@ export default function Home() {
   const setActiveThirdwebWallet = useSetActiveWallet();
   const { fetchWithPayment: fetchWithX402Payment } = useFetchWithPayment(thirdwebClient, { uiEnabled: false });
   const [environment, setEnvironment] = useState<'MINIPAY' | 'FARCASTER' | 'WEB' | 'LOADING' | 'BASE'>('LOADING');
+
+  /**
+   * Is the live wallet IN this browser, or a separate app on the other end of WalletConnect?
+   *
+   * It changes what the user physically has to do to approve, and therefore what we should
+   * tell them. An injected wallet raises its own window right here; a WalletConnect wallet
+   * (Valora, Trust, Rainbow on a phone) gets a request over the relay with nothing to bring it
+   * to the foreground — the user has to switch to it themselves, and if we don't say so they
+   * will sit watching a spinner. MiniPay and Farcaster bypass wagmi and inject directly, so
+   * they count as in-browser too.
+   */
+  const isInjectedWallet = useMemo(
+    () => environment !== 'WEB' || wagmiConnector?.type === 'injected',
+    [environment, wagmiConnector],
+  );
+
+  /**
+   * "Please sign the final payment" → tells a WalletConnect user WHERE to go and do it.
+   *
+   * "…in your wallet" is only actionable when the wallet is in this browser. Over
+   * WalletConnect the request lands in a separate app that nothing brings to the foreground,
+   * so the honest instruction is "switch to it" — which is precisely what was missing while a
+   * Valora user watched a spinner waiting for a prompt that was already sitting in Valora.
+   */
+  const walletApprovalPrompt = useCallback(
+    (action: string) =>
+      isInjectedWallet
+        ? `${action} in your wallet...`
+        : `${action} — open your wallet app to approve it.`,
+    [isInjectedWallet],
+  );
+
   const [killSwitches, setKillSwitches] = useState<Record<string, boolean>>({});
   const [address, setAddress] = useState<string | null>(null);
   const [client, setClient] = useState<WalletClient | null>(null);
@@ -1056,7 +1128,7 @@ export default function Home() {
       const { backendPayload: builtPayload, vtpassServiceID, payloadBillersCode, uiCategory, displayNetwork, currentBlockchainName } = buildBackendPayload();
       backendPayload = builtPayload;
 
-      setStatus("Please approve the transaction in your wallet...");
+      setStatus(walletApprovalPrompt("Please approve the transaction"));
 
             // ==========================================
       // ⚡ STRICT FIREWALL: ISOLATED APPROVAL BLOCK
@@ -1133,7 +1205,7 @@ export default function Home() {
           return;
       }
 
-      setStatus("Please sign the final payment...");
+      setStatus(walletApprovalPrompt("Please sign the final payment"));
 
       const callData = encodeFunctionData({
           abi: ABAPAY_ABI, 
@@ -1164,7 +1236,7 @@ export default function Home() {
               }
               calls.push({ to: ABAPAY_CONTRACT as `0x${string}`, data: attributedData });
 
-              setStatus("Please sign the sponsored transaction...");
+              setStatus(walletApprovalPrompt("Please sign the sponsored transaction"));
               const sendCallsResult: any = await withWalletTimeout(client.sendCalls({
                   account: address as `0x${string}`,
                   chain: activeChain,
@@ -1333,18 +1405,29 @@ export default function Home() {
     if (!(await hasEnoughBalanceOnChain())) return setStatus(`Insufficient ${selectedToken.symbol} balance — you need ${cryptoToCharge} ${selectedToken.symbol}. Top up and try again.`);
 
     setIsProcessing(true);
-    // Same wording the normal contract-call path shows while waiting (line ~944) — the rail
-    // underneath is an implementation detail, not something the user needs surfaced.
-    setStatus("Confirming on blockchain... Please hold.");
+    // 🔴 WAS "Confirming on blockchain... Please hold." — SET BEFORE ANYTHING WAS SIGNED.
+    //
+    // x402 needs an EIP-712 `transferWithAuthorization` signature from the wallet before the
+    // facilitator can settle anything, so at this point the app is waiting on the USER, not on
+    // the chain. Claiming otherwise is what made the Valora case unreadable: the wallet is a
+    // separate app, nothing brings it to the foreground, and the screen insisted the
+    // blockchain was already working on a payment that had not been authorised yet. Anyone
+    // would sit and wait. Name the thing we are actually waiting for.
+    setStatus(walletApprovalPrompt("Approve this payment"));
 
     const { backendPayload, uiCategory, displayNetwork, payloadBillersCode, currentBlockchainName } = buildBackendPayload();
 
     try {
-      const finalStatus: any = await fetchWithX402Payment('/api/pay/x402', {
+      // 🔴 AND IT COULD HANG FOREVER. The contract-call path wraps its wallet interaction in
+      // withWalletTimeout; this one had nothing, so a signature request that never reached the
+      // wallet — the exact WalletConnect-to-a-backgrounded-mobile-app case — left the user on
+      // a spinner with no error, no retry and no explanation, indefinitely. Same 90s budget
+      // and the same message as every other wallet interaction in this file.
+      const finalStatus: any = await withWalletTimeout(fetchWithX402Payment('/api/pay/x402', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(backendPayload),
-      });
+      }));
 
       // The server's duplicate-electricity check runs BEFORE the facilitator settles the x402
       // payment (see /api/pay/x402's placement comment), so a DUPLICATE response here means
@@ -1381,6 +1464,22 @@ export default function Home() {
       // completely independent contract-call flow: it's a different signing mechanism
       // entirely (a real payBill() transaction, not an EIP-3009 authorization), so whatever
       // caused x402 to fail cannot recur there.
+      // 🔴 EXCEPT ON A TIMEOUT — THAT FALLBACK WOULD BE A DOUBLE CHARGE.
+      //
+      // The reasoning above holds for a settlement FAILURE, where nothing moved and nothing
+      // can. A timeout is a different animal: it means the wallet never answered us, NOT that
+      // the request is dead. withWalletTimeout rejects our wrapper while the signature prompt
+      // is still sitting in the user's wallet — so if they approve it thirty seconds later the
+      // facilitator settles normally, and if we had meanwhile started the contract-call flow
+      // they would have signed and paid a second time for the same bill. Stop instead, and
+      // point at History, which is where a late settlement will show up.
+      if (e instanceof WalletTimeoutError) {
+        console.error('[x402] Wallet did not respond; NOT falling back (a late signature could still settle).');
+        setStatus(e.message);
+        showToast("Wallet Didn't Respond", "If you approve it in your wallet after this, the payment still goes through — check your History tab before trying again.", "error");
+        return;
+      }
+
       console.error('[x402] Settlement failed, falling back to the standard on-chain flow:', e.message);
       setStatus("This payment method is temporarily unavailable — trying the standard payment method instead...");
       await processBlockchainPayment();
@@ -1748,15 +1847,33 @@ export default function Home() {
   // was wrong in both directions: wallets that don't advertise a flag were treated as fake
   // and denied auto-connect, while a stub with a fake flag would still have hung. Asking the
   // provider and timing it out answers the only question that matters — does it work?
+  // 🔴 PROBES EVERY WALLET WAGMI FOUND, NOT `window.ethereum`. Under EIP-6963 a wallet
+  // announces itself over an event instead of claiming the `window.ethereum` global, so a
+  // browser with a perfectly good wallet can have that global undefined — which is exactly
+  // why a real web3 browser was being shown a WalletConnect QR for a wallet sitting in the
+  // same browser, and why auto-connect never fired there.
+  //
+  // Depends on `connectors` because EIP-6963 discovery is ASYNC: wagmi's list grows a tick
+  // or two after mount as wallets answer the announcement, so probing once on mount would
+  // miss them. Re-probing when the list changes is what catches a late announcer.
   useEffect(() => {
-    if (environment !== 'WEB' || injectedProbe !== null) return;
+    if (environment !== 'WEB' || connectors.length === 0) return;
     let cancelled = false;
     (async () => {
-      const result = await probeInjectedProvider();
-      if (!cancelled) setInjectedProbe(result);
+      const found = await probeInjectedConnectors(connectors);
+      if (cancelled) return;
+      setInjectedCandidates(found);
+      // Keep the single-probe summary in sync for /network-check and the messaging below:
+      // the best status any wallet reported is what describes this browser.
+      const best = found.some((c) => c.status === 'authorized')
+        ? 'authorized'
+        : found.some((c) => c.status === 'available')
+          ? 'available'
+          : 'none';
+      setInjectedProbe(best === 'authorized' ? { status: 'authorized', accounts: [] } : { status: best });
     })();
     return () => { cancelled = true; };
-  }, [environment, injectedProbe]);
+  }, [environment, connectors]);
 
   // ⚡ NATIVE INJECTED AUTOCONNECT ⚡
   //
@@ -1771,14 +1888,13 @@ export default function Home() {
   useEffect(() => {
     // Abort if already connected, explicitly logged out, or not in web mode
     if (address || environment !== 'WEB' || localStorage.getItem('abapay_explicit_logout') === 'true') return;
-    if (injectedProbe?.status !== 'authorized') return;
-    if (connectors.length === 0) return; // Wait for connectors to load
     if (connectStatus === 'pending') return; // a connection attempt is already in flight
 
-    // Find ANY injected provider (MetaMask, Trust, Coinbase, generic EIP-6963). If it isn't
-    // discovered yet, bail WITHOUT marking the attempt — the effect re-runs when `connectors`
-    // updates (EIP-6963 discovery is async), so we retry the moment it appears.
-    const injectedConnector = connectors.find(c => c.type === 'injected' || c.id === 'injected' || c.id === 'metaMask');
+    // The wallet that ALREADY has accounts for this site — not merely "an injected connector
+    // exists". If none has answered `authorized` yet, bail WITHOUT marking the attempt: the
+    // effect re-runs as EIP-6963 discovery fills `connectors` in, so a wallet that announces
+    // itself late still gets its auto-connect.
+    const injectedConnector = injectedCandidates.find(c => c.status === 'authorized')?.connector;
     if (!injectedConnector) return;
 
     // Only auto-fire ONCE. If it doesn't complete, the visible Connect button stays as the
@@ -1797,7 +1913,7 @@ export default function Home() {
         },
       }
     );
-  }, [address, environment, connectors, connect, connectStatus, injectedProbe]);
+  }, [address, environment, injectedCandidates, connect, connectStatus]);
 
   // ⚡ THE MANUAL CONNECT PATH ⚡
   //
@@ -1819,20 +1935,40 @@ export default function Home() {
     setConnectError(null);
     setIsConnecting(true);
 
-    const injectedConnector = connectors.find(c => c.type === 'injected' || c.id === 'injected' || c.id === 'metaMask');
     const wcConnector = connectors.find(c => c.id === 'walletConnect' || c.type === 'walletConnect');
 
     try {
       // 1. A REAL injected wallet is always the best path — no third-party host involved,
       //    which is exactly why it keeps working on networks that filter the relay.
       //
-      //    "Real" is decided by the silent probe, not by sniffing `is*` flags: a provider
-      //    that ANSWERED eth_accounts is one worth prompting, whatever it calls itself. If
-      //    the probe hasn't finished yet, run it now rather than guessing.
-      const probe = injectedProbe ?? (await probeInjectedProvider());
-      if (injectedProbe === null) setInjectedProbe(probe);
+      //    "Real" is decided by asking each wallet wagmi discovered, not by reading
+      //    `window.ethereum`: under EIP-6963 the wallet may never have claimed that global.
+      //    Reading it was why this button opened a WalletConnect QR in a browser that had a
+      //    wallet installed. If discovery hasn't settled yet, probe now rather than guessing.
+      const candidates = injectedCandidates.length
+        ? injectedCandidates
+        : await probeInjectedConnectors(connectors);
+      if (!injectedCandidates.length) setInjectedCandidates(candidates);
 
-      if (injectedConnector && probe.status !== 'none') {
+      // Only wallets that actually answered are worth prompting. A wedged provider ('none')
+      // is excluded so it can't swallow the click.
+      const usable = candidates.filter(c => c.status !== 'none');
+
+      // 🔴 SEVERAL WALLETS: ASK, DON'T GUESS. Picking the first would pop whichever extension
+      // happened to answer first — not necessarily the one the user wants — and there is no
+      // way for them to correct it. The chooser resolves through this same promise, so the
+      // rest of the flow (timeouts, error messages, the WalletConnect fallback) is identical
+      // however the wallet was chosen.
+      const chosen = usable.length > 1
+        ? await askWhichWallet(usable)
+        : usable[0];
+
+      // Cancelled the chooser — not a failure, just stop. No error banner, no QR code.
+      if (usable.length > 1 && !chosen) return;
+
+      const injectedConnector = chosen?.connector;
+
+      if (injectedConnector) {
         try {
           await withConnectTimeout(
             connectAsync({ connector: injectedConnector }),
@@ -1855,7 +1991,10 @@ export default function Home() {
         }
       }
 
-      // 2. WalletConnect — Valora and every other mobile wallet.
+      // 2. WalletConnect — the fallback for a browser with NO injected wallet, which is what
+      //    it was always meant to be: a plain desktop browser with no extension, or a phone
+      //    browser pairing with a wallet app. Reaching it when an injected wallet exists is
+      //    the bug fixed above, not the intent.
       if (wcConnector) {
         try {
           // ⚠️ NO timeout on this promise: it resolves only once the user has scanned the
@@ -1906,7 +2045,7 @@ export default function Home() {
     } finally {
       setIsConnecting(false);
     }
-  }, [connectors, connectAsync, isConnecting, injectedProbe]);
+  }, [connectors, connectAsync, isConnecting, injectedCandidates, askWhichWallet]);
 
   // =======================================================================
 
@@ -2541,6 +2680,62 @@ export default function Home() {
         selectedValue={getCurrentModalValue()} 
         onRetryBanks={fetchBanksManual} 
       />
+
+      {/* ⚡ WHICH BROWSER WALLET? — only ever shown when MORE THAN ONE injected wallet
+          answered. A single wallet is connected straight away (it pops its own approval, which
+          is the whole point of being in a web3 browser), and a browser with none goes to
+          WalletConnect. So this appears exactly when the app genuinely cannot know the answer.
+          Backdrop click and Cancel both resolve null, which ends the attempt quietly rather
+          than falling through to a QR code the user didn't ask for. */}
+      {walletChoice && (
+        <div
+          className="fixed inset-0 z-[110] bg-slate-900/80 dark:bg-black/90 backdrop-blur-md flex justify-center items-center p-6 animate-in fade-in"
+          onClick={() => walletChoice.resolve(null)}
+        >
+          <div
+            className="bg-white dark:bg-[#111114] w-full max-w-xs rounded-[2rem] p-6 shadow-2xl animate-in zoom-in-95 transition-colors"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <h3 className="text-base font-black text-slate-900 dark:text-white tracking-tight">Choose a wallet</h3>
+            <p className="mt-1 text-xs font-medium text-slate-500 dark:text-slate-400 leading-relaxed">
+              More than one wallet is installed in this browser.
+            </p>
+            <div className="mt-5 flex flex-col gap-2">
+              {walletChoice.options.map((option) => (
+                <button
+                  key={option.connector.uid || option.connector.id}
+                  onClick={() => walletChoice.resolve(option)}
+                  className="flex items-center gap-3 p-3 rounded-2xl bg-slate-50 dark:bg-[#1a1a1f] border border-slate-100 dark:border-slate-800/80 hover:bg-emerald-50 dark:hover:bg-emerald-900/20 hover:border-emerald-200 dark:hover:border-emerald-900/50 transition-all active:scale-[0.98] text-left"
+                >
+                  {option.icon ? (
+                    /* eslint-disable-next-line @next/next/no-img-element */
+                    <img src={option.icon} alt="" className="w-8 h-8 rounded-lg object-contain shrink-0" />
+                  ) : (
+                    <span className="w-8 h-8 rounded-lg bg-slate-200 dark:bg-slate-800 flex items-center justify-center text-xs font-black text-slate-500 shrink-0">
+                      {option.name.slice(0, 1).toUpperCase()}
+                    </span>
+                  )}
+                  <span className="flex-1 min-w-0">
+                    <span className="block text-sm font-black text-slate-900 dark:text-slate-100 truncate">{option.name}</span>
+                    {/* `authorized` means this wallet has already approved AbaPay, so picking
+                        it reconnects with no prompt at all. Worth surfacing — it tells the user
+                        which one they used last. */}
+                    {option.status === 'authorized' && (
+                      <span className="block text-[10px] font-bold uppercase tracking-widest text-emerald-600 dark:text-emerald-400">Connected before</span>
+                    )}
+                  </span>
+                </button>
+              ))}
+            </div>
+            <button
+              onClick={() => walletChoice.resolve(null)}
+              className="mt-4 w-full text-[10px] font-black uppercase tracking-widest text-slate-400 hover:text-slate-600 dark:hover:text-slate-300 transition-colors"
+            >
+              Cancel
+            </button>
+          </div>
+        </div>
+      )}
 
       {toast && (
         <div className="fixed top-4 right-4 sm:top-6 sm:right-6 z-[100] animate-in slide-in-from-top-8 fade-in duration-300">
