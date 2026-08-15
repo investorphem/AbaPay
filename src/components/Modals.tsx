@@ -1,6 +1,8 @@
 import React, { useRef, useState, useEffect } from "react";
 import { CheckCircle2, ExternalLink, Share2, HelpCircle, XCircle, Loader2, Search, Download } from "lucide-react";
 import { SUPPORTED_TOKENS } from "@/constants";
+import { logoForServiceId } from "@/lib/providerFallback";
+import { normalizePurchasedCode, issuesTokenOrPin } from "@/lib/purchasedCode";
 
 // ⚡ International transactions store a pre-formatted currency string (e.g. "GHS 2.50").
 // Domestic transactions store a plain NGN number. Render each correctly instead of forcing ₦ on everything.
@@ -22,11 +24,16 @@ export function ReceiptModal({ receipt, isMainnet, onClose, onSupport }: any) {
   // for an external handler to fail to resolve.
   const [saveOptions, setSaveOptions] = useState<{ imageUrl: string; pdfUrl: string | null } | null>(null);
 
-  const hasPin = receipt.status === 'SUCCESS' && receipt.purchased_code && receipt.purchased_code !== "Vended Successfully";
+  // normalizePurchasedCode strips VTpass's own "Token : " label and rejects its placeholders
+  // ("N/A", "Vended Successfully"). New rows are already clean because the vend paths normalize
+  // before storing; this also repairs the handful of rows written before that fix, which would
+  // otherwise still render a "Meter Token PIN" panel containing the word N/A.
+  const purchasedCode = normalizePurchasedCode(receipt.purchased_code);
+  const hasPin = receipt.status === 'SUCCESS' && !!purchasedCode;
   const isElectricity = receipt.service?.toUpperCase() === 'ELECTRICITY' || receipt.service === 'Electricity';
   const isEducation = receipt.service === 'Education PIN' || receipt.service?.toUpperCase().includes('WAEC') || receipt.service?.toUpperCase().includes('JAMB');
 
-  const buildFallbackText = () => `🧾 AbaPay Receipt\n\nService: ${receipt.network} ${receipt.service}\nAmount: ${formatTxAmount(receipt.amountNaira)}\nStatus: ${receipt.status}\nAccount: ${receipt.account}${receipt.customerName ? `\nName: ${receipt.customerName}` : ''}\nRef: ${receipt.id}\n${hasPin ? `\nPIN/TOKEN: ${receipt.purchased_code}` : ''}\n\nSecured by ${receipt.blockchain || 'Celo'} ⚡`;
+  const buildFallbackText = () => `🧾 AbaPay Receipt\n\nService: ${receipt.network} ${receipt.service}\nAmount: ${formatTxAmount(receipt.amountNaira)}\nStatus: ${receipt.status}\nAccount: ${receipt.account}${receipt.customerName ? `\nName: ${receipt.customerName}` : ''}\nRef: ${receipt.id}\n${hasPin ? `\nPIN/TOKEN: ${purchasedCode}` : ''}\n\nSecured by ${receipt.blockchain || 'Celo'} ⚡`;
 
   // ⚡ THE ACTUAL BUG — this project runs Tailwind v4, whose default palette (and every
   // `/opacity` utility like `bg-emerald-900/20`) compiles to `oklch()`/`color-mix()` colors.
@@ -225,6 +232,16 @@ export function ReceiptModal({ receipt, isMainnet, onClose, onSupport }: any) {
                     <span className="text-slate-800 dark:text-slate-200 font-black text-xs text-right">{receipt.customerName}</span>
                  </div>
                )}
+               {/* The verified service address from VTpass — for electricity this is the
+                   registered address of the meter, which is how a customer confirms they topped
+                   up the right one. It was already on the email receipt; the in-app receipt
+                   simply never carried the field through. */}
+               {receipt.customerAddress && (
+                 <div className="flex justify-between gap-3 border-b border-slate-100 dark:border-slate-800/60 pb-3 transition-colors">
+                    <span className="text-slate-400 dark:text-slate-500 text-[10px] font-bold uppercase tracking-wider shrink-0">Address</span>
+                    <span className="text-slate-800 dark:text-slate-200 font-bold text-[11px] text-right leading-snug">{receipt.customerAddress}</span>
+                 </div>
+               )}
                {receipt.request_id && (
                  <div className="flex justify-between border-b border-slate-100 dark:border-slate-800/60 pb-3 transition-colors">
                     <span className="text-slate-400 dark:text-slate-500 text-[10px] font-bold uppercase tracking-wider">Transaction ID</span>
@@ -237,9 +254,24 @@ export function ReceiptModal({ receipt, isMainnet, onClose, onSupport }: any) {
                     <span className="text-slate-800 dark:text-slate-200 font-black text-xs">{receipt.units} kWh</span>
                  </div>
                )}
-               <div className="flex justify-between border-b border-slate-100 dark:border-slate-800/60 pb-3 transition-colors">
+               {/* ⚡ PROVIDER LOGO AS A WATERMARK BEHIND THE AMOUNT — same treatment as the
+                   history row, so the two read as one design. `object-contain` and a fixed box
+                   keep wildly different source artwork (square DisCo seals, wide telco
+                   wordmarks) optically consistent. No onError handler needed: logoForServiceId
+                   resolves to a bundled asset or the AbaPay mark, never a guessed path.
+
+                   html2canvas renders this receipt for share/download, so the image must be
+                   same-origin — a bundled /public asset is, a VTpass CDN URL would taint the
+                   canvas and break saving the receipt entirely. */}
+               <div className="flex justify-between border-b border-slate-100 dark:border-slate-800/60 pb-3 transition-colors relative">
                   <span className="text-slate-400 dark:text-slate-500 text-[10px] font-bold uppercase tracking-wider">Amount Paid</span>
-                  <div className="text-right">
+                  <img
+                    src={logoForServiceId(receipt.serviceId)}
+                    alt=""
+                    aria-hidden="true"
+                    className="absolute -top-2 right-0 w-14 h-14 rounded-xl object-contain opacity-15 dark:opacity-25 pointer-events-none select-none"
+                  />
+                  <div className="text-right relative z-10">
                      <p className="text-slate-800 dark:text-slate-100 font-black text-sm">{formatTxAmount(receipt.amountNaira)}</p>
                      <p className="text-slate-400 dark:text-slate-500 text-[9px] font-bold">{receipt.amountCrypto} {receipt.tokenUsed || 'USD₮'}</p>
                   </div>
@@ -248,8 +280,18 @@ export function ReceiptModal({ receipt, isMainnet, onClose, onSupport }: any) {
                {hasPin && (
                  <div className="mt-4 bg-emerald-50 dark:bg-emerald-900/20 border-2 border-emerald-200 dark:border-emerald-800/50 rounded-xl p-4 text-center transition-colors">
                     <p className="text-[10px] font-black text-emerald-700 dark:text-emerald-400 uppercase tracking-widest mb-1">{isElectricity ? 'Meter Token PIN' : 'Purchased Education PIN'}</p>
-                    <p className="font-mono text-sm sm:text-base font-black text-slate-900 dark:text-emerald-100 tracking-wide break-all">{isElectricity ? receipt.purchased_code.replace(/token\s*[:\-]*\s*/gi, '').trim() : receipt.purchased_code}</p>
+                    <p className="font-mono text-sm sm:text-base font-black text-slate-900 dark:text-emerald-100 tracking-wide break-all">{purchasedCode}</p>
                     <p className="text-[9px] font-bold text-emerald-600 dark:text-emerald-500 mt-2">{isElectricity ? 'Enter this exactly as shown into your meter.' : 'Please keep this PIN/Serial Number safe.'}</p>
+                 </div>
+               )}
+
+               {/* Postpaid meters are billed accounts — no token is ever issued for them. Say
+                   that outright: an electricity receipt with no token panel and no explanation
+                   is indistinguishable from one where the token failed to arrive. */}
+               {isElectricity && receipt.status === 'SUCCESS' && !issuesTokenOrPin(receipt.service, receipt.variationCode) && (
+                 <div className="mt-4 bg-slate-50 dark:bg-slate-800/40 border border-slate-200 dark:border-slate-700/50 rounded-xl p-4 text-center transition-colors">
+                    <p className="text-[10px] font-black text-slate-600 dark:text-slate-300 uppercase tracking-widest mb-1">Postpaid Account</p>
+                    <p className="text-[9px] font-bold text-slate-500 dark:text-slate-400">Paid directly onto the bill — postpaid meters don&apos;t issue a token.</p>
                  </div>
                )}
 

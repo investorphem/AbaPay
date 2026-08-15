@@ -2087,6 +2087,15 @@ export default function Home() {
              txHash: tx.tx_hash, account: tx.account_number, refund_hash: tx.refund_hash,
              purchased_code: tx.purchased_code, request_id: tx.request_id, units: tx.units,
              customerName: tx.customer_name || null,
+             // ⚡ service_id drives the provider logo on the history row and the receipt
+             // (logoForServiceId). customerAddress is the verified meter address — it was
+             // already reaching the EMAIL receipt but was dropped on the way to the in-app one,
+             // so the same payment showed the address in your inbox and not in the app.
+             serviceId: tx.service_id || null,
+             customerAddress: tx.customer_address || null,
+             // 'prepaid' | 'postpaid' — the receipt uses it to say why a postpaid purchase has
+             // no meter token, instead of just omitting the row and leaving the customer to guess.
+             variationCode: tx.variation_code || null,
           }));
           setTransactions(cloudHistory); localStorage.setItem(`abapay_history_${address}`, JSON.stringify(cloudHistory));
         }

@@ -4,6 +4,8 @@ import { sendTelegramAlert } from '@/lib/telegram';
 import { sendAbaPaySms } from '@/lib/messaging';
 import { getHeaders } from '@/lib/vtpass';
 import { Resend } from 'resend';
+import { normalizePurchasedCode, issuesTokenOrPin } from '@/lib/purchasedCode';
+import { buildReceiptEmail } from '@/lib/receiptEmail';
 
 const resend = new Resend(process.env.RESEND_API_KEY || "re_dummy_key_for_build");
 
@@ -95,7 +97,9 @@ async function processNotification(body: any) {
       if (txData.status === 'SUCCESS') return;
 
       // Extract the delayed Token, PIN, or Units from the CONFIRMED payload only
-      let dbPurchasedCode = confirmedPayload.purchased_code || confirmedPayload.token || confirmedPayload.tokens || confirmedPayload.Pin || trustedTx.token || trustedTx.purchased_code || null;
+      // normalizePurchasedCode: VTpass sends the placeholder "Token : N/A" instead of omitting
+      // the field, which was being stored as though it were a real meter token.
+      let dbPurchasedCode = normalizePurchasedCode(confirmedPayload.purchased_code || confirmedPayload.token || confirmedPayload.tokens || confirmedPayload.Pin || trustedTx.token || trustedTx.purchased_code);
       let vendedUnits = confirmedPayload.units || trustedTx.units || trustedTx.unit || null;
 
       // Aggressive Token Regex fallback for Electricity
@@ -129,7 +133,9 @@ async function processNotification(body: any) {
       );
 
       // ⚡ ONLY SEND SMS FOR TOKENS/PINS TO SAVE COST ⚡
-      if (txData.service_category === 'ELECTRICITY' || txData.service_category === 'EDUCATION') {
+      // Postpaid excluded — see issuesTokenOrPin; a postpaid meter never gets a token, so
+      // there is no code to deliver and the old text promised one that does not exist.
+      if (issuesTokenOrPin(txData.service_category, txData.variation_code)) {
         const typeLabel = txData.service_category === 'ELECTRICITY' ? 'Token' : 'PIN';
         const networkDisplay = txData.network || txData.service_category;
 
@@ -142,29 +148,33 @@ async function processNotification(body: any) {
       }
 
       if (txData.customer_email) {
+        // 🔴 WAS A HAND-ROLLED EMAIL — the exact drift src/lib/receiptEmail.ts was created to
+        // end. Every other vend path (/api/pay, /api/webhook, /api/requery, reconcileStuck)
+        // already used the shared premium template, so whether a customer got the branded
+        // receipt or this stripped-down one came down to WHICH path happened to complete the
+        // vend — and a delayed VTpass push is exactly the case where they'd get the plain one,
+        // with no provider logo, no customer name and no meter address.
         const emailPromise = resend.emails.send({
-          from: 'AbaPay <receipts@abapays.com>',
+          from: 'AbaPay Receipts <receipts@abapays.com>',
           to: txData.customer_email,
+          replyTo: 'support@abapays.com',
           subject: `AbaPay Receipt - ${txData.network} ${txData.service_category}`,
-          html: `
-              <div style="font-family: sans-serif; max-width: 600px; margin: 0 auto; padding: 20px; border: 1px solid #eaeaea; border-radius: 10px;">
-                  <h2 style="color: #333;">Delayed Transaction Completed ⚡</h2>
-                  <p>Your recent AbaPay transaction for <strong>${txData.network} ${txData.service_category}</strong> has successfully completed processing:</p>
-                  <div style="background-color: #f9f9f9; padding: 15px; border-radius: 8px; margin: 20px 0;">
-                      <p style="margin: 5px 0;"><strong>Amount Paid:</strong> ₦${txData.amount_naira}</p>
-                      <p style="margin: 5px 0;"><strong>Crypto Charged:</strong> ${txData.amount_usdt} ${txData.token_used || 'USD₮'}</p>
-                      <p style="margin: 5px 0;"><strong>Account/Phone:</strong> ${txData.account_number}</p>
-                  </div>
-                  ${dbPurchasedCode ? `
-                  <p style="margin-top: 20px; font-weight: bold;">Your PIN / Token is:</p>
-                  <div style="background-color: #e0f2fe; color: #0284c7; padding: 15px; text-align: center; font-size: 24px; letter-spacing: 2px; font-weight: bold; border-radius: 8px; margin: 10px 0;">
-                      ${dbPurchasedCode}
-                  </div>
-                  ` : `
-                  <p style="margin-top: 20px;"><strong>Reference ID:</strong> ${alertTokenRef}</p>
-                  `}
-              </div>
-          `
+          html: buildReceiptEmail({
+            displayAmount: txData.display_amount || `₦${Number(txData.amount_naira).toLocaleString()}`,
+            serviceLabel: `${txData.network || ''} ${txData.service_category || ''}`.trim(),
+            serviceId: txData.service_id,
+            serviceCategory: txData.service_category,
+            variationCode: txData.variation_code,
+            accountNumber: txData.account_number,
+            cryptoCharged: `${txData.amount_usdt} ${txData.token_used || 'USD₮'}`,
+            txHash: txData.tx_hash,
+            purchasedCode: dbPurchasedCode,
+            units: vendedUnits ? String(vendedUnits) : null,
+            referenceId: txData.request_id,
+            customerName: txData.customer_name,
+            customerAddress: txData.customer_address,
+            isDelayed: true,
+          }),
         });
         notifications.push(emailPromise);
       }

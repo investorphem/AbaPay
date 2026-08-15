@@ -1,5 +1,7 @@
 import { supabaseAdmin } from '@/utils/supabase';
 import { explorerBaseFor } from '@/lib/chain';
+import { logoForServiceId } from '@/lib/providerFallback';
+import { issuesTokenOrPin } from '@/lib/purchasedCode';
 import Link from 'next/link';
 import type { Metadata } from 'next';
 
@@ -104,10 +106,20 @@ export default async function ReceiptPage({ params }: { params: Promise<{ reques
             </span>
           </div>
 
-          <div className="mb-8">
+          {/* Provider logo watermarked behind the amount — the same treatment as the in-app
+              receipt and the history row, so a receipt looks like itself wherever it's opened.
+              This page is dark-only, hence a single opacity rather than a light/dark pair. */}
+          <div className="mb-8 relative">
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img
+              src={logoForServiceId(tx.service_id)}
+              alt=""
+              aria-hidden="true"
+              className="absolute top-0 right-0 w-16 h-16 rounded-2xl object-contain opacity-25 pointer-events-none select-none"
+            />
             <p className="text-xs font-bold uppercase tracking-widest text-slate-500 mb-1">Amount Paid</p>
-            <p className="text-4xl font-black">₦{Number(tx.amount_naira || 0).toLocaleString()}</p>
-            <p className="text-sm text-slate-400 mt-1">{tx.amount_usdt} {tx.token_used || 'USD₮'}</p>
+            <p className="relative z-10 text-4xl font-black">₦{Number(tx.amount_naira || 0).toLocaleString()}</p>
+            <p className="relative z-10 text-sm text-slate-400 mt-1">{tx.amount_usdt} {tx.token_used || 'USD₮'}</p>
           </div>
 
           <div>
@@ -131,9 +143,19 @@ export default async function ReceiptPage({ params }: { params: Promise<{ reques
             </a>
           )}
 
-          {(isElectricity || String(tx.service_category || '').toUpperCase() === 'EDUCATION') && ok && (
+          {/* 🔴 This note used to fire for ALL electricity, telling a POSTPAID customer their
+              token "was sent privately" — a token that is never issued, since a postpaid meter
+              is a billed account. issuesTokenOrPin splits the two cases so each one gets the
+              statement that is actually true for it. */}
+          {ok && issuesTokenOrPin(tx.service_category, tx.variation_code) && (
             <p className="mt-6 text-[11px] text-slate-500 text-center">
-              The {isElectricity ? 'token' : 'PIN'} for this purchase was sent privately and isn't shown on this shareable page.
+              The {isElectricity ? 'token' : 'PIN'} for this purchase was sent privately and isn&apos;t shown on this shareable page.
+            </p>
+          )}
+          {ok && isElectricity && !issuesTokenOrPin(tx.service_category, tx.variation_code) && (
+            <p className="mt-6 text-[11px] text-slate-500 text-center">
+              This is a postpaid account — the payment was credited directly to the bill, so no
+              meter token is issued.
             </p>
           )}
         </div>

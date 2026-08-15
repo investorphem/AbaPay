@@ -1,4 +1,6 @@
 import 'server-only';
+import { logoForServiceId } from '@/lib/providerFallback';
+import { normalizePurchasedCode, issuesTokenOrPin } from '@/lib/purchasedCode';
 
 // ⚡ SHARED RECEIPT EMAIL TEMPLATE
 //
@@ -19,6 +21,15 @@ export interface ReceiptEmailData {
   displayAmount: string;        // e.g. "₦2,000" or "GHS 2.50" — already formatted
   serviceLabel: string;         // e.g. "IBADAN-ELECTRIC ELECTRICITY"
   accountNumber: string;        // meter / phone / account
+  // ⚡ VTpass serviceID ('ibadan-electric', 'mtn', 'dstv') — resolves the provider logo shown
+  // beside the amount. Falls back to the AbaPay mark when absent or unrecognised, so an older
+  // record or a newly-added VTpass service degrades to a valid image rather than a broken one.
+  serviceId?: string | null;
+  // ⚡ 'prepaid' | 'postpaid' for electricity (VTpass's variation_code). Decides whether a
+  // token is even expected — see issuesTokenOrPin. A postpaid receipt with no Token row would
+  // otherwise leave the customer hunting for a code that was never going to be issued.
+  variationCode?: string | null;
+  serviceCategory?: string | null;
   cryptoCharged?: string;       // e.g. "1.5672 cUSD"
   txHash?: string;
   purchasedCode?: string | null;  // electricity token / exam PIN
@@ -71,13 +82,27 @@ export function buildReceiptEmail(d: ReceiptEmailData): string {
   if (d.units) rows.push(row('Units', d.units));
   if (d.txHash) rows.push(row('Transaction Hash', d.txHash, { mono: true, labelWidth: 30 }));
 
-  if (d.purchasedCode) {
-    rows.push(row('Token / PIN', `Token : ${d.purchasedCode}`, { highlight: true }));
-  } else if (d.referenceId) {
-    rows.push(row('Reference ID', d.referenceId));
+  // ⚡ Was `Token : ${d.purchasedCode}` unconditionally. VTpass returns the literal placeholder
+  // "Token : N/A" when it has issued no token, so that produced "Token : Token : N/A" — a
+  // label doubled onto a non-existent token. normalizePurchasedCode() strips VTpass's own
+  // label and turns placeholders into null, so a receipt with no token now correctly shows the
+  // Reference ID instead of pretending one was delivered.
+  const code = normalizePurchasedCode(d.purchasedCode);
+  const expectsCode = issuesTokenOrPin(d.serviceCategory, d.variationCode);
+  if (code) {
+    rows.push(row('Token / PIN', code, { highlight: true }));
+  } else {
+    // A POSTPAID meter is a billed account: the payment settles against the bill and no token
+    // is ever issued. Saying so explicitly is the whole point — silence here is what makes a
+    // customer think their token went missing.
+    if (!expectsCode && String(d.serviceCategory || '').toUpperCase() === 'ELECTRICITY') {
+      rows.push(row('Token', 'Not applicable — postpaid accounts are credited directly, no token is issued.', { labelWidth: 30 }));
+    }
+    if (d.referenceId) rows.push(row('Reference ID', d.referenceId));
   }
 
   const heading = d.isDelayed ? 'Transaction Successful (Delayed)' : 'Transaction Successful';
+  const logo = logoForServiceId(d.serviceId, true);
 
   return `
   <div style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; background-color: #fdfbf7; padding: 40px 20px;">
@@ -86,8 +111,27 @@ export function buildReceiptEmail(d: ReceiptEmailData): string {
         <img src="https://abapays.com/logo.png" alt="AbaPay" style="height: 48px; width: auto;" />
       </div>
       <div style="padding: 40px 30px;">
-        <p style="font-size: 11px; font-weight: 700; color: #64748b; letter-spacing: 1px; text-transform: uppercase; margin: 0 0 8px 0;">${heading}</p>
-        <h2 style="font-size: 36px; font-weight: 900; color: #0f172a; margin: 0 0 32px 0; letter-spacing: -1px;">${d.displayAmount}</h2>
+        <!--
+          ⚡ The amount and the provider logo share one row, logo hard right.
+
+          A TABLE, not flexbox or a CSS background: Outlook's Word rendering engine ignores
+          display:flex entirely (the cells would stack) and strips background-image, so a
+          "watermark behind the amount" — which is what the in-app receipt does — would simply
+          vanish for a large share of email readers. A real <img> in a right-aligned table cell
+          is the one construction that survives every client, so the email places the logo
+          BESIDE the amount instead of behind it.
+        -->
+        <table role="presentation" cellpadding="0" cellspacing="0" border="0" width="100%" style="margin: 0 0 32px 0;">
+          <tr>
+            <td style="vertical-align: middle;">
+              <p style="font-size: 11px; font-weight: 700; color: #64748b; letter-spacing: 1px; text-transform: uppercase; margin: 0 0 8px 0;">${heading}</p>
+              <h2 style="font-size: 36px; font-weight: 900; color: #0f172a; margin: 0; letter-spacing: -1px;">${d.displayAmount}</h2>
+            </td>
+            <td width="64" style="vertical-align: middle; text-align: right;">
+              <img src="${logo}" alt="" width="56" height="56" style="width: 56px; height: 56px; border-radius: 12px; object-fit: contain; background-color: #f8fafc; border: 1px solid #e2e8f0;" />
+            </td>
+          </tr>
+        </table>
         ${rows.join('')}
         <div style="border-top: 1px solid #e2e8f0; padding-top: 32px; margin-top: 16px;">
           <p style="font-size: 12px; color: #64748b; line-height: 1.5; margin: 0;">If you have any issues with this transaction, please reply directly to this email to reach our support desk.</p>

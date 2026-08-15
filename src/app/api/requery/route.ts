@@ -7,6 +7,7 @@ import { verifyAdminRequest } from '@/utils/adminAuth';
 import { enforceRateLimit } from '@/lib/rateLimit';
 import { buildReceiptEmail } from '@/lib/receiptEmail';
 import { Resend } from 'resend';
+import { normalizePurchasedCode, issuesTokenOrPin } from '@/lib/purchasedCode';
 
 const resend = new Resend(process.env.RESEND_API_KEY || "re_dummy_key_for_build");
 
@@ -75,12 +76,14 @@ export async function POST(req: Request) {
 
     if (actualStatus === 'delivered' || actualStatus === 'successful') {
 
-      let dbPurchasedCode = requeryData.purchased_code || 
-                            requeryData.token || 
-                            requeryData.content?.transactions?.token || 
-                            requeryData.content?.transactions?.purchased_code || 
-                            requeryData.Pin || 
-                            null;
+      // normalizePurchasedCode strips VTpass's own "Token : " label and rejects its "N/A"
+      // placeholder, so the regex scan below still runs instead of a placeholder being stored.
+      let dbPurchasedCode = normalizePurchasedCode(
+                            requeryData.purchased_code ||
+                            requeryData.token ||
+                            requeryData.content?.transactions?.token ||
+                            requeryData.content?.transactions?.purchased_code ||
+                            requeryData.Pin);
 
       if (!dbPurchasedCode) {
           const rawString = JSON.stringify(requeryData);
@@ -92,7 +95,10 @@ export async function POST(req: Request) {
 
       // STRICT TOKEN REQUIREMENT FOR REQUERY
       const serviceCategory = record.service_category;
-      const requiresCode = serviceCategory === 'ELECTRICITY' || serviceCategory === 'EDUCATION';
+      // 🔴 POSTPAID IS EXCLUDED. A postpaid meter is a billed account — the provider never
+      // issues a token for it. Holding it here would park a genuinely delivered payment at
+      // PENDING forever, waiting on something that is never coming.
+      const requiresCode = issuesTokenOrPin(serviceCategory, record.variation_code);
 
       if (requiresCode && !dbPurchasedCode) {
           return NextResponse.json({ success: true, status: 'PENDING', message: 'Provider is still generating the Token/PIN. Please check back again.' });
@@ -118,7 +124,8 @@ export async function POST(req: Request) {
           sendTelegramAlert(`✅ *DELAYED TX SUCCESS (REQUERY)*\n⛓️ *Chain:* ${record.blockchain || 'CELO'}\n🛒 *Product:* ${record.network} ${record.service_category}\n💰 *Naira:* ₦${record.amount_naira}\n🪙 *Asset:* ${record.amount_usdt} ${record.token_used || 'USD₮'}\n👤 *User:* ${record.account_number}\n🧾 *Ref:* ${alertTokenRef}`)
       );
 
-      if (record.service_category === 'ELECTRICITY' || record.service_category === 'EDUCATION') {
+      // Postpaid excluded — see issuesTokenOrPin; a postpaid meter never gets a token.
+      if (issuesTokenOrPin(record.service_category, record.variation_code)) {
           const typeLabel = record.service_category === 'ELECTRICITY' ? 'Token' : 'PIN';
           notifications.push(
               sendAbaPaySms(record.phone || record.account_number, `AbaPay: Your delayed ${record.network || record.service_category} ${typeLabel} is ${alertTokenRef}. Amount: N${record.amount_naira}. Thank you.`)
@@ -134,6 +141,9 @@ export async function POST(req: Request) {
               html: buildReceiptEmail({
                   displayAmount: record.display_amount || `₦${Number(record.amount_naira).toLocaleString()}`,
                   serviceLabel: `${record.network || ''} ${record.service_category || ''}`.trim(),
+                  serviceId: record.service_id,
+                  serviceCategory: record.service_category,
+                  variationCode: record.variation_code,
                   accountNumber: record.account_number,
                   cryptoCharged: `${record.amount_usdt} ${record.token_used || 'USD₮'}`,
                   txHash: record.tx_hash,

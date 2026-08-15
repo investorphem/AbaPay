@@ -120,3 +120,28 @@ export const LOCAL_LOGO_BY_SERVICE_ID: Record<string, string> = Object.fromEntri
   [...AIRTIME_SEED, ...DATA_SEED, ...ELECTRICITY_SEED, ...CABLE_SEED, ...EDUCATION_SEED]
     .map(s => [s.serviceID, s.logo])
 );
+
+/**
+ * The logo to show for a completed transaction — receipts (email, modal) and the history list.
+ *
+ * 🔴 DELIBERATELY THE BUNDLED ARTWORK, NOT VTpass'S URL, even though the live pickers use
+ * VTpass's own images. A receipt is read long after the payment, often months later and (for
+ * email) by a client that fetches images through a proxy: pointing it at
+ * vtpass.com/resources/products/... makes every historical receipt depend on a third party
+ * still hosting that exact file. The bundled copy is served from our own domain and can't rot.
+ *
+ * Matching is forgiving because the field it's given varies by caller — `service_id` is the
+ * canonical lowercase id ('ibadan-electric'), but `network` holds an uppercased variant
+ * ('IBADAN-ELECTRIC'), and old cached history rows have neither. Anything unrecognised falls
+ * back to the AbaPay mark rather than a broken image.
+ *
+ * `absolute` prefixes the app origin — required for email, where a root-relative `/ibadan.png`
+ * has no origin to resolve against.
+ */
+export function logoForServiceId(serviceId: string | null | undefined, absolute = false): string {
+  const key = String(serviceId || '').trim().toLowerCase();
+  const path = LOCAL_LOGO_BY_SERVICE_ID[key] || '/logo.png';
+  if (!absolute) return path;
+  const origin = (process.env.NEXT_PUBLIC_APP_URL || 'https://abapays.com').replace(/\/$/, '');
+  return `${origin}${path}`;
+}

@@ -9,6 +9,7 @@ import { enqueueRefund } from '@/lib/refunds';
 import { initiateMonnifyBankTransfer } from '@/lib/monnifyVend';
 import { checkProviderBalances } from '@/lib/balanceAlerts';
 import { Resend } from 'resend';
+import { normalizePurchasedCode, issuesTokenOrPin } from '@/lib/purchasedCode';
 
 const resend = new Resend(process.env.RESEND_API_KEY || 're_dummy_key_for_build');
 
@@ -174,12 +175,15 @@ export async function executeVend(input: VendInput): Promise<VendResult> {
     let dbPurchasedCode = null; let vendedUnits = null; let alertTokenRef = 'Success';
 
     if (serviceCategory === 'ELECTRICITY' && !isForeign) {
-      dbPurchasedCode = payData.purchased_code || payData.token || payData.content?.transactions?.token || payData.content?.transactions?.purchased_code || null;
+      // normalizePurchasedCode: VTpass returns the placeholder "Token : N/A" rather than
+      // omitting the field. Storing it verbatim is what produced "Token : Token : N/A" on the
+      // receipt; nulling it also lets the regex scan below still look for a real token.
+      dbPurchasedCode = normalizePurchasedCode(payData.purchased_code || payData.token || payData.content?.transactions?.token || payData.content?.transactions?.purchased_code);
       if (!dbPurchasedCode) { const tokenMatch = JSON.stringify(payData).match(/(?:\b|Token:?\s*)(\d{4}[-\s]?\d{4}[-\s]?\d{4}[-\s]?\d{4}[-\s]?\d{4})\b/i); if (tokenMatch) dbPurchasedCode = tokenMatch[1].replace(/[-\s]/g, ''); }
       alertTokenRef = dbPurchasedCode || 'Processing Token';
       vendedUnits = payData.units?.toString() || payData.content?.transactions?.units?.toString() || null;
     } else if (serviceCategory === 'EDUCATION') {
-      dbPurchasedCode = payData.purchased_code || payData.Pin || null; alertTokenRef = dbPurchasedCode || 'Processing PIN';
+      dbPurchasedCode = normalizePurchasedCode(payData.purchased_code || payData.Pin); alertTokenRef = dbPurchasedCode || 'Processing PIN';
     } else {
       alertTokenRef = payData.content?.transactions?.transactionId || payData.requestId || 'Success';
     }
@@ -192,7 +196,12 @@ export async function executeVend(input: VendInput): Promise<VendResult> {
       console.error('Telegram Success Alert Error:', tgError);
     }
 
-    if (serviceCategory === 'ELECTRICITY' || serviceCategory === 'EDUCATION') {
+    // 🔴 POSTPAID GETS NO SMS. The guard was `category === ELECTRICITY || EDUCATION`, which
+    // texted postpaid customers "Your IBADAN-ELECTRIC Token is Token : N/A" — a token that does
+    // not exist and never will, because postpaid meters are billed accounts. issuesTokenOrPin
+    // keeps the original cost rationale (only text when there is a code worth delivering)
+    // while telling the truth about which purchases actually produce one.
+    if (issuesTokenOrPin(serviceCategory, variation_code)) {
       const typeLabel = serviceCategory === 'ELECTRICITY' ? 'Token' : 'PIN';
       sendAbaPaySms(phone || billersCode, `AbaPay: Your ${network || serviceCategory} ${typeLabel} is ${alertTokenRef}. Amount: N${vendAmount}. Thank you.`).catch(() => {});
     }
@@ -201,6 +210,9 @@ export async function executeVend(input: VendInput): Promise<VendResult> {
       const premiumHtml = buildReceiptEmail({
         displayAmount: displayAmount || `₦${vendAmount.toLocaleString()}`,
         serviceLabel: `${network} ${serviceCategory}`,
+        serviceId: serviceID,
+        serviceCategory,
+        variationCode: variation_code,
         accountNumber: billersCode || phone || '',
         cryptoCharged: `${amount} ${tokenSymbol || 'USD₮'}`,
         txHash: txHash,

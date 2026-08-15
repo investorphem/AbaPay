@@ -1,4 +1,5 @@
 import { Receipt, ExternalLink, ChevronLeft, ChevronRight } from "lucide-react";
+import { logoForServiceId } from "@/lib/providerFallback";
 
 // ⚡ International transactions store a pre-formatted currency string (e.g. "GHS 2.50").
 // Domestic transactions store a plain NGN number. Render each correctly instead of forcing ₦ on everything.
@@ -39,9 +40,22 @@ export function HistoryTab({ transactions, currentTransactions, currentPage, tot
                                 <span className="font-mono text-slate-400 dark:text-slate-500">{tx.account}</span>
                               </p>
                           </div>
-                          <div className="text-right flex flex-col items-end gap-1.5 shrink-0 ml-2">
-                              <p className="text-sm font-black text-emerald-600 dark:text-emerald-400">{formatTxAmount(tx.amountNaira)}</p>
-                              <span className="text-[9px] font-black uppercase tracking-widest bg-slate-200 dark:bg-slate-800 text-slate-500 dark:text-slate-400 px-3 py-1 rounded-full group-hover:bg-emerald-200 dark:group-hover:bg-emerald-900/40 group-hover:text-emerald-800 dark:group-hover:text-emerald-300 transition-all flex items-center gap-1">
+                          {/* ⚡ PROVIDER LOGO AS A WATERMARK BEHIND THE AMOUNT.
+                              `relative` + an absolutely-positioned, low-opacity image pinned to
+                              the top right, with the amount and Receipt pill stacked above it via
+                              `relative z-10`. Kept low-contrast and `pointer-events-none` so it
+                              reads as branding rather than a control, and never intercepts the
+                              row's click. Falls back to the AbaPay mark for older cached rows
+                              that predate serviceId, so there is no broken-image state. */}
+                          <div className="text-right flex flex-col items-end gap-1.5 shrink-0 ml-2 relative">
+                              <img
+                                src={logoForServiceId(tx.serviceId)}
+                                alt=""
+                                aria-hidden="true"
+                                className="absolute -top-1 -right-1 w-11 h-11 rounded-xl object-contain opacity-15 dark:opacity-25 pointer-events-none select-none"
+                              />
+                              <p className="relative z-10 text-sm font-black text-emerald-600 dark:text-emerald-400">{formatTxAmount(tx.amountNaira)}</p>
+                              <span className="relative z-10 text-[9px] font-black uppercase tracking-widest bg-slate-200 dark:bg-slate-800 text-slate-500 dark:text-slate-400 px-3 py-1 rounded-full group-hover:bg-emerald-200 dark:group-hover:bg-emerald-900/40 group-hover:text-emerald-800 dark:group-hover:text-emerald-300 transition-all flex items-center gap-1">
                                 Receipt <ExternalLink size={10}/>
                               </span>
                           </div>

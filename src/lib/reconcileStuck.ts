@@ -8,6 +8,7 @@ import { buildReceiptEmail } from '@/lib/receiptEmail';
 import { requeryMonnifyTransfer, finalizeMonnifyTransfer } from '@/lib/monnifyVend';
 import { classifyTransferStatus, extractMonnifyFailureReason } from '@/lib/monnify';
 import { Resend } from 'resend';
+import { normalizePurchasedCode, issuesTokenOrPin } from '@/lib/purchasedCode';
 
 const resend = new Resend(process.env.RESEND_API_KEY || 're_dummy_key_for_build');
 
@@ -149,17 +150,21 @@ export async function reconcileStuckProcessing(opts: { force?: boolean } = {}) {
       const actualStatus = requeryData?.content?.transactions?.status;
 
       if (actualStatus === 'delivered' || actualStatus === 'successful') {
-        let dbPurchasedCode =
+        // normalizePurchasedCode: rejects VTpass's "Token : N/A" placeholder so the regex scan
+        // below still gets a chance, and a real absence stays null rather than becoming "N/A".
+        let dbPurchasedCode = normalizePurchasedCode(
           requeryData.purchased_code || requeryData.token ||
           requeryData.content?.transactions?.token || requeryData.content?.transactions?.purchased_code ||
-          requeryData.Pin || null;
+          requeryData.Pin);
         if (!dbPurchasedCode && (record.service_category === 'ELECTRICITY' || record.service_category === 'EDUCATION')) {
           const tokenMatch = JSON.stringify(requeryData).match(/(?:\b|Token:?\s*)(\d{4}[-\s]?\d{4}[-\s]?\d{4}[-\s]?\d{4}[-\s]?\d{4})\b/i);
           if (tokenMatch) dbPurchasedCode = tokenMatch[1].replace(/[-\s]/g, '');
         }
         const vendedUnits = requeryData.units || requeryData.content?.transactions?.units || null;
 
-        const requiresCode = record.service_category === 'ELECTRICITY' || record.service_category === 'EDUCATION';
+        // 🔴 POSTPAID IS EXCLUDED — see issuesTokenOrPin. A postpaid meter never gets a token,
+        // so demanding one here would strand a delivered payment as permanently unreconciled.
+        const requiresCode = issuesTokenOrPin(record.service_category, record.variation_code);
         if (requiresCode && !dbPurchasedCode) {
           // Delivered per VTpass, but the token/PIN isn't in the response yet — leave it for
           // the next sweep rather than completing without the thing the user actually needs.
@@ -186,7 +191,8 @@ export async function reconcileStuckProcessing(opts: { force?: boolean } = {}) {
           )
         );
 
-        if (record.service_category === 'ELECTRICITY' || record.service_category === 'EDUCATION') {
+        // Postpaid excluded — see issuesTokenOrPin; a postpaid meter never gets a token.
+        if (issuesTokenOrPin(record.service_category, record.variation_code)) {
           const typeLabel = record.service_category === 'ELECTRICITY' ? 'Token' : 'PIN';
           notifications.push(
             sendAbaPaySms(record.phone || record.account_number, `AbaPay: Your ${record.network || record.service_category} ${typeLabel} is ${alertTokenRef}. Amount: N${record.amount_naira}. Thank you.`)
@@ -202,6 +208,9 @@ export async function reconcileStuckProcessing(opts: { force?: boolean } = {}) {
             html: buildReceiptEmail({
               displayAmount: record.display_amount || `₦${Number(record.amount_naira).toLocaleString()}`,
               serviceLabel: `${record.network || ''} ${record.service_category || ''}`.trim(),
+              serviceId: record.service_id,
+              serviceCategory: record.service_category,
+              variationCode: record.variation_code,
               accountNumber: record.account_number,
               cryptoCharged: `${record.amount_usdt} ${record.token_used || 'USD₮'}`,
               txHash: record.tx_hash,
