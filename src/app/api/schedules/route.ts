@@ -4,6 +4,7 @@ import { enforceRateLimit } from '@/lib/rateLimit';
 import { getRemainingAllowance } from '@/lib/deai/relayer';
 import { getServiceRules } from '@/lib/serviceRules';
 import { verifyWalletOwnership } from '@/utils/walletAuth';
+import { normalizeChainName, defaultTokenForChain } from '@/constants';
 
 // ⚡ SCHEDULED BILLS — in-app CRUD (the "Bill Pay & Autopay Agent")
 //
@@ -113,8 +114,10 @@ export async function POST(req: Request) {
       runOnceAt = parsed.toISOString();
     }
 
-    const blockchain = (b.blockchain || 'CELO').toUpperCase();
-    const tokenUsed = b.token_used || 'USD₮';
+    // A new schedule with no chain named gets the app default (Base) and the stablecoin that
+    // chain leads with (USDC), not a hardcoded Celo/USD₮ pair the caller never asked for.
+    const blockchain = normalizeChainName(b.blockchain);
+    const tokenUsed = b.token_used || defaultTokenForChain(blockchain).symbol;
     const autoExecute = b.auto_execute === true;
 
     // ⚡ RE-VERIFY ON-CHAIN — never trust a client-supplied "yes I have an allowance for

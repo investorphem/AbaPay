@@ -7,7 +7,7 @@ import { isDuplicateElectricity } from '@/lib/parity';
 import { enforceRateLimit } from '@/lib/rateLimit';
 import { createPublicClient, http, decodeFunctionData, decodeEventLog, parseUnits } from 'viem';
 import { base, baseSepolia, celo, celoSepolia } from 'viem/chains';
-import { resolveTokenOnChain } from '@/constants';
+import { resolveTokenOnChain, normalizeChainName, LEGACY_RECORD_CHAIN } from '@/constants';
 
 const ABAPAY_ABI = [{"inputs":[{"internalType":"address","name":"tokenAddress","type":"address"},{"internalType":"string","name":"serviceType","type":"string"},{"internalType":"string","name":"accountNumber","type":"string"},{"internalType":"uint256","name":"amount","type":"uint256"}],"name":"payBill","outputs":[],"stateMutability":"nonpayable","type":"function"}];
 
@@ -136,7 +136,12 @@ export async function POST(req: Request) {
     // 2. THE SAFETY NET / ATOMIC LOCK
     const dbPayload = {
       tx_hash: txHash, request_id: vtRequestId, service_category: serviceCategory, service_id: serviceID, variation_code: variation_code, network: network,
-      blockchain: blockchain || "CELO", account_number: destinationAccount, phone: phone || null, amount_usdt: parseFloat(amount),
+      // Stored canonical ('BASE' | 'CELO'). The frontend used to send the raw viem chain name,
+      // so testnet rows held "BASE SEPOLIA" and read back as Celo. The empty case keeps the
+      // LEGACY meaning rather than the new default — this row describes a payment that has
+      // ALREADY happened on some chain, and guessing Base for a caller that omitted the field
+      // would send the webhook looking for the receipt on the wrong one.
+      blockchain: normalizeChainName(blockchain || LEGACY_RECORD_CHAIN), account_number: destinationAccount, phone: phone || null, amount_usdt: parseFloat(amount),
       amount_naira: vendAmount, fee_naira: serviceFee, stamp_duty_ngn: stampDutyNgn, discount_ngn: discountNgn, discount_campaign_id: activeDiscount?.id || null,
       discount_phone: discountPhone, client_ip: clientIp,
       status: 'PENDING', wallet_address: (wallet_address || "UNKNOWN").toLowerCase(),

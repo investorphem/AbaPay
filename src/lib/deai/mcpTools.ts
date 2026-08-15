@@ -5,7 +5,7 @@ import { getServiceRules, checkServiceAllowed, checkAgentSpendAllowed, isChannel
 import { describeCapabilities, capabilityForIntent, getCapability } from '@/lib/deai/capabilities';
 import { resolveServiceId, fetchCryptoBalances, verifyAccount } from '@/lib/deai/services';
 import { getRemainingAllowance } from '@/lib/deai/relayer';
-import { SUPPORTED_TOKENS } from '@/constants';
+import { LEGACY_RECORD_CHAIN, tokenSymbolsForChain } from '@/constants';
 import { providersForIntent } from '@/lib/vtpassCatalog';
 import { checkAccountNumber, checkAmountLive, requiresVariation, requiresVerifiedName } from '@/lib/parity';
 import { checkAutonomousCapacity, executeAgentPayment, type BatchItem, type AgentPaymentResult } from '@/lib/deai/batch';
@@ -121,15 +121,11 @@ function imageAndTextResult(pngBuffer: Buffer, text: string) {
   };
 }
 
-// Which stablecoins actually exist on a given chain — same source (SUPPORTED_TOKENS) every
-// other channel already filters against, so this can never offer a token that doesn't exist
-// there (e.g. USDm is Celo-only).
-function tokensForChain(chain: string): string[] {
-  const key = chain.toLowerCase();
-  return (SUPPORTED_TOKENS as any[])
-    .filter((t) => !t.supportedNetworks || t.supportedNetworks.includes(key))
-    .map((t) => t.symbol);
-}
+// Which stablecoins exist on a given chain, in the same order the web app shows them —
+// tokenSymbolsForChain in @/constants. This used to be a local copy of the filter (as did the
+// chat agent's, the Agent Hub's and the Pay tab's), which is how four surfaces could end up
+// disagreeing about which stablecoin a chain leads with.
+const tokensForChain = tokenSymbolsForChain;
 
 export const TOOLS = [
   {
@@ -325,7 +321,7 @@ async function callCheckBalance(args: any, oauthIdentity: McpIdentity | null) {
   }
   const identity = resolved.identity;
 
-  const chain = args?.chain === 'BASE' || args?.chain === 'CELO' ? args.chain : identity.approved_chain || 'CELO';
+  const chain = args?.chain === 'BASE' || args?.chain === 'CELO' ? args.chain : identity.approved_chain || LEGACY_RECORD_CHAIN;
   const tokens = tokensForChain(chain);
   const [balances, allowances] = await Promise.all([
     fetchCryptoBalances(identity.wallet_address, chain),
@@ -605,7 +601,7 @@ async function callPayBillInternational(
   const spendGate = await checkAgentSpendAllowed(supabaseAdmin, identity.wallet_address, vendAmountNgn);
   if (!spendGate.allowed) return errorResult(spendGate.reason || 'Agent spending is currently disabled for this account.');
 
-  const chain = chainOverride || identity.approved_chain || 'CELO';
+  const chain = chainOverride || identity.approved_chain || LEGACY_RECORD_CHAIN;
   const chainTokens = tokensForChain(chain);
   const tokenSymbol = tokenOverride && chainTokens.includes(tokenOverride) ? tokenOverride : (identity.approved_token || 'USD₮');
 
@@ -814,7 +810,7 @@ async function callPayBill(args: any, oauthIdentity: McpIdentity | null) {
 
   const rules = await getServiceRules();
   const rate = rules.exchangeRate;
-  const chain = chainOverride || identity.approved_chain || 'CELO';
+  const chain = chainOverride || identity.approved_chain || LEGACY_RECORD_CHAIN;
   const chainTokens = tokensForChain(chain);
   // Defaults to whatever was approved when the API key was created — same as every other
   // channel — but callers can pass `token` to retry with a different one on the same chain

@@ -2,7 +2,7 @@
 
 import React, { useState, useEffect, useCallback } from "react";
 import { Bot, Shield, Check, Copy, Trash2, Loader2, AlertTriangle, ExternalLink, KeyRound } from "lucide-react";
-import { SUPPORTED_TOKENS } from "@/constants";
+import { normalizeChainName, tokensForChain, defaultTokenForChain, type ChainName } from "@/constants";
 
 const CHANNELS = [
   { id: 'TELEGRAM', name: 'Telegram', color: 'text-sky-500', bot: 'https://t.me/abapayagentbot' },
@@ -13,12 +13,8 @@ const CHANNELS = [
   { id: 'MCP', name: 'MCP (AI Agents)', color: 'text-violet-500', bot: '' },
 ];
 
-const CHAINS: Array<'CELO' | 'BASE'> = ['CELO', 'BASE'];
-
-function tokensFor(chainName: 'CELO' | 'BASE'): any[] {
-  const key = chainName.toLowerCase();
-  return (SUPPORTED_TOKENS as any[]).filter((t) => !t.supportedNetworks || t.supportedNetworks.includes(key));
-}
+// Base first — it's the app's default chain, so it's the one this picker should open on.
+const CHAINS: ChainName[] = ['BASE', 'CELO'];
 
 // ⚡ The bare bot links above open the chat with nothing pre-filled — the user then has to
 // remember and retype the link code themselves. Telegram and WhatsApp both support
@@ -43,9 +39,9 @@ interface Props {
   // tab happening to show USD₮ on Celo. Returns a result rather than throwing, so this
   // component can show its own confirmation — the page's shared `status` banner only renders
   // inside the Pay tab, never here.
-  onApproveAllowance: (amount: string, tokenSymbol: string, chainName: 'CELO' | 'BASE') => Promise<{ success: boolean; message: string } | void>;
+  onApproveAllowance: (amount: string, tokenSymbol: string, chainName: ChainName) => Promise<{ success: boolean; message: string } | void>;
   // Reads the on-chain allowance for a given chain/token and updates currentAllowance below.
-  onCheckAllowance: (tokenSymbol: string, chainName: 'CELO' | 'BASE') => Promise<string | null>;
+  onCheckAllowance: (tokenSymbol: string, chainName: ChainName) => Promise<string | null>;
   // Current on-chain allowance, in human units, for whatever combo was last checked.
   currentAllowance: string | null;
   isApproving: boolean;
@@ -91,11 +87,14 @@ export function AgentHub({ address, selectedToken, activeChainName, onApproveAll
 
   // Independent chain/token selection for THIS approval step — seeded from the Pay tab's
   // current selector as a sensible starting point, but freely changeable here.
-  const [approvalChain, setApprovalChain] = useState<'CELO' | 'BASE'>(
-    (activeChainName === 'BASE' ? 'BASE' : 'CELO')
+  const [approvalChain, setApprovalChain] = useState<ChainName>(
+    () => normalizeChainName(activeChainName)
   );
+  // Falls back to whatever THAT chain leads with (USDC on Base, USD₮ on Celo) rather than to
+  // a hardcoded symbol, so an unset Pay-tab selection can't seed this with a token the chain
+  // doesn't even offer.
   const [approvalTokenSymbol, setApprovalTokenSymbol] = useState<string>(
-    selectedToken?.symbol || 'USD₮'
+    () => selectedToken?.symbol || defaultTokenForChain(normalizeChainName(activeChainName)).symbol
   );
 
   // Re-check the on-chain allowance whenever the selection (or wallet) changes, so the
@@ -108,10 +107,10 @@ export function AgentHub({ address, selectedToken, activeChainName, onApproveAll
 
   // Switching chains may drop the currently selected token if it isn't available there
   // (e.g. USDm is Celo-only) — fall back to the first token that IS available.
-  const handleChainChange = (next: 'CELO' | 'BASE') => {
+  const handleChainChange = (next: ChainName) => {
     setApprovalChain(next);
     setApprovalResult(null);
-    const available = tokensFor(next);
+    const available = tokensForChain(next);
     if (!available.some((t) => t.symbol === approvalTokenSymbol) && available[0]) {
       setApprovalTokenSymbol(available[0].symbol);
     }
@@ -282,8 +281,8 @@ export function AgentHub({ address, selectedToken, activeChainName, onApproveAll
               </button>
             ))}
           </div>
-          <div className={`grid gap-1.5`} style={{ gridTemplateColumns: `repeat(${tokensFor(approvalChain).length}, minmax(0, 1fr))` }}>
-            {tokensFor(approvalChain).map((t: any) => (
+          <div className={`grid gap-1.5`} style={{ gridTemplateColumns: `repeat(${tokensForChain(approvalChain).length}, minmax(0, 1fr))` }}>
+            {tokensForChain(approvalChain).map((t: any) => (
               <button
                 key={t.symbol}
                 onClick={() => { setApprovalTokenSymbol(t.symbol); setApprovalResult(null); }}

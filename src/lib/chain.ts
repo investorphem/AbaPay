@@ -1,5 +1,6 @@
 import { createPublicClient, http, fallback, type PublicClient } from 'viem';
 import { base, baseSepolia, celo, celoSepolia } from 'viem/chains';
+import { LEGACY_RECORD_CHAIN, normalizeChainName } from '@/constants';
 
 // ⚡ SHARED CHAIN / RPC RESOLUTION
 //
@@ -14,9 +15,17 @@ export function isMainnetEnv(): boolean {
   return n === 'mainnet' || n === 'celo' || n === 'base';
 }
 
+// 🔴 THIS RESOLVES A STORED ROW, so its fallback is LEGACY_RECORD_CHAIN (Celo) and NOT
+// DEFAULT_CHAIN (now Base). A row with no `blockchain` predates the column being written and
+// was on Celo; reading it as Base would send the webhook looking for a receipt on the wrong
+// chain and leave a paid transaction unvended. See the note on both constants.
+//
+// The match is also a SUBSTRING now, not `=== 'BASE'`. The frontend sent the raw viem chain
+// name, so a testnet payment stored "BASE SEPOLIA", which failed the equality check and was
+// resolved as Celo. New payments store the canonical name; this keeps the old rows working.
 export function resolveChain(blockchain: string | null | undefined) {
   const isMainnet = isMainnetEnv();
-  const isBase = (blockchain || 'CELO').toUpperCase() === 'BASE';
+  const isBase = normalizeChainName(blockchain || LEGACY_RECORD_CHAIN) === 'BASE';
   const chain = isBase ? (isMainnet ? base : baseSepolia) : (isMainnet ? celo : celoSepolia);
   return { chain, isMainnet, isBase };
 }

@@ -1,7 +1,7 @@
 import 'server-only';
 import { getHeaders } from '@/lib/vtpass';
 import { getPublicClient, isMainnetEnv } from '@/lib/chain';
-import { SUPPORTED_TOKENS, resolveTokenOnChain } from '@/constants';
+import { SUPPORTED_TOKENS, resolveTokenOnChain, DEFAULT_CHAIN } from '@/constants';
 import { formatUnits } from 'viem';
 
 // ⚡ DeAI REAL DATA LAYER
@@ -133,7 +133,7 @@ export interface CryptoBalances {
 /**
  * REAL on-chain stablecoin balances for a wallet, read from the same chain/RPC the app uses.
  */
-export async function fetchCryptoBalances(walletAddress: string, blockchain = 'CELO'): Promise<CryptoBalances> {
+export async function fetchCryptoBalances(walletAddress: string, blockchain: string = DEFAULT_CHAIN): Promise<CryptoBalances> {
   const empty: CryptoBalances = {};
   if (!walletAddress || !/^0x[a-fA-F0-9]{40}$/.test(walletAddress)) return empty;
 

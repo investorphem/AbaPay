@@ -1,6 +1,6 @@
 # ⚡ AbaPay Protocol
 
-AbaPay is a decentralized, Web3-native utility payment platform built on **Celo** and **Base**. It lets users pay for real-world bills — Airtime, Mobile Data, Electricity, Cable TV, Bank Transfers, Education PINs, and International Airtime/Data — using on-chain stablecoins (**USDT**, **USDC**, **cUSD/USDm**), with instant fiat settlement handled server-side via the VTpass API. Payments can be made directly in the web app, or hands-free through a conversational, autonomous AI agent ("DeAI") on Telegram, WhatsApp, and X — a real on-chain identity under [ERC-8004](https://eips.ethereum.org/EIPS/eip-8004), discoverable on [8004scan.io](https://8004scan.io) — that can pay bills unattended, run recurring/scheduled autopay, and settle multi-recipient batch payments, all spending from a bounded, user-revocable on-chain allowance — no custody, no server-side keys.
+AbaPay is a decentralized, Web3-native utility payment platform built on **Base** (the default chain) and **Celo**. It lets users pay for real-world bills — Airtime, Mobile Data, Electricity, Cable TV, Bank Transfers, Education PINs, and International Airtime/Data — using on-chain stablecoins (**USDT**, **USDC**, **cUSD/USDm**), with instant fiat settlement handled server-side via the VTpass API. Payments can be made directly in the web app, or hands-free through a conversational, autonomous AI agent ("DeAI") on Telegram, WhatsApp, and X — a real on-chain identity under [ERC-8004](https://eips.ethereum.org/EIPS/eip-8004), discoverable on [8004scan.io](https://8004scan.io) — that can pay bills unattended, run recurring/scheduled autopay, and settle multi-recipient batch payments, all spending from a bounded, user-revocable on-chain allowance — no custody, no server-side keys.
 
 Designed for low fees, cross-border utility vending (Nigeria + every country VTpass's live international catalogue returns), and mobile-first accessibility — MiniPay, Valora, Farcaster Mini Apps, Coinbase Smart Wallet / Base Account, MetaMask, and any other WalletConnect-compatible wallet (see [Supported Wallets & Environments](#-supported-wallets--environments)).
 
@@ -10,7 +10,7 @@ Designed for low fees, cross-border utility vending (Nigeria + every country VTp
 
 ## 🌟 Key Features
 
-* **Multi-Chain Payments:** Pay bills directly with USDT, USDC, or cUSD on Celo (Mainnet/Alfajores) or Base (Mainnet/Sepolia). The app auto-detects the connected chain and filters/reorders available stablecoins accordingly (e.g. cUSD is Celo-exclusive; USDT defaults first on Celo).
+* **Multi-Chain Payments:** Pay bills directly with USDT, USDC, or cUSD on Base (Mainnet/Sepolia) or Celo (Mainnet/Alfajores). **Base is the default chain**; Celo remains fully supported and switchable. The app auto-detects the connected chain and filters/reorders available stablecoins accordingly — **USDC leads on Base, USD₮ leads on Celo**, and cUSD/USDm is Celo-exclusive.
 * **Live VTpass Catalogue — nothing about a provider is hardcoded any more:** every provider name, logo, and amount limit for airtime, data, electricity, cable and education is fetched live from VTpass (`src/lib/vtpassCatalog.ts`, served to the browser by `/api/providers`) rather than from four separate hardcoded lists. The app, chat, MCP and the admin dashboard all read the same in-process cache, so there is exactly one source of truth. See [Live provider catalogue](#live-provider-catalogue-vtpass-sourced) below.
 * **Per-Provider Amount Limits, Enforced Live:** the ceiling is VTpass's real published `minimium_amount`/`maximum_amount` *per provider*, not one flat number per service — airtime alone ranges MTN ₦200,000 / Glo ₦100,000 / Airtel ₦50,000 / 9mobile ₦50,000, and electricity minimums range ₦100 (Ikeja, Aba) to ₦2,000 (Ibadan). A flat cap either wrongly refused a valid MTN top-up or wrongly accepted an Airtel one that VTpass rejects *after* the user has already paid on-chain.
 * **International Bill Pay:** Users can select a country and pay for foreign airtime/data in that country's own currency and rate — transaction history and receipts reflect the *local* currency, not just Naira. The country list is fetched live from VTpass (`/get-international-airtime-countries`) on every channel, so the app, chat and MCP can never disagree about which countries are covered.
@@ -68,20 +68,36 @@ and `walletConnect()`.
 |---|---|---|
 | **MiniPay** (Opera Mini's built-in Celo wallet) | Detected directly via `window.ethereum.isMiniPay`; the app builds its own viem wallet client and locks to Celo | Gas is paid in a stablecoin (`txConfig.feeCurrency`), so users need no CELO. Network switching is intentionally disabled here. |
 | **Farcaster Mini App** | Detected via `@farcaster/miniapp-sdk`'s `sdk.context`; uses `sdk.wallet.ethProvider`, locked to Base | Addresses are read with a *silent* `getAddresses()` so opening the app never forces a wallet popup. Frame metadata ships in `public/.well-known/farcaster.json`. |
-| **Valora** | Standard WalletConnect connector — **no Valora-specific code exists or is needed** | Valora is pinned to the top of the WalletConnect modal's recommended list via `explorerRecommendedWalletIds`, and `chains` puts Celo first so Valora defaults to Celo. It works exactly the way MetaMask does. |
+| **Valora** | Standard WalletConnect connector — **no Valora-specific code exists or is needed** | Valora is pinned to the top of the WalletConnect modal's recommended list via `explorerRecommendedWalletIds`. It is Celo-only, and still works now that `chains` puts Base first: wagmi offers every configured chain as an *optional* namespace and requires none, so Valora simply approves Celo and the app follows it there. It works exactly the way MetaMask does. |
 | **MetaMask** and other injected browser wallets | `injected()` connector (also used for the silent auto-reconnect on desktop) | — |
 | **Coinbase Smart Wallet / Base Account** | `baseAccount()` connector | The only wallets that get **sponsored gas** — the app probes EIP-5792 paymaster capability and batches approve + pay into one sponsored call. Everything else falls back to the normal self-paid flow. |
 | **Any other WalletConnect v2 wallet** (Trust, Rainbow, Ledger Live, …) | `walletConnect()` connector with the QR modal | Nothing wallet-specific in the code — if it speaks WalletConnect and supports Celo or Base, it works. |
 
-Chains registered in `wagmi.ts`, in order: **Celo, Celo Alfajores, Base, Base Sepolia** — Celo is
-deliberately first so mobile Celo wallets default to it. Note the app's own non-wagmi paths
-(`src/lib/chain.ts`, `page.tsx`) use viem's **`celoSepolia`** as the Celo testnet, while
+#### The default chain is Base
+
+`DEFAULT_CHAIN` in `src/constants/index.ts` is **`BASE`**, and everything forward-looking reads
+from it: the chain a freshly connected wallet lands on, the token picker's seed before a wallet
+is connected, and the chain an agent link approves when the caller doesn't name one. Celo is
+fully supported and switchable — nothing was dropped, it just isn't where you start.
+
+Chains registered in `wagmi.ts`, in order: **Base, Base Sepolia, Celo, Celo Alfajores**. wagmi
+treats `chains[0]` as the default and offers the rest as *optional* WalletConnect namespaces, so
+a Celo-only wallet still connects fine (see the Valora row above). Note the app's own non-wagmi
+paths (`src/lib/chain.ts`, `page.tsx`) use viem's **`celoSepolia`** as the Celo testnet, while
 `wagmi.ts` still lists `celoAlfajores`; mainnet is unaffected, but they should be reconciled if
 testnet WalletConnect flows are exercised.
 
-Stablecoins: **USD₮** and **USDC** on both chains, plus **cUSD/USDm** on Celo only
-(`supportedNetworks` in `src/constants/index.ts`) — the token picker filters and reorders itself
-from the connected chain.
+`LEGACY_RECORD_CHAIN` is the deliberate counterpart, and it stays **`CELO`**. It is how a
+*stored* row with an empty `blockchain` column is read — such rows predate the column being
+written and were all on Celo. It must not follow `DEFAULT_CHAIN`: reading an old Celo payment as
+Base would send the webhook hunting for a receipt on the wrong chain and strand a real payment
+as unvended.
+
+Stablecoins: **USD₮** and **USDC** on both chains, plus **cUSD/USDm** on Celo only. Which token
+a chain *leads* with, and in what order the rest follow, is `TOKEN_ORDER_BY_CHAIN` in
+`src/constants/index.ts` — **Base: USDC then USD₮; Celo: USD₮, USDC, USDm**. One
+`tokensForChain()` serves the Pay tab, the Agent Hub, the chat agent and the MCP tools, which
+each used to filter `SUPPORTED_TOKENS` themselves and could therefore disagree.
 
 ---
 

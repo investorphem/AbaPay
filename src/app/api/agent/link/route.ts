@@ -5,6 +5,7 @@ import { hashPin } from '@/utils/pinSecurity';
 import { enforceRateLimit } from '@/lib/rateLimit';
 import { verifyWalletOwnership } from '@/utils/walletAuth';
 import { generateMcpApiKey, hashMcpApiKey } from '@/lib/deai/mcpAuth';
+import { normalizeChainName, defaultTokenForChain } from '@/constants';
 
 // ⚡ SOCIAL LINKING — done in the REAL APP, where the user has their wallet.
 //
@@ -65,6 +66,12 @@ export async function POST(req: Request) {
       return NextResponse.json({ success: false, message: 'PIN must be 4-6 digits' }, { status: 400 });
     }
 
+    // A link the caller doesn't pin to a chain gets the app's default (Base), and the token
+    // that chain leads with (USDC) rather than a hardcoded USD₮ — pairing "no chain given"
+    // with a token the default chain doesn't lead with is how an agent ends up approved for
+    // a combination the user never picked.
+    const approvedChain = normalizeChainName(approved_chain);
+
     // 🔐 Prove the caller actually controls this wallet before binding a chat identity + PIN
     // to it — see src/utils/walletAuth.ts for why a bare address string is not enough.
     const auth = await verifyWalletOwnership(req, wallet, 'POST:/api/agent/link');
@@ -87,8 +94,8 @@ export async function POST(req: Request) {
         pin_hash: hashPin(String(pin)),
         mcp_key_label: mcp_key_label ? String(mcp_key_label).slice(0, 60) : null,
         link_verified: true,
-        approved_token: approved_token || 'USD₮',
-        approved_chain: approved_chain || 'CELO',
+        approved_chain: approvedChain,
+        approved_token: approved_token || defaultTokenForChain(approvedChain).symbol,
         failed_pin_attempts: 0,
         locked_until: null,
         is_active: true,
@@ -119,8 +126,8 @@ export async function POST(req: Request) {
         pin_hash: hashPin(String(pin)),
         link_code: linkCode,
         link_verified: false,
-        approved_token: approved_token || 'USD₮',
-        approved_chain: approved_chain || 'CELO',
+        approved_chain: approvedChain,
+        approved_token: approved_token || defaultTokenForChain(approvedChain).symbol,
         failed_pin_attempts: 0,
         locked_until: null,
         is_active: true,

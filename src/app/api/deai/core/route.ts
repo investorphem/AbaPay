@@ -10,7 +10,7 @@ import { assessFeasibility, describeCapabilities, getCapability, capabilityForIn
 import { checkParity, checkAccountNumber, checkAmountLive, isDuplicateElectricity, formatConversion, REQ, requiresVariation, supportsRenew, requiresVerifiedName } from '@/lib/parity';
 import { sendTelegramAlert } from '@/lib/telegram';
 import { checkPinAllowed, recordPinFailure, clearPinFailures, notifySpendOutOfBand } from '@/lib/deai/pinSecurity';
-import { SUPPORTED_TOKENS } from '@/constants';
+import { SUPPORTED_TOKENS, tokenSymbolsForChain, normalizeChainName, defaultTokenForChain, LEGACY_RECORD_CHAIN } from '@/constants';
 import { providersFor, hasProviderList, renderOptions, matchProvider, needsVariation, variationServiceId, fetchVariations, matchVariation, groupDataPlans, renderCategoryMenu, matchCategory, renderOptionsPage, isNextPageRequest, matchPagedOption, type Option } from '@/lib/deai/selection';
 import { createClient } from '@supabase/supabase-js';
 import { verifyInternalRequest } from '@/utils/internalAuth';
@@ -389,12 +389,9 @@ function needsEmailOptIn(d: any): boolean {
 // ⚡ Which tokens are actually available on a given chain?
 // Read from SUPPORTED_TOKENS — the SAME source the web app uses — so the agent can never
 // offer a token that doesn't exist on the selected chain (cUSD/USDm is Celo-only).
-function tokensForChain(chain: 'CELO' | 'BASE'): string[] {
-    const key = chain.toLowerCase();
-    return (SUPPORTED_TOKENS as any[])
-        .filter((t) => !t.supportedNetworks || t.supportedNetworks.includes(key))
-        .map((t) => t.symbol);
-}
+// Shared with the Pay tab, the Agent Hub and the MCP tools — see @/constants. This was a
+// local copy of the same filter, so it could drift on which stablecoin a chain leads with.
+const tokensForChain = tokenSymbolsForChain;
 
 // Live platform exchange rate (NGN per 1 stablecoin), used to convert a bill into crypto.
 async function getExchangeRate(): Promise<number> {
@@ -603,8 +600,12 @@ async function buildScheduleConfirm(
                    : intentData.intent === 'TV' ? 'CABLE'
                    : intentData.intent === 'VEND_DATA' ? 'DATA' : 'AIRTIME';
 
-    const tokenSym = intentData.selected_token || approvedToken || 'USD₮';
-    const schedChain = (intentData.chain || approvedChain || 'CELO').toUpperCase();
+    // Chain first, then token — the token fallback has to know which chain it's on. A link
+    // stored without a chain predates the column and was on Celo (LEGACY_RECORD_CHAIN); the
+    // token then falls back to whatever THAT chain leads with, so an unset pair can never be
+    // a chain/token combination the chain doesn't actually offer.
+    const schedChain = normalizeChainName(intentData.chain || approvedChain || LEGACY_RECORD_CHAIN);
+    const tokenSym = intentData.selected_token || approvedToken || defaultTokenForChain(schedChain).symbol;
     const allowance = await getRemainingAllowance(wallet, tokenSym, schedChain);
 
     const schedRate = await getExchangeRate();

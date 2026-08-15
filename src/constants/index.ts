@@ -41,9 +41,81 @@ export const SERVICES = [
 // a user could pick one, pay on-chain, and only then have the vend fail) while omitting
 // `glo-sme-data` and `9mobile-sme-data`, which are live and were unreachable from the app.
 
+// ⚡ THE DEFAULT CHAIN — BASE.
+//
+// AbaPay launched Celo-first, and "Celo unless told otherwise" was hardcoded in a dozen
+// places. Base is now the default: it is the chain the app connects to, the chain the token
+// picker is seeded from, and the chain a new agent link approves when the caller doesn't
+// name one.
+//
+// 🔴 DO NOT use this to interpret a row that was STORED earlier — that's what
+// LEGACY_RECORD_CHAIN below is for. The two were the same value until now, which is exactly
+// why the distinction was invisible and easy to get wrong.
+export type ChainName = 'CELO' | 'BASE';
+export const DEFAULT_CHAIN: ChainName = 'BASE';
+
+// How to read a transaction/agent-link row whose `blockchain` column is NULL or empty.
+//
+// Every row the app writes populates that column, so this only ever fires for rows written
+// before it did — and every one of those was on Celo. It must stay CELO no matter what
+// DEFAULT_CHAIN becomes: flipping it would make the webhook verify an old Celo payment
+// against Base, find nothing, and strand a real user's money as unvended.
+export const LEGACY_RECORD_CHAIN: ChainName = 'CELO';
+
+// Which stablecoin leads the picker on each chain, and in what order the rest follow.
+// A token missing from a chain's list simply isn't offered there (USDm is Celo-only).
+//
+// Base leads with USDC — it's the canonical, Circle-issued dollar on Base and what nearly
+// every Base user already holds — then USD₮. Celo keeps USD₮ first, which is what it has
+// always shown there.
+const TOKEN_ORDER_BY_CHAIN: Record<ChainName, string[]> = {
+  BASE: ['USDC', 'USD₮'],
+  CELO: ['USD₮', 'USDC', 'USDm'],
+};
+
+/**
+ * Normalise anything that names a chain into 'CELO' | 'BASE'.
+ *
+ * Accepts what each caller actually has: a stored 'BASE' string, a viem chain NAME from the
+ * browser ("Base", "Base Sepolia", "Celo Alfajores"), or nothing at all. Substring matching
+ * is deliberate — the testnet names would fail an equality check.
+ *
+ * `undefined` means "no chain in hand yet" (e.g. no wallet connected), which resolves to
+ * DEFAULT_CHAIN. Callers reading a stored row should pass `?? LEGACY_RECORD_CHAIN` instead.
+ */
+export function normalizeChainName(chain: string | null | undefined): ChainName {
+  if (!chain) return DEFAULT_CHAIN;
+  return chain.toUpperCase().includes('BASE') ? 'BASE' : 'CELO';
+}
+
+/**
+ * The tokens offered on a chain, in display order — one definition for the Pay tab, the
+ * Agent Hub, the MCP tools and the chat agent, which each used to filter SUPPORTED_TOKENS
+ * themselves and could therefore disagree about which stablecoin came first.
+ */
+export function tokensForChain(chain: string | null | undefined): any[] {
+  const name = normalizeChainName(chain);
+  const key = name.toLowerCase();
+  const order = TOKEN_ORDER_BY_CHAIN[name];
+  return (SUPPORTED_TOKENS as any[])
+    .filter((t) => !t.supportedNetworks || t.supportedNetworks.includes(key))
+    .filter((t) => order.includes(t.symbol))
+    .sort((a, b) => order.indexOf(a.symbol) - order.indexOf(b.symbol));
+}
+
+/** Same list, as symbols — what the server-side/agent paths want. */
+export function tokenSymbolsForChain(chain: string | null | undefined): string[] {
+  return tokensForChain(chain).map((t) => t.symbol);
+}
+
+/** The stablecoin a chain leads with: USDC on Base, USD₮ on Celo. */
+export function defaultTokenForChain(chain: string | null | undefined): any {
+  return tokensForChain(chain)[0];
+}
+
 export const SUPPORTED_TOKENS = [
   {
-    symbol: "USDm", 
+    symbol: "USDm",
     logo: "/cusd.png",
     decimals: 18,
     mainnet: "0x765DE816845861e75A25fCA122bb6898B8B1282a", // Celo Mainnet

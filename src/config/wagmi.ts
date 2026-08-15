@@ -33,8 +33,13 @@ const transportFor = (chainId: number) => {
 };
 
 export const config = createConfig({
-  // ⚡ CELO IS NOW FIRST: Valora and other wallets will default to Celo!
-  chains: [celo, celoAlfajores, base, baseSepolia],
+  // ⚡ BASE IS FIRST — it is the app's default chain (constants/DEFAULT_CHAIN).
+  //
+  // wagmi treats chains[0] as the default: it's the chain a freshly connected wallet is
+  // asked for, and the one reads fall back to before the user switches. This array was
+  // Celo-first while AbaPay was Celo-first; both flipped together. Celo stays fully
+  // supported and switchable — nothing is dropped, it just isn't what you land on.
+  chains: [base, baseSepolia, celo, celoAlfajores],
   connectors: [
     injected(),
     baseAccount({
@@ -66,10 +71,10 @@ export const config = createConfig({
   storage: createStorage({ storage: cookieStorage }),
   ssr: true,
   transports: {
-    // ⚡ TRANSPORTS REORDERED TO MATCH THE CHAINS ARRAY
-    [celo.id]: transportFor(celo.id),
-    [celoAlfajores.id]: transportFor(celoAlfajores.id),
+    // ⚡ TRANSPORTS ORDERED TO MATCH THE CHAINS ARRAY
     [base.id]: transportFor(base.id),
     [baseSepolia.id]: transportFor(baseSepolia.id),
+    [celo.id]: transportFor(celo.id),
+    [celoAlfajores.id]: transportFor(celoAlfajores.id),
   },
 });

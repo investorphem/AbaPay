@@ -2,7 +2,7 @@ import 'server-only';
 import { createWalletClient, publicActions, parseUnits, formatUnits } from 'viem';
 import { privateKeyToAccount } from 'viem/accounts';
 import { resolveChain, getPublicClient, getChainTransport, isMainnetEnv } from '@/lib/chain';
-import { resolveTokenOnChain } from '@/constants';
+import { resolveTokenOnChain, DEFAULT_CHAIN } from '@/constants';
 import { sendTelegramAlert } from '@/lib/telegram';
 import { celoAttributionSuffix, baseAttributionSuffix } from '@/lib/attribution';
 
@@ -68,7 +68,7 @@ export interface AllowanceInfo {
 export async function getRemainingAllowance(
   userWallet: string,
   tokenSymbol: string,
-  blockchain = 'CELO'
+  blockchain: string = DEFAULT_CHAIN
 ): Promise<AllowanceInfo> {
   try {
     const contract = contractAddressFor(blockchain);
@@ -160,7 +160,7 @@ export async function relayPayBillFor(params: {
   amountNgn?: number;
 }): Promise<RelayResult> {
   const { userWallet, tokenSymbol, serviceType, accountNumber, amountCrypto } = params;
-  const blockchain = params.blockchain || 'CELO';
+  const blockchain = params.blockchain || DEFAULT_CHAIN;
   const sourceChannel = params.sourceChannel || 'AGENT';
 
   const pk = process.env.RELAYER_PRIVATE_KEY;

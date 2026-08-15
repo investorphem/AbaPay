@@ -371,8 +371,8 @@ export default function DocsPage() {
               <FAQItem
                 q="Which chains and stablecoins are supported?"
                 a={<>
-                  <p>Celo and Base — those two, plus their public test networks, and nothing else. USD₮ and USDC work on both; cUSD/USDm is Celo-only.</p>
-                  <p>The token picker filters itself to whatever chain your wallet is on, so you can't accidentally choose one that doesn't exist there. Sending funds to our contract by hand, on another network or in another token, is not a payment and can't be matched to an order.</p>
+                  <p>Base and Celo — those two, plus their public test networks, and nothing else. <strong>Base is the default</strong>: it&apos;s what AbaPay connects to unless your wallet puts you somewhere else, and you can switch to Celo at any time. USD₮ and USDC work on both chains; cUSD/USDm is Celo-only.</p>
+                  <p>The token picker filters itself to whatever chain your wallet is on, so you can&apos;t accidentally choose one that doesn&apos;t exist there. On Base it offers <strong>USDC first, then USD₮</strong>; on Celo, USD₮ first. Sending funds to our contract by hand, on another network or in another token, is not a payment and can&apos;t be matched to an order.</p>
                 </>}
               />
               <FAQItem

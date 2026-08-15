@@ -39,7 +39,8 @@ import {
 import {
   ABAPAY_ABI, ERC20_ABI, SERVICES,
   SUPPORTED_TOKENS, SUPPORTED_COUNTRIES, PRE_SELECT_AMOUNTS,
-  ELEC_PRE_SELECT_AMOUNTS, ITEMS_PER_PAGE, extractVtpassArray
+  ELEC_PRE_SELECT_AMOUNTS, ITEMS_PER_PAGE, extractVtpassArray,
+  DEFAULT_CHAIN, normalizeChainName, tokensForChain, defaultTokenForChain
 } from "@/constants";
 import { HistoryTab } from "@/components/HistoryTab";
 import AppTour, { hasSeenTour, type TourTab } from "@/components/AppTour";
@@ -214,7 +215,10 @@ export default function Home() {
   const [isSendingSupport, setIsSendingSupport] = useState(false);
 
   const [currentPage, setCurrentPage] = useState(1);
-  const [selectedToken, setSelectedToken] = useState(SUPPORTED_TOKENS.find(t => t.symbol === "USD₮") || SUPPORTED_TOKENS[0]);
+  // Seeded from the DEFAULT chain (Base → USDC), not a hardcoded symbol. Before a wallet is
+  // connected there is no activeChain to derive this from, and the old hardcoded "USD₮" meant
+  // the very first thing a Base user saw was the token Base does NOT lead with.
+  const [selectedToken, setSelectedToken] = useState(() => defaultTokenForChain(DEFAULT_CHAIN));
   const [walletBalance, setWalletBalance] = useState("0.00");
   const [isFetchingBalance, setIsFetchingBalance] = useState(false);
   const [exchangeRate, setExchangeRate] = useState<number>(1550); 
@@ -264,17 +268,18 @@ export default function Home() {
   }, [address, activeChain]);
 
   // ⚡ MULTI-CHAIN TOKEN FILTER & AUTO-SWITCHER ⚡
-  const availableTokens = useMemo(() => {
-     const filtered = SUPPORTED_TOKENS.filter((t: any) => 
-        !t.supportedNetworks || 
-        t.supportedNetworks.some((n: string) => activeChain?.name?.toLowerCase().includes(n))
-     );
-     // ⚡ On Celo, default the initial stablecoin to USDT (USD₮) instead of USDm
-     if (activeChain?.name?.toLowerCase().includes("celo")) {
-        return [...filtered].sort((a, b) => (a.symbol === "USD₮" ? -1 : b.symbol === "USD₮" ? 1 : 0));
-     }
-     return filtered;
-  }, [activeChain]);
+  //
+  // Both the filtering and the per-chain ordering now come from constants/tokensForChain, so
+  // the Pay tab, the Agent Hub, the chat agent and the MCP tools can't disagree about which
+  // stablecoin a chain leads with. Base → USDC then USD₮; Celo → USD₮, USDC, USDm.
+  //
+  // With no wallet connected `activeChain` is undefined, which resolves to DEFAULT_CHAIN
+  // rather than to an empty list — the picker used to render with nothing in it until the
+  // user connected.
+  const availableTokens = useMemo(
+    () => tokensForChain(activeChain?.name),
+    [activeChain]
+  );
 
   useEffect(() => {
      if (availableTokens.length > 0 && !availableTokens.find(t => t.symbol === selectedToken.symbol)) {
@@ -896,7 +901,10 @@ export default function Home() {
       else { vtpassServiceID = telecomProvider; displayNetwork = telecomProvider; }
     }
 
-    const currentBlockchainName = activeChain?.name?.toUpperCase() || "CELO";
+    // Normalised to exactly 'BASE' | 'CELO'. This used to send the raw viem chain name, so a
+    // testnet payment stored the literal "BASE SEPOLIA" — which resolveChain's exact-match
+    // then read back as Celo. Sending the canonical name keeps every consumer honest.
+    const currentBlockchainName = normalizeChainName(activeChain?.name);
 
     const backendPayload: any = {
       serviceID: vtpassServiceID, serviceCategory: uiCategory, network: displayNetwork.toUpperCase(), billersCode: payloadBillersCode, amount: cryptoToCharge,
@@ -3872,7 +3880,7 @@ export default function Home() {
           <AgentHub
             address={address ?? undefined}
             selectedToken={selectedToken}
-            activeChainName={activeChain?.name?.toUpperCase().includes('BASE') ? 'BASE' : 'CELO'}
+            activeChainName={normalizeChainName(activeChain?.name)}
             onApproveAllowance={handleApproveAgentAllowance}
             onCheckAllowance={checkAgentAllowanceFor}
             currentAllowance={agentAllowance}
@@ -3891,7 +3899,7 @@ export default function Home() {
           walletConnected={!!address}
           onRequireWallet={() => showToast("Connect Your Wallet", "Connect your wallet first — the assistant fills a payment you still need to sign.", "error")}
           walletAddress={address ?? undefined}
-          chain={activeChain?.name?.toUpperCase().includes('BASE') ? 'BASE' : 'CELO'}
+          chain={normalizeChainName(activeChain?.name)}
           tokenSymbol={selectedToken.symbol}
         />
       </div>
