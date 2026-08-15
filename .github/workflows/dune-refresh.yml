@@ -43,7 +43,12 @@ jobs:
   refresh:
     name: Refresh Dune dashboards
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    # Raised from 10. The route no longer just fires /execute and hangs up — it waits for each
+    # execution to reach a terminal state and retries the ones that failed, so a bad day takes
+    # a few minutes per dashboard instead of seconds. Add the 60s gap between the two and 10
+    # minutes is no longer comfortable headroom. This is a ceiling, not a target: a healthy run
+    # still finishes in well under a minute.
+    timeout-minutes: 20
 
     env:
       APP_URL: ${{ secrets.APP_URL }}
@@ -93,9 +98,29 @@ jobs:
         run: |
           set -uo pipefail
           failed=""
+          first=1
           for dashboard in main base; do
+            # 🔴 THE TWO DASHBOARDS MUST NOT RUN BACK-TO-BACK. They used to, and the second
+            # one paid for it: on 2026-08-15 `main` spent ~54s of a 7.5s workload climbing its
+            # retry ladder (i.e. being rate-limited) and scraped through, then `base` started
+            # 1 second later into an already-saturated limiter and permanently lost two of its
+            # five queries. `base` is always second, which is why it is always the casualty —
+            # the Base dashboard going stale while the combined one looks fine is this gap,
+            # not anything wrong with the Base queries themselves.
+            #
+            # 60s of doing nothing is free here; a stale public dashboard is not.
+            if [ "$first" -eq 0 ]; then
+              echo "Waiting 60s so the rate limiter drains before the next dashboard…"
+              sleep 60
+            fi
+            first=0
+
             echo "── $dashboard"
-            code=$(curl -sS -o /tmp/out.json -w '%{http_code}' -X POST \
+            # ⚠️ --max-time must exceed the route's own budget: it now waits for each execution
+            # to finish and retries the failures, so a slow-but-recovering run legitimately
+            # takes minutes. Cutting it off early would report a failure for work that
+            # succeeded, and re-running would spend credits repeating it.
+            code=$(curl -sS --max-time 600 -o /tmp/out.json -w '%{http_code}' -X POST \
               -H "Authorization: Bearer $CRON_SECRET" \
               "$APP_URL/api/cron/dune-refresh?dashboard=$dashboard" || echo 000)
             cat /tmp/out.json; echo

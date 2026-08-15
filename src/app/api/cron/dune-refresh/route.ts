@@ -116,17 +116,40 @@ const SPACING_MS = 1500;
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
-type Started = { queryId: number; executionId: string | null; error?: string };
+type Started = {
+  queryId: number;
+  executionId: string | null;
+  /** Did the execution reach QUERY_STATE_COMPLETED? A started query is not a fresh panel. */
+  completed?: boolean;
+  error?: string;
+};
+
+/**
+ * Statuses worth another attempt.
+ *
+ * 🔴 THIS USED TO BE `=== 429` AND NOTHING ELSE, which is what left the Base dashboard
+ * half-refreshed. On 2026-08-15 the refresh step ran 03:51:07 → 03:52:08: `main` spent ~54s
+ * on a 7.5s workload (the full retry ladder, i.e. 429s) and recovered, while `base` fired all
+ * five queries in 7s flat with no retries at all and still lost two of them. A fast non-429
+ * response — a 5xx from Dune, a dropped upstream, a concurrent-execution rejection — was
+ * returned immediately as a permanent loss, so the two unlucky queries were never retried and
+ * their panels simply stayed a day stale.
+ *
+ * Only a genuine 4xx about THIS request (a deleted query, a malformed body, a bad key) is
+ * hopeless on a retry; those still fail fast so a real misconfiguration stays loud.
+ */
+function isRetryableStatus(status: number): boolean {
+  return status === 429 || status === 408 || status === 425 || status >= 500;
+}
 
 /**
  * Start one query, backing off through Dune's rate limiter.
  *
- * 429 is the expected failure here, not an exceptional one, so it is retried rather than
- * recorded as a loss. Anything else (a deleted query, a bad key) will not improve on a
- * retry and is returned immediately so the caller can report it.
+ * The ladder is longer and wider than before because the old one demonstrably was not enough:
+ * two `main` queries needed the whole of it on the run above and only just made it.
  */
 async function execute(apiKey: string, queryId: number): Promise<Started> {
-  const backoffs = [2000, 6000, 15_000];
+  const backoffs = [2000, 5000, 12_000, 25_000];
   for (let attempt = 0; ; attempt++) {
     let res: Response;
     try {
@@ -144,7 +167,10 @@ async function execute(apiKey: string, queryId: number): Promise<Started> {
       return { queryId, executionId: null, error: `fetch failed: ${(err as Error)?.message}` };
     }
 
-    if (res.status === 429 && attempt < backoffs.length) {
+    if (isRetryableStatus(res.status) && attempt < backoffs.length) {
+      // Log every retry — a run that only just scraped through looks identical to a healthy
+      // one otherwise, which is how this degraded unnoticed until it started failing outright.
+      console.warn(`[dune-refresh] execute ${queryId} got ${res.status}, retry ${attempt + 1}/${backoffs.length}`);
       await sleep(backoffs[attempt]);
       continue;
     }
@@ -156,8 +182,65 @@ async function execute(apiKey: string, queryId: number): Promise<Started> {
     }
 
     const json = await res.json();
-    return { queryId, executionId: json?.execution_id ?? null };
+    const executionId = json?.execution_id ?? null;
+    return executionId
+      ? { queryId, executionId }
+      : { queryId, executionId: null, error: 'Dune accepted the request but returned no execution_id' };
   }
+}
+
+// How long to wait for one execution to reach a terminal state before giving up on it.
+//
+// ⚠️ SIZED AGAINST `maxDuration = 300`. Both the initial pass and the retry pass poll in
+// parallel, so the route's worst case is roughly: start (5 x 1.5s) + poll (60s) + retry start
+// (5 x 1.5s) + poll (60s) ≈ 135s. That leaves real headroom under 300s. Raising this much
+// further, or polling sequentially, would let a bad day hit the platform timeout — which
+// reports a failure for queries that were actually running fine.
+//
+// Every query here reads a matview and returns in a few seconds; 60s is already generous.
+const EXECUTION_POLL_TIMEOUT_MS = 60_000;
+const EXECUTION_POLL_INTERVAL_MS = 3000;
+
+/**
+ * Wait for a started execution to actually FINISH, and say whether it succeeded.
+ *
+ * 🔴 THE HOLE THIS CLOSES. /execute returning an execution_id means Dune accepted the job,
+ * NOT that the query ran — an accepted execution can still end QUERY_STATE_FAILED, and when it
+ * does the panel keeps rendering yesterday's result while this route reports a clean 200. That
+ * is the same "green tick over a stale dashboard" failure the status-code comment below was
+ * written for, one level deeper: we fixed reporting on queries that never started, and went on
+ * trusting queries that started and then died.
+ *
+ * It is also the only way to distinguish the two on the Base dashboard, whose queries were
+ * being reported as started while their panels did not move.
+ */
+async function waitForCompletion(apiKey: string, s: Started): Promise<Started> {
+  if (!s.executionId) return { ...s, completed: false };
+
+  const deadline = Date.now() + EXECUTION_POLL_TIMEOUT_MS;
+  while (Date.now() < deadline) {
+    try {
+      const res = await fetch(`${DUNE_API}/execution/${s.executionId}/status`, {
+        headers: { 'X-DUNE-API-KEY': apiKey },
+      });
+      if (res.ok) {
+        const state = (await res.json())?.state as string | undefined;
+        if (state === 'QUERY_STATE_COMPLETED') return { ...s, completed: true };
+        if (state === 'QUERY_STATE_FAILED' || state === 'QUERY_STATE_CANCELLED' || state === 'QUERY_STATE_EXPIRED') {
+          console.error(`[dune-refresh] query ${s.queryId} execution ${s.executionId} ended ${state}`);
+          return { ...s, completed: false, error: `execution ended ${state}` };
+        }
+      }
+    } catch {
+      // A failed status poll says nothing about the execution — keep waiting.
+    }
+    await sleep(EXECUTION_POLL_INTERVAL_MS);
+  }
+
+  // Still running at the deadline. Deliberately NOT counted as a failure: the execution is
+  // very likely to land on its own, and re-running it would spend credits to no purpose.
+  // Reported so a persistently slow query is visible rather than silent.
+  return { ...s, completed: true, error: 'still running when the refresh finished (not re-run)' };
 }
 
 async function handle(req: Request) {
@@ -200,14 +283,45 @@ async function handle(req: Request) {
   // that silently did nothing would be a worse answer than doing the work twice.
   const legacyStage = params.get('stage');
 
-  const started: Started[] = [];
+  // Phase 1 — start every panel query, spaced so the burst doesn't trip the rate limiter.
+  let started: Started[] = [];
   for (const [i, queryId] of dashboard.panelQueries.entries()) {
     if (i > 0) await sleep(SPACING_MS);
     started.push(await execute(apiKey, queryId));
   }
 
-  const ok = started.every((s) => s.executionId !== null);
-  const okCount = started.filter((s) => s.executionId !== null).length;
+  // Phase 2 — wait for them to actually finish. Polled in PARALLEL: they were started
+  // seconds apart and run concurrently on Dune, so waiting on them one at a time would add
+  // their runtimes together for no benefit.
+  started = await Promise.all(started.map((s) => waitForCompletion(apiKey, s)));
+
+  // Phase 3 — one retry pass over whatever genuinely did not refresh, whether it failed to
+  // start or started and then died. By now the initial burst is well past, so the limiter has
+  // had time to drain and a retry has a real chance — which is exactly what the two lost Base
+  // queries never got. Bounded to a single pass so a genuinely broken query cannot turn the
+  // cron into a credit-burning retry loop.
+  //
+  // Structured start-all-then-poll-all, exactly like phase 1, rather than
+  // start-and-wait per query: sequential waiting would ADD the poll timeouts together
+  // (5 x 60s) and blow the route's 300s maxDuration, killing the run mid-retry and
+  // reporting a failure for work that was actually in flight.
+  const needsRetry = started.filter((s) => !s.completed);
+  if (needsRetry.length > 0) {
+    console.warn(`[dune-refresh] ${dashboardKey}: retrying ${needsRetry.map((s) => s.queryId).join(', ')}`);
+    const retried: Started[] = [];
+    for (const [i, s] of needsRetry.entries()) {
+      if (i > 0) await sleep(SPACING_MS);
+      retried.push(await execute(apiKey, s.queryId));
+    }
+    const settled = await Promise.all(retried.map((s) => waitForCompletion(apiKey, s)));
+    started = started.map((original) => settled.find((r) => r.queryId === original.queryId) ?? original);
+  }
+
+  // ⚠️ `ok` now means "the panel is genuinely fresh", not merely "Dune accepted the request".
+  // Those are different claims, and reporting the second while implying the first is what let
+  // the Base dashboard go stale under a green tick.
+  const ok = started.every((s) => s.completed);
+  const okCount = started.filter((s) => s.completed).length;
 
   // 🔴 THE STATUS CODE MUST TRACK `ok`. This used to return 200 unconditionally, with the
   // real outcome buried in an `ok: false` field that the workflow never read — so a run

@@ -458,8 +458,23 @@ and deployed with `node scripts/dune-base-setup.mjs`; see that directory's READM
 | **Data** — one materialized view per dashboard (`dune.abapay.result_abapay_unified_payments`, `dune.abapay.result_abapay_base_events`) | Dune's own matview cron | 02:00 UTC daily |
 | **Panels** — the 10 queries that have charts (5 per dashboard) | [`.github/workflows/dune-refresh.yml`](.github/workflows/dune-refresh.yml) → `/api/cron/dune-refresh` | 03:15 UTC daily |
 
-No manual run and no external cron service. The workflow needs two repository secrets, `APP_URL`
-and `CRON_SECRET`.
+The workflow needs two repository secrets, `APP_URL` and `CRON_SECRET`.
+
+⚠️ **Something outside this repo also calls `?dashboard=main`.** On 2026-08-15 the only workflow
+run started 03:51 UTC, yet the five `main` panel queries were executed again at 05:15:03–05:15:10
+— 1.5s apart, which is this route's own `SPACING_MS`, so it is this endpoint being called by
+another scheduler (a Vercel dashboard cron or an external cron service predating the workflow).
+It is not harmful, but it **masks failures**: `main` gets a second attempt each day and therefore
+always looks healthy, while `base` — which nothing else covers — stays stale whenever the
+workflow run fails. Worth finding and removing so both dashboards have the same single owner.
+
+**A refresh is only "done" when the execution COMPLETES.** `/execute` returning an
+`execution_id` means Dune accepted the job, not that the query ran: an accepted execution can
+still end `QUERY_STATE_FAILED`, leaving the panel on yesterday's result while the cron reports a
+clean 200. The route therefore polls every execution to a terminal state and makes one spaced
+retry pass over whatever genuinely didn't refresh, and the two dashboards are separated by 60s
+so the second one doesn't start into a rate limiter the first one just saturated. `base` is
+always the second call, which is why it was always the casualty.
 
 A dashboard panel renders the **last execution** of the query behind it, and refreshing a matview
 does *not* count as an execution of that query. So the matview cron alone never moves a panel —
