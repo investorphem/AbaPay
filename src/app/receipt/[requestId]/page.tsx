@@ -106,20 +106,19 @@ export default async function ReceiptPage({ params }: { params: Promise<{ reques
             </span>
           </div>
 
-          {/* Provider logo watermarked behind the amount — the same treatment as the in-app
-              receipt and the history row, so a receipt looks like itself wherever it's opened.
-              This page is dark-only, hence a single opacity rather than a light/dark pair. */}
-          <div className="mb-8 relative">
-            {/* eslint-disable-next-line @next/next/no-img-element */}
-            <img
-              src={logoForServiceId(tx.service_id)}
-              alt=""
-              aria-hidden="true"
-              className="absolute top-0 right-0 w-16 h-16 rounded-2xl object-contain opacity-25 pointer-events-none select-none"
-            />
-            <p className="text-xs font-bold uppercase tracking-widest text-slate-500 mb-1">Amount Paid</p>
-            <p className="relative z-10 text-4xl font-black">₦{Number(tx.amount_naira || 0).toLocaleString()}</p>
-            <p className="relative z-10 text-sm text-slate-400 mt-1">{tx.amount_usdt} {tx.token_used || 'USD₮'}</p>
+          {/* Provider logo beside the amount — the same idea as the in-app receipt and the
+              history row, so a receipt looks like itself wherever it is opened. White plate
+              because this page is dark and several provider marks are dark-on-transparent. */}
+          <div className="mb-8 flex items-start justify-between gap-4">
+            <div>
+              <p className="text-xs font-bold uppercase tracking-widest text-slate-500 mb-1">Amount Paid</p>
+              <p className="text-4xl font-black">₦{Number(tx.amount_naira || 0).toLocaleString()}</p>
+              <p className="text-sm text-slate-400 mt-1">{tx.amount_usdt} {tx.token_used || 'USD₮'}</p>
+            </div>
+            <div className="shrink-0 w-14 h-14 rounded-2xl bg-white flex items-center justify-center overflow-hidden shadow-lg">
+              {/* eslint-disable-next-line @next/next/no-img-element */}
+              <img src={logoForServiceId(tx.service_id)} alt="" aria-hidden="true" className="w-10 h-10 object-contain select-none" />
+            </div>
           </div>
 
           <div>

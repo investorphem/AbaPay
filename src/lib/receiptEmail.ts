@@ -114,12 +114,9 @@ export function buildReceiptEmail(d: ReceiptEmailData): string {
         <!--
           ⚡ The amount and the provider logo share one row, logo hard right.
 
-          A TABLE, not flexbox or a CSS background: Outlook's Word rendering engine ignores
-          display:flex entirely (the cells would stack) and strips background-image, so a
-          "watermark behind the amount" — which is what the in-app receipt does — would simply
-          vanish for a large share of email readers. A real <img> in a right-aligned table cell
-          is the one construction that survives every client, so the email places the logo
-          BESIDE the amount instead of behind it.
+          A TABLE, not flexbox: Outlook's Word rendering engine ignores display:flex entirely,
+          so the cells would stack and drop the logo under the amount. A real <img> in a
+          right-aligned table cell is the one construction that survives every client.
         -->
         <table role="presentation" cellpadding="0" cellspacing="0" border="0" width="100%" style="margin: 0 0 32px 0;">
           <tr>

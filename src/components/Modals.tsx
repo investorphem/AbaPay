@@ -202,7 +202,22 @@ export function ReceiptModal({ receipt, isMainnet, onClose, onSupport }: any) {
           <div id="printable-receipt" className="bg-white dark:bg-[#111114] transition-colors">
             <div className="bg-emerald-600 dark:bg-emerald-800 p-8 text-white text-center relative transition-colors">
                <button data-html2canvas-ignore="true" onClick={onClose} className="absolute top-4 right-4 bg-white/20 p-1.5 rounded-full hover:bg-white/30 transition-colors"><XCircle size={20}/></button>
-               <CheckCircle2 size={48} className="mx-auto mb-3 opacity-90" />
+               {/* ⚡ THE PROVIDER'S OWN MARK, LEADING THE RECEIPT. This is the single most
+                   recognisable thing on the page — you know what you're looking at before
+                   reading a word — so it replaces the generic tick that used to sit here, with
+                   the tick demoted to a small confirmation badge on its corner.
+
+                   White plate for the same reason as the history row: the source artwork mixes
+                   transparent PNGs and light-background marks, several of which would disappear
+                   against this green. Bundled asset, so html2canvas can still render the
+                   receipt for share/download — a remote image would taint the canvas. */}
+               <div className="relative inline-block mb-3">
+                 <div className="w-16 h-16 rounded-2xl bg-white flex items-center justify-center overflow-hidden shadow-lg">
+                   {/* eslint-disable-next-line @next/next/no-img-element */}
+                   <img src={logoForServiceId(receipt.serviceId)} alt="" aria-hidden="true" className="w-11 h-11 object-contain select-none" />
+                 </div>
+                 <CheckCircle2 size={22} className="absolute -bottom-1 -right-1 text-white bg-emerald-600 dark:bg-emerald-800 rounded-full" />
+               </div>
                <h2 className="text-xl font-black tracking-tight">Payment Receipt</h2>
                <p className="text-emerald-100 text-xs font-bold uppercase tracking-widest mt-1">AbaPay Secured</p>
             </div>
@@ -254,24 +269,9 @@ export function ReceiptModal({ receipt, isMainnet, onClose, onSupport }: any) {
                     <span className="text-slate-800 dark:text-slate-200 font-black text-xs">{receipt.units} kWh</span>
                  </div>
                )}
-               {/* ⚡ PROVIDER LOGO AS A WATERMARK BEHIND THE AMOUNT — same treatment as the
-                   history row, so the two read as one design. `object-contain` and a fixed box
-                   keep wildly different source artwork (square DisCo seals, wide telco
-                   wordmarks) optically consistent. No onError handler needed: logoForServiceId
-                   resolves to a bundled asset or the AbaPay mark, never a guessed path.
-
-                   html2canvas renders this receipt for share/download, so the image must be
-                   same-origin — a bundled /public asset is, a VTpass CDN URL would taint the
-                   canvas and break saving the receipt entirely. */}
-               <div className="flex justify-between border-b border-slate-100 dark:border-slate-800/60 pb-3 transition-colors relative">
+               <div className="flex justify-between border-b border-slate-100 dark:border-slate-800/60 pb-3 transition-colors">
                   <span className="text-slate-400 dark:text-slate-500 text-[10px] font-bold uppercase tracking-wider">Amount Paid</span>
-                  <img
-                    src={logoForServiceId(receipt.serviceId)}
-                    alt=""
-                    aria-hidden="true"
-                    className="absolute -top-2 right-0 w-14 h-14 rounded-xl object-contain opacity-15 dark:opacity-25 pointer-events-none select-none"
-                  />
-                  <div className="text-right relative z-10">
+                  <div className="text-right">
                      <p className="text-slate-800 dark:text-slate-100 font-black text-sm">{formatTxAmount(receipt.amountNaira)}</p>
                      <p className="text-slate-400 dark:text-slate-500 text-[9px] font-bold">{receipt.amountCrypto} {receipt.tokenUsed || 'USD₮'}</p>
                   </div>

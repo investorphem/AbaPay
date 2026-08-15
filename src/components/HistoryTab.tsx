@@ -24,8 +24,28 @@ export function HistoryTab({ transactions, currentTransactions, currentPage, tot
                   const isBaseTx = (tx.blockchain || "").toUpperCase().includes("BASE");
 
                   return (
-                      <div key={idx} onClick={() => setSelectedReceipt(tx)} className="p-5 bg-slate-50 dark:bg-[#1a1a1f] rounded-2xl border border-slate-100 dark:border-slate-800/80 flex justify-between items-center cursor-pointer hover:bg-emerald-50 dark:hover:bg-emerald-900/20 hover:border-emerald-100 dark:hover:border-emerald-900/50 transition-all group shadow-sm active:scale-[0.98]">
-                          <div>
+                      <div key={idx} onClick={() => setSelectedReceipt(tx)} className="p-5 bg-slate-50 dark:bg-[#1a1a1f] rounded-2xl border border-slate-100 dark:border-slate-800/80 flex justify-between items-center gap-3 cursor-pointer hover:bg-emerald-50 dark:hover:bg-emerald-900/20 hover:border-emerald-100 dark:hover:border-emerald-900/50 transition-all group shadow-sm active:scale-[0.98]">
+                          {/* ⚡ PROVIDER LOGO — a proper leading avatar, the way every
+                              transaction list worth reading identifies its rows. It sits where
+                              the eye already lands when scanning down the list, so you pick out
+                              "the MTN one" or "the IBEDC one" by mark rather than by reading
+                              every line of text.
+
+                              Given a white plate rather than shown bare: the source artwork is a
+                              mix of transparent PNGs and light-background marks, and several
+                              would vanish into the dark-mode row without it. `object-contain`
+                              keeps square DisCo seals and wide telco wordmarks the same optical
+                              size. logoForServiceId falls back to the AbaPay mark, so an older
+                              cached row with no serviceId shows a logo rather than a gap. */}
+                          <div className="shrink-0 w-11 h-11 rounded-2xl bg-white dark:bg-slate-800/90 border border-slate-200/80 dark:border-slate-700/60 flex items-center justify-center overflow-hidden shadow-sm">
+                            <img
+                              src={logoForServiceId(tx.serviceId)}
+                              alt=""
+                              aria-hidden="true"
+                              className="w-8 h-8 object-contain select-none"
+                            />
+                          </div>
+                          <div className="min-w-0 flex-1">
                               <p className="text-sm font-black text-slate-900 dark:text-slate-100 uppercase group-hover:text-emerald-700 dark:group-hover:text-emerald-400 transition-colors tracking-tight line-clamp-1">{tx.network} {tx.service}</p>
                               <p className="text-[10px] font-medium text-slate-500 dark:text-slate-400 mt-0.5 flex items-center gap-1.5 flex-wrap">
                                 {/* ⚡ MULTI-CHAIN BADGE ⚡ */}
@@ -40,22 +60,9 @@ export function HistoryTab({ transactions, currentTransactions, currentPage, tot
                                 <span className="font-mono text-slate-400 dark:text-slate-500">{tx.account}</span>
                               </p>
                           </div>
-                          {/* ⚡ PROVIDER LOGO AS A WATERMARK BEHIND THE AMOUNT.
-                              `relative` + an absolutely-positioned, low-opacity image pinned to
-                              the top right, with the amount and Receipt pill stacked above it via
-                              `relative z-10`. Kept low-contrast and `pointer-events-none` so it
-                              reads as branding rather than a control, and never intercepts the
-                              row's click. Falls back to the AbaPay mark for older cached rows
-                              that predate serviceId, so there is no broken-image state. */}
-                          <div className="text-right flex flex-col items-end gap-1.5 shrink-0 ml-2 relative">
-                              <img
-                                src={logoForServiceId(tx.serviceId)}
-                                alt=""
-                                aria-hidden="true"
-                                className="absolute -top-1 -right-1 w-11 h-11 rounded-xl object-contain opacity-15 dark:opacity-25 pointer-events-none select-none"
-                              />
-                              <p className="relative z-10 text-sm font-black text-emerald-600 dark:text-emerald-400">{formatTxAmount(tx.amountNaira)}</p>
-                              <span className="relative z-10 text-[9px] font-black uppercase tracking-widest bg-slate-200 dark:bg-slate-800 text-slate-500 dark:text-slate-400 px-3 py-1 rounded-full group-hover:bg-emerald-200 dark:group-hover:bg-emerald-900/40 group-hover:text-emerald-800 dark:group-hover:text-emerald-300 transition-all flex items-center gap-1">
+                          <div className="text-right flex flex-col items-end gap-1.5 shrink-0">
+                              <p className="text-sm font-black text-emerald-600 dark:text-emerald-400">{formatTxAmount(tx.amountNaira)}</p>
+                              <span className="text-[9px] font-black uppercase tracking-widest bg-slate-200 dark:bg-slate-800 text-slate-500 dark:text-slate-400 px-3 py-1 rounded-full group-hover:bg-emerald-200 dark:group-hover:bg-emerald-900/40 group-hover:text-emerald-800 dark:group-hover:text-emerald-300 transition-all flex items-center gap-1">
                                 Receipt <ExternalLink size={10}/>
                               </span>
                           </div>
