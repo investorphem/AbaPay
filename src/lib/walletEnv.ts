@@ -95,6 +95,33 @@ export async function probeProvider(
   }
 }
 
+/**
+ * Did the USER decline, as opposed to something going wrong?
+ *
+ * 🔴 THE FAILURE THIS EXISTS FOR: a cancelled wallet prompt was being treated as "that route
+ * didn't work, try the next one". Cancelling an injected connect dropped the user into the
+ * WalletConnect branch — a QR code they never asked for, and on a network that filters the
+ * relay, a socket that never opens. From the outside that is indistinguishable from the app
+ * ignoring the cancel and hanging forever, which is precisely how it was reported.
+ *
+ * A rejection is an ANSWER. It must end the attempt immediately and say so, never silently
+ * retry on another rail — the same rule that stops a declined payment raising a second prompt.
+ *
+ * EIP-1193 standardises 4001 for this and every wallet sets it, but each layer of the stack
+ * (viem wraps, wagmi wraps, thirdweb wraps again) buries it at a different depth, so the cause
+ * chain is walked and the message checked as a backstop.
+ */
+export function isUserRejection(e: any): boolean {
+  for (let node = e, depth = 0; node && depth < 6; node = node.cause, depth++) {
+    const code = node.code ?? node.data?.code;
+    if (code === 4001 || code === 'ACTION_REJECTED') return true;
+  }
+  const message = String(e?.shortMessage || e?.message || '').toLowerCase();
+  return /user rejected|user denied|user cancell?ed|rejected the request|request rejected|denied transaction|denied message|cancell?ed by user/.test(
+    message,
+  );
+}
+
 /** One injected wallet wagmi found, plus what it answered when asked about this site. */
 export interface InjectedCandidate {
   /** wagmi connector — `id` is the EIP-6963 rdns ('io.metamask'), or 'injected' for the generic one. */
@@ -274,6 +301,13 @@ export function describeConnectFailure(error: unknown): string {
 
   if (error instanceof ConnectTimeoutError) {
     return "Your wallet didn't respond. Open your wallet app or extension and try again, or use the WalletConnect option.";
+  }
+
+  // Checked BEFORE the message patterns below, because a wrapped rejection often carries a
+  // generic outer message ("Connection request reset") with the 4001 buried in its cause —
+  // which used to be reported as a mysterious failure instead of "you cancelled this".
+  if (isUserRejection(error)) {
+    return 'Connection request was cancelled.';
   }
 
   const message = String((error as any)?.message || error || '');

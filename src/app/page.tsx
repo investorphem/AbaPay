@@ -27,6 +27,7 @@ import { AgentHub } from "@/components/AgentHub";
 import { AIChat } from "@/components/AIChat";
 import {
   probeInjectedConnectors,
+  isUserRejection,
   type InjectedProbe,
   type InjectedCandidate,
   withConnectTimeout,
@@ -71,21 +72,6 @@ function timeoutSignal(ms: number): AbortSignal {
 // holding a signature prompt that the user can approve a moment later. Anything that reacts to
 // a failure by starting a SECOND payment has to be able to tell the two apart — see the x402
 // catch block, where getting this wrong would mean paying twice.
-/**
- * Did the USER decline, as opposed to something going wrong?
- *
- * EIP-1193 defines 4001 for "user rejected request" and every wallet sets it, but the code
- * gets buried at a different depth by each library in the stack (viem wraps, thirdweb wraps
- * again), so the message is checked as well. Worth getting right: a rejection must never be
- * retried on another rail, or the app appears to ignore "no" and ask a second time.
- */
-function isUserRejection(e: any): boolean {
-  const code = e?.code ?? e?.cause?.code ?? e?.data?.code ?? e?.cause?.cause?.code;
-  if (code === 4001 || code === 'ACTION_REJECTED') return true;
-  const message = String(e?.shortMessage || e?.message || '').toLowerCase();
-  return /user rejected|user denied|user cancell?ed|rejected the request|request rejected|denied transaction/.test(message);
-}
-
 class WalletTimeoutError extends Error {
   constructor() {
     super("Your wallet didn't respond in time. Check that it's unlocked and connected, then try again.");
@@ -1411,7 +1397,7 @@ export default function Home() {
     // transferWithAuthorization) and only when the Coinbase-facilitator rail is enabled.
     const onCelo = activeChain?.id === celo.id || activeChain?.id === celoSepolia.id;
     const onBase = activeChain?.id === base.id || activeChain?.id === baseSepolia.id;
-    const baseX402Enabled = process.env.NEXT_PUBLIC_BASE_X402_ENABLED === 'true';
+    const baseX402Enabled = process.env.NEXT_PUBLIC_BASE_X402_ENABLED !== 'false';
     // ⚡ Deliberately generic wording — x402 vs. the normal contract-call rail is an internal
     // routing decision (see `useX402` below), never something the user chose or should see.
     // A USDm/USDT transaction on Celo looks identical to the user whichever rail settles it.
@@ -1708,6 +1694,14 @@ export default function Home() {
       setStatus(successMsg);
       return { success: true, message: successMsg };
     } catch (e: any) {
+      // A cancelled signature is not an error to diagnose — this is a two-transaction flow, so
+      // saying plainly which half was cancelled saves the user wondering whether the first one
+      // still went through.
+      if (isUserRejection(e)) {
+        const cancelled = "Cancelled — nothing was changed.";
+        setStatus(cancelled);
+        return { success: false, message: cancelled };
+      }
       console.error('Agent allowance failed:', e);
       const errMsg = e?.shortMessage?.slice(0, 60) || e?.message?.slice(0, 80) || "Could not set the agent limit. Is the contract AbaPayV3?";
       setStatus(errMsg);
@@ -2020,12 +2014,25 @@ export default function Home() {
           localStorage.setItem('abapay_connected', 'true');
           return;
         } catch (injectedErr) {
-          // A wallet that REFUSED (unsupported, locked, user dismissed) must not be a dead
-          // end while WalletConnect is still available — fall through.
+          // 🔴 "CANCEL" MEANS CANCEL — DO NOT FALL THROUGH TO WALLETCONNECT.
           //
-          // A wallet that TIMED OUT is different: it may still be sitting there waiting for
-          // approval, and stacking a QR modal on top of a live wallet prompt is worse than
+          // Dismissing the wallet prompt used to drop straight into the WalletConnect branch,
+          // so the user who just said no was handed a QR code instead — and on a network that
+          // filters the relay that branch then sits waiting on a socket that never opens. From
+          // the outside it is indistinguishable from the app ignoring the cancel and hanging,
+          // which is exactly what was reported. A rejection is a decision, not a failure to
+          // route around: acknowledge it immediately and stop.
+          if (isUserRejection(injectedErr)) {
+            setConnectError('Connection request was cancelled.');
+            return;
+          }
+
+          // A wallet that TIMED OUT is different again: it may still be sitting there waiting
+          // for approval, and stacking a QR modal on top of a live wallet prompt is worse than
           // saying so. Report and stop.
+          //
+          // Anything else (unsupported chain, locked wallet, a provider that errored) is a
+          // genuine failure to connect, and WalletConnect is still worth offering.
           if (injectedErr instanceof ConnectTimeoutError || !wcConnector) {
             setConnectError(describeConnectFailure(injectedErr));
             return;
@@ -2687,32 +2694,27 @@ export default function Home() {
                       //     (server-side CDP creds must be configured too — see route.ts).
                       // Everything else (cUSD/USDm, Base while x402 disabled, x402 unconfigured)
                       // uses the normal contract-call flow, unchanged. See README "x402 settlement".
-                      // 🔴 x402 IS NOW OPT-IN, AND OFF BY DEFAULT. It used to be automatic for
-                      // Celo+USDC/USD₮ and Base+USDC, and it was actively hurting users:
+                      // ⚡ x402 IS THE DEFAULT RAIL ON BOTH CHAINS — Celo (USDC/USD₮) and Base
+                      // (USDC) — so payments are genuinely indexed on x402scan rather than
+                      // being relabeled contract calls.
                       //
-                      //  • x402 settles by asking the wallet to SIGN TYPED DATA — an EIP-3009
-                      //    `transferWithAuthorization` that lets a third party move the tokens.
-                      //    That is the same shape as a well-known drainer attack, so wallet
-                      //    security scanners flag it. Zerion showed AbaPay's own request as
-                      //    "Malicious Request — Approving this may risk total asset loss.
-                      //    Proceeding is not advised." on a routine ₦ bill payment. No user
-                      //    should ever be asked to click past that, and most rightly won't.
-                      //  • The very same payment through the normal contract call is shown by
-                      //    the same wallet as an ordinary Send with "No Risks Found".
-                      //  • On other wallets the signature request never surfaced at all, which
-                      //    is what left mobile users on an endless spinner.
-                      //
-                      // The contract-call path is the proven rail: it works everywhere, it is
-                      // what every agent/scheduled payment already uses, and it reads as a
-                      // normal transaction. Set NEXT_PUBLIC_X402_ENABLED=true to opt back in
-                      // (see README "x402 settlement") — the code is unchanged and ready, it
-                      // simply no longer decides on the user's behalf.
-                      const x402OptIn = process.env.NEXT_PUBLIC_X402_ENABLED === 'true';
+                      // ⚠️ A NOTE ON THE WALLET WARNING, since it will come up again. x402
+                      // settles via an EIP-3009 `transferWithAuthorization` signature, which is
+                      // structurally the same request a token-drainer makes, so some wallet
+                      // security scanners flag it — Zerion has shown AbaPay's own request as
+                      // "Malicious Request. Approving this may risk total asset loss." on a
+                      // routine bill payment, while the same payment via the contract call
+                      // reads as an ordinary Send. This is inherent to x402, not a bug in the
+                      // request, and it is a deliberate, owner-made trade for x402scan
+                      // visibility. Set NEXT_PUBLIC_X402_ENABLED=false (or
+                      // NEXT_PUBLIC_BASE_X402_ENABLED=false for Base alone) to fall back to the
+                      // contract-call rail, which behaves identically for the user otherwise.
+                      const x402Enabled = process.env.NEXT_PUBLIC_X402_ENABLED !== 'false';
                       const hasThirdweb = !!process.env.NEXT_PUBLIC_THIRDWEB_CLIENT_ID;
                       // Celo condition kept byte-identical to the original (mainnet, USDC/USD₮).
                       const celoX402 = activeChain?.id === celo.id && (selectedToken.symbol === "USDC" || selectedToken.symbol === "USD₮");
-                      const baseX402 = (activeChain?.id === base.id || activeChain?.id === baseSepolia.id) && selectedToken.symbol === "USDC" && process.env.NEXT_PUBLIC_BASE_X402_ENABLED === 'true';
-                      const useX402 = x402OptIn && hasThirdweb && (celoX402 || baseX402);
+                      const baseX402 = (activeChain?.id === base.id || activeChain?.id === baseSepolia.id) && selectedToken.symbol === "USDC" && process.env.NEXT_PUBLIC_BASE_X402_ENABLED !== 'false';
+                      const useX402 = x402Enabled && hasThirdweb && (celoX402 || baseX402);
                       if (useX402) processX402Payment(); else processBlockchainPayment();
                   }}
                   className={`w-full text-white dark:text-slate-900 font-black py-5 rounded-2xl flex items-center justify-center gap-2.5 transition-all active:scale-95 shadow-xl text-lg tracking-tight ${hasPendingDuplicate ? 'bg-orange-500 dark:bg-orange-500 hover:bg-orange-600 dark:hover:bg-orange-600 text-white shadow-orange-500/20' : 'bg-slate-900 dark:bg-white hover:bg-black dark:hover:bg-slate-200 shadow-slate-900/20 dark:shadow-white/10'}`}

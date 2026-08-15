@@ -354,6 +354,15 @@ export default function DocsPage() {
                 </>}
               />
               <FAQItem
+                q="My wallet warned me this payment looks risky or 'malicious'. Is AbaPay safe?"
+                a={<>
+                  <p>Some wallets — Zerion and a few others — show a risk warning on AbaPay&apos;s payment signature. The warning is about the <em>shape</em> of the request, not about AbaPay.</p>
+                  <p>AbaPay settles payments using <strong>x402</strong>, an open payment standard. It asks you to sign a one-off permission for a single, exact amount to be collected for the bill you&apos;re paying. Automated scanners can&apos;t tell that kind of permission apart from the one a scam site would ask for, so some of them flag every request of that shape.</p>
+                  <p><strong>Check the wallet screen itself, which is the part that can&apos;t lie to you:</strong> it shows the exact amount and the recipient. The amount should match your bill, and the recipient should be AbaPay&apos;s payment contract. If those look right, the request is genuine. If they don&apos;t, cancel — and please tell us.</p>
+                  <p>Cancelling is always safe. Nothing is charged, and nothing is left half-done.</p>
+                </>}
+              />
+              <FAQItem
                 q="I'm paying from Valora (or another wallet app) and it's stuck loading."
                 a={<>
                   <p>When your wallet is a <strong>separate app</strong> rather than one built into this browser, AbaPay sends the approval request to it over WalletConnect — but nothing can force that app to open on top of what you&apos;re doing. The request is sitting in your wallet waiting for you.</p>

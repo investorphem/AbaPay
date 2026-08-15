@@ -29,7 +29,7 @@ Designed for low fees, cross-border utility vending (Nigeria + every country VTp
 * **MCP Server (AI Agent Payments):** AbaPay is reachable by any MCP-speaking AI client (Claude, or any other agent that supports the Model Context Protocol) as a real tool server — `describe_capabilities`, `check_balance`, `list_plans`, and `pay_bill` — over Streamable HTTP JSON-RPC at `/api/mcp`. This is a fourth channel alongside Telegram/WhatsApp/X, not a new trust boundary: it runs through the exact same allowance-bounded, kill-switch-gated, discount-aware execution pipeline as the chat channels, on **either Celo or Base** depending on what the linking wallet approved. See [MCP Server](#mcp-server-ai-agent-payments) below.
 * **MCP OAuth 2.1 (authorize once, not once per conversation):** the connector supports a full OAuth 2.1 authorization-code + PKCE (S256) flow with Dynamic Client Registration (`/api/oauth/register`, `/api/oauth/authorize`, `/api/oauth/token`, discovery under `/.well-known/`). A user authorizes once in a browser — proving their API key **and** PIN on AbaPay's own hand-rendered consent page — and every future conversation reconnects with a Bearer token instead of retyping an API key. **OAuth never authorizes a spend:** the PIN is still required on every single `pay_bill` call, and a Bearer token alone can only read a balance. The `api_key` tool argument remains the fallback for clients that can't do OAuth.
 * **`list_plans` — real VTpass plan codes and prices, never guessed:** `variation_code` used to be something an agent had to invent for DATA/CABLE/EDUCATION. `list_plans` returns the currently purchasable plans with their exact codes and live VTpass prices, and both the tool description and the server instructions tell the client to call it before `pay_bill` rather than guessing.
-* **x402 Settlement (opt-in, `NEXT_PUBLIC_X402_ENABLED`):** The web app can settle via the [x402](https://x402.org) HTTP-payment protocol against Celo's own facilitator, making payments genuinely indexed on x402scan rather than relabeled contract calls. **Off by default**: x402 needs an EIP-3009 `transferWithAuthorization` signature, which is structurally what a drainer asks for, so wallet scanners flag it — Zerion showed AbaPay's own request as a *"Malicious Request"* on a routine bill payment. The default rail is the normal on-chain `payBill` flow, including Base's sponsored-gas path. The signature-free agent-initiated flow is untouched either way, since x402 requires a fresh signature per payment. See [x402 settlement](#x402-settlement-main-app-only) below.
+* **x402 Settlement (main app, both chains):** Payments made directly in the web app settle via the [x402](https://x402.org) HTTP-payment protocol — Celo's own facilitator for **USDC/USD₮ on Celo**, the Coinbase CDP facilitator for **USDC on Base** — so they're genuinely indexed on x402scan, not relabeled contract calls. Everything else (cUSD/USDm) uses the on-chain `payBill` flow, including Base's sponsored-gas path. ⚠️ x402 needs an EIP-3009 `transferWithAuthorization` signature, which is structurally what a drainer asks for, so some wallet scanners flag it as risky — a known, deliberate trade for x402scan visibility; `NEXT_PUBLIC_X402_ENABLED=false` opts out. The signature-free agent-initiated flow is untouched either way. See [x402 settlement](#x402-settlement-main-app-only) below.
 * **Dynamic Exchange Engine:** Live market rate conversions with admin-configurable exchange rate and automated profit spread calculation, verified server-side to prevent underpayment exploits.
 * **Executive Admin Dashboard:** Real-time monitoring of VTpass fiat balance, on-chain vault balances per token/chain, transaction analytics, manual refund tools, and CSV export — protected behind admin auth.
 * **Kill Switches That Actually Stop Every Channel:** the dashboard's "pause a service" toggles are a **two-level** model — a per-service master (`MASTER_AIRTIME`, `MASTER_INTERNET`, `MASTER_ELECTRICITY`, `MASTER_CABLE`, `MASTER_EDUCATION`, `MASTER_INTERNATIONAL`) plus a per-provider switch keyed by VTpass serviceID (`AIRTIME_mtn`, `INTERNET_airtel-data`, `ELEC_ikeja-electric`, `CABLE_dstv`, `EDU_waec`). A payment is refused when **either** level is off. `src/lib/serviceRules.ts`'s `killSwitchKeysFor()` maps an agent intent (+ provider, normalised through `resolveServiceId` so `ELEC_ikeja` can't miss `ELEC_ikeja-electric`) onto exactly those keys, so chat, MCP and the autonomous scheduler now honour the same switches the web app does. See [Kill switches](#kill-switches-two-level-master--per-provider) below.
@@ -389,29 +389,26 @@ CELO_X402_API_KEY=your_x402_celo_org_api_key   # Server-side: settles via api.x4
 NEXT_PUBLIC_THIRDWEB_CLIENT_ID=your_thirdweb_client_id    # Client-side only: useFetchWithPayment's signing infra
 ```
 ```env
-NEXT_PUBLIC_X402_ENABLED=                      # Opt-in. Unset/false = the web app uses the contract call
+NEXT_PUBLIC_X402_ENABLED=                      # Default ON. Set to "false" to use the contract call instead
 ```
 
-🔴 **x402 is OFF by default in the web app, deliberately.** It used to route automatically and
-it was hurting real users:
+**x402 is the default settlement rail on both chains** — **USDC or USD₮ on Celo** (each settling
+against its own EIP-712 domain) and **USDC on Base** — so payments are genuinely indexed on
+x402scan rather than being relabeled contract calls. Everything else (cUSD/USDm) uses the normal
+contract call. It never touches the agent-initiated flow, since x402 needs a fresh signature per
+payment. Distinct infra from `RELAYER_PRIVATE_KEY` above.
 
-x402 settles by asking the wallet to **sign typed data** — an EIP-3009
-`transferWithAuthorization` that permits a third party to move the tokens. That is structurally
-the same request a drainer makes, so wallet security scanners flag it. **Zerion presented
-AbaPay's own request as "Malicious Request — Approving this may risk total asset loss.
-Proceeding is not advised."** for an ordinary bill payment. The identical payment through the
-normal contract call is shown by the same wallet as a plain Send with *"No Risks Found"*. On
-other wallets the signature request never surfaced at all, leaving users on an endless spinner.
+⚠️ **Expect some wallets to warn about the signature, and know why.** x402 settles via an
+EIP-3009 `transferWithAuthorization` — a signature permitting a third party to move the tokens.
+That is structurally the same request a token-drainer makes, so some wallet security scanners
+flag it: **Zerion has shown AbaPay's own request as "Malicious Request — Approving this may risk
+total asset loss."** on a routine bill payment, while the same payment via the contract call
+reads as an ordinary Send with *"No Risks Found"*. This is inherent to how x402 works — the very
+property that makes a payment provable on x402scan is what the scanners object to — not a fault
+in the request. It is a deliberate trade.
 
-No user should be asked to click past a malicious-request warning to pay a electricity bill, and
-almost none will. So the "Confirm & Pay" button uses the contract-call rail unless
-`NEXT_PUBLIC_X402_ENABLED=true` is set. The x402 code is unchanged and fully working behind that
-flag — enable it if x402scan indexing is worth the warning to you. It never touched the
-agent-initiated flow either way, since x402 needs a fresh signature per payment.
-
-With the flag on, the rest still applies: **USDC or USD₮ on Celo** (each settling against its own
-EIP-712 domain), **USDC on Base** when `NEXT_PUBLIC_BASE_X402_ENABLED=true` as well, and the
-normal contract call for everything else. Distinct infra from `RELAYER_PRIVATE_KEY` above.
+Escape hatches, per chain: `NEXT_PUBLIC_X402_ENABLED=false` moves everything to the contract-call
+rail; `NEXT_PUBLIC_BASE_X402_ENABLED=false` moves only Base. Both default to on.
 
 Settlement runs through **Celo's own x402 facilitator** (`api.x402.celo.org` mainnet /
 `api.x402.sepolia.celo.org` testnet — built by Celo Core Co.), not thirdweb. thirdweb is
@@ -901,20 +898,18 @@ curl -X POST https://www.abapays.com/api/a2a \
 
 #### x402 Settlement (main app only)
 
-🔴 **Off by default — set `NEXT_PUBLIC_X402_ENABLED=true` to use it.** See the env section
-above for why: the EIP-3009 signature x402 requires is the same shape as a drainer request, and
-wallet scanners flag it — Zerion labelled AbaPay's own request a *"Malicious Request"* on a
-routine bill payment, while the same payment via the contract call showed *"No Risks Found"*.
-Everything below describes the behaviour **when the flag is on**.
+⚠️ On by default; `NEXT_PUBLIC_X402_ENABLED=false` falls back to the contract call. Note the
+wallet-warning trade-off documented in the env section above — the EIP-3009 signature x402
+requires is structurally what a drainer asks for, so some scanners flag it.
 
-The web app's payment flow then settles via [x402](https://x402.org) — through **Celo's own
+The web app's payment flow settles via [x402](https://x402.org) — through **Celo's own
 facilitator** (`api.x402.celo.org`, built by Celo Core Co. — see
 `src/app/api/pay/x402/route.ts`), not thirdweb — whenever the user is paying with **USDC or
 USD₮ on Celo**. Each token settles against its own EIP-712 domain (`X402_TOKEN_EIP712` in that
 route) since Circle's USDC and Tether's USD₮ deployments don't share one. The same "Confirm &
 Pay" button routes through x402 for either token on Celo and through the normal `payBill`
-contract call for everything else (cUSD/USDm, Base unless `NEXT_PUBLIC_BASE_X402_ENABLED` is
-also on, or x402 unconfigured). This makes the payment genuinely visible on x402scan — not a
+contract call for everything else (cUSD/USDm, Base when `NEXT_PUBLIC_BASE_X402_ENABLED=false`,
+or x402 unconfigured). This makes the payment genuinely visible on x402scan — not a
 relabeled transaction — because x402 settlement requires an EIP-3009
 (`transferWithAuthorization`) signature from the payer for that specific payment. That
 requirement is also precisely why the scanners object.

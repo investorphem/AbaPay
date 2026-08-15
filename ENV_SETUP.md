@@ -143,18 +143,19 @@ CELO_X402_API_KEY=x402_...                 # Server-side: settles via api.x402.c
 NEXT_PUBLIC_THIRDWEB_CLIENT_ID=...          # Client-side only: wallet-signing plumbing
 ```
 
-🔴 **Leave `NEXT_PUBLIC_X402_ENABLED` unset unless you specifically want x402 indexing.**
+x402 is **on by default on both chains**. Set `NEXT_PUBLIC_X402_ENABLED=false` to route the web
+app through the normal contract call instead, or `NEXT_PUBLIC_BASE_X402_ENABLED=false` for Base
+alone.
 
-x402 settles by asking the wallet to sign an EIP-3009 `transferWithAuthorization` — permission
-for a third party to move the user's tokens. Structurally that is what a drainer asks for, so
-wallet security scanners flag it: **Zerion showed AbaPay's own request as "Malicious Request —
-Approving this may risk total asset loss. Proceeding is not advised."** on an ordinary bill
-payment, while the same payment through the normal contract call showed *"No Risks Found"*. On
-some wallets the signature request never appeared at all and the app just span.
-
-Setting the two keys below does **not** switch the rail on by itself — that is deliberate, so
-configuring x402 for the agent/API side can't silently change what the web app asks users to
-sign. Everything below is only reached when the flag is explicitly `true`.
+⚠️ **Expect some wallets to warn about the signature.** x402 settles by asking the wallet to
+sign an EIP-3009 `transferWithAuthorization` — permission for a third party to move the user's
+tokens. Structurally that is what a drainer asks for, so wallet security scanners flag it:
+**Zerion has shown AbaPay's own request as "Malicious Request — Approving this may risk total
+asset loss. Proceeding is not advised."** on an ordinary bill payment, while the same payment
+through the contract call showed *"No Risks Found"*. This is inherent to the protocol — the same
+property that makes the payment provable on x402scan is what the scanner objects to — so it is a
+trade, not a bug to fix. Support will get asked about it; the answer is that the request is
+genuine and the amount and recipient shown in the wallet are the real ones.
 **Free** — no billing plan required, unlike thirdweb (see below). Celo's facilitator charges
 a flat **$0.001 per settlement** from a prepaid USDC credit balance instead of a percentage
 cut or a subscription — you get free credits just for connecting a wallet (500 mainnet /
