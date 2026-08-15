@@ -10,12 +10,71 @@
 //      `Boolean(window.ethereum)`, so those users were routed down the injected path and
 //      hung forever, never reaching the WalletConnect fallback that would have worked.
 //
-//   2. A FILTERED WALLETCONNECT RELAY. Some Nigerian mobile networks (MTN most reported)
-//      block `relay.walletconnect.org`. It's a WebSocket, so it fails silently — no error
-//      to catch, just a promise that never resolves.
+//   2. A FILTERED WALLETCONNECT RELAY. Some networks block `relay.walletconnect.org`.
+//      It's a WebSocket, so it fails silently — no error to catch, just a promise that
+//      never resolves. Confirmed on at least one carrier (works over VPN, fails without);
+//      we have no data on how widespread it is, so nothing user-facing names a network.
 //
 // The cure for both is the same shape: never trust a connector to settle, always race it
 // against a timeout, and always tell the user which dependency actually failed.
+
+/**
+ * What the injected provider actually is, established by ASKING it rather than by sniffing
+ * flags on it.
+ *
+ *  • `authorized` — it already has accounts for this site. We can connect with no click and
+ *    no prompt: the user is in a wallet's in-app browser (MiniPay, Valora, Base App, Trust,
+ *    MetaMask mobile), or they connected here before in a normal browser.
+ *  • `available`  — a real provider that answered, but this site isn't approved yet. Do NOT
+ *    auto-connect (that would fire an unsolicited permission popup on page load); show the
+ *    Connect button and use this provider when it's clicked.
+ *  • `none`       — no provider, or a stub that never answered. The Connect button should
+ *    skip the injected path entirely and go straight to WalletConnect.
+ */
+export type InjectedProbe =
+  | { status: 'authorized'; accounts: string[] }
+  | { status: 'available' }
+  | { status: 'none' };
+
+export const INJECTED_PROBE_TIMEOUT_MS = 3_000;
+
+/**
+ * Silently ask the injected provider whether it already has accounts for this site.
+ *
+ * `eth_accounts` NEVER prompts — it returns [] when the site isn't authorized. That is what
+ * makes auto-connect safe to run on every page load, and it's the same technique the
+ * Farcaster path already uses (getAddresses()). Contrast `eth_requestAccounts`, which is
+ * what wagmi's connect() calls and which DOES prompt.
+ *
+ * The timeout is what makes this safe against stub providers: one that never answers
+ * resolves to `none` after a few seconds instead of hanging the flow forever.
+ */
+export async function probeInjectedProvider(
+  timeoutMs: number = INJECTED_PROBE_TIMEOUT_MS,
+): Promise<InjectedProbe> {
+  if (typeof window === 'undefined') return { status: 'none' };
+
+  const eth = (window as any).ethereum;
+  if (!eth || typeof eth.request !== 'function') return { status: 'none' };
+
+  let timer: ReturnType<typeof setTimeout>;
+  try {
+    const accounts = (await Promise.race([
+      Promise.resolve(eth.request({ method: 'eth_accounts' })).finally(() => clearTimeout(timer)),
+      new Promise<never>((_, reject) => {
+        timer = setTimeout(() => reject(new Error('injected probe timed out')), timeoutMs);
+      }),
+    ])) as unknown;
+
+    if (Array.isArray(accounts) && accounts.length > 0) {
+      return { status: 'authorized', accounts: accounts as string[] };
+    }
+    return { status: 'available' };
+  } catch {
+    // Threw or never answered — treat as no usable injected wallet.
+    return { status: 'none' };
+  }
+}
 
 /**
  * Is `window.ethereum` a wallet we should actually attempt, or a stub left by an extension?
@@ -36,11 +95,19 @@ export function looksLikeRealInjectedWallet(): boolean {
   return Object.keys(eth).some((k) => k.startsWith('is') && eth[k] === true);
 }
 
-/** True when we're inside MiniPay's browser — the one path that touches no blockable host. */
+/** True when we're inside MiniPay's browser — one of the paths that touches no blockable host. */
 export function isMiniPayBrowser(): boolean {
   if (typeof window === 'undefined') return false;
   return Boolean((window as any).ethereum?.isMiniPay);
 }
+
+/**
+ * The hosts that connect a wallet WITHOUT touching the WalletConnect relay: MiniPay and Base
+ * App inject a provider straight into the page, and Farcaster supplies its own wallet through
+ * the Mini App SDK. On a network that filters the relay, these keep working — which is why
+ * every failure message points at them.
+ */
+export const RELAY_FREE_SURFACES = ['MiniPay', 'Base App', 'Farcaster'] as const;
 
 // An injected wallet shows its own approval UI, so the user needs real time to react. This
 // is a backstop against a wedged provider, NOT a limit on how long someone may take to
@@ -55,8 +122,8 @@ export const INJECTED_CONNECT_TIMEOUT_MS = 180_000;
 // What we time out instead is the RELAY HANDSHAKE, observed via the `display_uri` event:
 // the connector emits it once it has a pairing URI, which requires the relay socket to be
 // open. URI within the window = the relay is fine, and from there we wait on the user as
-// long as they need. No URI = the relay is unreachable (the MTN case), and that is worth
-// telling the user about immediately.
+// long as they need. No URI = the relay is unreachable (the blocked-network case), and that
+// is worth telling the user about immediately.
 export const RELAY_HANDSHAKE_TIMEOUT_MS = 12_000;
 
 /**
@@ -118,14 +185,18 @@ export function withConnectTimeout<T>(
 }
 
 /**
- * Turn a connector failure into something a user can act on. The MTN case is called out by
- * name because it is by far the most common cause of a timed-out relay for our users, and
- * "try MiniPay" is a fix they can apply in the next thirty seconds.
+ * Turn a connector failure into something a user can act on.
+ *
+ * ⚠️ Deliberately names NO country and NO carrier. We have confirmed the block exists on at
+ * least one network, but we have no evidence about which other networks or regions are
+ * affected — and naming a specific carrier to someone who is not on it makes them distrust
+ * the whole message. Describe what we actually know ("your network is blocking it") and
+ * give them routes out.
  */
 export function describeConnectFailure(error: unknown): string {
   if (error instanceof RelayUnreachableError ||
       (error instanceof ConnectTimeoutError && error.stage === 'walletconnect')) {
-    return "Couldn't reach the wallet connection service. Some Nigerian networks (MTN especially) block it — try another network or a VPN, or open AbaPay inside MiniPay, which doesn't need it.";
+    return "Your network is blocking the service AbaPay uses to connect external wallets. Try a different network or a VPN — or open AbaPay in MiniPay, Base App or Farcaster, which connect your wallet directly and aren't affected.";
   }
 
   if (error instanceof ConnectTimeoutError) {

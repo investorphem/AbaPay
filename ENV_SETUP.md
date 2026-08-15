@@ -37,10 +37,10 @@ NEXT_PUBLIC_APP_URL=https://abapays.com
 ### `NEXT_PUBLIC_WC_RELAY_URL` (optional — blocked networks)
 **Free, and only needed if your users are on a network that filters WalletConnect.**
 
-Some Nigerian mobile networks (MTN most reported) block `relay.walletconnect.org`. The relay
-is a WebSocket, so the block is silent: no QR code, no error, the Connect button just sits
-there. There is only ONE WalletConnect relay network — you can't switch provider — but you
-can change the URL your app reaches it through.
+Some networks block `relay.walletconnect.org`. The relay is a WebSocket, so the block is
+silent: no QR code, no error, the Connect button just sits there. There is only ONE
+WalletConnect relay network — you can't switch provider — but you can change the URL your app
+reaches it through.
 
 1. Stand up a WebSocket reverse proxy on a subdomain you control, forwarding to
    `wss://relay.walletconnect.org`. **Vercel cannot do this** — its functions don't proxy

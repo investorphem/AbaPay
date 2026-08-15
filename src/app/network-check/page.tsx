@@ -3,18 +3,19 @@
 // ⚡ /network-check — "IS IT MY NETWORK, OR IS IT ABAPAY?"
 //
 // AbaPay's own domain being reachable proves nothing: the connect flow depends on several
-// THIRD-PARTY hosts, and some Nigerian mobile networks (MTN most reported) filter them.
-// When that happens the failure is silent — a blocked WebSocket never errors, it just never
-// opens — so users conclude the app is broken.
+// THIRD-PARTY hosts, and some networks filter them. When that happens the failure is silent
+// — a blocked WebSocket never errors, it just never opens — so users conclude the app is
+// broken.
 //
 // This page tests each dependency from the user's own network and names the ones that fail.
-// That gives the user an immediate answer, and gives us (and any complaint to the carrier or
-// the NCC) the exact hostnames rather than "crypto doesn't work on MTN".
+// That gives the user an immediate answer, and gives us the exact hostnames to take to
+// whichever carrier or regulator is involved — without us having to guess in advance which
+// networks or countries are affected.
 
 import { useCallback, useEffect, useState } from "react";
 import Link from "next/link";
 import { CheckCircle2, XCircle, Loader2, ShieldCheck, Copy, RefreshCw } from "lucide-react";
-import { CONNECT_DEPENDENCY_HOSTS, looksLikeRealInjectedWallet, isMiniPayBrowser } from "@/lib/walletEnv";
+import { CONNECT_DEPENDENCY_HOSTS, probeInjectedProvider, isMiniPayBrowser } from "@/lib/walletEnv";
 
 type Status = "pending" | "ok" | "blocked";
 
@@ -96,7 +97,7 @@ export default function NetworkCheckPage() {
   const [results, setResults] = useState<Result[]>([]);
   const [running, setRunning] = useState(false);
   const [copied, setCopied] = useState(false);
-  const [env, setEnv] = useState<{ miniPay: boolean; injected: boolean }>({ miniPay: false, injected: false });
+  const [env, setEnv] = useState<{ miniPay: boolean; injected: string }>({ miniPay: false, injected: "checking" });
 
   const run = useCallback(async () => {
     setRunning(true);
@@ -138,7 +139,11 @@ export default function NetworkCheckPage() {
   }, []);
 
   useEffect(() => {
-    setEnv({ miniPay: isMiniPayBrowser(), injected: looksLikeRealInjectedWallet() });
+    // The probe status ("authorized" / "available" / "none") is far more useful in a bug
+    // report than a yes/no guess — it says whether this browser's wallet would auto-connect.
+    void probeInjectedProvider().then((p) => {
+      setEnv({ miniPay: isMiniPayBrowser(), injected: p.status });
+    });
     void run();
   }, [run]);
 
@@ -149,6 +154,7 @@ export default function NetworkCheckPage() {
     const report = [
       `AbaPay network check — ${new Date().toISOString()}`,
       `MiniPay: ${env.miniPay} | injected wallet: ${env.injected}`,
+      `(injected "authorized" = auto-connects, "available" = needs a tap, "none" = no usable wallet)`,
       `UA: ${typeof navigator !== "undefined" ? navigator.userAgent : "n/a"}`,
       "",
       ...results.map((r) => `${r.status === "ok" ? "OK     " : "BLOCKED"}  ${r.url}  (${r.ms}ms) — ${r.detail}`),
@@ -171,8 +177,8 @@ export default function NetworkCheckPage() {
 
         <h1 className="mt-4 text-2xl font-black text-slate-900 dark:text-white">Network check</h1>
         <p className="mt-2 text-sm text-slate-600 dark:text-slate-400 leading-relaxed">
-          If the Connect button does nothing, it is usually your mobile network blocking a service
-          AbaPay needs — not AbaPay itself. This checks each one from your connection.
+          If the Connect button does nothing, it is usually your network blocking a service AbaPay
+          needs — not AbaPay itself. This checks each one from your connection.
         </p>
 
         {finished && (
@@ -190,8 +196,10 @@ export default function NetworkCheckPage() {
                   {blockedCritical.length > 1 ? "s" : ""} AbaPay needs.
                 </p>
                 <p className="mt-2 text-xs text-amber-900/90 dark:text-amber-200/90 leading-relaxed">
-                  Open AbaPay inside <strong>MiniPay</strong> — it connects your wallet directly and needs
-                  none of the blocked services. A VPN or a different network also works.
+                  Open AbaPay inside <strong>MiniPay</strong>, <strong>Base App</strong> or{" "}
+                  <strong>Farcaster</strong> — they connect your wallet directly and need none of the
+                  blocked services. Switching to a different network (mobile data instead of Wi-Fi, or
+                  the other way round) or turning on a VPN also works.
                 </p>
               </>
             ) : (

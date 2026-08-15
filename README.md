@@ -161,18 +161,25 @@ NEXT_PUBLIC_WALLETCONNECT_PROJECT_ID=your_walletconnect_project_id
 NEXT_PUBLIC_WC_RELAY_URL=                         # Optional. Override the WalletConnect relay — see "Blocked networks" below
 ```
 
-#### Blocked networks (Nigeria / MTN)
+#### Blocked networks
 
-Connecting an external wallet depends on third-party hosts that some Nigerian mobile
-networks filter — chiefly `relay.walletconnect.org` (the WalletConnect relay) and
-`api.web3modal.org` (the wallet chooser). Because the relay is a WebSocket, a block produces
-**silence** rather than an error, which reads to the user as "the Connect button is broken".
+Connecting an external wallet depends on third-party hosts that some networks filter —
+chiefly `relay.walletconnect.org` (the WalletConnect relay) and `api.web3modal.org` (the
+wallet chooser). Because the relay is a WebSocket, a block produces **silence** rather than
+an error, which reads to the user as "the Connect button is broken".
+
+This is confirmed on at least one carrier — the connect flow works over a VPN and hangs
+without one — but we have no data on how many networks or regions are affected. **No
+user-facing copy names a carrier or country**, deliberately: telling someone their problem is
+carrier X when they are not on carrier X just makes them distrust the message. `/network-check`
+reports what is actually blocked for the user in front of it.
 
 Two things address this:
 
 - **`/network-check`** — a page any user can open that probes each dependency from their own
   connection and names the ones that fail. It is linked from the connect-failure banner and
-  from the FAQ, and doubles as the evidence to quote in a complaint to the carrier or the NCC.
+  from the FAQ, and doubles as the evidence to quote in a complaint to whichever carrier or
+  regulator turns out to be involved.
 - **`NEXT_PUBLIC_WC_RELAY_URL`** — point this at a WebSocket reverse proxy on a domain of
   yours that isn't filtered (e.g. `wss://relay.abapays.com` forwarding to
   `wss://relay.walletconnect.org`) and WalletConnect wallets start working on those networks.
@@ -180,8 +187,10 @@ Two things address this:
   Note that **Vercel functions cannot proxy long-lived WebSockets** — host it on Cloudflare
   Workers, Fly.io, or a VPS running nginx with `proxy_pass` and the `Upgrade` headers.
 
-MiniPay needs none of these hosts (it injects a provider directly), so it remains the
-reliable path on a filtered network and is what the app recommends when a connect fails.
+**MiniPay, Base App and Farcaster need none of these hosts** — the first two inject a provider
+straight into the page and Farcaster supplies its own wallet through the Mini App SDK. They
+stay reliable on a filtered network, and are what the app recommends when a connect fails
+(`RELAY_FREE_SURFACES` in `src/lib/walletEnv.ts`).
 
 ### Smart Contracts (per chain)
 ```

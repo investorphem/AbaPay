@@ -6,12 +6,14 @@ import { rpcUrlsFor } from '@/lib/chain';
 // ⚡ PULL IN YOUR WALLETCONNECT ID
 const projectId = process.env.NEXT_PUBLIC_WALLETCONNECT_PROJECT_ID || "";
 
-// ⚡ RELAY OVERRIDE — THE MTN / NIGERIA ESCAPE HATCH ⚡
+// ⚡ RELAY OVERRIDE — THE BLOCKED-NETWORK ESCAPE HATCH ⚡
 //
 // WalletConnect has exactly ONE relay network; you cannot switch "provider". What you CAN
-// change is the URL your app reaches it through. Some Nigerian mobile networks (MTN most
-// reported) filter `relay.walletconnect.org`, and because the relay is a WebSocket the
-// failure is silent — no session, no QR, no error. Point this at a WebSocket reverse proxy
+// change is the URL your app reaches it through. Some networks filter
+// `relay.walletconnect.org`, and because the relay is a WebSocket the failure is silent —
+// no session, no QR, no error. (Confirmed on at least one carrier: the connect flow works
+// over a VPN and hangs without one. We have no data on how many networks are affected, so
+// nothing user-facing names a carrier or country.) Point this at a WebSocket reverse proxy
 // on a domain of yours that isn't filtered (e.g. wss://relay.abapays.com -> the real relay)
 // and every WalletConnect wallet — Valora included — starts working on those networks.
 //

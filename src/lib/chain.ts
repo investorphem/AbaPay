@@ -26,9 +26,9 @@ export function resolveChain(blockchain: string | null | undefined) {
 //
 // ⚡ EXPORTED because the BROWSER needs the same list. src/config/wagmi.ts used to build its
 // transports with a bare `http()`, i.e. viem's single default endpoint per chain with no
-// backup — so a user whose network can't reach `forno.celo.org` (some Nigerian mobile
-// networks filter it) got a silently broken balance/allowance read even though the server
-// side had failover. One list, both sides.
+// backup — so a user whose network can't reach `forno.celo.org` (some networks filter it)
+// got a silently broken balance/allowance read even though the server side had failover.
+// One list, both sides.
 export function rpcUrlsFor(chainId: number): string[] {
   switch (chainId) {
     case celo.id:

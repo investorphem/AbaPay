@@ -26,7 +26,8 @@ import AppFooter from "@/components/AppFooter";
 import { AgentHub } from "@/components/AgentHub";
 import { AIChat } from "@/components/AIChat";
 import {
-  looksLikeRealInjectedWallet,
+  probeInjectedProvider,
+  type InjectedProbe,
   withConnectTimeout,
   waitForRelayHandshake,
   describeConnectFailure,
@@ -77,6 +78,8 @@ export default function Home() {
   // Surfaces WHY a connect attempt failed. Previously every failure was silent.
   const [connectError, setConnectError] = useState<string | null>(null);
   const [isConnecting, setIsConnecting] = useState(false);
+  // What the browser's injected wallet actually is — see the silent probe effect below.
+  const [injectedProbe, setInjectedProbe] = useState<InjectedProbe | null>(null);
   const { disconnect } = useDisconnect();
   // ⚡ ADD THIS: Grabs the live WalletConnect provider securely
   const { data: wagmiWalletClient } = useWalletClient();
@@ -1727,18 +1730,41 @@ export default function Home() {
   // 👇 PASTE THE NEW CODE RIGHT HERE, EXACTLY ABOVE THE WAGMI BRIDGE 👇
   // =======================================================================
 
-  // ⚡ NATIVE INJECTED AUTOCONNECT INTERCEPTOR ⚡
+  // ⚡ SILENT INJECTED PROBE — RUNS ONCE, ASKS THE PROVIDER WHAT IT IS ⚡
+  //
+  // Everything about auto-connect hangs off this. `eth_accounts` never prompts, so we can
+  // ask on every page load whether this browser's wallet has already approved AbaPay. If it
+  // has, the user should never see a Connect button at all.
+  //
+  // This replaced a flag-sniffing heuristic (`is*` properties on window.ethereum). Sniffing
+  // was wrong in both directions: wallets that don't advertise a flag were treated as fake
+  // and denied auto-connect, while a stub with a fake flag would still have hung. Asking the
+  // provider and timing it out answers the only question that matters — does it work?
+  useEffect(() => {
+    if (environment !== 'WEB' || injectedProbe !== null) return;
+    let cancelled = false;
+    (async () => {
+      const result = await probeInjectedProvider();
+      if (!cancelled) setInjectedProbe(result);
+    })();
+    return () => { cancelled = true; };
+  }, [environment, injectedProbe]);
+
+  // ⚡ NATIVE INJECTED AUTOCONNECT ⚡
+  //
+  // Fires ONLY when the wallet already has accounts for this site — i.e. an in-app wallet
+  // browser (MiniPay, Valora, Base App, Trust, MetaMask mobile) or a returning user who
+  // approved us before. In those cases wagmi's connect() resolves without a popup, because
+  // the permission already exists, so the app just… appears connected.
+  //
+  // It deliberately does NOT fire on `available` (a real wallet that hasn't approved us):
+  // auto-firing there would throw an unsolicited permission dialog in the user's face the
+  // instant the page loads. That's what the Connect button is for.
   useEffect(() => {
     // Abort if already connected, explicitly logged out, or not in web mode
     if (address || environment !== 'WEB' || localStorage.getItem('abapay_explicit_logout') === 'true') return;
-
-    // 🔴 WAS `Boolean(window.ethereum)`. Several extensions and in-app webviews define
-    // `window.ethereum` WITHOUT being a usable wallet — no identity flag, and a request()
-    // that never settles. Those users were auto-routed into the injected path and hung
-    // there forever. looksLikeRealInjectedWallet() requires the provider to actually
-    // identify itself before we hand it a connection attempt.
-    const isWeb3Browser = looksLikeRealInjectedWallet();
-    if (!isWeb3Browser || connectors.length === 0) return; // Wait for connectors to load
+    if (injectedProbe?.status !== 'authorized') return;
+    if (connectors.length === 0) return; // Wait for connectors to load
     if (connectStatus === 'pending') return; // a connection attempt is already in flight
 
     // Find ANY injected provider (MetaMask, Trust, Coinbase, generic EIP-6963). If it isn't
@@ -1747,9 +1773,8 @@ export default function Home() {
     const injectedConnector = connectors.find(c => c.type === 'injected' || c.id === 'injected' || c.id === 'metaMask');
     if (!injectedConnector) return;
 
-    // Only auto-fire ONCE. If the injected provider isn't ready or the user dismisses it,
-    // we do NOT keep retrying — instead the manual "Connect" button stays visible so the
-    // user can pick WalletConnect/Valora themselves (exactly the desired fallback).
+    // Only auto-fire ONCE. If it doesn't complete, the visible Connect button stays as the
+    // clean path forward (WalletConnect included).
     if (autoConnectTried.current) return;
     autoConnectTried.current = true;
 
@@ -1764,7 +1789,7 @@ export default function Home() {
         },
       }
     );
-  }, [address, environment, connectors, connect, connectStatus]);
+  }, [address, environment, connectors, connect, connectStatus, injectedProbe]);
 
   // ⚡ THE MANUAL CONNECT PATH ⚡
   //
@@ -1792,7 +1817,14 @@ export default function Home() {
     try {
       // 1. A REAL injected wallet is always the best path — no third-party host involved,
       //    which is exactly why it keeps working on networks that filter the relay.
-      if (injectedConnector && looksLikeRealInjectedWallet()) {
+      //
+      //    "Real" is decided by the silent probe, not by sniffing `is*` flags: a provider
+      //    that ANSWERED eth_accounts is one worth prompting, whatever it calls itself. If
+      //    the probe hasn't finished yet, run it now rather than guessing.
+      const probe = injectedProbe ?? (await probeInjectedProvider());
+      if (injectedProbe === null) setInjectedProbe(probe);
+
+      if (injectedConnector && probe.status !== 'none') {
         try {
           await withConnectTimeout(
             connectAsync({ connector: injectedConnector }),
@@ -1866,7 +1898,7 @@ export default function Home() {
     } finally {
       setIsConnecting(false);
     }
-  }, [connectors, connectAsync, isConnecting]);
+  }, [connectors, connectAsync, isConnecting, injectedProbe]);
 
   // =======================================================================
 
