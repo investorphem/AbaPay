@@ -1,5 +1,12 @@
 import { describe, it, expect } from 'vitest';
-import { probeProvider, probeInjectedConnectors, isUserRejection } from '@/lib/walletEnv';
+import {
+  probeProvider,
+  probeInjectedConnectors,
+  isUserRejection,
+  looksLikeValora,
+  walletApprovedChainIds,
+  walletConnectSessionLive,
+} from '@/lib/walletEnv';
 
 /**
  * These cover the reason a real web3 browser was being shown a WalletConnect QR code for a
@@ -82,6 +89,144 @@ describe('isUserRejection', () => {
     const err: any = { message: 'boom' };
     err.cause = err;
     expect(isUserRejection(err)).toBe(false);
+  });
+});
+
+/**
+ * Inside Valora's in-app browser the page can see something that answers `eth_accounts` — real
+ * enough for auto-connect to fire and for the whole UI to look connected, not real enough to
+ * pay with. The first request raises a prompt, the user taps Allow, Valora toasts "Connection
+ * to AbaPay was successful!" — it took a payment authorization for a connection handshake — and
+ * returns nothing to the page. Nothing rejects, so there is nothing to catch: the spinner runs
+ * forever. Recognising the host is what lets the app skip that rail and use WalletConnect,
+ * which Valora actually supports.
+ *
+ * A false positive costs a real user their in-browser wallet, so the match is deliberately
+ * narrow: Valora's own flag, or its name as a whole word in the user agent.
+ */
+describe('looksLikeValora', () => {
+  const VALORA_UA =
+    'Mozilla/5.0 (Linux; Android 13) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/119.0.0.0 Mobile Safari/537.36 Valora/1.100.0';
+  const CHROME_UA =
+    'Mozilla/5.0 (Linux; Android 13) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/119.0.0.0 Mobile Safari/537.36';
+
+  it('recognises the in-app browser by its user agent', () => {
+    expect(looksLikeValora(VALORA_UA, undefined)).toBe(true);
+  });
+
+  it('recognises the flag Valora sets on the injected object', () => {
+    expect(looksLikeValora(CHROME_UA, { isValora: true })).toBe(true);
+    expect(looksLikeValora(undefined, { isValoraApp: true })).toBe(true);
+  });
+
+  // 🔴 The whole point: a wallet that DOES return signatures must keep the injected path.
+  it('leaves a working in-browser wallet alone', () => {
+    expect(looksLikeValora(CHROME_UA, { isMetaMask: true })).toBe(false);
+    expect(looksLikeValora(CHROME_UA, { isZerion: true })).toBe(false);
+    expect(looksLikeValora(CHROME_UA, { isMiniPay: true })).toBe(false);
+    expect(looksLikeValora(CHROME_UA, undefined)).toBe(false);
+    expect(looksLikeValora(undefined, undefined)).toBe(false);
+  });
+
+  // Word-bounded so an unrelated token can't strip a user's wallet off the injected path.
+  it('does not match on a substring inside another token', () => {
+    expect(looksLikeValora(`${CHROME_UA} Valorant/2.0`, undefined)).toBe(false);
+    expect(looksLikeValora(`${CHROME_UA} EvaloraX/1.0`, undefined)).toBe(false);
+  });
+
+  // A falsy flag is not a claim. Only `true` counts.
+  it('ignores a flag that is present but not true', () => {
+    expect(looksLikeValora(CHROME_UA, { isValora: false })).toBe(false);
+    expect(looksLikeValora(CHROME_UA, { isValora: undefined })).toBe(false);
+  });
+});
+
+/**
+ * A WalletConnect wallet silently DROPS requests for a chain outside its approved session — no
+ * prompt, no error, nothing back over the relay. Valora is Celo-only, and wagmi asks for
+ * chains[0], which became Base when Base became the default: the session looked healthy, the
+ * address populated, balances rendered off a public RPC, and then every transaction vanished.
+ *
+ * Reading the session's own chain list is how the app tells "connected on a chain this wallet
+ * supports" from "connected, having optimistically named one it does not".
+ */
+describe('walletApprovedChainIds', () => {
+  const withSession = (chains: unknown) => ({
+    getProvider: async () => ({ session: { namespaces: { eip155: { chains } } } }),
+  });
+
+  it('parses CAIP-2 chain ids from a WalletConnect session', async () => {
+    expect(await walletApprovedChainIds(withSession(['eip155:42220', 'eip155:8453']))).toEqual([42220, 8453]);
+  });
+
+  it('reports Celo-only for a Valora-shaped session — the case that was hanging', async () => {
+    const approved = await walletApprovedChainIds(withSession(['eip155:42220']));
+    expect(approved).toEqual([42220]);
+    expect(approved).not.toContain(8453); // Base — requests for it would be dropped
+  });
+
+  // 🔴 null means "unknowable", and callers must read it as "no constraint". Returning [] here
+  // would read as "supports nothing" and would strand every injected wallet on a false error.
+  it('returns null when there is no session to read', async () => {
+    expect(await walletApprovedChainIds({ getProvider: async () => ({}) })).toBeNull();
+    expect(await walletApprovedChainIds({ getProvider: async () => null })).toBeNull();
+    expect(await walletApprovedChainIds(undefined)).toBeNull();
+  });
+
+  it('returns null rather than throwing when the provider errors', async () => {
+    expect(await walletApprovedChainIds({ getProvider: async () => { throw new Error('nope'); } })).toBeNull();
+  });
+
+  it('returns null for an empty or unparseable chain list', async () => {
+    expect(await walletApprovedChainIds(withSession([]))).toBeNull();
+    expect(await walletApprovedChainIds(withSession('not-an-array'))).toBeNull();
+    expect(await walletApprovedChainIds(withSession(['solana:xyz']))).toBeNull();
+  });
+});
+
+/**
+ * The "auto-connects, then hangs forever" failure. wagmi persists the WalletConnect session and
+ * restores it on load, which produces an address — and an address is all the UI needs to look
+ * connected, since balances come from a public RPC and never touch the wallet. But a request
+ * only reaches the phone if the RELAY SOCKET is open. Restored over a dead socket, the
+ * transaction is written to a closed pipe: no prompt, nothing back, and nothing to catch,
+ * because nothing rejected.
+ */
+describe('walletConnectSessionLive', () => {
+  const wc = (provider: any) => ({ type: 'walletConnect', id: 'walletConnect', getProvider: async () => provider });
+
+  it('is live when a session exists and the relay socket is connected', async () => {
+    expect(await walletConnectSessionLive(wc({ session: {}, client: { core: { relayer: { connected: true } } } }))).toBe(true);
+  });
+
+  it('is DEAD when the session was restored but the relay socket is closed — the hang', async () => {
+    expect(await walletConnectSessionLive(wc({ session: {}, client: { core: { relayer: { connected: false } } } }))).toBe(false);
+  });
+
+  it('reads the socket state off the signer client too', async () => {
+    expect(await walletConnectSessionLive(wc({ session: {}, signer: { client: { core: { relayer: { connected: false } } } } }))).toBe(false);
+  });
+
+  it('is dead when nothing was restored at all', async () => {
+    expect(await walletConnectSessionLive(wc({}))).toBe(false);
+    expect(await walletConnectSessionLive(wc(null))).toBe(false);
+  });
+
+  // 🔴 A missing internal is not evidence of a dead socket. Treating it as dead would
+  // disconnect working wallets on every payment.
+  it('assumes live when the socket state cannot be read', async () => {
+    expect(await walletConnectSessionLive(wc({ session: {} }))).toBe(true);
+  });
+
+  // null = "not applicable", and the caller must not read it as a failure.
+  it('returns null for non-WalletConnect connectors, which have no socket to lose', async () => {
+    expect(await walletConnectSessionLive({ type: 'injected', id: 'io.metamask' })).toBeNull();
+    expect(await walletConnectSessionLive({ type: 'baseAccount', id: 'baseAccount' })).toBeNull();
+    expect(await walletConnectSessionLive(undefined)).toBeNull();
+  });
+
+  it('returns null rather than throwing when the provider errors', async () => {
+    expect(await walletConnectSessionLive({ type: 'walletConnect', getProvider: async () => { throw new Error('x'); } })).toBeNull();
   });
 });
 

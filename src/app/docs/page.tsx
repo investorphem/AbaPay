@@ -367,14 +367,22 @@ export default function DocsPage() {
                 a={<>
                   <p>When your wallet is a <strong>separate app</strong> rather than one built into this browser, AbaPay sends the approval request to it — but nothing can force that app to open on top of what you&apos;re doing. The request is sitting in your wallet waiting for you.</p>
                   <p><strong>Switch to your wallet app and approve it there</strong>, then come back. AbaPay says so on screen rather than leaving you watching a spinner.</p>
-                  <p>Wallet apps also get a plain transaction to approve rather than a signature request, because some of them — Valora among them — treat a signature as a &ldquo;verify wallet&rdquo; step and never send the result back, which used to leave the page waiting forever. Nothing changes for you; the payment is identical.</p>
-                  <p>If the request never arrives, AbaPay stops waiting after ninety seconds and tells you. Should you then approve it late, the payment can still go through — so check your <strong>History</strong> tab before paying again, to be sure you don&apos;t pay twice.</p>
+                  <p>If no prompt arrives at all, the connection to your wallet has usually gone stale. AbaPay reconnects you automatically when you return, and that remembered connection can look fine — your address and balance show — while the link to your wallet is actually closed, so requests reach nothing. AbaPay now checks that link before asking you to approve anything, and tells you to tap <strong>Connect</strong> again if it has dropped.</p>
+                  <p>If a request still goes unanswered, AbaPay stops waiting after ninety seconds rather than spinning forever. Should you then approve it late, the payment can still go through — so check your <strong>History</strong> tab before paying again, to be sure you don&apos;t pay twice.</p>
+                </>}
+              />
+              <FAQItem
+                q="I opened AbaPay inside Valora's browser and it won't connect on its own."
+                a={<>
+                  <p>That&apos;s deliberate. Inside Valora&apos;s built-in browser, AbaPay used to appear connected by itself — and then payments got stuck: an approval prompt would come up, you&apos;d tap <strong>Allow</strong>, Valora would say the connection succeeded, and the payment would keep loading with no second prompt ever arriving.</p>
+                  <p>Valora connects properly over <strong>WalletConnect</strong>, so that is the only route AbaPay now uses there. Tap <strong>Connect</strong> and choose Valora — it&apos;s the same app you&apos;re already in, so it takes one tap — and payments go through normally after that.</p>
+                  <p>Valora works on <strong>Celo</strong>. If AbaPay is showing Base when you connect, it switches itself to Celo to match your wallet; pick a Celo token (USDC, USD₮ or USDm) and pay as usual.</p>
                 </>}
               />
               <FAQItem
                 q="What wallets and apps can I use?"
                 a={<>
-                  <p>MiniPay (Opera Mini's Celo wallet), Valora, MetaMask, Coinbase Smart Wallet / Base Account, and any other wallet reachable over WalletConnect or injected into your browser. AbaPay also runs as a Farcaster Mini App.</p>
+                  <p>MiniPay (Opera Mini&apos;s Celo wallet), Valora, MetaMask, Coinbase Smart Wallet / Base Account, and any other wallet reachable over WalletConnect or injected into your browser. AbaPay also runs as a Farcaster Mini App. Valora connects over WalletConnect — tap <strong>Connect</strong> and pick it — which is the only route it handles reliably.</p>
                   <p>Wallets that support smart-account gas sponsorship on Base get it automatically — the app detects the capability and batches the token approval and the payment into one sponsored transaction. Every other wallet just pays normal network fees, with no difference in behaviour.</p>
                 </>}
               />

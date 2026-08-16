@@ -122,6 +122,78 @@ export function isUserRejection(e: any): boolean {
   );
 }
 
+/**
+ * Which chains has the connected wallet ACTUALLY agreed to, as opposed to which chains this app
+ * happens to be configured for?
+ *
+ * 🔴 THE FAILURE THIS DIAGNOSES. A WalletConnect session lists its approved chains in
+ * `session.namespaces.eip155.chains`, and a wallet silently IGNORES requests for a chain outside
+ * that set — no prompt, no error, nothing back over the relay. The dapp sits on a spinner having
+ * sent a perfectly valid request into a void.
+ *
+ * That is what Valora does. It is Celo-first, and wagmi asks for `chains[0]` — which became Base
+ * when Base became AbaPay's default. The session connects and looks healthy, `address` populates,
+ * balances render (those come from a public RPC and need no wallet at all), and then the first
+ * transaction request for Base is dropped on the floor. The app had no way to know, because
+ * nothing in wagmi's surface distinguishes "connected on a chain the wallet supports" from
+ * "connected, having optimistically named a chain it does not".
+ *
+ * Returns null when the answer is unknowable (an injected wallet, which can usually be asked to
+ * switch anyway) — callers must treat null as "no constraint", never as "supports nothing".
+ */
+export async function walletApprovedChainIds(connector: any): Promise<number[] | null> {
+  try {
+    const provider: any = await connector?.getProvider?.();
+    const chains = provider?.session?.namespaces?.eip155?.chains;
+    if (!Array.isArray(chains) || chains.length === 0) return null;
+    const ids = chains
+      .map((c: string) => Number(String(c).split(':')[1]))
+      .filter((n: number) => Number.isFinite(n));
+    return ids.length > 0 ? ids : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Is this WalletConnect session actually ALIVE, or just remembered?
+ *
+ * 🔴 THE "AUTO-CONNECTS, THEN HANGS FOREVER" FAILURE. wagmi persists the WalletConnect session
+ * (cookieStorage) and restores it on load — which is the "it auto connects after some time"
+ * users see. Restoring produces an address, and an address is all the UI needs to look
+ * connected: balances render (they come from a public RPC and never touch the wallet), the
+ * button enables, everything reads as normal.
+ *
+ * But a WalletConnect request only reaches the wallet if the RELAY SOCKET is open. If the
+ * session was restored while the socket is dead — the relay was unreachable at load, the pairing
+ * expired, the wallet dropped it — then `eth_sendTransaction` is written to a closed pipe. No
+ * prompt appears on the phone, nothing comes back, and there is no error to catch, because
+ * nothing rejected: the request simply went nowhere. From the page it is indistinguishable from
+ * a user who has not looked at their wallet yet.
+ *
+ * Checking the relay before asking is the difference between "waiting for you" and "shouting
+ * into a void". Returns null for anything that is not a WalletConnect connector (an injected
+ * wallet is in-process and has no socket to lose).
+ */
+export async function walletConnectSessionLive(connector: any): Promise<boolean | null> {
+  try {
+    if (connector?.type !== 'walletConnect' && connector?.id !== 'walletConnect') return null;
+    const provider: any = await connector?.getProvider?.();
+    if (!provider) return false;
+    // No session at all — nothing was restored, so there is nothing to be stale.
+    if (!provider.session) return false;
+    // WalletConnect's SignClient exposes the live socket state here. Treated as ALIVE when the
+    // field is absent: a missing internal is not evidence of a dead socket, and a false negative
+    // would disconnect working wallets.
+    const connected = provider.signer?.client?.core?.relayer?.connected
+      ?? provider.client?.core?.relayer?.connected;
+    return connected === undefined ? true : Boolean(connected);
+  } catch {
+    // Can't tell — don't punish the user for a missing internal.
+    return null;
+  }
+}
+
 /** One injected wallet wagmi found, plus what it answered when asked about this site. */
 export interface InjectedCandidate {
   /** wagmi connector — `id` is the EIP-6963 rdns ('io.metamask'), or 'injected' for the generic one. */
@@ -199,6 +271,42 @@ export function looksLikeRealInjectedWallet(): boolean {
 export function isMiniPayBrowser(): boolean {
   if (typeof window === 'undefined') return false;
   return Boolean((window as any).ethereum?.isMiniPay);
+}
+
+/**
+ * The Valora rule, as a pure function so it can be tested without a DOM.
+ *
+ * 🔴 THE "FIRST PROMPT WORKS, THE SECOND NEVER COMES" HANG. Inside Valora's in-app browser
+ * the page can see something that answers `eth_accounts` — enough to read as a real injected
+ * wallet, enough for auto-connect to fire, enough for the whole UI to look connected. It is
+ * not enough to PAY with. The first request raises a prompt, the user taps Allow, Valora
+ * toasts "Connection to AbaPay was successful!" — it has classified the request as a
+ * connection handshake, consumed it, and returned nothing — and the page waits on a response
+ * that is never coming. No error, no rejection, nothing to catch. Just a spinner, forever.
+ *
+ * Valora's supported way in is WalletConnect, and over WalletConnect it behaves: the request
+ * is a real session request with a real response. So inside Valora we do not offer the
+ * injected path at all — not on auto-connect, not on the Connect button. The wallet is right
+ * there in the same app, so pairing costs the user a tap and buys them a rail that works.
+ *
+ * Deliberately signal-based rather than a version check: `isValora` on the injected object is
+ * what Valora's own bridge sets, and the webview stamps its name into the user agent. Either
+ * is enough — both point at the same host.
+ */
+export function looksLikeValora(userAgent: string | undefined, ethereum: any): boolean {
+  if (ethereum && (ethereum.isValora === true || ethereum.isValoraApp === true)) return true;
+  // Word-bounded so a substring inside some unrelated token can't drag a working wallet off
+  // the injected path — a false positive here costs a real user their in-browser wallet.
+  return /\bvalora\b/i.test(String(userAgent ?? ''));
+}
+
+/** `looksLikeValora` against this browser's own globals. False during SSR. */
+export function isValoraBrowser(): boolean {
+  if (typeof window === 'undefined') return false;
+  return looksLikeValora(
+    typeof navigator !== 'undefined' ? navigator.userAgent : undefined,
+    (window as any).ethereum,
+  );
 }
 
 /**

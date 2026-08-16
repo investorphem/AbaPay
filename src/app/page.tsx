@@ -28,6 +28,9 @@ import { AIChat } from "@/components/AIChat";
 import {
   probeInjectedConnectors,
   isUserRejection,
+  isValoraBrowser,
+  walletApprovedChainIds,
+  walletConnectSessionLive,
   type InjectedProbe,
   type InjectedCandidate,
   withConnectTimeout,
@@ -185,7 +188,10 @@ export default function Home() {
     process.env.NEXT_PUBLIC_NETWORK === "base";
 
   // ⚡ MUST BE A USESTATE (Defaults to Celo, but changes to Base when connected) ⚡
-  const [activeChain, setActiveChain] = useState<any>(isMainnet ? celo : celoSepolia);
+  // Seeded from the app's DEFAULT chain (Base). This was still Celo — a leftover from when Celo
+  // was the default — so before a wallet connected, the token picker and the balance read were
+  // pointed at a different chain from the one the app was about to connect on.
+  const [activeChain, setActiveChain] = useState<any>(isMainnet ? base : baseSepolia);
 
   const [nairaAmount, setNairaAmount] = useState(""); 
   const [accountNumber, setAccountNumber] = useState("");
@@ -1067,8 +1073,58 @@ export default function Home() {
     }
   };
 
+  /**
+   * Refuse to start a wallet interaction the wallet cannot possibly answer.
+   *
+   * Two ways that happens, and BOTH present as an eternal spinner rather than an error,
+   * because in each case nothing rejects — the request simply goes nowhere:
+   *
+   * 🔴 A DEAD SESSION. A restored-but-dead WalletConnect session is the worst state the app
+   * can be in, because everything LOOKS fine: address set, balance rendered, button enabled —
+   * and then the request is written to a closed socket, no prompt appears on the phone, and
+   * there is not even an error to show.
+   *
+   * 🔴 AN UNAPPROVED CHAIN. A WalletConnect wallet silently DROPS requests for a chain outside
+   * its approved session. Valora is Celo-only; the app defaults to Base; the session looks
+   * healthy right up until the first `eth_sendTransaction` for Base vanishes. The effect below
+   * normally follows the wallet onto a chain it did approve, but it is asynchronous and the
+   * user can outrun it — so the last word belongs here, where nothing has been committed yet.
+   *
+   * Returns true when it is safe to proceed. Disconnects on a dead session so the Connect
+   * button pairs fresh rather than restoring the same corpse.
+   */
+  const ensureWalletReachable = useCallback(async (): Promise<boolean> => {
+    const live = await walletConnectSessionLive(wagmiConnector);
+    if (live === false) {
+      setStatus("Your wallet connection has dropped — tap Connect to reconnect, then try again.");
+      setIsProcessing(false);
+      try { disconnect(); } catch { /* best effort */ }
+      localStorage.removeItem('abapay_connected');
+      return false;
+    }
+
+    // null = unknowable (an injected wallet), which must read as "no constraint" — never as
+    // "supports nothing", or every in-browser wallet would be blocked on a false negative.
+    const approved = await walletApprovedChainIds(wagmiConnector);
+    if (approved && activeChain && !approved.includes(activeChain.id)) {
+      const usable = [base, baseSepolia, celo, celoSepolia].find((c) => approved.includes(c.id));
+      setStatus(
+        usable
+          ? `Your wallet isn't connected to ${activeChain.name}. Switch AbaPay to ${usable.name} and try again.`
+          : `Your wallet isn't connected to a network AbaPay supports. Reconnect it on Base or Celo.`,
+      );
+      setIsProcessing(false);
+      // Nudge the app onto the chain the wallet actually agreed to, so the retry works.
+      if (usable) setActiveChain(usable);
+      return false;
+    }
+
+    return true; // reachable, on a chain it agreed to — or not a WalletConnect wallet at all
+  }, [wagmiConnector, disconnect, activeChain]);
+
   const processBlockchainPayment = async () => {
     if (!address || !client) return setStatus("Connect Wallet First");
+    if (!(await ensureWalletReachable())) return;
     if (!(await hasEnoughBalanceOnChain())) return setStatus(`Insufficient ${selectedToken.symbol} balance — you need ${cryptoToCharge} ${selectedToken.symbol}. Top up and try again.`);
 
     setIsProcessing(true); 
@@ -1082,15 +1138,31 @@ export default function Home() {
 
     try {
       // 1. Network Sync
+      //
+      // 🔴 EVERY CALL HERE IS A WALLET ROUND-TRIP, AND NONE OF THEM HAD A TIMEOUT. Over
+      // WalletConnect, `wallet_switchEthereumChain` and `wallet_addEthereumChain` are exactly
+      // the requests a wallet is most likely to ignore rather than refuse — Valora drops
+      // anything for a chain outside its approved session — so this block could hang before a
+      // single payment prompt was ever raised, with the button spinning and nothing to catch.
+      // 30s is generous for a chain switch, which needs at most one tap.
       try {
-        const currentChainId = await client.getChainId();
+        const currentChainId = await withWalletTimeout(client.getChainId(), 30_000);
         if (currentChainId !== activeChain.id) {
-            await client.switchChain({ id: activeChain.id });
-            await new Promise(resolve => setTimeout(resolve, 1500)); 
+            await withWalletTimeout(client.switchChain({ id: activeChain.id }), 30_000);
+            await new Promise(resolve => setTimeout(resolve, 1500));
         }
-      } catch (switchError) { 
-        await client.addChain({ chain: activeChain }); 
-        await new Promise(resolve => setTimeout(resolve, 1500)); 
+      } catch (switchError) {
+        // A wallet that won't switch may still accept the chain being added. If THAT is also
+        // ignored, stop and say so: sending a transaction for a chain the wallet has not
+        // acknowledged is how a payment disappears with no prompt and no error.
+        try {
+          await withWalletTimeout(client.addChain({ chain: activeChain }), 30_000);
+          await new Promise(resolve => setTimeout(resolve, 1500));
+        } catch {
+          setStatus(`Your wallet didn't switch to ${activeChain.name}. Open it, switch network manually, then try again — or pick a network your wallet supports.`);
+          setIsProcessing(false);
+          return; // 🛑 Do not send a transaction the wallet is going to ignore.
+        }
       }
 
       const valueInWei = parseUnits(cryptoToCharge, selectedToken.decimals);
@@ -1158,10 +1230,24 @@ export default function Home() {
               await new Promise(resolve => setTimeout(resolve, 1000));
               
           } catch (appError: any) {
+              // A wallet APP that never answered is not a user who said no. Over WalletConnect
+              // a timeout here means the request didn't reach the phone — the relay socket
+              // died under a restored session — and calling that "Approval Cancelled" sends
+              // the user looking for a prompt they declined and never saw. Name the real
+              // problem and drop the session so Connect pairs fresh instead of restoring the
+              // same dead one. Nothing was signed at this point, so there is no intent to
+              // clean up.
+              if (appError instanceof WalletTimeoutError && !isInjectedWallet) {
+                  setStatus("Your wallet never received the approval request. Tap Connect to reconnect your wallet, then try again.");
+                  try { disconnect(); } catch { /* best effort */ }
+                  localStorage.removeItem('abapay_connected');
+                  setIsProcessing(false);
+                  return;
+              }
               // User rejected approval, wallet glitched, OR withWalletTimeout gave up waiting
-              // on a wallet that never responded — that last case has no `.shortMessage`
-              // (it's a plain Error, not a viem one), so fall back to `.message` rather than
-              // mislabeling a genuine timeout as "User rejected.".
+              // on an in-browser wallet — that last case has no `.shortMessage` (it's a plain
+              // Error, not a viem one), so fall back to `.message` rather than mislabeling a
+              // genuine timeout as "User rejected.".
               // Stop everything. Do NOT touch the database.
               setStatus(`Approval Cancelled: ${appError.shortMessage?.slice(0, 60) || appError.message?.slice(0, 80) || "User rejected."}`);
               setIsProcessing(false);
@@ -1362,6 +1448,23 @@ export default function Home() {
             // SAFE: User rejected the wallet popup BEFORE signing (or withWalletTimeout gave up
             // on a wallet that never responded — a plain Error with no `.shortMessage`, so fall
             // back to `.message` rather than mislabeling a timeout as "User rejected.").
+            // A timeout on a wallet APP is usually a request that never arrived rather than a
+            // user who ignored it — the relay socket having quietly died under a restored
+            // session. Say what to do about it instead of reporting a bare timeout, and drop
+            // the session so Connect pairs fresh rather than restoring the same dead one.
+            if (e instanceof WalletTimeoutError && !isInjectedWallet) {
+              setStatus("Your wallet never received the request. Tap Connect to reconnect your wallet, then try again.");
+              try { disconnect(); } catch { /* best effort */ }
+              localStorage.removeItem('abapay_connected');
+              if (preflightHash) {
+                fetch('/api/pay', {
+                  method: 'POST',
+                  headers: { 'Content-Type': 'application/json' },
+                  body: JSON.stringify({ txHash: preflightHash, cancel_intent: true }),
+                }).catch(() => {});
+              }
+              return;
+            }
             setStatus(`Cancelled: ${e.shortMessage?.slice(0, 60) || e.message?.slice(0, 80) || "User rejected."}`);
             if (preflightHash) {
                  fetch('/api/pay', { 
@@ -1398,6 +1501,7 @@ export default function Home() {
   // state to rescue in the catch block, unlike the contract-call path.
   const processX402Payment = async () => {
     if (!address) return setStatus("Connect Wallet First");
+    if (!(await ensureWalletReachable())) return;
     // Celo: USDC + USD₮ (both have EIP-3009). Base: USDC only (Base USD₮ has no
     // transferWithAuthorization) and only when the Coinbase-facilitator rail is enabled.
     const onCelo = activeChain?.id === celo.id || activeChain?.id === celoSepolia.id;
@@ -1918,6 +2022,15 @@ export default function Home() {
     if (address || environment !== 'WEB' || localStorage.getItem('abapay_explicit_logout') === 'true') return;
     if (connectStatus === 'pending') return; // a connection attempt is already in flight
 
+    // 🔴 NOT IN VALORA. Valora's in-app browser exposes something that answers `eth_accounts`,
+    // so this effect used to fire there and the app came up connected on its own — the "it
+    // auto connects after some time" report. That connection cannot complete a payment: the
+    // first request raises a prompt, Allow toasts "Connection to AbaPay was successful!", and
+    // nothing is ever returned to the page. Auto-connecting into a rail that cannot sign is
+    // worse than not connecting at all, because it hides the working one behind a Connect
+    // button the user has no reason to press. See isValoraBrowser().
+    if (isValoraBrowser()) return;
+
     // The wallet that ALREADY has accounts for this site — not merely "an injected connector
     // exists". If none has answered `authorized` yet, bail WITHOUT marking the attempt: the
     // effect re-runs as EIP-6963 discovery fills `connectors` in, so a wallet that announces
@@ -1980,7 +2093,14 @@ export default function Home() {
 
       // Only wallets that actually answered are worth prompting. A wedged provider ('none')
       // is excluded so it can't swallow the click.
-      const usable = candidates.filter(c => c.status !== 'none');
+      //
+      // 🔴 …AND INSIDE VALORA, NONE OF THEM ARE. Valora's in-app browser answers the probe
+      // like a real injected wallet and then never returns a signature — the user taps Allow,
+      // Valora reports a successful CONNECTION, and the payment waits forever on a response
+      // that was never sent. Emptying the list here drops the click straight through to the
+      // WalletConnect branch below, which is Valora's supported rail and does return
+      // responses. The wallet is in the same app, so pairing costs a tap.
+      const usable = isValoraBrowser() ? [] : candidates.filter(c => c.status !== 'none');
 
       // 🔴 SEVERAL WALLETS: ASK, DON'T GUESS. Picking the first would pop whichever extension
       // happened to answer first — not necessarily the one the user wants — and there is no
@@ -2155,6 +2275,39 @@ export default function Home() {
     })();
     return () => { cancelled = true; };
   }, [environment, isWagmiConnected, wagmiAddress, wagmiChain, isMainnet, client, wagmiWalletClient, wagmiConnector]);
+
+  // ⚡ FOLLOW THE WALLET ONTO A CHAIN IT CAN ACTUALLY TRANSACT ON ⚡
+  //
+  // 🔴 THE VALORA HANG. A WalletConnect wallet silently DROPS requests for a chain outside its
+  // approved session — no prompt, no error, nothing back. Valora is Celo-only, and wagmi asks
+  // for chains[0], which became Base when Base became the default. The session then looks
+  // perfectly healthy (address set, balances rendering off a public RPC that needs no wallet)
+  // right up until the first transaction vanishes into the void.
+  //
+  // So the app follows the WALLET rather than insisting on its own default: if the connected
+  // wallet never approved the active chain, move the app to the first of our chains that it did
+  // approve. A Valora user lands on Celo and pays normally, instead of watching a spinner
+  // forever on Base. Injected wallets report null (unknowable, and switchable anyway) and are
+  // left alone by the guard above.
+  useEffect(() => {
+    if (environment !== 'WEB' || !isWagmiConnected || !wagmiConnector || !activeChain) return;
+    let cancelled = false;
+    (async () => {
+      const approved = await walletApprovedChainIds(wagmiConnector);
+      if (cancelled || !approved || approved.includes(activeChain.id)) return;
+
+      const fallback = [base, baseSepolia, celo, celoSepolia].find((c) => approved.includes(c.id));
+      if (!fallback) {
+        // The wallet approved nothing we support. Say so rather than letting the user discover
+        // it by watching a payment silently fail.
+        setStatus(`This wallet isn't connected to a network AbaPay supports. Reconnect it on Base or Celo.`);
+        return;
+      }
+      console.warn(`[wallet] wallet has not approved chain ${activeChain.id}; following it to ${fallback.name}`);
+      setActiveChain(fallback);
+    })();
+    return () => { cancelled = true; };
+  }, [environment, isWagmiConnected, wagmiConnector, activeChain]);
 
   // ⚡ PUT THE WALLET ON A CHAIN WE ACTUALLY SUPPORT ⚡
   //
@@ -2720,27 +2873,16 @@ export default function Home() {
                       const celoX402 = activeChain?.id === celo.id && (selectedToken.symbol === "USDC" || selectedToken.symbol === "USD₮");
                       const baseX402 = (activeChain?.id === base.id || activeChain?.id === baseSepolia.id) && selectedToken.symbol === "USDC" && process.env.NEXT_PUBLIC_BASE_X402_ENABLED !== 'false';
 
-                      // 🔴 x402 REQUIRES A WALLET IN THIS BROWSER. It settles on an
-                      // `eth_signTypedData_v4` signature that must come BACK to the page, and
-                      // some WalletConnect wallets never return one.
-                      //
-                      // Valora is the proven case. It renders the x402 typed data as
-                      // "Verify wallet — AbaPay would like to verify ownership of your wallet",
-                      // and when the user taps Allow it reports "Connection to AbaPay was
-                      // successful!" — it has classified a payment authorization as a CONNECTION
-                      // handshake, consumed it, and sent nothing back over the relay. The page
-                      // then waits for a signature that is never coming, forever, having done
-                      // everything right. There is no response to wait for and no error to
-                      // catch; from the page's side it is indistinguishable from a slow user.
-                      //
-                      // An injected wallet (Zerion, MetaMask, Base App, MiniPay, Farcaster)
-                      // answers signTypedData in-process and works correctly — x402 is verified
-                      // working there. So the rule is the capability, not a wallet blocklist:
-                      // in-browser wallet → x402; WalletConnect → the contract call, which is a
-                      // normal transaction every wallet handles. The user cannot tell the
-                      // difference; only the settlement rail changes.
-                      const walletCanSignTypedData = isInjectedWallet;
-                      const useX402 = x402Enabled && hasThirdweb && walletCanSignTypedData && (celoX402 || baseX402);
+                      // ⚠️ THIS DELIBERATELY DOES NOT BRANCH ON THE WALLET. An earlier version
+                      // restricted x402 to in-browser wallets, on the theory that Valora's
+                      // "Verify wallet" prompt swallowing the x402 signature was why it hung.
+                      // Testing disproved it: routed to the contract call, Valora hung at
+                      // exactly the same point, on a plain `eth_sendTransaction` with no
+                      // signature involved. Whatever is wrong with Valora is not the settlement
+                      // rail, so making other environments pay for it bought nothing. Both
+                      // rails, all wallets — see the chain-support guard in
+                      // processBlockchainPayment for what the real problem looks like.
+                      const useX402 = x402Enabled && hasThirdweb && (celoX402 || baseX402);
                       if (useX402) processX402Payment(); else processBlockchainPayment();
                   }}
                   className={`w-full text-white dark:text-slate-900 font-black py-5 rounded-2xl flex items-center justify-center gap-2.5 transition-all active:scale-95 shadow-xl text-lg tracking-tight ${hasPendingDuplicate ? 'bg-orange-500 dark:bg-orange-500 hover:bg-orange-600 dark:hover:bg-orange-600 text-white shadow-orange-500/20' : 'bg-slate-900 dark:bg-white hover:bg-black dark:hover:bg-slate-200 shadow-slate-900/20 dark:shadow-white/10'}`}

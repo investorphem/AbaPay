@@ -68,7 +68,7 @@ and `walletConnect()`.
 |---|---|---|
 | **MiniPay** (Opera Mini's built-in Celo wallet) | Detected directly via `window.ethereum.isMiniPay`; the app builds its own viem wallet client and locks to Celo | Gas is paid in a stablecoin (`txConfig.feeCurrency`), so users need no CELO. Network switching is intentionally disabled here. |
 | **Farcaster Mini App** | Detected via `@farcaster/miniapp-sdk`'s `sdk.context`; uses `sdk.wallet.ethProvider`, locked to Base | Addresses are read with a *silent* `getAddresses()` so opening the app never forces a wallet popup. Frame metadata ships in `public/.well-known/farcaster.json`. |
-| **Valora** | Standard WalletConnect connector — **no Valora-specific code exists or is needed** | Valora is pinned to the top of the WalletConnect modal's recommended list via `explorerRecommendedWalletIds`. It is Celo-only, and still works now that `chains` puts Base first: wagmi offers every configured chain as an *optional* namespace and requires none, so Valora simply approves Celo and the app follows it there. It works exactly the way MetaMask does. |
+| **Valora** | **WalletConnect only** — the injected path is deliberately skipped inside Valora's in-app browser (`isValoraBrowser()`) | Pinned to the top of the WalletConnect modal's recommended list via `explorerRecommendedWalletIds`. Celo-only, which the app follows automatically (`walletApprovedChainIds()`). See "Valora is WalletConnect-only" below for why the injected path is off. |
 | **MetaMask** and other injected browser wallets | Whichever **EIP-6963-discovered** connector the wallet announced, falling back to the generic `injected()` one | wagmi discovers one connector per installed wallet (`multiInjectedProviderDiscovery`, on by default). See "How the Connect button chooses" below — reading `window.ethereum` instead of these is what used to send web3-browser users to a QR code. |
 | **Coinbase Smart Wallet / Base Account** | `baseAccount()` connector | The only wallets that get **sponsored gas** — the app probes EIP-5792 paymaster capability and batches approve + pay into one sponsored call. Everything else falls back to the normal self-paid flow. |
 | **Any other WalletConnect v2 wallet** (Trust, Rainbow, Ledger Live, …) | `walletConnect()` connector with the QR modal | Nothing wallet-specific in the code — if it speaks WalletConnect and supports Celo or Base, it works. |
@@ -86,7 +86,8 @@ each one's own provider, and sends it a timed-out `eth_accounts` — a call that
 it is safe on every page load. Each wallet comes back `authorized` (already approved this site),
 `available` (real, not yet approved) or `none` (absent, or a stub that never answered).
 
-- **Any wallet `authorized`** → silent auto-connect, no popup, no Connect button.
+- **Any wallet `authorized`** → silent auto-connect, no popup, no Connect button. (Except inside
+  Valora — see below.)
 - **Exactly one usable wallet** → the Connect button uses it directly, so that wallet raises its
   own approval window.
 - **Several** → a chooser lists them; cancelling ends the attempt rather than falling through to
@@ -102,6 +103,55 @@ the injected path entirely, and showed a QR code for a wallet sitting in the sam
 
 Prompts also say **where** to approve. Over WalletConnect the request lands in a separate app
 that nothing brings to the foreground, so the copy says to open it (`walletApprovalPrompt`).
+
+#### Valora is WalletConnect-only
+
+🔴 **The "first prompt works, the second never comes" hang.** Inside Valora's in-app browser the
+page can see something that answers `eth_accounts` — real enough for the probe above to report a
+wallet, real enough for auto-connect to fire, real enough for the entire UI to look connected.
+Not real enough to pay with. The first request raises a prompt; the user taps **Allow**; Valora
+toasts *"Connection to AbaPay was successful!"* — it has taken a payment authorization for a
+connection handshake, consumed it, and returned nothing to the page. Nothing rejected, so there
+is nothing to catch. The spinner runs forever.
+
+Valora's supported rail is WalletConnect, and over WalletConnect it behaves normally: a real
+session request with a real response. So inside Valora the injected path is skipped entirely —
+`isValoraBrowser()` (`src/lib/walletEnv.ts`) suppresses auto-connect and empties the Connect
+button's injected candidate list, dropping the click straight through to WalletConnect. The
+wallet is in the same app, so pairing costs the user a tap.
+
+Detection is signal-based, not a version check: the `isValora` flag Valora's own bridge sets, or
+its name as a **whole word** in the user agent. The word boundary is deliberate — a false positive
+would strip a working in-browser wallet (Zerion, MetaMask) off the rail it should be using, which
+is the more expensive mistake. Covered in `tests/walletEnv.test.ts`.
+
+#### A restored WalletConnect session is not a live one
+
+🔴 **The "auto-connects, then hangs forever" failure.** wagmi persists the WalletConnect session
+(`cookieStorage`) and restores it on load — that is the *"it auto-connects after a while"* users
+describe. Restoring produces an address, and an address is all the UI needs to look connected:
+balances render (they come from a public RPC and never touch the wallet), the pay button enables,
+everything reads as normal.
+
+But a WalletConnect request only reaches the phone if the **relay socket is open**. Restored over
+a dead socket, `eth_sendTransaction` is written to a closed pipe: no prompt appears in the wallet,
+nothing comes back, and **there is no error to catch, because nothing rejected** — the request
+simply went nowhere. From the page it is indistinguishable from a user who hasn't looked at their
+wallet yet, which is why it presented as an eternal spinner.
+
+`walletConnectSessionLive()` (`src/lib/walletEnv.ts`) checks the relay before any wallet
+interaction; a dead session is reported in one sentence and disconnected so **Connect** pairs
+fresh instead of restoring the same corpse. A missing socket internal is treated as *live* —
+a false negative would disconnect working wallets on every payment. Injected wallets return
+`null`: they are in-process and have no socket to lose.
+
+Every wallet call also has a timeout now, including the chain-switch handshake and the Base
+`sendTransaction`, which had none. On a wallet app, a timeout is reported as "your wallet never
+received the request" with a reconnect, since that is what it almost always means.
+
+`walletApprovedChainIds()` is a related guard: a WalletConnect wallet silently drops requests for
+a chain outside its approved session, so if the connected wallet never approved the active chain
+the app follows it to one it did.
 
 #### The default chain is Base
 
@@ -410,19 +460,13 @@ in the request. It is a deliberate trade.
 Escape hatches, per chain: `NEXT_PUBLIC_X402_ENABLED=false` moves everything to the contract-call
 rail; `NEXT_PUBLIC_BASE_X402_ENABLED=false` moves only Base. Both default to on.
 
-🔴 **x402 is used only when the wallet is IN the browser.** It settles on an
-`eth_signTypedData_v4` signature that has to come *back* to the page, and some WalletConnect
-wallets never return one. Valora is the proven case: it renders the x402 typed data as *"Verify
-wallet — AbaPay would like to verify ownership of your wallet"*, and on Allow it reports
-*"Connection to AbaPay was successful!"* — it has classified a payment authorization as a
-connection handshake, consumed it, and sent nothing back over the relay. The page then waits
-forever for a signature that is never coming, with no response to await and no error to catch.
-
-So the router asks about the capability, not the wallet's name: an **injected** wallet (Zerion,
-MetaMask, Base App, MiniPay, Farcaster — all verified working) gets x402; a **WalletConnect**
-session gets the contract call, which is an ordinary transaction every wallet handles. Users see
-no difference; only the settlement rail changes. Note this means mobile WalletConnect payments
-are not x402-indexed.
+x402 runs on **every wallet and both rails**. An earlier version restricted it to in-browser
+wallets, on the theory that Valora's *"Verify wallet"* prompt swallowing the x402 signature was
+why it hung; testing disproved that — routed to the contract call, Valora hung at exactly the
+same point on a plain `eth_sendTransaction` with no signature involved. The settlement rail was
+never the problem, so making every other environment pay for it bought nothing. See "Valora is
+WalletConnect-only" and "a restored WalletConnect session is not a live one" above for what the
+problem turned out to be.
 
 Settlement runs through **Celo's own x402 facilitator** (`api.x402.celo.org` mainnet /
 `api.x402.sepolia.celo.org` testnet — built by Celo Core Co.), not thirdweb. thirdweb is
