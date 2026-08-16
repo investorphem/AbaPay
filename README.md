@@ -380,13 +380,24 @@ DEAI_TELEGRAM_BOT_TOKEN=your_deai_bot_token
 WHATSAPP_ACCESS_TOKEN=your_whatsapp_access_token
 WHATSAPP_PHONE_NUMBER_ID=your_phone_number_id
 WHATSAPP_VERIFY_TOKEN=your_verify_token
-WHATSAPP_APP_SECRET=your_meta_app_secret   # Optional but strongly recommended: verifies the X-Hub-Signature-256 on inbound webhooks so senders can't be spoofed.
+WHATSAPP_APP_SECRET=your_meta_app_secret   # ⚠️ REQUIRED. Verifies the X-Hub-Signature-256 on inbound webhooks so senders can't be spoofed.
 ```
+
+⚠️ **`WHATSAPP_APP_SECRET` is required, not optional.** The webhook **fails closed**: with it
+unset, `POST /api/whatsapp/webhook` returns **503 `Webhook not configured`** and every delivery
+from Meta is rejected — the bot goes completely silent with no other symptom. That is deliberate
+(an unset secret used to skip verification entirely, leaving anyone able to impersonate any
+sender), but it means *forgetting to set it looks exactly like the bot being broken*.
+
+To check a live deployment, POST an unsigned body at the webhook and read the status:
+`503` = the secret is missing; `401 Invalid signature` = the secret is set and the gate is
+working. Find the value in Meta App Dashboard → **App Settings → Basic → App Secret**. The same
+fail-closed rule applies to `TELEGRAM_WEBHOOK_SECRET` and `X_CONSUMER_SECRET`.
 
 ### X (Twitter)
 ```
 X_BEARER_TOKEN=your_bearer_token
-X_CONSUMER_SECRET=your_consumer_secret
+X_CONSUMER_SECRET=your_consumer_secret   # ⚠️ REQUIRED — the webhook returns 503 without it (same fail-closed rule as WhatsApp).
 X_BOT_ACCOUNT_ID=your_bot_account_id
 ```
 
