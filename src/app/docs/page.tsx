@@ -365,8 +365,9 @@ export default function DocsPage() {
               <FAQItem
                 q="I'm paying from Valora (or another wallet app) and it's stuck loading."
                 a={<>
-                  <p>When your wallet is a <strong>separate app</strong> rather than one built into this browser, AbaPay sends the approval request to it over WalletConnect — but nothing can force that app to open on top of what you&apos;re doing. The request is sitting in your wallet waiting for you.</p>
-                  <p><strong>Switch to your wallet app and approve it there</strong>, then come back. AbaPay now says so on screen rather than leaving you watching a spinner.</p>
+                  <p>When your wallet is a <strong>separate app</strong> rather than one built into this browser, AbaPay sends the approval request to it — but nothing can force that app to open on top of what you&apos;re doing. The request is sitting in your wallet waiting for you.</p>
+                  <p><strong>Switch to your wallet app and approve it there</strong>, then come back. AbaPay says so on screen rather than leaving you watching a spinner.</p>
+                  <p>Wallet apps also get a plain transaction to approve rather than a signature request, because some of them — Valora among them — treat a signature as a &ldquo;verify wallet&rdquo; step and never send the result back, which used to leave the page waiting forever. Nothing changes for you; the payment is identical.</p>
                   <p>If the request never arrives, AbaPay stops waiting after ninety seconds and tells you. Should you then approve it late, the payment can still go through — so check your <strong>History</strong> tab before paying again, to be sure you don&apos;t pay twice.</p>
                 </>}
               />

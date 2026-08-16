@@ -410,6 +410,20 @@ in the request. It is a deliberate trade.
 Escape hatches, per chain: `NEXT_PUBLIC_X402_ENABLED=false` moves everything to the contract-call
 rail; `NEXT_PUBLIC_BASE_X402_ENABLED=false` moves only Base. Both default to on.
 
+🔴 **x402 is used only when the wallet is IN the browser.** It settles on an
+`eth_signTypedData_v4` signature that has to come *back* to the page, and some WalletConnect
+wallets never return one. Valora is the proven case: it renders the x402 typed data as *"Verify
+wallet — AbaPay would like to verify ownership of your wallet"*, and on Allow it reports
+*"Connection to AbaPay was successful!"* — it has classified a payment authorization as a
+connection handshake, consumed it, and sent nothing back over the relay. The page then waits
+forever for a signature that is never coming, with no response to await and no error to catch.
+
+So the router asks about the capability, not the wallet's name: an **injected** wallet (Zerion,
+MetaMask, Base App, MiniPay, Farcaster — all verified working) gets x402; a **WalletConnect**
+session gets the contract call, which is an ordinary transaction every wallet handles. Users see
+no difference; only the settlement rail changes. Note this means mobile WalletConnect payments
+are not x402-indexed.
+
 Settlement runs through **Celo's own x402 facilitator** (`api.x402.celo.org` mainnet /
 `api.x402.sepolia.celo.org` testnet — built by Celo Core Co.), not thirdweb. thirdweb is
 still used client-side only, for `useFetchWithPayment`'s wallet-signing plumbing (protocol-

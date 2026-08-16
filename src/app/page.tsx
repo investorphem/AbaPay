@@ -1307,12 +1307,17 @@ export default function Home() {
       // ==========================================
       if (!rawHash) {
           if (isBaseChain) {
-              rawHash = await client.sendTransaction({
+              // 🔴 THIS WAS THE ONE WALLET CALL IN THE FILE WITH NO TIMEOUT — and Base is now
+              // the default chain, so it is the path most users take. A wallet that never
+              // answers (a backgrounded WalletConnect app, a wallet that swallowed the request)
+              // left the button spinning indefinitely with nothing to catch. Same 90s budget as
+              // every other wallet interaction here.
+              rawHash = await withWalletTimeout(client.sendTransaction({
                   to: ABAPAY_CONTRACT,
                   data: attributedData,
                   account: address as `0x${string}`,
                   ...txConfig // ⚡ FIX 2: Removed forced nonce so wallets don't block the transaction
-              });
+              }));
           } else {
               rawHash = await withWalletTimeout(client.writeContract({
                   address: ABAPAY_CONTRACT,
@@ -2714,7 +2719,28 @@ export default function Home() {
                       // Celo condition kept byte-identical to the original (mainnet, USDC/USD₮).
                       const celoX402 = activeChain?.id === celo.id && (selectedToken.symbol === "USDC" || selectedToken.symbol === "USD₮");
                       const baseX402 = (activeChain?.id === base.id || activeChain?.id === baseSepolia.id) && selectedToken.symbol === "USDC" && process.env.NEXT_PUBLIC_BASE_X402_ENABLED !== 'false';
-                      const useX402 = x402Enabled && hasThirdweb && (celoX402 || baseX402);
+
+                      // 🔴 x402 REQUIRES A WALLET IN THIS BROWSER. It settles on an
+                      // `eth_signTypedData_v4` signature that must come BACK to the page, and
+                      // some WalletConnect wallets never return one.
+                      //
+                      // Valora is the proven case. It renders the x402 typed data as
+                      // "Verify wallet — AbaPay would like to verify ownership of your wallet",
+                      // and when the user taps Allow it reports "Connection to AbaPay was
+                      // successful!" — it has classified a payment authorization as a CONNECTION
+                      // handshake, consumed it, and sent nothing back over the relay. The page
+                      // then waits for a signature that is never coming, forever, having done
+                      // everything right. There is no response to wait for and no error to
+                      // catch; from the page's side it is indistinguishable from a slow user.
+                      //
+                      // An injected wallet (Zerion, MetaMask, Base App, MiniPay, Farcaster)
+                      // answers signTypedData in-process and works correctly — x402 is verified
+                      // working there. So the rule is the capability, not a wallet blocklist:
+                      // in-browser wallet → x402; WalletConnect → the contract call, which is a
+                      // normal transaction every wallet handles. The user cannot tell the
+                      // difference; only the settlement rail changes.
+                      const walletCanSignTypedData = isInjectedWallet;
+                      const useX402 = x402Enabled && hasThirdweb && walletCanSignTypedData && (celoX402 || baseX402);
                       if (useX402) processX402Payment(); else processBlockchainPayment();
                   }}
                   className={`w-full text-white dark:text-slate-900 font-black py-5 rounded-2xl flex items-center justify-center gap-2.5 transition-all active:scale-95 shadow-xl text-lg tracking-tight ${hasPendingDuplicate ? 'bg-orange-500 dark:bg-orange-500 hover:bg-orange-600 dark:hover:bg-orange-600 text-white shadow-orange-500/20' : 'bg-slate-900 dark:bg-white hover:bg-black dark:hover:bg-slate-200 shadow-slate-900/20 dark:shadow-white/10'}`}
