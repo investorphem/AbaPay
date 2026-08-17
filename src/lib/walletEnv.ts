@@ -310,6 +310,36 @@ export function isValoraBrowser(): boolean {
 }
 
 /**
+ * Which wallet is on the other end of this WalletConnect session?
+ *
+ * 🔴 WHY THIS EXISTS AND `isValoraBrowser()` WASN'T ENOUGH. The first attempt identified Valora
+ * from the page's own globals — an `isValora` flag, or its name in the user agent. In Valora's
+ * in-app browser neither is there: it injects no provider and its webview reports a stock
+ * Android Chrome user agent, so the page has NOTHING local to go on. The one thing that does
+ * name the wallet is the session itself — WalletConnect exchanges peer metadata on connect, and
+ * `session.peer.metadata.name` is the wallet's own name for itself ("Valora").
+ *
+ * Available only AFTER a session exists, which is the trade: this can shape what happens next,
+ * but it cannot pre-empt the connection. Returns null for injected wallets, which have no peer.
+ */
+export async function walletConnectPeerName(connector: any): Promise<string | null> {
+  try {
+    if (connector?.type !== 'walletConnect' && connector?.id !== 'walletConnect') return null;
+    const provider: any = await connector?.getProvider?.();
+    const name = provider?.session?.peer?.metadata?.name;
+    return typeof name === 'string' && name.trim() ? name.trim() : null;
+  } catch {
+    return null;
+  }
+}
+
+/** Is the wallet on the other end of this session Valora? */
+export async function connectedWalletIsValora(connector: any): Promise<boolean> {
+  const name = await walletConnectPeerName(connector);
+  return name !== null && /\bvalora\b/i.test(name);
+}
+
+/**
  * The hosts that connect a wallet WITHOUT touching the WalletConnect relay: MiniPay and Base
  * App inject a provider straight into the page, and Farcaster supplies its own wallet through
  * the Mini App SDK. On a network that filters the relay, these keep working — which is why

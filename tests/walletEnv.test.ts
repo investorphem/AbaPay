@@ -4,6 +4,8 @@ import {
   probeInjectedConnectors,
   isUserRejection,
   looksLikeValora,
+  walletConnectPeerName,
+  connectedWalletIsValora,
   walletApprovedChainIds,
   walletConnectSessionLive,
 } from '@/lib/walletEnv';
@@ -138,6 +140,60 @@ describe('looksLikeValora', () => {
   it('ignores a flag that is present but not true', () => {
     expect(looksLikeValora(CHROME_UA, { isValora: false })).toBe(false);
     expect(looksLikeValora(CHROME_UA, { isValora: undefined })).toBe(false);
+  });
+});
+
+/**
+ * 🔴 WHY PEER METADATA AND NOT THE PAGE'S OWN GLOBALS. Identifying Valora from `isValora` or the
+ * user agent does not work in its in-app browser: it injects no provider and its webview reports
+ * a stock Android Chrome user agent, so the page has nothing local to go on. The session is the
+ * only thing that names the wallet — WalletConnect exchanges peer metadata on connect.
+ *
+ * The trade-off is that this is only knowable AFTER connecting, so it shapes what happens next
+ * rather than pre-empting the connection.
+ */
+describe('walletConnectPeerName / connectedWalletIsValora', () => {
+  const wc = (name?: string) => ({
+    type: 'walletConnect',
+    id: 'walletConnect',
+    getProvider: async () => ({ session: name === undefined ? {} : { peer: { metadata: { name } } } }),
+  });
+
+  it('reads the wallet name the peer reports for itself', async () => {
+    expect(await walletConnectPeerName(wc('Valora'))).toBe('Valora');
+    expect(await walletConnectPeerName(wc('MetaMask'))).toBe('MetaMask');
+  });
+
+  it('identifies Valora regardless of casing or surrounding words', async () => {
+    expect(await connectedWalletIsValora(wc('Valora'))).toBe(true);
+    expect(await connectedWalletIsValora(wc('valora'))).toBe(true);
+    expect(await connectedWalletIsValora(wc('Valora Wallet'))).toBe(true);
+  });
+
+  // 🔴 A false positive drops a working session and forces a needless re-pair.
+  it('leaves every other wallet connected', async () => {
+    expect(await connectedWalletIsValora(wc('MetaMask'))).toBe(false);
+    expect(await connectedWalletIsValora(wc('Trust Wallet'))).toBe(false);
+    expect(await connectedWalletIsValora(wc('Valorant Wallet'))).toBe(false); // word-bounded
+    expect(await connectedWalletIsValora(wc(undefined))).toBe(false);
+  });
+
+  it('returns null for connectors that have no peer at all', async () => {
+    expect(await walletConnectPeerName({ type: 'injected', id: 'io.metamask' })).toBeNull();
+    expect(await walletConnectPeerName(undefined)).toBeNull();
+    expect(await connectedWalletIsValora({ type: 'injected' })).toBe(false);
+  });
+
+  it('treats a blank name as unknown rather than as a match', async () => {
+    expect(await walletConnectPeerName(wc('   '))).toBeNull();
+    expect(await connectedWalletIsValora(wc('   '))).toBe(false);
+  });
+
+  it('returns null rather than throwing when the provider errors', async () => {
+    expect(await walletConnectPeerName({
+      type: 'walletConnect',
+      getProvider: async () => { throw new Error('nope'); },
+    })).toBeNull();
   });
 });
 

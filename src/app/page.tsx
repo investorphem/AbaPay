@@ -29,6 +29,7 @@ import {
   probeInjectedConnectors,
   isUserRejection,
   isValoraBrowser,
+  connectedWalletIsValora,
   walletApprovedChainIds,
   walletConnectSessionLive,
   type InjectedProbe,
@@ -93,6 +94,10 @@ export default function Home() {
   const { address: wagmiAddress, isConnected: isWagmiConnected, chain: wagmiChain, connector: wagmiConnector } = useAccount();
   const { connectors, connect, connectAsync, status: connectStatus } = useConnect();
   const autoConnectTried = useRef(false);
+  // Did the USER ask for this connection, or did wagmi restore one on mount? Only the restored
+  // kind is dropped for Valora — see the effect that enforces "no auto-connect in Valora".
+  const userInitiatedConnect = useRef(false);
+  const valoraAutoConnectChecked = useRef(false);
   // Asked once per session. A wallet on an unsupported chain gets one switch request, never a
   // loop — declining must leave the app usable, not re-prompt on every render.
   const chainSwitchAsked = useRef(false);
@@ -212,7 +217,40 @@ export default function Home() {
   // ⚡ DeAI agent allowance state
   const [agentAllowance, setAgentAllowance] = useState<string | null>(null);
   const [isApprovingAgent, setIsApprovingAgent] = useState(false);
-  const [isProcessing, setIsProcessing] = useState(false); 
+  const [isProcessing, setIsProcessing] = useState(false);
+
+  /**
+   * ⚡ AN ESCAPE HATCH FROM A WALLET THAT NEVER ANSWERS ⚡
+   *
+   * 🔴 DISMISSING A WALLET PROMPT IS NOT ALWAYS AN ANSWER. Every cancellation path in this file
+   * assumes the wallet reports the rejection — EIP-1193 says it should, and injected wallets do.
+   * Valora over WalletConnect does not: dismissing its sheet sends NOTHING back over the relay,
+   * so there is no rejection to catch, no error and no event. The request simply stays open and
+   * the page goes on waiting for a decision that has already been made. Reported as "I cancelled
+   * the wallet pop up and it kept loading for life".
+   *
+   * withWalletTimeout does eventually fire, but ninety seconds of frozen spinner AFTER you have
+   * already tapped cancel reads as broken — and that budget has to stay ninety seconds, because
+   * it is also how long someone gets to actually read a prompt before approving it.
+   *
+   * So the user gets to say so themselves. This cannot abort the in-flight request — nothing on
+   * this side can — and it deliberately does NOT claim the payment was cancelled: if they
+   * approve it a moment later it will still settle, and telling them otherwise is how someone
+   * pays twice. It stops the spinner and says exactly that. Shown only after 15s, so a normal
+   * payment never sees it.
+   */
+  const [canStopWaiting, setCanStopWaiting] = useState(false);
+  useEffect(() => {
+    if (!isProcessing) { setCanStopWaiting(false); return; }
+    const t = setTimeout(() => setCanStopWaiting(true), 15_000);
+    return () => clearTimeout(t);
+  }, [isProcessing]);
+
+  const stopWaitingForWallet = useCallback(() => {
+    setIsProcessing(false);
+    setStatus("Stopped waiting. If the payment was already approved it will still go through — check History before trying again.");
+  }, []);
+
   const [customerName, setCustomerName] = useState<string | null>(null);
   const [isVerifying, setIsVerifying] = useState(false);
   const [isConfirmModalOpen, setIsConfirmModalOpen] = useState(false);
@@ -363,11 +401,33 @@ export default function Home() {
     [activeChain]
   );
 
+  // 🔴 SWITCHING CHAIN MUST RESET TO THAT CHAIN'S LEAD STABLECOIN, NOT JUST RESCUE AN
+  // IMPOSSIBLE ONE. This only fired when the selected token didn't exist on the new chain —
+  // and USD₮ exists on BOTH. So arriving on Base from Celo (or from a Celo-shaped saved state)
+  // silently kept USD₮ selected, even though Base leads with USDC.
+  //
+  // That wasn't cosmetic, it changed the settlement rail: x402 on Base requires USDC, because
+  // Base USD₮ has no `transferWithAuthorization` to sign. A Base user left on USD₮ was quietly
+  // routed to the contract call and never saw x402 at all — reported as "in base mode it's
+  // using the normal contract call route".
+  //
+  // Keyed on the chain ID so it fires when the CHAIN changes, and never fights a user who
+  // deliberately picked the other token while staying put.
+  const lastTokenChainId = useRef<number | null>(null);
   useEffect(() => {
-     if (availableTokens.length > 0 && !availableTokens.find(t => t.symbol === selectedToken.symbol)) {
-         setSelectedToken(availableTokens[0]);
-     }
-  }, [availableTokens, selectedToken.symbol]);
+    if (availableTokens.length === 0) return;
+    const chainId = activeChain?.id ?? null;
+
+    if (lastTokenChainId.current !== chainId) {
+      lastTokenChainId.current = chainId;
+      setSelectedToken(availableTokens[0]); // the chain's lead stablecoin — USDC on Base
+      return;
+    }
+    // Same chain, but the current pick is somehow not offered here — rescue it.
+    if (!availableTokens.find(t => t.symbol === selectedToken.symbol)) {
+      setSelectedToken(availableTokens[0]);
+    }
+  }, [availableTokens, selectedToken.symbol, activeChain]);
 
   const isCurrentServiceDisabled = useMemo(() => {
       if (!killSwitches) return false;
@@ -2073,6 +2133,7 @@ export default function Home() {
     if (isConnecting) return;
 
     localStorage.removeItem('abapay_explicit_logout');
+    userInitiatedConnect.current = true; // this one is deliberate — never auto-dropped below
     setConnectError(null);
     setIsConnecting(true);
 
@@ -2102,23 +2163,28 @@ export default function Home() {
       // responses. The wallet is in the same app, so pairing costs a tap.
       const usable = isValoraBrowser() ? [] : candidates.filter(c => c.status !== 'none');
 
-      // 🔴 SEVERAL WALLETS: ASK, DON'T GUESS. Picking the first would pop whichever extension
-      // happened to answer first — not necessarily the one the user wants — and there is no
-      // way for them to correct it. The chooser resolves through this same promise, so the
-      // rest of the flow (timeouts, error messages, the WalletConnect fallback) is identical
-      // however the wallet was chosen.
+      // 🔴 ASK, DON'T GUESS — AND ALWAYS OFFER WALLETCONNECT.
       //
-      // WalletConnect is offered ALONGSIDE the installed wallets, not merely as what happens
-      // when there are none. Someone with three extensions may still want to pair a phone
-      // wallet, and the first version of this chooser gave them no way to say so — the only
-      // route to WalletConnect was to have no wallet installed at all.
-      const showChooser = usable.length > 1;
-      let chosen: InjectedCandidate | null | undefined = usable[0];
+      // Picking an installed wallet automatically would pop whichever extension answered first,
+      // not necessarily the one the user meant, with no way to correct it. So the options are
+      // presented and the chooser resolves through this same promise, keeping one flow (and one
+      // set of timeouts and error messages) however the wallet was chosen.
+      //
+      // 🔴 WALLETCONNECT IS ALWAYS IN THE LIST, not merely what happens when nothing is
+      // installed. The chooser used to require TWO OR MORE injected wallets before it appeared,
+      // so the very common "one extension installed" browser silently connected to that
+      // extension and was never offered WalletConnect at all — there was no way to pair a phone
+      // wallet short of uninstalling the extension. Building the option list first and deciding
+      // on the chooser from ITS length is what makes the single-wallet case a real choice.
+      const options: InjectedCandidate[] = wcConnector
+        ? [...usable, { connector: wcConnector, name: 'WalletConnect', status: 'available' as const }]
+        : usable;
 
-      if (showChooser) {
-        const options: InjectedCandidate[] = wcConnector
-          ? [...usable, { connector: wcConnector, name: 'WalletConnect', status: 'available' as const }]
-          : usable;
+      // One option is not a decision — a browser with no injected wallet still goes straight to
+      // WalletConnect without a pointless one-item modal.
+      let chosen: InjectedCandidate | null | undefined = options[0];
+
+      if (options.length > 1) {
         chosen = await askWhichWallet(options);
         // Cancelled — not a failure, just stop. No error banner, no QR code.
         if (!chosen) return;
@@ -2275,6 +2341,39 @@ export default function Home() {
     })();
     return () => { cancelled = true; };
   }, [environment, isWagmiConnected, wagmiAddress, wagmiChain, isMainnet, client, wagmiWalletClient, wagmiConnector]);
+
+  // ⚡ NO AUTO-CONNECT IN VALORA — PAIR FRESH OR NOT AT ALL ⚡
+  //
+  // 🔴 WHY A RESTORED VALORA SESSION IS DROPPED. wagmi persists the WalletConnect session and
+  // restores it on mount, so opening AbaPay in Valora comes up connected with no Connect button
+  // ever pressed — the "it auto connects after some time" report, and the reason the
+  // WalletConnect option never appeared: there was nothing left to connect.
+  //
+  // Valora reaches this app over WalletConnect and nothing else, and a restored session there
+  // has been the common factor in every hang. Dropping it costs one tap and guarantees the
+  // session was negotiated fresh, with a live relay socket and current peer metadata.
+  //
+  // Deliberately narrow, because this friction is worth paying only where it buys something:
+  //   • Valora only — identified from the session's own peer metadata, the sole signal
+  //     available (its in-app browser injects nothing and reports a stock Chrome user agent).
+  //   • Restored sessions only — a connection the user just asked for is never yanked out from
+  //     under them (userInitiatedConnect).
+  //   • Once per mount, so it can't fight a connect that's mid-flight.
+  useEffect(() => {
+    if (environment !== 'WEB' || !isWagmiConnected || !wagmiConnector) return;
+    if (userInitiatedConnect.current || valoraAutoConnectChecked.current) return;
+    valoraAutoConnectChecked.current = true;
+
+    let cancelled = false;
+    (async () => {
+      if (!(await connectedWalletIsValora(wagmiConnector)) || cancelled) return;
+      console.warn('[wallet] dropping a restored Valora session — Valora must pair fresh over WalletConnect.');
+      try { disconnect(); } catch { /* best effort */ }
+      localStorage.removeItem('abapay_connected');
+      setConnectError('Tap Connect to link Valora — it needs a fresh WalletConnect session each time.');
+    })();
+    return () => { cancelled = true; };
+  }, [environment, isWagmiConnected, wagmiConnector, disconnect]);
 
   // ⚡ FOLLOW THE WALLET ONTO A CHAIN IT CAN ACTUALLY TRANSACT ON ⚡
   //
@@ -2869,7 +2968,18 @@ export default function Home() {
                       // contract-call rail, which behaves identically for the user otherwise.
                       const x402Enabled = process.env.NEXT_PUBLIC_X402_ENABLED !== 'false';
                       const hasThirdweb = !!process.env.NEXT_PUBLIC_THIRDWEB_CLIENT_ID;
-                      // Celo condition kept byte-identical to the original (mainnet, USDC/USD₮).
+                      // 🔴 THE REMAINING LIMIT IS THE TOKEN, NOT THE CHAIN AND NOT THE WALLET.
+                      // x402 settles on an EIP-3009 `transferWithAuthorization` signature, so it
+                      // only works on tokens that actually implement one. Celo's USDC and USD₮
+                      // both do; on Base, USDC does and Tether's USD₮ does NOT — there is no
+                      // such function on that contract to sign against, so routing it through
+                      // x402 would fail at settlement rather than fall back gracefully.
+                      //
+                      // That is why the chain's LEAD stablecoin matters so much: Base leads with
+                      // USDC (constants/TOKEN_ORDER_BY_CHAIN), so the default path on Base is
+                      // x402. Until the token-reset effect above was keyed on chain ID, arriving
+                      // on Base kept USD₮ selected from Celo and quietly demoted every Base user
+                      // to the contract call — which is exactly what was reported.
                       const celoX402 = activeChain?.id === celo.id && (selectedToken.symbol === "USDC" || selectedToken.symbol === "USD₮");
                       const baseX402 = (activeChain?.id === base.id || activeChain?.id === baseSepolia.id) && selectedToken.symbol === "USDC" && process.env.NEXT_PUBLIC_BASE_X402_ENABLED !== 'false';
 
@@ -3429,7 +3539,12 @@ export default function Home() {
                 {status && (
                     <div className={`p-5 rounded-2xl border flex items-center gap-4 animate-in fade-in transition-colors ${status.includes('Success') ? 'bg-emerald-50 dark:bg-emerald-900/20 border-emerald-100 dark:border-emerald-800/50 text-emerald-800 dark:text-emerald-400' : 'bg-blue-50 dark:bg-blue-900/20 border-blue-100 dark:border-blue-800/50 text-blue-800 dark:text-blue-400'}`}>
                         {status.includes('Success') ? <CheckCircle2 size={24}/> : <Loader2 size={24} className="animate-spin"/>}
-                        <p className="text-sm font-black tracking-tight">{status}</p>
+                        <p className="text-sm font-black tracking-tight flex-1">{status}</p>
+                        {isProcessing && canStopWaiting && (
+                            <button onClick={stopWaitingForWallet} className="shrink-0 text-[11px] font-black tracking-tight underline underline-offset-2 opacity-70 hover:opacity-100">
+                                STOP WAITING
+                            </button>
+                        )}
                     </div>
                 )}
 
@@ -3635,7 +3750,12 @@ export default function Home() {
                 {status && (
                     <div className={`p-5 rounded-2xl border flex items-center gap-4 animate-in fade-in shadow-sm transition-colors ${status.includes('Success') || status.includes('Secured') || status.includes('Initiating') ? 'bg-emerald-50 dark:bg-emerald-900/20 border-emerald-100 dark:border-emerald-800/50 text-emerald-800 dark:text-emerald-400' : 'bg-blue-50 dark:bg-blue-900/20 border-blue-100 dark:border-blue-800/50 text-blue-800 dark:text-blue-400'}`}>
                         {status.includes('Success') ? <CheckCircle2 size={24}/> : <Loader2 size={24} className="animate-spin"/>}
-                        <p className="text-sm font-black tracking-tight">{status}</p>
+                        <p className="text-sm font-black tracking-tight flex-1">{status}</p>
+                        {isProcessing && canStopWaiting && (
+                            <button onClick={stopWaitingForWallet} className="shrink-0 text-[11px] font-black tracking-tight underline underline-offset-2 opacity-70 hover:opacity-100">
+                                STOP WAITING
+                            </button>
+                        )}
                     </div>
                 )}
 
@@ -4327,7 +4447,12 @@ export default function Home() {
                 {status && (
                     <div className={`p-5 rounded-2xl border flex items-center gap-4 animate-in fade-in shadow-sm transition-colors ${status.includes('Success') || status.includes('Secured') || status.includes('Initiating') ? 'bg-emerald-50 dark:bg-emerald-900/20 border-emerald-100 dark:border-emerald-800/50 text-emerald-800 dark:text-emerald-400' : status.includes('Processing') ? 'bg-orange-50 dark:bg-orange-900/20 border-orange-100 dark:border-orange-800/50 text-orange-800 dark:text-orange-400' : 'bg-blue-50 dark:bg-blue-900/20 border-blue-100 dark:border-blue-800/50 text-blue-800 dark:text-blue-400'}`}>
                         {status.includes('Success') ? <CheckCircle2 size={24}/> : <Loader2 size={24} className="animate-spin"/>}
-                        <p className="text-sm font-black tracking-tight">{status}</p>
+                        <p className="text-sm font-black tracking-tight flex-1">{status}</p>
+                        {isProcessing && canStopWaiting && (
+                            <button onClick={stopWaitingForWallet} className="shrink-0 text-[11px] font-black tracking-tight underline underline-offset-2 opacity-70 hover:opacity-100">
+                                STOP WAITING
+                            </button>
+                        )}
                     </div>
                 )}
 

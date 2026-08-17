@@ -86,14 +86,19 @@ each one's own provider, and sends it a timed-out `eth_accounts` — a call that
 it is safe on every page load. Each wallet comes back `authorized` (already approved this site),
 `available` (real, not yet approved) or `none` (absent, or a stub that never answered).
 
-- **Any wallet `authorized`** → silent auto-connect, no popup, no Connect button. (Except inside
+- **Any wallet `authorized`** → silent auto-connect, no popup, no Connect button. (Except with
   Valora — see below.)
-- **Exactly one usable wallet** → the Connect button uses it directly, so that wallet raises its
-  own approval window.
-- **Several** → a chooser lists them; cancelling ends the attempt rather than falling through to
-  a QR code. One extension that is both EIP-6963-announced and parked on `window.ethereum` is
-  de-duplicated, so it can't turn a single wallet into a pointless choice.
-- **None** → WalletConnect.
+- **One or more usable wallets** → a chooser lists them **plus WalletConnect**; cancelling ends
+  the attempt rather than falling through to a QR code. One extension that is both
+  EIP-6963-announced and parked on `window.ethereum` is de-duplicated, so it can't appear twice.
+- **None** → straight to WalletConnect, no pointless one-item modal.
+
+🔴 **WalletConnect is always an option, never only a fallback.** The chooser used to require
+*two or more* injected wallets before it appeared, so the very common "one extension installed"
+browser connected to that extension silently and was never offered WalletConnect at all — there
+was no route to pairing a phone wallet short of uninstalling the extension. The option list is
+now built first and the chooser decided from *its* length, which is what turns the single-wallet
+case into a real choice.
 
 🔴 **Why not `window.ethereum`:** under EIP-6963 a wallet announces itself over an event rather
 than claiming that global — which is how several extensions coexist without fighting over one
@@ -115,15 +120,44 @@ connection handshake, consumed it, and returned nothing to the page. Nothing rej
 is nothing to catch. The spinner runs forever.
 
 Valora's supported rail is WalletConnect, and over WalletConnect it behaves normally: a real
-session request with a real response. So inside Valora the injected path is skipped entirely —
-`isValoraBrowser()` (`src/lib/walletEnv.ts`) suppresses auto-connect and empties the Connect
-button's injected candidate list, dropping the click straight through to WalletConnect. The
-wallet is in the same app, so pairing costs the user a tap.
+session request with a real response. So the injected path is skipped inside Valora —
+`isValoraBrowser()` suppresses auto-connect and empties the Connect button's injected candidate
+list, dropping the click through to WalletConnect.
 
-Detection is signal-based, not a version check: the `isValora` flag Valora's own bridge sets, or
-its name as a **whole word** in the user agent. The word boundary is deliberate — a false positive
-would strip a working in-browser wallet (Zerion, MetaMask) off the rail it should be using, which
+🔴 **But the page's own globals are not enough to spot Valora.** `isValoraBrowser()` looks for an
+`isValora` flag or the name in the user agent, and in Valora's in-app browser **neither is
+present**: it injects no provider and its webview reports a stock Android Chrome user agent. The
+only thing that names the wallet is the session — WalletConnect exchanges peer metadata on
+connect, and `session.peer.metadata.name` is the wallet's own name for itself.
+
+So `connectedWalletIsValora()` reads that instead, and a **restored** Valora session is dropped on
+mount so the user pairs fresh. That is deliberately narrow, because the friction only buys
+something in one place:
+
+- **Valora only** — every other wallet keeps its restored session.
+- **Restored sessions only** — a connection the user just asked for is never yanked away
+  (`userInitiatedConnect`).
+- **Once per mount**, so it can't fight a connect that's mid-flight.
+
+The trade-off is that peer metadata only exists *after* connecting, so this shapes what happens
+next rather than pre-empting the connection. Both detectors are word-bounded — a false positive
+would drop a working session (or strip a real in-browser wallet off the rail it should use), which
 is the more expensive mistake. Covered in `tests/walletEnv.test.ts`.
+
+#### Cancelling in a wallet is not always an answer
+
+Every cancellation path assumes the wallet reports the rejection — EIP-1193 says it should, and
+injected wallets do. **Valora over WalletConnect does not**: dismissing its sheet sends nothing
+back over the relay, so there is no rejection to catch, no error and no event. The request stays
+open and the page waits on a decision that was already made — *"I cancelled the pop up and it kept
+loading for life"*.
+
+`withWalletTimeout` does fire, but 90s of frozen spinner after you've tapped cancel reads as
+broken — and that budget has to stay 90s, because it is also how long someone gets to read a
+prompt before approving. So after 15s of processing the status banner grows a **STOP WAITING**
+control. It cannot abort the in-flight request (nothing on this side can) and deliberately does
+**not** claim the payment was cancelled: if the user approves a moment later it still settles, and
+saying otherwise is how someone pays twice.
 
 #### A restored WalletConnect session is not a live one
 
@@ -511,13 +545,23 @@ in the request. It is a deliberate trade.
 Escape hatches, per chain: `NEXT_PUBLIC_X402_ENABLED=false` moves everything to the contract-call
 rail; `NEXT_PUBLIC_BASE_X402_ENABLED=false` moves only Base. Both default to on.
 
-x402 runs on **every wallet and both rails**. An earlier version restricted it to in-browser
-wallets, on the theory that Valora's *"Verify wallet"* prompt swallowing the x402 signature was
-why it hung; testing disproved that — routed to the contract call, Valora hung at exactly the
-same point on a plain `eth_sendTransaction` with no signature involved. The settlement rail was
-never the problem, so making every other environment pay for it bought nothing. See "Valora is
-WalletConnect-only" and "a restored WalletConnect session is not a live one" above for what the
-problem turned out to be.
+x402 runs on **every wallet, every environment and both chains**. An earlier version restricted it
+to in-browser wallets, on the theory that Valora's *"Verify wallet"* prompt swallowing the x402
+signature was why it hung; testing disproved that — routed to the contract call, Valora hung at
+exactly the same point on a plain `eth_sendTransaction` with no signature involved. The settlement
+rail was never the problem, so making every other environment pay for it bought nothing.
+
+🔴 **The one remaining limit is the TOKEN, not the chain and not the wallet.** x402 settles on an
+EIP-3009 `transferWithAuthorization` signature, so it only works on tokens that implement one.
+Celo's USDC and USD₮ both do; on Base, USDC does and **Tether's USD₮ does not** — there is no such
+function on that contract to sign against.
+
+That is why the chain's *lead* stablecoin matters so much. Base leads with USDC
+(`TOKEN_ORDER_BY_CHAIN`), so the default path on Base **is** x402. The token-reset effect used to
+fire only when the selected token didn't exist on the new chain — and USD₮ exists on *both*, so
+arriving on Base from Celo silently kept USD₮ selected and quietly demoted every Base user to the
+contract call. It is now keyed on the chain ID, so switching chain resets to that chain's lead
+stablecoin while never fighting a user who deliberately picks the other token in place.
 
 Settlement runs through **Celo's own x402 facilitator** (`api.x402.celo.org` mainnet /
 `api.x402.sepolia.celo.org` testnet — built by Celo Core Co.), not thirdweb. thirdweb is
