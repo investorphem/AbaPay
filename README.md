@@ -381,7 +381,47 @@ WHATSAPP_ACCESS_TOKEN=your_whatsapp_access_token
 WHATSAPP_PHONE_NUMBER_ID=your_phone_number_id
 WHATSAPP_VERIFY_TOKEN=your_verify_token
 WHATSAPP_APP_SECRET=your_meta_app_secret   # ⚠️ REQUIRED. Verifies the X-Hub-Signature-256 on inbound webhooks so senders can't be spoofed.
+WHATSAPP_SCHEDULE_TEMPLATE_NAME=schedule_update   # Approved utility template used when the 24h window has closed. Unset = scheduled payments go unreported on WhatsApp.
+WHATSAPP_SCHEDULE_TEMPLATE_LANG=en                # Must match the template's language exactly ('en' and 'en_US' are different templates).
 ```
+
+#### The 24-hour window, and why the scheduler needs a template
+
+🔴 WhatsApp lets a business send **free-form text** only within **24 hours of the user's last
+message**. Outside that window Meta rejects the send with error **131047** and the *only* thing
+that gets through is a pre-approved template.
+
+**Business Verification does not lift this.** Verification governs how *many* unique people you
+may message outside a window (250 → 1,000 → higher); it has no bearing on *what* you may send
+them. The two are independent, and conflating them is why this looked like it should already work.
+
+`src/lib/scheduler.ts` is the caller this bites: a payment scheduled for tomorrow reports back
+long after the chat that created it went quiet, so "your electricity bill was paid" was rejected
+every time — and swallowed, so the only symptom was a user who never heard back and had to find
+the receipt in History themselves.
+
+`sendWhatsAppMessage()` now sends text first (free, and correct while the window is open) and
+retries through the template **only** on 131047. Any other failure — expired token, blocked
+recipient — is not retried, since re-sending costs quality rating for nothing.
+
+**To make it work, create the template** in WhatsApp Manager → Templates, category **Utility**,
+with exactly one body variable:
+
+```
+AbaPay scheduled payment update:
+
+{{1}}
+
+Open AbaPay to see the full receipt in your History.
+```
+
+Then set `WHATSAPP_SCHEDULE_TEMPLATE_NAME` to its name. Utility templates sent *inside* an open
+window are free, so the fallback costs nothing in the common case.
+
+⚠️ **Template body parameters may not contain newlines, tabs, or 4+ consecutive spaces** — Meta
+rejects the whole send. Every scheduler message is multi-line, so `toTemplateParameter()`
+flattens them (paragraph breaks become `—`) and truncates at Meta's 1024-character cap. Covered
+in `tests/whatsapp.test.ts`.
 
 ⚠️ **`WHATSAPP_APP_SECRET` is required, not optional.** The webhook **fails closed**: with it
 unset, `POST /api/whatsapp/webhook` returns **503 `Webhook not configured`** and every delivery

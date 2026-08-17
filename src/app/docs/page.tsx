@@ -454,6 +454,7 @@ export default function DocsPage() {
                 a={<>
                   <p>Yes — just say so in chat: "every Tuesday buy ₦200 MTN airtime", "pay my meter on the 28th every month", or a one-off "top up 08012345678 in an hour". Ask to "show my schedules" or "cancel my airtime schedule" the same way.</p>
                   <p>Automatic execution is opt-in per schedule; by default a schedule only reminds you. When it is on, it's still bounded by your on-chain allowance and our per-transaction and daily caps, runs at most once per due date, and pauses itself after repeated failures.</p>
+                  <p>The outcome is reported back on whatever channel you created the schedule from. On <strong>WhatsApp</strong> there&apos;s a wrinkle outside AbaPay&apos;s control: WhatsApp only lets a business send you a free-form message within 24 hours of your last one, so a schedule due days later is delivered as a formatted notification instead. Either way, the full receipt is always in your <strong>History</strong> tab.</p>
                 </>}
               />
               <FAQItem
