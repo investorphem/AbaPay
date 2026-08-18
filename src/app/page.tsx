@@ -15,9 +15,7 @@ import { supabase } from "@/utils/supabase";
 import { celoAttributionSuffix } from "@/lib/attribution";
 import { useProviders, useValidSelection, useProviderLimits } from "@/lib/useProviders";
 import { useAccount, useConnect, useDisconnect, useWalletClient, useSwitchChain } from 'wagmi';
-import { createThirdwebClient } from "thirdweb";
-import { useSetActiveWallet, useFetchWithPayment } from "thirdweb/react";
-import { viemAdapter } from "thirdweb/adapters/viem";
+import { payWithX402, X402PaymentError } from "@/lib/x402Pay";
 
 import { ReceiptModal, SelectionModal } from "@/components/Modals";
 import PointsBadge from "@/components/PointsBadge"; 
@@ -32,6 +30,10 @@ import {
   connectedWalletIsValora,
   walletApprovedChainIds,
   walletConnectSessionLive,
+  walletCanSignTypedData,
+  walletApprovedMethods,
+  walletRouteFor,
+  routeIsRemote,
   type InjectedProbe,
   type InjectedCandidate,
   withConnectTimeout,
@@ -138,48 +140,56 @@ export default function Home() {
   const { data: wagmiWalletClient } = useWalletClient();
   const { switchChain } = useSwitchChain(); // ⚡ used by the DeAI deep-link handler to land on the right chain
 
-  // ⚡ x402 SETTLEMENT (main app only, Celo + USDC) ⚡
-  // Kept separate from the agent's signature-free relayer flow — see processX402Payment().
-  // clientId falls back to a placeholder when unconfigured; the x402 payment option is only
-  // ever shown (and fetchWithPayment only ever called) when NEXT_PUBLIC_THIRDWEB_CLIENT_ID
-  // is actually set, so the placeholder is never exercised.
-  const thirdwebClient = useMemo(
-    () => createThirdwebClient({ clientId: process.env.NEXT_PUBLIC_THIRDWEB_CLIENT_ID || "unconfigured" }),
-    []
-  );
-  const setActiveThirdwebWallet = useSetActiveWallet();
-  const { fetchWithPayment: fetchWithX402Payment } = useFetchWithPayment(thirdwebClient, { uiEnabled: false });
   const [environment, setEnvironment] = useState<'MINIPAY' | 'FARCASTER' | 'WEB' | 'LOADING' | 'BASE'>('LOADING');
 
   /**
-   * Is the live wallet IN this browser, or a separate app on the other end of WalletConnect?
+   * WHICH ROUTE the live wallet is on — read from the connector, not guessed from the page.
    *
-   * It changes what the user physically has to do to approve, and therefore what we should
-   * tell them. An injected wallet raises its own window right here; a WalletConnect wallet
-   * (Valora, Trust, Rainbow on a phone) gets a request over the relay with nothing to bring it
-   * to the foreground — the user has to switch to it themselves, and if we don't say so they
-   * will sit watching a spinner. MiniPay and Farcaster bypass wagmi and inject directly, so
-   * they count as in-browser too.
+   * It changes what the user physically has to do to approve, and therefore what we should tell
+   * them. An injected wallet raises its own window right here; a WalletConnect wallet (Valora,
+   * Trust, Rainbow on a phone) gets a request over the relay with nothing to bring it to the
+   * foreground — the user has to switch to it themselves, and if we don't say so they will sit
+   * watching a spinner. MiniPay, Farcaster and Base App bypass wagmi and inject directly, so
+   * they are in-page too, and each is named rather than lumped under "your wallet".
+   *
+   * 🔴 THE OLD TEST WAS `environment !== 'WEB' || connector.type === 'injected'`, i.e. "an
+   * in-app browser means an in-page wallet". That is not true of the wallet this matters most
+   * for: Valora browses to AbaPay in its own webview and then reaches it over the WalletConnect
+   * RELAY, so the host said "in-browser" while the request was actually going to a separate app.
+   * Every message derived from it then told the user the opposite of what to do.
    */
-  const isInjectedWallet = useMemo(
-    () => environment !== 'WEB' || wagmiConnector?.type === 'injected',
-    [environment, wagmiConnector],
+  const walletRoute = useMemo(
+    () => walletRouteFor(wagmiConnector, environment),
+    [wagmiConnector, environment],
   );
 
+  /** Is the wallet a separate app the user has to switch to? Drives every prompt below. */
+  const isRemoteWallet = useMemo(() => routeIsRemote(walletRoute), [walletRoute]);
+  const isInjectedWallet = !isRemoteWallet;
+
   /**
-   * "Please sign the final payment" → tells a WalletConnect user WHERE to go and do it.
+   * "Please sign the final payment" → tells the user WHERE to go and do it, per route.
    *
    * "…in your wallet" is only actionable when the wallet is in this browser. Over
    * WalletConnect the request lands in a separate app that nothing brings to the foreground,
    * so the honest instruction is "switch to it" — which is precisely what was missing while a
    * Valora user watched a spinner waiting for a prompt that was already sitting in Valora.
+   *
+   * The in-page hosts get their own names rather than a generic "your wallet": in MiniPay or
+   * Farcaster the approval appears in THAT app's own sheet, and naming it is the difference
+   * between looking for a prompt and finding one.
    */
   const walletApprovalPrompt = useCallback(
-    (action: string) =>
-      isInjectedWallet
-        ? `${action} in your wallet...`
-        : `${action} — open your wallet app to approve it.`,
-    [isInjectedWallet],
+    (action: string) => {
+      switch (walletRoute) {
+        case 'walletconnect': return `${action} — open your wallet app to approve it.`;
+        case 'minipay':       return `${action} in MiniPay...`;
+        case 'farcaster':     return `${action} in Farcaster...`;
+        case 'base-app':      return `${action} in Base App...`;
+        default:              return `${action} in your wallet...`;
+      }
+    },
+    [walletRoute],
   );
 
   const [killSwitches, setKillSwitches] = useState<Record<string, boolean>>({});
@@ -238,13 +248,20 @@ export default function Home() {
    * approve it a moment later it will still settle, and telling them otherwise is how someone
    * pays twice. It stops the spinner and says exactly that. Shown only after 15s, so a normal
    * payment never sees it.
+   *
+   * 🔴 AND ONLY ON THE ROUTE THAT HAS THE PROBLEM. This exists because a dismissal over the
+   * WalletConnect relay sends NOTHING back. An injected wallet does not behave that way: cancel
+   * an extension's prompt and it rejects the request, the catch block fires, and the spinner
+   * stops on its own. Offering "stop waiting" there attaches an escape hatch to a payment that
+   * was never trapped — it reads as the app admitting it has lost track of a transaction the
+   * user is midway through approving, which is alarming precisely when calm is warranted.
    */
   const [canStopWaiting, setCanStopWaiting] = useState(false);
   useEffect(() => {
-    if (!isProcessing) { setCanStopWaiting(false); return; }
+    if (!isProcessing || !isRemoteWallet) { setCanStopWaiting(false); return; }
     const t = setTimeout(() => setCanStopWaiting(true), 15_000);
     return () => clearTimeout(t);
-  }, [isProcessing]);
+  }, [isProcessing, isRemoteWallet]);
 
   const stopWaitingForWallet = useCallback(() => {
     setIsProcessing(false);
@@ -1251,9 +1268,18 @@ export default function Home() {
       const paymasterProxyUrl = typeof window !== 'undefined' ? `${window.location.origin}/api/paymaster` : undefined;
       let usingBasePaymaster = false;
 
-      if (isBaseChain && paymasterProxyUrl && typeof client.getCapabilities === 'function') {
+      // 🔴 AND IT MUST NOT BE ASKED OF A WALLET THAT WON'T ANSWER. `wallet_getCapabilities` is
+      // an ordinary WalletConnect request, so a session that never negotiated it drops the call
+      // on the floor — no prompt, no error, nothing back — and this `await` had no timeout,
+      // which would strand the payment on a spinner BEFORE the user was ever asked to approve
+      // anything. Ask only when the session says it will answer (or the wallet is in-page, where
+      // the question is answered in-process), and bound it either way.
+      const capabilitiesNegotiated = !isRemoteWallet
+        || ((await walletApprovedMethods(wagmiConnector))?.includes('wallet_getCapabilities') ?? false);
+
+      if (isBaseChain && paymasterProxyUrl && capabilitiesNegotiated && typeof client.getCapabilities === 'function') {
           try {
-              const capabilities: any = await client.getCapabilities({ account: address as `0x${string}` });
+              const capabilities: any = await withWalletTimeout(client.getCapabilities({ account: address as `0x${string}` }), 8_000);
               const chainCaps = capabilities?.[activeChain.id] || capabilities?.[`0x${activeChain.id.toString(16)}`];
               usingBasePaymaster = !!chainCaps?.paymasterService?.supported;
           } catch (capError) {
@@ -1560,7 +1586,9 @@ export default function Home() {
   // settlement is atomic within that single request, there's no "signed but unconfirmed"
   // state to rescue in the catch block, unlike the contract-call path.
   const processX402Payment = async () => {
-    if (!address) return setStatus("Connect Wallet First");
+    // `client` is required now that the signature is taken from the app's own wallet client
+    // rather than a parallel SDK — same precondition the contract-call path has always had.
+    if (!address || !client) return setStatus("Connect Wallet First");
     if (!(await ensureWalletReachable())) return;
     // Celo: USDC + USD₮ (both have EIP-3009). Base: USDC only (Base USD₮ has no
     // transferWithAuthorization) and only when the Coinbase-facilitator rail is enabled.
@@ -1596,11 +1624,24 @@ export default function Home() {
       // wallet — the exact WalletConnect-to-a-backgrounded-mobile-app case — left the user on
       // a spinner with no error, no retry and no explanation, indefinitely. Same 90s budget
       // and the same message as every other wallet interaction in this file.
-      const finalStatus: any = await withWalletTimeout(fetchWithX402Payment('/api/pay/x402', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(backendPayload),
-      }));
+      //
+      // Signed by `client` — the same wallet connection every contract call in this file uses.
+      // It used to go through thirdweb's separate wallet stack, which had to establish itself
+      // first and showed up over WalletConnect as an extra connection prompt before anything
+      // was even signed. See src/lib/x402Pay.ts.
+      //
+      // The 90s budget is handed to the SIGNATURE only, not to the whole payment: once the user
+      // has signed, the facilitator's settlement must be allowed to finish. Timing that out
+      // would report "your wallet didn't respond" about a payment already being settled — and
+      // WalletTimeoutError is precisely what suppresses the fallback below.
+      const finalStatus: any = await payWithX402({
+        url: '/api/pay/x402',
+        body: backendPayload,
+        client,
+        account: address as `0x${string}`,
+        expectedChainId: activeChain?.id,
+        wrapSignature: (p) => withWalletTimeout(p),
+      });
 
       // The server's duplicate-electricity check runs BEFORE the facilitator settles the x402
       // payment (see /api/pay/x402's placement comment), so a DUPLICATE response here means
@@ -1664,8 +1705,26 @@ export default function Home() {
         return;
       }
 
+      // 🔴 SETTLED, THEN SOMETHING ELSE WENT WRONG — NEVER FALL BACK.
+      //
+      // A failure carrying a tx_hash means the facilitator ALREADY took the money; the server
+      // has recorded it and queued a refund (see /api/pay/x402's "write the row FIRST" note).
+      // The old code could not see this — thirdweb's wrapper threw a bare Error with no body —
+      // so it went on to raise a SECOND, real payment prompt for a bill the user had already
+      // paid. That is a double charge, and it is the whole reason payWithX402 surfaces
+      // `settled` instead of just a message.
+      if (e instanceof X402PaymentError && e.settled) {
+        console.error('[x402] Settled but not delivered — refund queued, NOT falling back:', e.message, e.txHash);
+        setStatus(e.message || "Your payment went through but the bill couldn't be delivered — a refund is on its way.");
+        showToast("Payment Received, Bill Not Delivered", "Your payment settled but we couldn't complete the purchase. A refund has been queued automatically — check your History tab.", "error");
+        return;
+      }
+
+      // Nothing moved, so the contract-call rail is a genuinely safe second attempt — but it is
+      // a WHOLE SECOND PAYMENT FLOW, with its own approval and its own send. Saying so is the
+      // difference between "why is my wallet asking me again?" and an expected retry.
       console.error('[x402] Settlement failed, falling back to the standard on-chain flow:', e.message);
-      setStatus("This payment method is temporarily unavailable — trying the standard payment method instead...");
+      setStatus("Couldn't use the fast payment method — switching to the standard one. Your wallet will ask you to approve once more.");
       await processBlockchainPayment();
       return; // processBlockchainPayment manages its own isProcessing/status lifecycle
     } finally {
@@ -2424,34 +2483,27 @@ export default function Home() {
     );
   }, [environment, isWagmiConnected, wagmiChain, switchChain, isMainnet]);
 
-  // ⚡ SYNC WAGMI WALLET → THIRDWEB ACTIVE WALLET ⚡
-  // Powers x402 settlement (processX402Payment/useFetchWithPayment) without a second
-  // wallet-connect prompt: whichever wallet the user already connected via wagmi
-  // (MetaMask, WalletConnect, Base Account SDK, Valora, MiniPay) becomes the account
-  // thirdweb signs x402 payment authorizations with.
+  // ⚡ CAN THIS WALLET RETURN AN x402 SIGNATURE AT ALL? ⚡
   //
-  // viemAdapter.wallet.fromViem() returns a wallet whose internal account stays
-  // undefined until autoConnect()/connect() actually runs — thirdweb's setActiveWallet
-  // requires getAccount() to be non-null and throws synchronously otherwise. That throw
-  // happens inside an async function, so an un-awaited call here would silently become
-  // an unhandled rejection: the wallet would just never register, with no visible error,
-  // which is exactly what caused "wallet not connected" on every x402 attempt. Use
-  // autoConnect (reads eth_accounts, no popup) since the wallet is already connected via
-  // wagmi — connect() uses eth_requestAccounts and could prompt again unnecessarily.
+  // 🔴 THE FOUR-POPUP BILL. x402 needs an `eth_signTypedData_v4` signature to come BACK to the
+  // page. Valora over WalletConnect renders that request as "Verify wallet", reports
+  // "Connection to AbaPay was successful!" when the user approves, and returns nothing — so the
+  // attempt dies, the app falls back to the contract call, and the user is asked to approve
+  // twice more for the same bill. Asking a wallet to sign something it will never answer is not
+  // a rail choice, it is two wasted prompts, so the capability is resolved ONCE per connection
+  // (from the session, see walletCanSignTypedData) and the rail is picked from the answer.
+  //
+  // Defaults to true so the common case — an injected wallet, verified working — is never
+  // demoted by a check that hasn't resolved yet.
+  const [walletSupportsX402, setWalletSupportsX402] = useState(true);
   useEffect(() => {
-    if (!wagmiWalletClient) return;
     let cancelled = false;
     (async () => {
-      try {
-        const thirdwebWallet = viemAdapter.wallet.fromViem({ walletClient: wagmiWalletClient as any });
-        await thirdwebWallet.autoConnect({ client: thirdwebClient });
-        if (!cancelled) await setActiveThirdwebWallet(thirdwebWallet);
-      } catch (e) {
-        console.error("Failed to sync wallet for x402:", e);
-      }
+      const capable = await walletCanSignTypedData(wagmiConnector);
+      if (!cancelled) setWalletSupportsX402(capable);
     })();
     return () => { cancelled = true; };
-  }, [wagmiWalletClient, setActiveThirdwebWallet, thirdwebClient]);
+  }, [wagmiConnector, isWagmiConnected]);
 
   // ⚡ 2. THE CHAMELEON ENVIRONMENT DETECTOR ⚡
   useEffect(() => {
@@ -2967,7 +3019,6 @@ export default function Home() {
                       // NEXT_PUBLIC_BASE_X402_ENABLED=false for Base alone) to fall back to the
                       // contract-call rail, which behaves identically for the user otherwise.
                       const x402Enabled = process.env.NEXT_PUBLIC_X402_ENABLED !== 'false';
-                      const hasThirdweb = !!process.env.NEXT_PUBLIC_THIRDWEB_CLIENT_ID;
                       // 🔴 THE REMAINING LIMIT IS THE TOKEN, NOT THE CHAIN AND NOT THE WALLET.
                       // x402 settles on an EIP-3009 `transferWithAuthorization` signature, so it
                       // only works on tokens that actually implement one. Celo's USDC and USD₮
@@ -2983,16 +3034,22 @@ export default function Home() {
                       const celoX402 = activeChain?.id === celo.id && (selectedToken.symbol === "USDC" || selectedToken.symbol === "USD₮");
                       const baseX402 = (activeChain?.id === base.id || activeChain?.id === baseSepolia.id) && selectedToken.symbol === "USDC" && process.env.NEXT_PUBLIC_BASE_X402_ENABLED !== 'false';
 
-                      // ⚠️ THIS DELIBERATELY DOES NOT BRANCH ON THE WALLET. An earlier version
-                      // restricted x402 to in-browser wallets, on the theory that Valora's
-                      // "Verify wallet" prompt swallowing the x402 signature was why it hung.
-                      // Testing disproved it: routed to the contract call, Valora hung at
-                      // exactly the same point, on a plain `eth_sendTransaction` with no
-                      // signature involved. Whatever is wrong with Valora is not the settlement
-                      // rail, so making other environments pay for it bought nothing. Both
-                      // rails, all wallets — see the chain-support guard in
-                      // processBlockchainPayment for what the real problem looks like.
-                      const useX402 = x402Enabled && hasThirdweb && (celoX402 || baseX402);
+                      // ⚠️ IT BRANCHES ON THE WALLET'S CAPABILITY — NOT ON A WALLET BLOCKLIST,
+                      // AND NOT ON THE HOST PAGE. An earlier version restricted x402 to
+                      // in-browser wallets and was reverted because Valora hung on the contract
+                      // call too; that reasoning conflated two different faults. The hang has
+                      // since been fixed (Valora now completes contract payments — its "Send
+                      // transaction" sheet is screenshotted doing it), which leaves the ORIGINAL
+                      // observation standing on its own: Valora consumes the x402 typed-data
+                      // request as a connection handshake and returns no signature, so routing
+                      // it here costs the user two extra prompts and delivers nothing.
+                      //
+                      // walletSupportsX402 asks the SESSION whether signTypedData was ever
+                      // negotiated (plus the one wallet proven to mishandle it), so any wallet
+                      // that can sign keeps the x402 rail and only the ones that genuinely
+                      // cannot are routed straight to the contract call — with one prompt, not
+                      // three. See walletCanSignTypedData in src/lib/walletEnv.ts.
+                      const useX402 = x402Enabled && walletSupportsX402 && (celoX402 || baseX402);
                       if (useX402) processX402Payment(); else processBlockchainPayment();
                   }}
                   className={`w-full text-white dark:text-slate-900 font-black py-5 rounded-2xl flex items-center justify-center gap-2.5 transition-all active:scale-95 shadow-xl text-lg tracking-tight ${hasPendingDuplicate ? 'bg-orange-500 dark:bg-orange-500 hover:bg-orange-600 dark:hover:bg-orange-600 text-white shadow-orange-500/20' : 'bg-slate-900 dark:bg-white hover:bg-black dark:hover:bg-slate-200 shadow-slate-900/20 dark:shadow-white/10'}`}

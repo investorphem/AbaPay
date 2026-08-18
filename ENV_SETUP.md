@@ -135,12 +135,11 @@ NEXT_PUBLIC_ERC8004_AGENT_ID=          # filled in AFTER registering
 
 ---
 
-## 5. x402 Settlement — Celo's own facilitator + thirdweb (client-side only)
+## 5. x402 Settlement — Celo's own facilitator
 
 ```
 NEXT_PUBLIC_X402_ENABLED=                   # Opt-in. Unset/false = the web app uses the contract call
 CELO_X402_API_KEY=x402_...                 # Server-side: settles via api.x402.celo.org
-NEXT_PUBLIC_THIRDWEB_CLIENT_ID=...          # Client-side only: wallet-signing plumbing
 ```
 
 x402 is **on by default on both chains**. Set `NEXT_PUBLIC_X402_ENABLED=false` to route the web
@@ -169,11 +168,12 @@ cut or a subscription — you get free credits just for connecting a wallet (500
 3. When credits run low, deposit USDC from the same dashboard (~$1 ≈ 1,000 credits). At 0
    credits the facilitator returns 402 until topped up — the app sends a Telegram alert when
    this happens rather than failing silently.
-4. `NEXT_PUBLIC_THIRDWEB_CLIENT_ID` is still needed for the **client-side only** — the wallet
-   connects and signs the payment through thirdweb's SDK regardless of which facilitator
-   actually settles it (the protocol is generic). Sign up at [thirdweb.com](https://thirdweb.com)
-   → **Add New → Create Project** → set **Allowed Domains** → copy the **Client ID**. No
-   secret key or server wallet needed — thirdweb no longer does the settling.
+4. Nothing is needed client-side. The payer's EIP-3009 authorization is signed by the wallet
+   the user already connected, through the app's own viem wallet client (`src/lib/x402Pay.ts`)
+   — there is no second wallet SDK to configure. Wallets that cannot return a typed-data
+   signature over WalletConnect (Valora is the proven case: it renders the request as "Verify
+   wallet" and answers with a *connection*, not a signature) are routed to the contract call
+   instead, so they pay in one prompt rather than three.
 
 **Why not thirdweb's own facilitator?** It requires a paid billing plan just to settle on
 mainnet at all (`DELEGATION_CHECK_FAILED` — "Mainnets not enabled for this account" —
@@ -472,7 +472,7 @@ still inside the free tier.
 |---|---|---|
 | Celo / Base gas | — | Real gas costs (cents per tx), not a subscription |
 | Celo x402 facilitator | Yes, free credits on connect | Flat $0.001/settlement, prepaid USDC credits |
-| thirdweb | Free (client-side only now) | No longer used for settlement — just wallet-signing plumbing |
+| thirdweb | Not used | Removed: settlement is Celo/Coinbase facilitators, signing is the app's own wallet client |
 | Supabase | Yes | Paid plans at higher usage |
 | Resend | Yes | Paid plans at higher volume |
 | Anthropic (Claude) | No meaningful free tier | Pay-as-you-go per token, always |

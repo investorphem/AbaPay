@@ -340,6 +340,82 @@ export async function connectedWalletIsValora(connector: any): Promise<boolean> 
 }
 
 /**
+ * Which JSON-RPC methods has the connected wallet agreed to answer?
+ *
+ * The same session namespace that lists approved chains also lists approved METHODS. A wallet
+ * that never negotiated `eth_signTypedData_v4` will not answer one — the request goes the same
+ * way an unapproved-chain request goes: nowhere, silently.
+ *
+ * Returns null when unknowable (an injected wallet has no session), which callers must read as
+ * "no constraint", never as "supports nothing".
+ */
+export async function walletApprovedMethods(connector: any): Promise<string[] | null> {
+  try {
+    const provider: any = await connector?.getProvider?.();
+    const methods = provider?.session?.namespaces?.eip155?.methods;
+    return Array.isArray(methods) && methods.length > 0 ? methods.map((m: any) => String(m)) : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Can this wallet return an `eth_signTypedData_v4` signature TO THE PAGE?
+ *
+ * 🔴 THIS IS THE x402 QUESTION, AND IT IS NOT THE SAME AS "CAN IT PAY". x402 settles on a typed
+ * -data signature that has to come BACK so we can hand it to the facilitator. A wallet that
+ * cannot return one is not slow — it is a dead end, and the only way out is a second payment
+ * prompt on the contract-call rail, which is exactly the "four popups for one bill" people hit.
+ *
+ * Two grounds for a no, both evidence rather than taste:
+ *
+ *   • THE SESSION SAYS SO. If the WalletConnect session negotiated no signTypedData method, the
+ *     request is dropped on the floor the same way an unapproved-chain request is.
+ *
+ *   • VALORA SAYS "CONNECTED". Valora renders the x402 typed data as "Verify wallet — AbaPay
+ *     would like to verify ownership of your wallet" and, on Allow, announces "Connection to
+ *     AbaPay was successful!" — it has classified a payment authorization as a CONNECTION
+ *     handshake, consumed it, and sent nothing back. There is no response to await and no error
+ *     to catch. Screenshotted twice now, months apart, so it is treated as settled fact.
+ *
+ * Injected wallets (MetaMask, Zerion, Base App, MiniPay, Farcaster) answer in-process and are
+ * verified working, so an absent session reads as capable.
+ */
+export async function walletCanSignTypedData(connector: any): Promise<boolean> {
+  if (await connectedWalletIsValora(connector)) return false;
+  const methods = await walletApprovedMethods(connector);
+  if (!methods) return true; // injected / unknowable — no constraint
+  return methods.some((m) => /^eth_signTypedData(_v4|_v3)?$/.test(m));
+}
+
+/**
+ * How the live wallet is REACHED — which is what every "approve this" message has to agree with.
+ *
+ * 🔴 A STATUS LINE THAT NAMES THE WRONG ROUTE IS WORSE THAN A VAGUE ONE. "Approve it in your
+ * wallet" is actionable in an extension and misleading over WalletConnect, where the request is
+ * sitting in another app that nothing will bring to the foreground. The route is a property of
+ * the CONNECTION, so it is read from the connector — not inferred from the host page, which was
+ * the old bug: an in-app browser was assumed to mean an in-page wallet, and Valora reaches this
+ * app over the relay from inside its own browser.
+ */
+export type WalletRoute = 'injected' | 'walletconnect' | 'minipay' | 'farcaster' | 'base-app' | 'unknown';
+
+export function walletRouteFor(connector: any, environment: string): WalletRoute {
+  if (environment === 'MINIPAY') return 'minipay';
+  if (environment === 'FARCASTER') return 'farcaster';
+  if (environment === 'BASE') return 'base-app';
+  const type = String(connector?.type || connector?.id || '').toLowerCase();
+  if (type.includes('walletconnect')) return 'walletconnect';
+  if (type.includes('injected') || type.includes('metamask') || type.includes('coinbase')) return 'injected';
+  return 'unknown';
+}
+
+/** Is the wallet a SEPARATE APP the user must switch to, rather than one in this page? */
+export function routeIsRemote(route: WalletRoute): boolean {
+  return route === 'walletconnect';
+}
+
+/**
  * The hosts that connect a wallet WITHOUT touching the WalletConnect relay: MiniPay and Base
  * App inject a provider straight into the page, and Farcaster supplies its own wallet through
  * the Mini App SDK. On a network that filters the relay, these keep working — which is why

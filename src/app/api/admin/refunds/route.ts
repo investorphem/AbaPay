@@ -1,21 +1,7 @@
 import { NextResponse } from 'next/server';
 import { supabaseAdmin } from '@/utils/supabase';
 import { verifyAdminRequest } from '@/utils/adminAuth';
-import { notifyUserRefundCompleted } from '@/lib/refunds';
-import { getPublicClient, resolveChain } from '@/lib/chain';
-import { resolveTokenOnChain } from '@/constants';
-import { parseUnits, decodeEventLog } from 'viem';
-
-const ERC20_TRANSFER_ABI = [{
-  anonymous: false,
-  inputs: [
-    { indexed: true, name: 'from', type: 'address' },
-    { indexed: true, name: 'to', type: 'address' },
-    { indexed: false, name: 'value', type: 'uint256' },
-  ],
-  name: 'Transfer',
-  type: 'event',
-}] as const;
+import { verifyRefundOnChain, completeRefund, rememberRefundHash, refundHashAlreadyUsed } from '@/lib/refundVerify';
 
 // ⚡ ADMIN: REFUND QUEUE
 //
@@ -92,68 +78,63 @@ export async function POST(req: Request) {
       return NextResponse.json({ success: false, message: 'Refund transaction hash required' }, { status: 400 });
     }
 
-    // 🔐 VERIFY THE REFUND ON-CHAIN before we mark anyone as paid.
-    // Without this, a careless or malicious admin could mark refunds that never happened.
-    try {
-      const client = getPublicClient(refund.blockchain);
-      const receipt = await client.getTransactionReceipt({ hash: refund_tx_hash as `0x${string}` });
-
-      if (receipt.status !== 'success') {
-        return NextResponse.json({ success: false, message: 'That refund transaction failed on-chain.' }, { status: 400 });
-      }
-
-      const { isMainnet } = resolveChain(refund.blockchain);
-      const token = resolveTokenOnChain(refund.token_used, refund.blockchain, isMainnet);
-      const recipient = String(refund.wallet_address).toLowerCase();
-
-      let verified = false;
-      if (token) {
-        const requiredWei = parseUnits(Number(refund.amount_crypto).toFixed(token.decimals), token.decimals);
-        const tolerance = parseUnits('0.01', token.decimals);
-
-        for (const log of receipt.logs) {
-          if (log.address?.toLowerCase() !== token.address) continue;
-          try {
-            const d: any = decodeEventLog({ abi: ERC20_TRANSFER_ABI, data: log.data, topics: log.topics });
-            if (d.eventName !== 'Transfer') continue;
-            if (String(d.args.to).toLowerCase() !== recipient) continue;
-            const paid = BigInt(d.args.value);
-            const shortfall = requiredWei > paid ? requiredWei - paid : BigInt(0);
-            if (shortfall <= tolerance) { verified = true; break; }
-          } catch { /* not a Transfer log */ }
-        }
-      }
-
-      if (!verified) {
-        return NextResponse.json({
-          success: false,
-          message: 'Could not verify that refund on-chain (recipient, token, or amount did not match). NOT recorded.',
-        }, { status: 400 });
-      }
-    } catch (err: any) {
-      console.error('[Refund] verification error:', err?.message);
-      return NextResponse.json({ success: false, message: 'Could not read that refund transaction from the blockchain.' }, { status: 400 });
+    // 🔴 ONE PAYOUT CANNOT SETTLE TWO DEBTS. A retried bill leaves two queue rows with the same
+    // wallet, token and amount, so on-chain verification passes for BOTH against a single
+    // payout — see refundHashAlreadyUsed.
+    if (await refundHashAlreadyUsed(refund_tx_hash, id)) {
+      return NextResponse.json({
+        success: false,
+        message: 'That transaction is already recorded against another refund. One payout cannot settle two refunds — send a separate one for this row.',
+      }, { status: 400 });
     }
 
-    // Verified — complete it.
-    await supabaseAdmin.from('refund_queue').update({
-      status: 'COMPLETED',
-      refund_tx_hash,
-      approved_by: auth.address || 'admin',
-      approved_at: new Date().toISOString(),
-      completed_at: new Date().toISOString(),
-      notes: notes || null,
-    }).eq('id', id);
+    // 🔐 VERIFY THE REFUND ON-CHAIN before we mark anyone as paid.
+    // Without this, a careless or malicious admin could mark refunds that never happened.
+    //
+    // 🔴 BUT "NOT MINED YET" IS NOT "NOT VALID". The Ops tab posts this hash the moment the
+    // wallet broadcasts it — see AdminOpsPanel.doRefund — so the transaction is normally still
+    // in the mempool when we get here. Waiting for the receipt (rather than demanding one
+    // already exists) turns the common case from a hard failure into a short pause, and any
+    // hash we still can't confirm is KEPT on the row for the sweep to finish. Losing it was
+    // how refunds ended up paid on-chain and still showing as owed. See src/lib/refundVerify.ts.
+    const verdict = await verifyRefundOnChain({
+      blockchain: refund.blockchain,
+      tokenUsed: refund.token_used,
+      walletAddress: refund.wallet_address,
+      amountCrypto: refund.amount_crypto,
+      refundTxHash: refund_tx_hash,
+    }, 60_000);
 
-    // Keep the transaction ledger in step.
-    await supabaseAdmin.from('transactions')
-      .update({ status: 'REFUNDED', refund_hash: refund_tx_hash })
-      .eq('tx_hash', refund.tx_hash);
+    if (verdict.status === 'REVERTED') {
+      return NextResponse.json({ success: false, message: 'That refund transaction failed on-chain — no funds moved, so it is safe to send again.' }, { status: 400 });
+    }
 
-    // Tell the user, on the channel they actually used.
-    try { await notifyUserRefundCompleted(refund, refund_tx_hash); } catch { /* best-effort */ }
+    if (verdict.status === 'MISMATCH') {
+      return NextResponse.json({
+        success: false,
+        message: 'Could not verify that refund on-chain (recipient, token, or amount did not match). NOT recorded.',
+      }, { status: 400 });
+    }
 
-    return NextResponse.json({ success: true, message: 'Refund verified and recorded.' });
+    if (verdict.status === 'UNCONFIRMED') {
+      // The money may well be moving right now. Remember the hash against this row so the
+      // reconciliation sweep completes it automatically, and tell the operator NOT to resend.
+      await rememberRefundHash(id, refund_tx_hash, auth.address || 'admin');
+      console.warn('[Refund] hash recorded but unconfirmed:', refund_tx_hash, verdict.detail);
+      return NextResponse.json({
+        success: true,
+        pending: true,
+        message: 'Refund broadcast but not yet confirmed on-chain. It has been saved against this refund and will be marked complete automatically once it confirms — do NOT send it again.',
+      });
+    }
+
+    // Verified — complete it, notify the user, and keep the ledger in step.
+    const done = await completeRefund(refund, refund_tx_hash, { approvedBy: auth.address || 'admin', notes: notes || null });
+
+    return NextResponse.json({
+      success: true,
+      message: done ? 'Refund verified and recorded.' : 'This refund was already recorded.',
+    });
   } catch {
     return NextResponse.json({ success: false, message: 'Invalid request' }, { status: 400 });
   }
