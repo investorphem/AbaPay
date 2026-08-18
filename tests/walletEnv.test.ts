@@ -8,6 +8,9 @@ import {
   connectedWalletIsValora,
   walletApprovedChainIds,
   walletConnectSessionLive,
+  walletCanSignTypedData,
+  walletRouteFor,
+  routeIsRemote,
 } from '@/lib/walletEnv';
 
 /**
@@ -365,5 +368,76 @@ describe('probeInjectedConnectors', () => {
 
   it('returns nothing when the browser has no wallet at all — the WalletConnect case', async () => {
     expect(await probeInjectedConnectors([])).toEqual([]);
+  });
+});
+
+/**
+ * The four-popup bill. x402 needs an `eth_signTypedData_v4` signature to come BACK to the page;
+ * Valora over WalletConnect renders that request as "Verify wallet", answers it with a
+ * CONNECTION, and returns no signature. The attempt then dies and the app falls back to the
+ * contract call — so the user is asked to approve twice more for one bill. Routing on the
+ * capability instead of hoping keeps that to a single prompt.
+ */
+describe('walletCanSignTypedData', () => {
+  const wc = (session: unknown) => ({
+    type: 'walletConnect',
+    id: 'walletConnect',
+    getProvider: async () => ({ session }),
+  });
+
+  const sessionWith = (methods: unknown, name = 'Some Wallet') => ({
+    peer: { metadata: { name } },
+    namespaces: { eip155: { methods } },
+  });
+
+  it('says yes when the session negotiated eth_signTypedData_v4', async () => {
+    expect(await walletCanSignTypedData(wc(sessionWith(['eth_sendTransaction', 'eth_signTypedData_v4'])))).toBe(true);
+  });
+
+  it('says no when signTypedData was never negotiated — the request would be dropped silently', async () => {
+    expect(await walletCanSignTypedData(wc(sessionWith(['eth_sendTransaction', 'personal_sign'])))).toBe(false);
+  });
+
+  it('says no to Valora even when its session claims signTypedData', async () => {
+    expect(await walletCanSignTypedData(wc(sessionWith(['eth_signTypedData_v4'], 'Valora')))).toBe(false);
+  });
+
+  it('treats an injected wallet (no session to read) as capable — it answers in-process', async () => {
+    expect(await walletCanSignTypedData({ type: 'injected', getProvider: async () => ({}) })).toBe(true);
+    expect(await walletCanSignTypedData(undefined)).toBe(true);
+  });
+
+  it('accepts the older unversioned/v3 method names', async () => {
+    expect(await walletCanSignTypedData(wc(sessionWith(['eth_signTypedData'])))).toBe(true);
+    expect(await walletCanSignTypedData(wc(sessionWith(['eth_signTypedData_v3'])))).toBe(true);
+  });
+});
+
+/**
+ * Every "approve this" message has to name the route the request actually took. The old test
+ * was "an in-app browser means an in-page wallet", which is exactly wrong for Valora: it browses
+ * to the app in its own webview and then reaches it over the WalletConnect relay, so the page
+ * said "approve in your wallet" while the request was sitting in a separate app.
+ */
+describe('walletRouteFor / routeIsRemote', () => {
+  it('reads WalletConnect from the connector, not from the host page', () => {
+    expect(walletRouteFor({ type: 'walletConnect' }, 'WEB')).toBe('walletconnect');
+    expect(routeIsRemote(walletRouteFor({ type: 'walletConnect' }, 'WEB'))).toBe(true);
+  });
+
+  it('names the in-page hosts so the user knows which sheet to look for', () => {
+    expect(walletRouteFor({ type: 'injected' }, 'MINIPAY')).toBe('minipay');
+    expect(walletRouteFor({ type: 'injected' }, 'FARCASTER')).toBe('farcaster');
+    expect(walletRouteFor({ type: 'injected' }, 'BASE')).toBe('base-app');
+  });
+
+  it('treats an injected wallet as in-page — its prompt appears right here', () => {
+    expect(walletRouteFor({ type: 'injected' }, 'WEB')).toBe('injected');
+    expect(routeIsRemote(walletRouteFor({ type: 'injected' }, 'WEB'))).toBe(false);
+  });
+
+  it('never calls an unknown connector remote — the escape hatch is for the relay case only', () => {
+    expect(walletRouteFor(undefined, 'WEB')).toBe('unknown');
+    expect(routeIsRemote('unknown')).toBe(false);
   });
 });

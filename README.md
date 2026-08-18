@@ -46,7 +46,7 @@ Designed for low fees, cross-border utility vending (Nigeria + every country VTp
 * **Backend:** Next.js Route Handlers (serverless functions)
 * **Receipts:** html2canvas (image capture), jsPDF (PDF export)
 * **AI:** Claude (Anthropic API) for the DeAI conversational agent and in-app chat widget
-* **Agent Identity & Payments:** ERC-8004 (on-chain agent identity, Celo + Base) and x402 (`thirdweb` SDK) for HTTP-native, facilitator-settled payments in the main app
+* **Agent Identity & Payments:** ERC-8004 (on-chain agent identity, Celo + Base) and x402 (signed in-house with the connected wallet — `src/lib/x402Pay.ts`) for HTTP-native, facilitator-settled payments in the main app
 * **Agent Tool Access:** MCP (Model Context Protocol) — Streamable HTTP/JSON-RPC server at `/api/mcp` exposing balance-check and bill-pay tools to any MCP client — and A2A (Agent2Agent) at `/api/a2a`, card at `/.well-known/agent-card.json`, exposing the same tools to peer agents
 * **Utility Provider:** VTpass API (bills, airtime, data, education, international airtime)
 * **Bank Transfer Provider:** Monnify API (Moniepoint Inc.) — account auto-detect, Name Enquiry verification, and the real NUBAN payout, debited from a Moniepoint Microfinance Bank business account
@@ -521,8 +521,9 @@ Run this any time `agent.json`'s contents change (like the `mcp` service entry a
 ### x402 Settlement (main app, Celo + USDC/USD₮)
 ```
 CELO_X402_API_KEY=your_x402_celo_org_api_key   # Server-side: settles via api.x402.celo.org
-NEXT_PUBLIC_THIRDWEB_CLIENT_ID=your_thirdweb_client_id    # Client-side only: useFetchWithPayment's signing infra
 ```
+No client-side SDK key is needed: the payer's EIP-3009 authorization is signed by the wallet
+the user already connected (`src/lib/x402Pay.ts`), not by a second wallet SDK.
 ```env
 NEXT_PUBLIC_X402_ENABLED=                      # Default ON. Set to "false" to use the contract call instead
 ```
@@ -579,8 +580,8 @@ facilitator's own wallet.
 2. You're issued an API key instantly, plus free credits (500 mainnet, 1000 testnet at time of writing) — **the full key is shown only once**, copy it immediately.
 3. Set `CELO_X402_API_KEY` to that key — the same key works for both the mainnet and testnet endpoints, which are tracked as separate credit pools.
 4. Top up credits (USDC deposit, $1 ≈ 1,000 credits) from the same dashboard before you run out — `/settle` starts returning 402 at 0 credits, and the app sends a Telegram alert when that happens (see `src/app/api/pay/x402/route.ts`).
-5. `NEXT_PUBLIC_THIRDWEB_CLIENT_ID` still needs a thirdweb project for the client-side pieces — sign up at [thirdweb.com](https://thirdweb.com) → **Add New → Create Project**, set **Allowed Domains**, and copy the **Client ID** (no secret key or server wallet needed anymore, since thirdweb no longer does the settling).
-6. Add both vars to `.env.local` **and** your hosting provider's production environment variables, then redeploy — `NEXT_PUBLIC_*` vars are baked in at build time, so existing deployments won't pick up a change without a rebuild.
+5. Nothing else to sign up for — the client side needs no SDK account. The payment authorization is signed by the wallet the user already connected, through the app's own viem wallet client (`src/lib/x402Pay.ts`).
+6. Add the var to `.env.local` **and** your hosting provider's production environment variables, then redeploy — `NEXT_PUBLIC_*` vars are baked in at build time, so existing deployments won't pick up a change without a rebuild.
 
 ### Cron / Maintenance
 ```
@@ -1072,10 +1073,23 @@ than relying on any SDK's default — that's a deliberate choice, since thirdweb
 `settlePayment()` always delivers a fresh challenge via a base64 header with an empty JSON
 body, which generic x402 scanners (x402scan's discovery crawler included) don't parse,
 causing registration to silently fail with a correct-looking 402 status but no usable
-challenge. Client-side, `thirdweb`'s `useFetchWithPayment` (still used for its wallet-signing
-plumbing in `src/app/page.tsx`) is unaffected by any of this — it's protocol-generic and reads
-the challenge from the response body whenever there's no header present, so it works against
-this route exactly the same as it would against thirdweb's own.
+challenge.
+
+Client-side, the challenge is read, signed and retried by `src/lib/x402Pay.ts` using the same
+viem wallet client every contract call uses. It previously went through `thirdweb`'s
+`useFetchWithPayment`, which meant a second wallet connection alongside the wagmi one — over
+WalletConnect that second stack announced itself as an extra connection prompt in the middle of
+a payment, so one bill could cost four approvals. Signing in-house also lets the page read the
+server's actual answer: a settlement failure that carries a `tx_hash` means the money already
+moved, and the app must never "retry" it on the contract-call rail.
+
+**Which rail a payment takes also depends on the wallet, not just the token.** x402 settles on
+an `eth_signTypedData_v4` signature that has to come *back* to the page. Valora over
+WalletConnect renders that request as "Verify wallet", reports a successful *connection* when
+the user approves, and returns no signature — so any wallet whose session never negotiated a
+signTypedData method (and Valora specifically) is routed straight to the contract call, which
+it handles normally. That costs one prompt instead of three. See `walletCanSignTypedData` in
+`src/lib/walletEnv.ts`.
 
 That signature requirement is exactly why this is **scoped to the main app only**: the
 agent-initiated flow above depends on paying with *zero* signature at payment time (the whole

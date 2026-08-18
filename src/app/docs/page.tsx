@@ -549,7 +549,7 @@ export default function DocsPage() {
               />
               <FAQItem
                 q="What is x402 settlement, and does it change anything for me?"
-                a="x402 is an HTTP-native payment protocol that some app payments settle through automatically instead of a direct contract call, where the chain and token support it. It's invisible in day-to-day use — same wallet signature, same vault, same refund protection — it simply makes that payment independently verifiable on public x402 explorers. Which rail is used is our routing decision, not something you pick."
+                a="x402 is an HTTP-native payment protocol that some app payments settle through automatically instead of a direct contract call, where the chain, the token and your wallet all support it. It's invisible in day-to-day use — same wallet, same vault, same refund protection — it simply makes that payment independently verifiable on public x402 explorers. Some wallets can't return the kind of signature x402 needs (Valora, for one), and those payments just take the contract-call route instead. Which rail is used is our routing decision, not something you pick."
               />
               <FAQItem
                 q="Something's still wrong. How do I reach a human?"

@@ -417,6 +417,18 @@ async function handleX402Request(req: Request) {
     }
     if (!settleRes.ok || !settleResult.success) {
       console.error(`[Pay/x402] Settle rejected (${chainKey}):`, settleRes.status, 'token:', requestedTokenSymbol, 'asset:', usdc.address, 'raw:', rawSettleText.slice(0, 800));
+      // 🔴 A CONSOLE LINE IS NOT A REPORT. A rejected settlement leaves NO database row (the row
+      // is only written once money has moved), so this console line was the single trace that
+      // it happened — and reading it means having the hosting platform's logs open at the time.
+      // Meanwhile the user is bounced onto the contract-call rail and asked to approve all over
+      // again, with nobody the wiser about why. Send the facilitator's own words to the operator
+      // on the channel every other money-affecting failure already uses.
+      sendTelegramAlert(
+        `⚠️ *x402 SETTLEMENT REJECTED (${chainKey})*\n\n` +
+        `The payer signed, the facilitator refused, and they have been sent to the contract-call rail instead.\n\n` +
+        `HTTP ${settleRes.status} · ${requestedTokenSymbol} · ${requiredCrypto.toFixed(4)}\n` +
+        `\`${rawSettleText.slice(0, 400)}\``,
+      ).catch(() => {});
     }
   } catch (err: any) {
     console.error(`[Pay/x402] ${chainKey} facilitator unreachable:`, err?.message);

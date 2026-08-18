@@ -9,6 +9,7 @@ import { decodeEventLog, parseUnits } from 'viem';
 import { ABAPAY_CONTRACT_ABI_EVENTS, resolveTokenOnChain } from '@/constants';
 import { cleanupStalePreflights } from '@/lib/cleanupPreflights';
 import { reconcileStuckProcessing } from '@/lib/reconcileStuck';
+import { reconcileRecordedRefunds } from '@/lib/refundVerify';
 import { resolveChain, getPublicClient, explorerBaseFor } from '@/lib/chain';
 import { buildReceiptEmail } from '@/lib/receiptEmail';
 import { enqueueRefund } from '@/lib/refunds';
@@ -109,6 +110,11 @@ export async function POST(req: Request) {
         // Same opportunistic, throttled pattern — catches PROCESSING rows orphaned by a
         // server crash mid-vend on ANY route (contract-call, x402, agent relayer, scheduler).
         reconcileStuckProcessing().catch(() => {});
+        // And the same for a refund that was BROADCAST from the admin's wallet but never
+        // recorded (the POST that would have recorded it raced the transaction being mined, or
+        // the operator's connection dropped). Without this the money is gone from the vault and
+        // the queue still says the user is owed — see src/lib/refundVerify.ts.
+        reconcileRecordedRefunds().catch(() => {});
 
         // Extract the user's wallet address from Alchemy payload to find abandoned preflights
         const fromAddress = activity.fromAddress || null;

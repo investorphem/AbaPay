@@ -44,12 +44,20 @@ export function AdminOpsPanel({ adminHeaders, onExecuteRefund }: Props) {
 
   const doRefund = async (r: any) => {
     setBusyId(r.id); setMsg('');
+    let broadcastHash: string | null = null;
     try {
       // 1) Admin's own wallet signs the on-chain refund.
       const hash = await onExecuteRefund(r);
       if (!hash) { setMsg('Refund cancelled or failed in wallet.'); return; }
+      // 🔴 FROM HERE THE MONEY MAY ALREADY HAVE MOVED. writeContract has returned a hash, so
+      // the refund is BROADCAST — everything below is bookkeeping and none of it can un-send
+      // it. Nothing past this line may be reported as "Refund failed": that phrasing is what
+      // invites a second click and a second payout. Same rule as the Ledger tab's path.
+      broadcastHash = hash;
 
-      // 2) Backend VERIFIES it on-chain before recording it.
+      // 2) Backend VERIFIES it on-chain before recording it. It WAITS for the receipt (the
+      //    hash is normally still in the mempool at this point) and, failing that, stores the
+      //    hash against this row so the reconciliation sweep completes it later.
       const res = await fetch('/api/admin/refunds', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', ...adminHeaders },
@@ -59,7 +67,14 @@ export function AdminOpsPanel({ adminHeaders, onExecuteRefund }: Props) {
       setMsg(data.message);
       if (data.success) await load();
     } catch (e: any) {
-      setMsg(e?.shortMessage || 'Refund failed.');
+      // A throw AFTER the broadcast (network drop, tab backgrounded, server 500) is the exact
+      // case that used to lose the hash and leave a paid refund showing as still owed. Hand the
+      // operator the hash and tell them plainly not to retry.
+      setMsg(
+        broadcastHash
+          ? `Refund SENT on-chain (${broadcastHash.slice(0, 12)}…) but not yet recorded — do NOT retry. It will be reconciled automatically; paste this hash in the Ledger tab if it doesn't clear.`
+          : (e?.shortMessage || 'Refund failed.'),
+      );
     } finally {
       setBusyId(null);
     }

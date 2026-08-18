@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server';
 import { cleanupStalePreflights } from '@/lib/cleanupPreflights';
 import { reconcileStuckProcessing } from '@/lib/reconcileStuck';
 import { checkProviderBalances } from '@/lib/balanceAlerts';
+import { reconcileRecordedRefunds } from '@/lib/refundVerify';
 import { verifyCronRequest } from '@/utils/cronAuth';
 
 // ⚡ Manual / optional-cron trigger for the stale-preflight + stuck-PROCESSING sweeps.
@@ -26,13 +27,15 @@ async function handle(req: Request) {
   // check every call, but the ALERT itself keeps its own 6h per-provider cooldown regardless
   // of how often this endpoint is hit, so a cron running every few minutes can't spam Telegram
   // every time the float is confirmed low.
-  const [preflightResult, stuckResult, balanceResult] = await Promise.all([
+  const [preflightResult, stuckResult, balanceResult, refundResult] = await Promise.all([
     cleanupStalePreflights({ force: true }),
     reconcileStuckProcessing({ force: true }),
     checkProviderBalances(),
+    // Finishes refunds that were broadcast on-chain but never recorded — see refundVerify.ts.
+    reconcileRecordedRefunds({ force: true }),
   ]);
-  const ok = preflightResult.ok && stuckResult.ok && balanceResult.ok;
-  return NextResponse.json({ preflight: preflightResult, stuckProcessing: stuckResult, balances: balanceResult }, { status: ok ? 200 : 500 });
+  const ok = preflightResult.ok && stuckResult.ok && balanceResult.ok && refundResult.ok;
+  return NextResponse.json({ preflight: preflightResult, stuckProcessing: stuckResult, balances: balanceResult, refunds: refundResult }, { status: ok ? 200 : 500 });
 }
 
 export async function GET(req: Request) { return handle(req); }
