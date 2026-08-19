@@ -299,14 +299,23 @@ async function attemptX402Payment({ url, body, client, account, expectedChainId,
   // 🔴 THE ONE DISTINCTION THAT MATTERS. A tx_hash in a failure response means the facilitator
   // ALREADY MOVED THE MONEY and the trouble came after (the server couldn't vend it, and has
   // queued a refund). Anything that retries from here bills the user a second time.
+  //
+  // ⚡ AND A HASH IS NOT THE ONLY PROOF OF THAT. When the facilitator refuses with an error it
+  // gives for BOTH "nothing happened yet" and "it already happened" — `unable to estimate gas`,
+  // which is what re-simulating a spent EIP-3009 nonce produces — the server asks the chain
+  // directly whether the authorization was consumed, and answers `settled: true` when it was.
+  // There is no transaction hash in that case (the facilitator never told us one), but the money
+  // has moved just as surely, and the page must not fall back to the contract-call rail. This
+  // exact case charged a payer 1.4925 USDC twice, 140 seconds apart, for one bill.
   const txHash: string | undefined = settleBody?.tx_hash;
+  const settledWithoutHash = (settleBody as { settled?: unknown })?.settled === true;
   throw new X402PaymentError(
     settleBody?.error || settleBody?.message || `Payment could not be settled (${settleRes.status}).`,
-    Boolean(txHash),
+    Boolean(txHash) || settledWithoutHash,
     txHash,
     settleRes.status,
     // Only the SERVER gets to call a refusal worth another signature — it is the side that saw
-    // the facilitator's actual answer and knows whether a transaction was ever submitted.
-    Boolean((settleBody as { retryable?: unknown })?.retryable) && !txHash,
+    // the facilitator's actual answer and asked the chain whether the authorization was spent.
+    Boolean((settleBody as { retryable?: unknown })?.retryable) && !txHash && !settledWithoutHash,
   );
 }

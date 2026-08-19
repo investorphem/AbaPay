@@ -372,6 +372,14 @@ export default function DocsPage() {
                 </>}
               />
               <FAQItem
+                q="It says my payment went through but couldn't be confirmed. Should I pay again?"
+                a={<>
+                  <p><strong>No — don&apos;t pay again.</strong> That message means AbaPay checked the blockchain itself and found that your payment really did leave your wallet, even though the payment service that handled it reported an error instead of a receipt.</p>
+                  <p>AbaPay deliberately stops there rather than offering to retry. A retry in that situation would be a genuine second payment for the same bill, and the whole point of the check is to make sure that can&apos;t happen to you.</p>
+                  <p>Your payment is flagged for us to reconcile by hand. Check your <strong>History</strong> tab — if the bill hasn&apos;t been delivered or refunded shortly after, contact support and we&apos;ll trace it from the payment itself.</p>
+                </>}
+              />
+              <FAQItem
                 q="I opened AbaPay inside Valora's browser and it won't connect on its own."
                 a={<>
                   <p>That&apos;s deliberate. Inside Valora&apos;s built-in browser, AbaPay used to appear connected by itself — and then payments got stuck: an approval prompt would come up, you&apos;d tap <strong>Allow</strong>, Valora would say the connection succeeded, and the payment would keep loading with no second prompt ever arriving.</p>

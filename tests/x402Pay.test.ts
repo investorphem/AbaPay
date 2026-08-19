@@ -213,6 +213,35 @@ describe('payWithX402 — the signed validity window', () => {
   });
 });
 
+describe('payWithX402 — settled without a transaction hash', () => {
+  /**
+   * 🔴 THE REAL DOUBLE CHARGE. The facilitator answered `unable to estimate gas` for an
+   * authorization it had ALREADY settled (a spent EIP-3009 nonce reverts on re-simulation), so
+   * the refusal named no transaction and looked perfectly safe to retry. On Base that charged a
+   * payer 1.4925 USDC twice, 140 seconds apart, for one bill. The server now asks the chain
+   * whether the nonce was spent and says `settled: true` when it was — with no hash to offer,
+   * because the facilitator never gave one. The client must believe it anyway.
+   */
+  it('treats settled:true as settled even with no tx_hash, and refuses to re-sign it', async () => {
+    const wallet = fakeWallet();
+    let n = 0;
+    vi.stubGlobal('fetch', vi.fn(async () => (++n === 1
+      ? jsonResponse({ accepts: [accept] }, 402)
+      // Note `retryable: true` is ALSO present: `settled` has to win, or the guard is useless.
+      : jsonResponse({ settled: true, retryable: true, error: 'Your payment went through, but we could not confirm it automatically.' }, 402))));
+
+    const err = await payWithX402({ url: '/api/pay/x402', body: {}, client: wallet.client, account: ACCOUNT })
+      .catch((e) => e);
+
+    expect(err).toBeInstanceOf(X402PaymentError);
+    expect(err.settled).toBe(true);
+    expect(err.retryable).toBe(false);
+    // One signature only. A second would be a second real payment.
+    expect(wallet.calls.length).toBe(1);
+    expect(n).toBe(2);
+  });
+});
+
 describe('payWithX402 — the one automatic re-sign', () => {
   const settleRefusal = (retryable: boolean) =>
     jsonResponse({ x402Version: 1, error: 'unable to estimate gas', retryable, accepts: [accept] }, 402);
