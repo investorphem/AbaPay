@@ -368,7 +368,7 @@ export default function DocsPage() {
                   <p>When your wallet is a <strong>separate app</strong> rather than one built into this browser, AbaPay sends the approval request to it — but nothing can force that app to open on top of what you&apos;re doing. The request is sitting in your wallet waiting for you.</p>
                   <p><strong>Switch to your wallet app and approve it there</strong>, then come back. AbaPay says so on screen rather than leaving you watching a spinner.</p>
                   <p>If no prompt arrives at all, the connection to your wallet has usually gone stale. AbaPay reconnects you automatically when you return, and that remembered connection can look fine — your address and balance show — while the link to your wallet is actually closed, so requests reach nothing. AbaPay now checks that link before asking you to approve anything, and tells you to tap <strong>Connect</strong> again if it has dropped.</p>
-                  <p>If a request still goes unanswered, AbaPay stops waiting after ninety seconds rather than spinning forever. Should you then approve it late, the payment can still go through — so check your <strong>History</strong> tab before paying again, to be sure you don&apos;t pay twice.</p>
+                  <p>If a request still goes unanswered, AbaPay stops waiting after ninety seconds rather than spinning forever, and switches to its standard payment route — which will ask you to approve again, in your wallet app. That second request is the real one: the first was abandoned, so approving it late now does nothing and cannot charge you twice.</p>
                 </>}
               />
               <FAQItem
@@ -549,7 +549,7 @@ export default function DocsPage() {
               />
               <FAQItem
                 q="What is x402 settlement, and does it change anything for me?"
-                a="x402 is an HTTP-native payment protocol that some app payments settle through automatically instead of a direct contract call, where the chain, the token and your wallet all support it. It's invisible in day-to-day use — same wallet, same vault, same refund protection — it simply makes that payment independently verifiable on public x402 explorers. Some wallets can't return the kind of signature x402 needs (Valora, for one), and those payments just take the contract-call route instead. Which rail is used is our routing decision, not something you pick."
+                a="x402 is an HTTP-native payment protocol that some app payments settle through automatically instead of a direct contract call, where the chain, the token and your wallet all support it. It's invisible in day-to-day use — same wallet, same vault, same refund protection — it simply makes that payment independently verifiable on public x402 explorers. If your wallet can't return the kind of signature x402 needs, or the payment isn't accepted on that route, AbaPay switches to the ordinary contract-call route by itself and asks you to approve once more — nothing is charged twice, and you don't have to start over. Which rail is used is our routing decision, not something you pick."
               />
               <FAQItem
                 q="Something's still wrong. How do I reach a human?"

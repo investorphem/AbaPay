@@ -367,22 +367,28 @@ export async function walletApprovedMethods(connector: any): Promise<string[] | 
  * cannot return one is not slow — it is a dead end, and the only way out is a second payment
  * prompt on the contract-call rail, which is exactly the "four popups for one bill" people hit.
  *
- * Two grounds for a no, both evidence rather than taste:
+ * ONE ground for a no, and it is evidence rather than taste: THE SESSION SAYS SO. If the
+ * WalletConnect session negotiated no signTypedData method, the request is dropped on the floor
+ * the same way an unapproved-chain request is — asking anyway buys nothing but a wasted wait.
  *
- *   • THE SESSION SAYS SO. If the WalletConnect session negotiated no signTypedData method, the
- *     request is dropped on the floor the same way an unapproved-chain request is.
+ * 🔴 WHAT WAS REMOVED HERE, AND WHY. This used to answer `false` for Valora BY NAME, on the
+ * strength of Valora rendering the x402 typed data as "Verify wallet" and announcing "Connection
+ * to AbaPay was successful!" without ever returning a signature. Naming one wallet turned a
+ * maybe into a permanent no: Valora was routed straight to the contract call on BOTH chains and
+ * never saw the x402 rail again — the "the Base and Celo x402 route are both ignored in Valora"
+ * report — even once the thing that made an unanswered request unsurvivable had been fixed.
  *
- *   • VALORA SAYS "CONNECTED". Valora renders the x402 typed data as "Verify wallet — AbaPay
- *     would like to verify ownership of your wallet" and, on Allow, announces "Connection to
- *     AbaPay was successful!" — it has classified a payment authorization as a CONNECTION
- *     handshake, consumed it, and sent nothing back. There is no response to await and no error
- *     to catch. Screenshotted twice now, months apart, so it is treated as settled fact.
+ * It is fixed at the source now. An x402 signature that arrives late can no longer settle behind
+ * our back, because src/lib/x402Pay.ts is what posts the settle request and it abandons that
+ * request along with the signature — so giving up on a silent wallet and retrying on the
+ * contract-call rail is safe, and that is what the page does. Every wallet is therefore ASKED and
+ * its own answer decides, which is also the only way a wallet that starts behaving ever earns its
+ * fast rail back.
  *
  * Injected wallets (MetaMask, Zerion, Base App, MiniPay, Farcaster) answer in-process and are
  * verified working, so an absent session reads as capable.
  */
 export async function walletCanSignTypedData(connector: any): Promise<boolean> {
-  if (await connectedWalletIsValora(connector)) return false;
   const methods = await walletApprovedMethods(connector);
   if (!methods) return true; // injected / unknowable — no constraint
   return methods.some((m) => /^eth_signTypedData(_v4|_v3)?$/.test(m));

@@ -50,6 +50,22 @@ export class X402PaymentError extends Error {
     public readonly settled: boolean,
     public readonly txHash?: string,
     public readonly httpStatus?: number,
+    /**
+     * Is signing this AGAIN, against a fresh challenge, worth one more prompt?
+     *
+     * 🔴 THE BUG THIS FIELD EXISTS FOR: "it fails, I cancel and retry the same x402, and then it
+     * goes through". Reported on Base with the facilitator answering
+     * `unable to estimate gas` / `invalid_payload` — a refusal that carries no transaction, so
+     * nothing moved, and that a fresh authorization (new nonce, new validity window, the
+     * server's current price) simply does not reproduce. The app's answer used to be the
+     * contract-call rail: TWO more prompts (approve + payBill) for a bill the fast rail would
+     * have taken on a second attempt costing ONE. The server marks these `retryable`, and one
+     * re-sign is attempted before the fallback — the same thing the user was doing by hand.
+     *
+     * Never set when the payment SETTLED: a retry after money has moved is a double charge, and
+     * `settled` always wins over this flag.
+     */
+    public readonly retryable: boolean = false,
   ) {
     super(message);
     this.name = 'X402PaymentError';
@@ -131,11 +147,34 @@ export interface X402PayParams {
    * 🔴 IT MUST NOT WRAP THE WHOLE PAYMENT. The budget exists for one thing: a wallet that never
    * answers. Stretch it over the settle request too and the clock is running on the facilitator
    * while the user has already signed — which would surface as "your wallet didn't respond" for
-   * a payment that is, at that moment, being settled on-chain. The caller's timeout error is
-   * also what tells the page NOT to fall back (a late signature can still settle), so it has to
-   * mean exactly what it says.
+   * a payment that is, at that moment, being settled on-chain.
+   *
+   * ⚡ AND A SIGNATURE THAT ARRIVES LATE CANNOT SETTLE BEHIND OUR BACK. This is the property the
+   * whole Valora fix rests on, so it is stated here rather than assumed: the settle request is
+   * posted BY THIS FUNCTION, from the line after the signature is awaited. If the caller's
+   * wrapper rejects, this function unwinds and never posts anything — the wallet may still
+   * produce a signature a minute later, and it goes precisely nowhere, because nobody is left to
+   * hand it to the facilitator. So a signature timeout means "nothing moved and nothing can",
+   * which makes it safe for the page to fall back to the contract-call rail. It was NOT safe
+   * under the old thirdweb client, which owned the settle request itself and could complete it
+   * after our timeout had already fired — and the comment that used to live here still said so.
    */
   wrapSignature?: <T>(promise: Promise<T>) => Promise<T>;
+  /**
+   * How many complete challenge → sign → settle attempts before giving up. Default 2: one
+   * ordinary attempt plus one re-sign, and only when the SERVER marked the refusal retryable.
+   *
+   * See X402PaymentError.retryable — this is the automatic version of the workaround people
+   * found by hand ("cancel and retry the same x402 and it goes through"), and it is cheaper than
+   * the alternative it replaces: one more prompt on this rail, versus two on the contract call.
+   */
+  maxAttempts?: number;
+  /**
+   * Called just before the wallet is asked to sign again, with the facilitator's own reason.
+   * The page uses it to say why a second prompt is appearing — an unexplained one reads as an
+   * app that ignored the first.
+   */
+  onRetry?: (reason: string, nextAttempt: number) => void;
 }
 
 /**
@@ -143,8 +182,27 @@ export interface X402PayParams {
  *
  * Resolves with the server's final JSON (the vend result). Throws X402PaymentError with
  * `settled` set when the payment could not be completed.
+ *
+ * Retries the WHOLE cycle (fresh challenge, fresh nonce, fresh signature) when the server says
+ * the refusal was retryable and nothing moved — see maxAttempts.
  */
-export async function payWithX402({ url, body, client, account, expectedChainId, wrapSignature }: X402PayParams): Promise<Record<string, unknown>> {
+export async function payWithX402(params: X402PayParams): Promise<Record<string, unknown>> {
+  const attempts = Math.max(1, params.maxAttempts ?? 2);
+
+  for (let attempt = 1; ; attempt++) {
+    try {
+      return await attemptX402Payment(params);
+    } catch (e) {
+      // `settled` always wins: the money has moved, and a second attempt would move it again.
+      const canRetry = e instanceof X402PaymentError && e.retryable && !e.settled && attempt < attempts;
+      if (!canRetry) throw e;
+      params.onRetry?.((e as X402PaymentError).message, attempt + 1);
+    }
+  }
+}
+
+/** One attempt: challenge → signature → settle. Every retry starts again from the challenge. */
+async function attemptX402Payment({ url, body, client, account, expectedChainId, wrapSignature }: X402PayParams): Promise<Record<string, unknown>> {
   const post = (headers: Record<string, string>) =>
     fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json', ...headers }, body: JSON.stringify(body) });
 
@@ -185,7 +243,12 @@ export async function payWithX402({ url, body, client, account, expectedChainId,
     // Backdated a little: some chains' clocks run behind the browser's, and a validAfter in the
     // future makes transferWithAuthorization revert for no reason a user could ever act on.
     validAfter: String(now - 600),
-    validBefore: String(now + Math.min(accept.maxTimeoutSeconds ?? 3600, 86_400)),
+    // 🔴 AND FLOORED, NOT ONLY CAPPED. This end of the window is measured against the CHAIN's
+    // clock, not the browser's, so a device running fast can hand the facilitator an
+    // authorization that is already expired — which reverts gas estimation with nothing the
+    // user could act on ("unable to estimate gas", the Base rejection that was reported). A
+    // 15-minute floor keeps the window real however far the two clocks have drifted apart.
+    validBefore: String(now + Math.max(900, Math.min(accept.maxTimeoutSeconds ?? 3600, 86_400))),
     nonce: randomNonce(),
   };
 
@@ -242,5 +305,8 @@ export async function payWithX402({ url, body, client, account, expectedChainId,
     Boolean(txHash),
     txHash,
     settleRes.status,
+    // Only the SERVER gets to call a refusal worth another signature — it is the side that saw
+    // the facilitator's actual answer and knows whether a transaction was ever submitted.
+    Boolean((settleBody as { retryable?: unknown })?.retryable) && !txHash,
   );
 }
