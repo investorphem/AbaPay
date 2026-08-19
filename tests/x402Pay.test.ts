@@ -161,3 +161,132 @@ describe('payWithX402 — the duplicate guard', () => {
     expect(result).toMatchObject({ status: 'DUPLICATE' });
   });
 });
+
+/**
+ * "It fails and switches to the contract call, but if I cancel and retry the same x402 it will
+ * now be successful."
+ *
+ * Reported on Base, with the facilitator answering `unable to estimate gas`. The refusal moved
+ * nothing and did not reproduce on a fresh authorization — so the app's answer (drop to the
+ * contract call, two more prompts) was strictly worse than what the user was doing by hand (one
+ * more prompt on the same rail). These cover the automatic version of that, and the two lines it
+ * must never cross: a settled payment, and a refusal the server did not mark retryable.
+ */
+/**
+ * 🔴 THE VALIDITY WINDOW, WHICH IS WHAT REVERTED GAS ESTIMATION ON BASE.
+ *
+ * `validBefore` is measured against the CHAIN's clock, not the browser's. A device running fast,
+ * or a challenge whose `maxTimeoutSeconds` is small, can hand the facilitator an authorization
+ * that is already dead — and a dead authorization reverts `transferWithAuthorization` during
+ * simulation, which the facilitator reports as the reported "unable to estimate gas". A floor on
+ * the window is what keeps it real however far the two clocks have drifted apart.
+ */
+describe('payWithX402 — the signed validity window', () => {
+  const windowFor = async (maxTimeoutSeconds: number | undefined) => {
+    const wallet = fakeWallet();
+    let n = 0;
+    vi.stubGlobal('fetch', vi.fn(async () => (++n === 1
+      ? jsonResponse({ accepts: [{ ...accept, maxTimeoutSeconds }] }, 402)
+      : jsonResponse({ success: true }, 200))));
+    await payWithX402({ url: '/api/pay/x402', body: {}, client: wallet.client, account: ACCOUNT });
+    const msg = wallet.calls[0].message;
+    return { validAfter: Number(msg.validAfter), validBefore: Number(msg.validBefore) };
+  };
+
+  it('never signs a window shorter than 15 minutes, however small the challenge asks for', async () => {
+    const now = Math.floor(Date.now() / 1000);
+    // A 30-second challenge would be expired — or within the server's 60s settle margin —
+    // before the payer had finished reading their wallet's prompt.
+    const { validBefore } = await windowFor(30);
+    expect(validBefore - now).toBeGreaterThanOrEqual(900);
+  });
+
+  it('still honours a longer window the challenge asks for, and still caps it at a day', async () => {
+    const now = Math.floor(Date.now() / 1000);
+    expect((await windowFor(3600)).validBefore - now).toBeGreaterThanOrEqual(3600);
+    expect((await windowFor(999_999)).validBefore - now).toBeLessThanOrEqual(86_400);
+  });
+
+  it('backdates validAfter, because a chain clock behind the browser reverts for no reason', async () => {
+    const now = Math.floor(Date.now() / 1000);
+    expect((await windowFor(3600)).validAfter).toBeLessThanOrEqual(now - 600);
+  });
+});
+
+describe('payWithX402 — the one automatic re-sign', () => {
+  const settleRefusal = (retryable: boolean) =>
+    jsonResponse({ x402Version: 1, error: 'unable to estimate gas', retryable, accepts: [accept] }, 402);
+
+  it('re-challenges, re-signs and settles when the server says the refusal was retryable', async () => {
+    const wallet = fakeWallet();
+    const retries: string[] = [];
+    let n = 0;
+    vi.stubGlobal('fetch', vi.fn(async () => {
+      n++;
+      if (n === 1 || n === 3) return jsonResponse({ accepts: [accept] }, 402); // challenges
+      if (n === 2) return settleRefusal(true);                                 // first settle
+      return jsonResponse({ success: true, status: 'SUCCESS', tx_hash: '0xabc' }, 200);
+    }));
+
+    const result = await payWithX402({
+      url: '/api/pay/x402', body: {}, client: wallet.client, account: ACCOUNT,
+      onRetry: (reason) => retries.push(reason),
+    });
+
+    expect(result).toMatchObject({ status: 'SUCCESS' });
+    expect(wallet.calls).toHaveLength(2);          // two prompts, not one — and both were asked for
+    expect(retries).toEqual(['unable to estimate gas']); // …and the page was told why
+  });
+
+  it('signs a FRESH authorization on the retry — a reused nonce would revert on-chain', async () => {
+    const wallet = fakeWallet();
+    let n = 0;
+    vi.stubGlobal('fetch', vi.fn(async () => {
+      n++;
+      if (n === 1 || n === 3) return jsonResponse({ accepts: [accept] }, 402);
+      if (n === 2) return settleRefusal(true);
+      return jsonResponse({ success: true }, 200);
+    }));
+
+    await payWithX402({ url: '/api/pay/x402', body: {}, client: wallet.client, account: ACCOUNT });
+    expect(wallet.calls[0].message.nonce).not.toBe(wallet.calls[1].message.nonce);
+  });
+
+  it('does NOT re-sign a refusal the server left unmarked — that prompt would be wasted', async () => {
+    const wallet = fakeWallet();
+    let n = 0;
+    vi.stubGlobal('fetch', vi.fn(async () => (++n === 1
+      ? jsonResponse({ accepts: [accept] }, 402)
+      : settleRefusal(false))));
+
+    const err = await payWithX402({ url: '/api/pay/x402', body: {}, client: wallet.client, account: ACCOUNT }).catch((e) => e);
+    expect(err).toBeInstanceOf(X402PaymentError);
+    expect(err.retryable).toBe(false);
+    expect(wallet.calls).toHaveLength(1);
+  });
+
+  it('NEVER re-signs a payment that settled, however the response is marked', async () => {
+    // A tx_hash means the money moved. A second signature here is a second charge, so `settled`
+    // has to beat `retryable` even when the server contradicts itself.
+    const wallet = fakeWallet();
+    let n = 0;
+    vi.stubGlobal('fetch', vi.fn(async () => (++n === 1
+      ? jsonResponse({ accepts: [accept] }, 402)
+      : jsonResponse({ error: 'vending failed', retryable: true, tx_hash: '0xdead' }, 400))));
+
+    const err = await payWithX402({ url: '/api/pay/x402', body: {}, client: wallet.client, account: ACCOUNT }).catch((e) => e);
+    expect(err.settled).toBe(true);
+    expect(err.retryable).toBe(false);
+    expect(wallet.calls).toHaveLength(1);
+  });
+
+  it('gives up after the configured number of attempts instead of prompting forever', async () => {
+    const wallet = fakeWallet();
+    let n = 0;
+    vi.stubGlobal('fetch', vi.fn(async () => (++n % 2 === 1 ? jsonResponse({ accepts: [accept] }, 402) : settleRefusal(true))));
+
+    await expect(payWithX402({ url: '/api/pay/x402', body: {}, client: wallet.client, account: ACCOUNT }))
+      .rejects.toBeInstanceOf(X402PaymentError);
+    expect(wallet.calls).toHaveLength(2);
+  });
+});

@@ -6,6 +6,7 @@ import { sendTelegramAlert } from '@/lib/telegram';
 import { getServiceRules } from '@/lib/serviceRules';
 import { isDuplicateElectricity } from '@/lib/parity';
 import { enqueueRefund } from '@/lib/refunds';
+import { readAuthorization, checkAuthorization, isRetryableSettleFailure, settleResponseNamesTransaction } from '@/lib/x402Settle';
 
 // ⚡ x402 SETTLEMENT — MAIN APP ONLY. Two rails, resolved by chainConfigFor():
 //   • CELO (default): Celo's own facilitator (api.x402.celo.org — "Built by Celo Core Co."),
@@ -378,6 +379,11 @@ async function handleX402Request(req: Request) {
   // {paymentPayload, paymentRequirements} body shape. The exact version/network per chain come
   // from chainCfg — never hardcoded — so the Celo combo stays byte-identical.
   let settleResult: CeloSettleResponse;
+  let settleRawText = '';
+  let settleHttpStatus = 0;
+  // What will ACTUALLY move: the amount the payer signed, which from here on replaces the
+  // recomputed price everywhere it matters (the DB row, the vend, any refund). See below.
+  let chargedCrypto = requiredCrypto;
   try {
     let decodedPayload: any;
     try {
@@ -386,93 +392,174 @@ async function handleX402Request(req: Request) {
       return NextResponse.json({ x402Version: 1, error: 'Malformed X-PAYMENT header', accepts: [acceptEntry] }, { status: 402 });
     }
 
+    // 🔴 CHECK THE PAYLOAD BEFORE SPENDING A FACILITATOR ROUND-TRIP ON IT.
+    //
+    // An authorization that cannot settle comes back from the facilitator as
+    // "unable to estimate gas" — a revert during simulation, with no clue which of EIP-3009's
+    // several revert conditions caused it. That is the message that was reported on Base, and
+    // it cost the payer a Telegram alert, a dead rail and two extra prompts on the fallback.
+    // The conditions this can decide (expired window, a clock-skewed validAfter, an amount that
+    // disagrees with what we are about to declare as required) are decided HERE, where each one
+    // has a specific answer and a specific message. See src/lib/x402Settle.ts.
+    const auth = readAuthorization(decodedPayload);
+    const authCheck = checkAuthorization({
+      auth,
+      payTo,
+      requiredWei,
+      nowSec: Math.floor(Date.now() / 1000),
+    });
+
+    if (!authCheck.ok) {
+      console.error(`[Pay/x402] Authorization refused before settling (${chainKey}):`, authCheck.code, 'required:', requiredWei.toString(), 'signed:', auth?.value);
+      return NextResponse.json(
+        // `retryable` is what the client reads to decide between re-signing once on this rail
+        // and dropping to the contract call — see X402PaymentError.retryable. `accepts` carries
+        // a CURRENT challenge, so a re-sign is made against today's price and a fresh window.
+        { x402Version: 1, error: authCheck.message, errorCode: authCheck.code, retryable: authCheck.retryable, accepts: [acceptEntry] },
+        { status: 402 },
+      );
+    }
+
+    // 🔴 THE REQUIREMENTS MUST DECLARE WHAT WAS SIGNED, NOT WHAT WE RECOMPUTED.
+    //
+    // `acceptEntry` is rebuilt from scratch on the settle request, and its price comes from the
+    // exchange rate — which is cached for 30 seconds and can therefore differ from the rate the
+    // CHALLENGE was priced at, if the payer took a moment to approve. The facilitator receives
+    // both the payload and the requirements and reconciles them; hand it a pair that disagrees
+    // and it refuses, opaquely. checkAuthorization has already established that the signed value
+    // covers this bill and is not wildly above it, so the signed value is the honest figure for
+    // both — and the figure the user is actually charged, which is what gets recorded.
+    const chargedWei = authCheck.chargedWei;
+    chargedCrypto = Number(chargedWei) / 10 ** usdc.decimals;
+    const settleRequirements = { ...acceptEntry, amount: chargedWei.toString(), maxAmountRequired: chargedWei.toString() };
+
     const facilitatorPaymentPayload = { ...decodedPayload, x402Version: chainCfg.settleX402Version, network: chainCfg.settleNetworkName };
-    const facilitatorPaymentRequirements = { ...acceptEntry, network: chainCfg.settleNetworkName };
+    const facilitatorPaymentRequirements = { ...settleRequirements, network: chainCfg.settleNetworkName };
 
     const authHeaders = await chainCfg.authFor(CDP_FACILITATOR_SETTLE_PATH);
     if (!authHeaders) {
       return NextResponse.json({ success: false, status: 'FAILED_VENDING', message: 'This payment method is temporarily unavailable on this network.' }, { status: 500 });
     }
 
-    const settleRes = await fetch(chainCfg.facilitatorSettleUrl, {
-      method: 'POST',
-      headers: { ...authHeaders, 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        x402Version: chainCfg.settleX402Version,
-        paymentPayload: facilitatorPaymentPayload,
-        paymentRequirements: facilitatorPaymentRequirements,
-      }),
-    });
-    // ⚡ Capture the RAW response — the old code did `.json()` and then only read
-    // `errorReason`/`errorMessage`, which logged "undefined undefined" whenever the
-    // facilitator returned a DIFFERENT error shape (or a non-JSON / non-200 body). That hid
-    // the actual reason a settlement was rejected. Log status + full raw body so the real
-    // cause is always visible.
-    const rawSettleText = await settleRes.text();
-    try {
-      settleResult = JSON.parse(rawSettleText);
-    } catch {
-      console.error(`[Pay/x402] Settle returned non-JSON (${chainKey}):`, settleRes.status, rawSettleText.slice(0, 500));
-      return NextResponse.json({ x402Version: 1, error: `Facilitator error (${settleRes.status})`, accepts: [acceptEntry] }, { status: 402 });
+    // ⚡ ONE SILENT RETRY, AND ONLY WHERE IT CANNOT POSSIBLY COST MONEY.
+    //
+    // 🔴 THE REPORT THIS ANSWERS: "it fails and switches to the contract call, but if I cancel
+    // and retry the same x402 it goes through." The facilitator refused with
+    // `unable to estimate gas` — a simulation that reverted against state it could not read —
+    // and the identical payload settled moments later. That second attempt is one the SERVER can
+    // make, without the user's wallet being asked anything at all.
+    //
+    // Safe by construction, and the reason is EIP-3009 itself: the authorization carries a
+    // single-use nonce, so the token contract will accept it AT MOST ONCE no matter how many
+    // times it is submitted. A retry can therefore duplicate a request but never a transfer.
+    // The two conditions guarding it are about honesty rather than safety: retry only a refusal
+    // the facilitator actually returned (never a network error, where we cannot know what it
+    // did), and never one that names a transaction hash.
+    const SETTLE_ATTEMPTS = 2;
+    const SETTLE_RETRY_DELAY_MS = 1_200;
+
+    const attemptSettle = async () => {
+      // A fresh CDP JWT per attempt — they are short-lived and bound to this exact request.
+      const perAttemptAuth = (await chainCfg.authFor(CDP_FACILITATOR_SETTLE_PATH)) || authHeaders;
+      const res = await fetch(chainCfg.facilitatorSettleUrl, {
+        method: 'POST',
+        headers: { ...perAttemptAuth, 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          x402Version: chainCfg.settleX402Version,
+          paymentPayload: facilitatorPaymentPayload,
+          paymentRequirements: facilitatorPaymentRequirements,
+        }),
+      });
+      // ⚡ Capture the RAW response — the old code did `.json()` and then only read
+      // `errorReason`/`errorMessage`, which logged "undefined undefined" whenever the
+      // facilitator returned a DIFFERENT error shape (or a non-JSON / non-200 body). That hid
+      // the actual reason a settlement was rejected. Log status + full raw body so the real
+      // cause is always visible.
+      return { status: res.status, ok: res.ok, text: await res.text() };
+    };
+
+    let parsed: any = null;
+    for (let attempt = 1; ; attempt++) {
+      const res = await attemptSettle();
+      settleHttpStatus = res.status;
+      settleRawText = res.text;
+      try { parsed = JSON.parse(res.text); } catch { parsed = null; }
+
+      if (res.ok && parsed?.success === true) break;
+
+      const movedSomething = settleResponseNamesTransaction(parsed);
+      const worthRetrying = !movedSomething
+        && attempt < SETTLE_ATTEMPTS
+        && parsed !== null
+        && isRetryableSettleFailure(res.status, res.text);
+      if (!worthRetrying) break;
+
+      console.warn(`[Pay/x402] Settle refused (${chainKey}), retrying once:`, res.status, res.text.slice(0, 300));
+      await new Promise((resolve) => setTimeout(resolve, SETTLE_RETRY_DELAY_MS));
     }
-    if (!settleRes.ok || !settleResult.success) {
-      console.error(`[Pay/x402] Settle rejected (${chainKey}):`, settleRes.status, 'token:', requestedTokenSymbol, 'asset:', usdc.address, 'raw:', rawSettleText.slice(0, 800));
+
+    if (parsed === null) {
+      console.error(`[Pay/x402] Settle returned non-JSON (${chainKey}):`, settleHttpStatus, settleRawText.slice(0, 500));
+      return NextResponse.json(
+        { x402Version: 1, error: `Facilitator error (${settleHttpStatus})`, retryable: true, accepts: [acceptEntry] },
+        { status: 402 },
+      );
+    }
+    settleResult = parsed as CeloSettleResponse;
+  } catch (err: any) {
+    // 🔴 NOT RETRYABLE, DELIBERATELY. A fetch that threw tells us nothing about what the
+    // facilitator did with the request — it may have settled and lost the response. Signing
+    // again here could pay twice; the contract-call rail at least prompts the user first.
+    console.error(`[Pay/x402] ${chainKey} facilitator unreachable:`, err?.message);
+    return NextResponse.json({ x402Version: 1, error: 'Facilitator temporarily unavailable', accepts: [acceptEntry] }, { status: 402 });
+  }
+
+  if (!settleResult.success) {
+    const allText = settleRawText || JSON.stringify(settleResult);
+    const namesTransaction = settleResponseNamesTransaction(settleResult);
+    // Retryable = a fresh signature is worth one prompt. Never when a transaction was named:
+    // money may already have moved, and the client must not sign anything else.
+    const retryable = !namesTransaction && isRetryableSettleFailure(settleHttpStatus, allText);
+    const reason = settleResult.errorMessage || settleResult.errorReason || (settleResult as any).error || (settleResult as any).message || 'Payment could not be settled';
+
+    console.error(`[Pay/x402] Settle rejected (${chainKey}):`, settleHttpStatus, 'token:', requestedTokenSymbol, 'asset:', usdc.address, 'retryable:', retryable, 'raw:', allText.slice(0, 800));
+
+    // "0 credits" also comes back as a settle failure per Celo's own docs ("the facilitator
+    // returns 402 Payment Required until you top up") — that's an operator problem, not a
+    // payer one, so alert rather than silently telling the payer to just retry. Scan every
+    // stringy field on the response, not just the two we used to know about, since the
+    // facilitator's error shape has varied.
+    if (/credit/i.test(allText)) {
+      sendTelegramAlert(`🚨 *x402 FACILITATOR OUT OF CREDITS*\n\n${chainKey} x402 settlement is failing — top up credits at x402.celo.org.\n\n${allText.slice(0, 300)}`).catch(() => {});
+    } else {
       // 🔴 A CONSOLE LINE IS NOT A REPORT. A rejected settlement leaves NO database row (the row
       // is only written once money has moved), so this console line was the single trace that
       // it happened — and reading it means having the hosting platform's logs open at the time.
       // Meanwhile the user is bounced onto the contract-call rail and asked to approve all over
       // again, with nobody the wiser about why. Send the facilitator's own words to the operator
       // on the channel every other money-affecting failure already uses.
+      //
+      // ⚡ AND SAY WHAT HAPPENS NEXT. This alert used to state flatly that the payer "has been
+      // sent to the contract-call rail", which stopped being true: a retryable refusal has
+      // already been re-sent to the facilitator once by then, and is about to be re-signed once
+      // on this rail before anything falls back. An alert that describes the old behaviour is
+      // worse than none — it sends whoever reads it looking for the wrong thing.
       sendTelegramAlert(
         `⚠️ *x402 SETTLEMENT REJECTED (${chainKey})*\n\n` +
-        `The payer signed, the facilitator refused, and they have been sent to the contract-call rail instead.\n\n` +
-        `HTTP ${settleRes.status} · ${requestedTokenSymbol} · ${requiredCrypto.toFixed(4)}\n` +
-        `\`${rawSettleText.slice(0, 400)}\``,
+        (retryable
+          ? 'The payer signed, the facilitator refused twice, and their wallet is being asked to sign once more before anything falls back to the contract-call rail.'
+          : 'The payer signed, the facilitator refused, and they have been sent to the contract-call rail instead.') + '\n\n' +
+        `HTTP ${settleHttpStatus} · ${requestedTokenSymbol} · ${chargedCrypto.toFixed(4)}\n` +
+        `\`${allText.slice(0, 400)}\``,
       ).catch(() => {});
     }
-  } catch (err: any) {
-    console.error(`[Pay/x402] ${chainKey} facilitator unreachable:`, err?.message);
-    return NextResponse.json({ x402Version: 1, error: 'Facilitator temporarily unavailable', accepts: [acceptEntry] }, { status: 402 });
-  }
 
-  if (!settleResult.success) {
-    // "0 credits" also comes back as a settle failure per Celo's own docs ("the facilitator
-    // returns 402 Payment Required until you top up") — that's an operator problem, not a
-    // payer one, so alert rather than silently telling the payer to just retry. Scan every
-    // stringy field on the response, not just the two we used to know about, since the
-    // facilitator's error shape has varied.
-    const allText = JSON.stringify(settleResult);
-    const looksLikeCreditExhaustion = /credit/i.test(allText);
-    if (looksLikeCreditExhaustion) {
-      sendTelegramAlert(`🚨 *x402 FACILITATOR OUT OF CREDITS*\n\nCelo x402 settlement is failing — top up credits at x402.celo.org.\n\n${allText.slice(0, 300)}`).catch(() => {});
-    } else {
-      console.error('[Pay/x402] Settle failed (parsed):', allText.slice(0, 800));
-    }
-    const reason = settleResult.errorMessage || settleResult.errorReason || (settleResult as any).error || (settleResult as any).message || 'Payment could not be settled';
     return NextResponse.json(
-      { x402Version: 1, error: reason, accepts: [acceptEntry] },
+      { x402Version: 1, error: reason, retryable, accepts: [acceptEntry] },
       { status: 402 }
     );
   }
 
-  // ⚡ Payment is now CONFIRMED and irreversibly settled — real money already moved via the
-  // payer's signed EIP-3009 authorization. EVERYTHING below this point, including the row
-  // write immediately following, must happen unconditionally: a generic x402 client (e.g. a
-  // third-party wallet/agent paying this endpoint via the raw x402 protocol rather than
-  // AbaPay's own web app or MCP tool) only ever resends the standard challenge fields
-  // (scheme/network/amount/asset/payTo) that the facilitator itself needs to settle — it has
-  // no reason to know about AbaPay-specific extras like serviceID/billersCode/nairaAmount, so
-  // those can legitimately be absent even on a perfectly valid settlement.
-  //
-  // 🔴 THE BUG THIS FIXES: the old code ran the "do we have enough to vend" field check
-  // BEFORE ever writing a `transactions` row, and returned early on a miss. That left a fully
-  // settled, real on-chain payment with ZERO trace anywhere in the database — invisible to
-  // cleanupStalePreflights, reconcileStuckProcessing, the admin refunds dashboard, and the
-  // "contact support with your tx hash" message it printed was the only record of it existing
-  // at all. Now: write the row FIRST (so every settled payment is always auditable), THEN
-  // decide whether there's enough to vend — and if not, auto-queue a refund using the
-  // settlement's own known payer/amount/token/chain (all always available, unlike the bill
-  // details) instead of leaving it for someone to notice and chase manually.
   const txHash = settleResult.transaction;
   const payer = settleResult.payer;
   const explorerUrl = `${explorerBase}/tx/${txHash}`;
@@ -482,7 +569,10 @@ async function handleX402Request(req: Request) {
     tx_hash: txHash, request_id: vtRequestId, service_category: serviceCategory || 'UNKNOWN', service_id: serviceID || 'UNKNOWN',
     variation_code: variation_code, network: network || 'UNKNOWN', blockchain: chainKey,
     account_number: billersCode || phone || 'N/A', phone: phone || null,
-    amount_usdt: requiredCrypto, amount_naira: vendAmount, fee_naira: serviceFee, stamp_duty_ngn: stampDutyNgn, status: 'PENDING',
+    // The amount the facilitator ACTUALLY transferred (the payer's signed value), not the
+    // figure we recomputed at settle time — those can differ by an exchange-rate tick, and a
+    // refund issued against the wrong one under- or over-pays the user. See x402Settle.ts.
+    amount_usdt: chargedCrypto, amount_naira: vendAmount, fee_naira: serviceFee, stamp_duty_ngn: stampDutyNgn, status: 'PENDING',
     wallet_address: settledWallet,
     customer_name: customer_name || null, customer_address: customer_address || null,
     source_channel: source_channel || 'WEB', token_used: requestedTokenSymbol,
@@ -521,7 +611,7 @@ async function handleX402Request(req: Request) {
         txHash,
         walletAddress: settledWallet,
         tokenUsed: requestedTokenSymbol,
-        amountCrypto: requiredCrypto,
+        amountCrypto: chargedCrypto,
         amountNaira: vendAmount ?? undefined,
         blockchain: chainKey,
         reason,
@@ -556,7 +646,7 @@ async function handleX402Request(req: Request) {
 
   const vendResult = await executeVend({
     vtRequestId, txHash, serviceID, serviceCategory, network, billersCode, phone,
-    variation_code, subscription_type, amount: requiredCrypto, tokenSymbol: requestedTokenSymbol, vendAmount, displayAmount,
+    variation_code, subscription_type, amount: chargedCrypto, tokenSymbol: requestedTokenSymbol, vendAmount, displayAmount,
     foreignAmount, isForeign, operator_id, country_code, product_type_id, email,
     wallet_address: payer || wallet_address, blockchain: chainKey, source_channel, customer_name, customer_address,
     baseRate,

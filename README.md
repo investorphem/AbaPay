@@ -1083,13 +1083,53 @@ a payment, so one bill could cost four approvals. Signing in-house also lets the
 server's actual answer: a settlement failure that carries a `tx_hash` means the money already
 moved, and the app must never "retry" it on the contract-call rail.
 
+#### A refused settlement is retried before the rail is abandoned
+
+🔴 **The bug: "it fails, I cancel and retry the same x402, and then it goes through."** Reported
+on Base, with the facilitator answering `unable to estimate gas` / `invalid_payload` — a
+`transferWithAuthorization` simulation that reverted, carrying no transaction, so nothing moved.
+The app's answer was to declare the rail dead and fall back, which costs **two** more prompts
+(approve + payBill) for a bill the fast rail settles on a second attempt costing **one**. Users
+were doing that second attempt by hand; now it happens on its own, at three levels:
+
+1. **Before the facilitator is called at all.** `src/lib/x402Settle.ts` decides the EIP-3009
+   revert conditions that are visible in the payload — an expired validity window, a
+   clock-skewed `validAfter`, a wrong recipient, an amount that disagrees with what the server
+   is about to declare as required — so a payload that *cannot* settle is answered with a fresh
+   challenge instead of an opaque revert. The signed `value`, not the recomputed price, is what
+   `paymentRequirements` declares and what the DB row and any refund record: the two can differ
+   by an exchange-rate tick, and a facilitator handed a mismatched pair refuses.
+2. **Server-side, once, on the same authorization.** Safe by construction — an EIP-3009 nonce is
+   single-use, so the token accepts it at most once however many times it is submitted. A retry
+   can duplicate a request but never a transfer.
+3. **Client-side, once, on a fresh signature** — only when the server marked the refusal
+   `retryable`, and never when it carries a `tx_hash`. The second prompt is announced, because an
+   unexplained one reads as an app that ignored the first.
+
+🔴 **The one refusal that is never retried is an authorization that has already been consumed.**
+`FiatTokenV2: authorization is used or canceled` means that authorization *already moved the
+money* and only the response went missing — re-signing would mint a fresh nonce the token would
+accept, double-charging the one person who did nothing wrong. It is matched ahead of everything
+else, because a used authorization reverts during simulation and so arrives wearing the same
+"unable to estimate gas" wording as the transient case. Note that `nonce too low` and
+`replacement transaction underpriced` are the *facilitator's own* EOA racing itself and remain
+retryable — a different nonce entirely.
+
 **Which rail a payment takes also depends on the wallet, not just the token.** x402 settles on
-an `eth_signTypedData_v4` signature that has to come *back* to the page. Valora over
-WalletConnect renders that request as "Verify wallet", reports a successful *connection* when
-the user approves, and returns no signature — so any wallet whose session never negotiated a
-signTypedData method (and Valora specifically) is routed straight to the contract call, which
-it handles normally. That costs one prompt instead of three. See `walletCanSignTypedData` in
+an `eth_signTypedData_v4` signature that has to come *back* to the page, and a WalletConnect
+session that never negotiated that method drops the request on the floor — no prompt, no error,
+nothing back. Only that is checked, from the session itself: see `walletCanSignTypedData` in
 `src/lib/walletEnv.ts`.
+
+🔴 **It no longer routes by wallet NAME.** An earlier version answered `false` for Valora
+outright, on the strength of Valora rendering the request as "Verify wallet" and reporting a
+successful *connection* without returning a signature. Naming one wallet turned a *maybe* into a
+permanent *no*: Valora lost the x402 rail on **both** Celo and Base and could never earn it back,
+because a wallet routed off a rail can never demonstrate it works on one. Every wallet is now
+asked, and its own answer decides. When the answer never comes, the signature times out, nothing
+has been sent to settle (`src/lib/x402Pay.ts` posts the settle request itself, on the line after
+the signature is awaited, so unwinding it means a late signature reaches nobody) and the page
+falls back to the contract call on its own. That fallback is what made it safe to stop guessing.
 
 That signature requirement is exactly why this is **scoped to the main app only**: the
 agent-initiated flow above depends on paying with *zero* signature at payment time (the whole

@@ -1632,8 +1632,12 @@ export default function Home() {
       //
       // The 90s budget is handed to the SIGNATURE only, not to the whole payment: once the user
       // has signed, the facilitator's settlement must be allowed to finish. Timing that out
-      // would report "your wallet didn't respond" about a payment already being settled — and
-      // WalletTimeoutError is precisely what suppresses the fallback below.
+      // would report "your wallet didn't respond" about a payment already being settled.
+      //
+      // Keeping the budget off the settle request is also what makes WalletTimeoutError mean
+      // one exact thing — the wallet never answered, so nothing was ever sent to settle — which
+      // is why the catch below can fall back to the contract call on it without risking a
+      // double charge. See the WalletTimeoutError branch there.
       const finalStatus: any = await payWithX402({
         url: '/api/pay/x402',
         body: backendPayload,
@@ -1641,6 +1645,21 @@ export default function Home() {
         account: address as `0x${string}`,
         expectedChainId: activeChain?.id,
         wrapSignature: (p) => withWalletTimeout(p),
+        // ⚡ ONE AUTOMATIC RE-SIGN, WHICH IS WHAT PEOPLE WERE DOING BY HAND.
+        //
+        // 🔴 "if I cancel and retry the same x402 it will now be successful" — reported on Base
+        // after the facilitator answered `unable to estimate gas`. The app's answer to that
+        // refusal was the contract-call rail, which costs TWO more prompts (approve + payBill)
+        // for a bill the fast rail settles on a second attempt costing one. payWithX402 now
+        // re-challenges and re-signs once when the SERVER marks the refusal retryable (nothing
+        // moved, and a fresh nonce/window/price plausibly fixes it) — and only then falls back.
+        //
+        // The second prompt is announced. An unexplained one reads as an app that ignored the
+        // first, which is exactly the suspicion this whole flow has been trying to shake.
+        onRetry: (reason) => {
+          console.warn('[x402] Facilitator refused; re-signing once before falling back:', reason);
+          setStatus(walletApprovalPrompt('That payment was turned down — approve it once more'));
+        },
       });
 
       // The server's duplicate-electricity check runs BEFORE the facilitator settles the x402
@@ -1678,20 +1697,27 @@ export default function Home() {
       // completely independent contract-call flow: it's a different signing mechanism
       // entirely (a real payBill() transaction, not an EIP-3009 authorization), so whatever
       // caused x402 to fail cannot recur there.
-      // 🔴 EXCEPT ON A TIMEOUT — THAT FALLBACK WOULD BE A DOUBLE CHARGE.
+      // 🔴 A SILENT WALLET USED TO END THE PAYMENT HERE. IT IS NOW THE FALLBACK'S CUE.
       //
-      // The reasoning above holds for a settlement FAILURE, where nothing moved and nothing
-      // can. A timeout is a different animal: it means the wallet never answered us, NOT that
-      // the request is dead. withWalletTimeout rejects our wrapper while the signature prompt
-      // is still sitting in the user's wallet — so if they approve it thirty seconds later the
-      // facilitator settles normally, and if we had meanwhile started the contract-call flow
-      // they would have signed and paid a second time for the same bill. Stop instead, and
-      // point at History, which is where a late settlement will show up.
+      // This branch stopped dead, on the reasoning that the signature might still arrive and
+      // settle a moment later, so starting the contract-call flow risked paying twice. That was
+      // TRUE of the thirdweb client, which owned the settle request and could complete it after
+      // our timeout fired. It has not been true since x402 moved to src/lib/x402Pay.ts: the
+      // settle POST is made by that function, on the line after the signature is awaited, so a
+      // timeout unwinds it and no X-PAYMENT header is ever sent. A signature that shows up late
+      // has nobody left to hand it to the facilitator — it goes nowhere.
+      //
+      // Which makes this the single most important line for Valora. Valora renders the x402
+      // typed data as "Verify wallet", announces "Connection to AbaPay was successful!" when the
+      // user taps Allow, and returns NOTHING. Refusing to fall back left that user on a dead
+      // payment; the old workaround was to keep Valora off the x402 rail entirely, which is why
+      // "the Base and Celo x402 route are both ignored in Valora". Now the rail is tried, and
+      // when the wallet does not answer, the contract call takes over by itself.
       if (e instanceof WalletTimeoutError) {
-        console.error('[x402] Wallet did not respond; NOT falling back (a late signature could still settle).');
-        setStatus(e.message);
-        showToast("Wallet Didn't Respond", "If you approve it in your wallet after this, the payment still goes through — check your History tab before trying again.", "error");
-        return;
+        console.error('[x402] Wallet never returned a signature; nothing was sent to settle — falling back to the contract call.');
+        setStatus("Your wallet didn't return the fast-payment approval — switching to the standard one. It will ask you to approve again.");
+        await processBlockchainPayment();
+        return; // processBlockchainPayment manages its own isProcessing/status lifecycle
       }
 
       // 🔴 A REJECTION IS AN ANSWER, NOT A FAULT. Falling back here meant that declining the
@@ -2401,6 +2427,28 @@ export default function Home() {
     return () => { cancelled = true; };
   }, [environment, isWagmiConnected, wagmiAddress, wagmiChain, isMainnet, client, wagmiWalletClient, wagmiConnector]);
 
+  // ⚡ AND LET GO THE MOMENT WAGMI DOES ⚡
+  //
+  // 🔴 THE "IT CONNECTED BY ITSELF AND THERE IS NO CONNECT BUTTON" TRAP, AND WHY THE VALORA
+  // RULE BELOW DID NOT ACTUALLY WORK. The bridge above copies wagmi's address into this
+  // component's own `address`, and nothing ever copied a DISCONNECT back. Every effect that
+  // drops a connection — the restored-Valora rule below, the dead-session guard in
+  // ensureWalletReachable — calls wagmi's disconnect() and then watches the page carry on as
+  // though nothing happened, because the page keys off `address`: the Connect button renders on
+  // `!address`, and so does the banner explaining why the wallet was dropped. So the user was
+  // left looking at a connected-looking app, no Connect button, no message, and a `client`
+  // pointing at a session that had just been torn down — which is precisely the "Valora auto
+  // connects and I cannot get it to connect properly" report the Valora rule was meant to fix.
+  //
+  // Releasing both here, in one place, is what makes every disconnect in this file real.
+  useEffect(() => {
+    if (environment !== 'WEB') return;
+    if (isWagmiConnected && wagmiAddress) return;
+    if (address === null && client === null) return;
+    setAddress(null);
+    setClient(null);
+  }, [environment, isWagmiConnected, wagmiAddress, address, client]);
+
   // ⚡ NO AUTO-CONNECT IN VALORA — PAIR FRESH OR NOT AT ALL ⚡
   //
   // 🔴 WHY A RESTORED VALORA SESSION IS DROPPED. wagmi persists the WalletConnect session and
@@ -2485,13 +2533,19 @@ export default function Home() {
 
   // ⚡ CAN THIS WALLET RETURN AN x402 SIGNATURE AT ALL? ⚡
   //
-  // 🔴 THE FOUR-POPUP BILL. x402 needs an `eth_signTypedData_v4` signature to come BACK to the
-  // page. Valora over WalletConnect renders that request as "Verify wallet", reports
-  // "Connection to AbaPay was successful!" when the user approves, and returns nothing — so the
-  // attempt dies, the app falls back to the contract call, and the user is asked to approve
-  // twice more for the same bill. Asking a wallet to sign something it will never answer is not
-  // a rail choice, it is two wasted prompts, so the capability is resolved ONCE per connection
-  // (from the session, see walletCanSignTypedData) and the rail is picked from the answer.
+  // x402 needs an `eth_signTypedData_v4` signature to come BACK to the page, and a WalletConnect
+  // session that never negotiated that method drops the request on the floor — no prompt, no
+  // error, nothing back. Asking anyway is not a rail choice, it is a guaranteed wait followed by
+  // the fallback, so the capability is resolved ONCE per connection (from the session, see
+  // walletCanSignTypedData) and the rail is picked from the answer.
+  //
+  // 🔴 IT NO LONGER NAMES A WALLET. This used to answer false for Valora outright, on the
+  // strength of Valora rendering the request as "Verify wallet" and reporting "Connection to
+  // AbaPay was successful!" without returning a signature — which took the x402 rail away from
+  // Valora on Celo AND Base permanently. A wallet that MIGHT not answer is not the same as one
+  // that cannot: the rail is tried, and an unanswered signature now falls back on its own (see
+  // the WalletTimeoutError branch in processX402Payment) instead of stranding the payment. That
+  // fallback is what made it safe to stop guessing on the wallet's behalf.
   //
   // Defaults to true so the common case — an injected wallet, verified working — is never
   // demoted by a check that hasn't resolved yet.
@@ -3031,24 +3085,31 @@ export default function Home() {
                       // x402. Until the token-reset effect above was keyed on chain ID, arriving
                       // on Base kept USD₮ selected from Celo and quietly demoted every Base user
                       // to the contract call — which is exactly what was reported.
-                      const celoX402 = activeChain?.id === celo.id && (selectedToken.symbol === "USDC" || selectedToken.symbol === "USD₮");
+                      // celoSepolia included so a testnet run exercises the SAME rail the
+                      // live one uses — it was mainnet-only here while processX402Payment below
+                      // already accepted both, so testing on Celo Sepolia silently rehearsed the
+                      // contract call and proved nothing about x402.
+                      const celoX402 = (activeChain?.id === celo.id || activeChain?.id === celoSepolia.id) && (selectedToken.symbol === "USDC" || selectedToken.symbol === "USD₮");
                       const baseX402 = (activeChain?.id === base.id || activeChain?.id === baseSepolia.id) && selectedToken.symbol === "USDC" && process.env.NEXT_PUBLIC_BASE_X402_ENABLED !== 'false';
 
                       // ⚠️ IT BRANCHES ON THE WALLET'S CAPABILITY — NOT ON A WALLET BLOCKLIST,
-                      // AND NOT ON THE HOST PAGE. An earlier version restricted x402 to
-                      // in-browser wallets and was reverted because Valora hung on the contract
-                      // call too; that reasoning conflated two different faults. The hang has
-                      // since been fixed (Valora now completes contract payments — its "Send
-                      // transaction" sheet is screenshotted doing it), which leaves the ORIGINAL
-                      // observation standing on its own: Valora consumes the x402 typed-data
-                      // request as a connection handshake and returns no signature, so routing
-                      // it here costs the user two extra prompts and delivers nothing.
+                      // AND NOT ON THE HOST PAGE. Two earlier versions got this wrong in the
+                      // same direction: one restricted x402 to in-browser wallets, and one named
+                      // Valora and sent it straight to the contract call on BOTH chains. The
+                      // second is the "the Base and Celo x402 route are both ignored in Valora"
+                      // report, and it was self-fulfilling — a wallet routed off the rail can
+                      // never demonstrate it works on it.
                       //
-                      // walletSupportsX402 asks the SESSION whether signTypedData was ever
-                      // negotiated (plus the one wallet proven to mishandle it), so any wallet
-                      // that can sign keeps the x402 rail and only the ones that genuinely
-                      // cannot are routed straight to the contract call — with one prompt, not
-                      // three. See walletCanSignTypedData in src/lib/walletEnv.ts.
+                      // walletSupportsX402 now asks only what the SESSION can answer: was
+                      // signTypedData negotiated at all? A wallet that never negotiated it drops
+                      // the request silently, so asking buys nothing. Every other wallet is
+                      // ASKED, and its own answer decides. When the answer never comes — Valora
+                      // announcing "Connection to AbaPay was successful!" and returning no
+                      // signature is the known case — the signature times out, nothing has been
+                      // sent to settle (see src/lib/x402Pay.ts), and processX402Payment's catch
+                      // hands the bill to the contract call automatically. That is the
+                      // "otherwise fall back to the initial contract call" behaviour, arrived at
+                      // by evidence instead of by name. See walletCanSignTypedData.
                       const useX402 = x402Enabled && walletSupportsX402 && (celoX402 || baseX402);
                       if (useX402) processX402Payment(); else processBlockchainPayment();
                   }}

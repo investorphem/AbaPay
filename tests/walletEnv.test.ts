@@ -372,11 +372,17 @@ describe('probeInjectedConnectors', () => {
 });
 
 /**
- * The four-popup bill. x402 needs an `eth_signTypedData_v4` signature to come BACK to the page;
- * Valora over WalletConnect renders that request as "Verify wallet", answers it with a
- * CONNECTION, and returns no signature. The attempt then dies and the app falls back to the
- * contract call — so the user is asked to approve twice more for one bill. Routing on the
- * capability instead of hoping keeps that to a single prompt.
+ * x402 needs an `eth_signTypedData_v4` signature to come BACK to the page. A WalletConnect
+ * session that never negotiated the method drops the request silently — no prompt, no error,
+ * nothing back — so asking is a guaranteed wait followed by the fallback, and the session is
+ * worth reading before the rail is chosen.
+ *
+ * What this must NOT do is decide by wallet NAME. It used to answer `false` for Valora outright,
+ * which took the x402 rail away from Valora on both Celo and Base for good — the reported "the
+ * Base and Celo x402 route are both ignored in Valora". The wallet is asked now, and the case
+ * that motivated the blocklist (Valora consuming the request and returning nothing) is handled
+ * where it actually happens: the signature times out, no settle request was ever sent, and the
+ * payment falls back to the contract call by itself.
  */
 describe('walletCanSignTypedData', () => {
   const wc = (session: unknown) => ({
@@ -398,8 +404,18 @@ describe('walletCanSignTypedData', () => {
     expect(await walletCanSignTypedData(wc(sessionWith(['eth_sendTransaction', 'personal_sign'])))).toBe(false);
   });
 
-  it('says no to Valora even when its session claims signTypedData', async () => {
-    expect(await walletCanSignTypedData(wc(sessionWith(['eth_signTypedData_v4'], 'Valora')))).toBe(false);
+  it('says yes to Valora when its session negotiated signTypedData — the rail is not decided by name', async () => {
+    // 🔴 THIS ASSERTION IS THE INVERSE OF THE ONE IT REPLACES, DELIBERATELY. Answering `false`
+    // for Valora by name took the x402 rail away from it on Celo AND Base permanently, and made
+    // the verdict unfalsifiable: a wallet routed off the rail can never show that it works on
+    // it. Valora is asked like everything else now, and an unanswered signature falls back to
+    // the contract call on its own (see the WalletTimeoutError branch in processX402Payment).
+    expect(await walletCanSignTypedData(wc(sessionWith(['eth_signTypedData_v4'], 'Valora')))).toBe(true);
+  });
+
+  it('still says no to Valora when its session never negotiated signTypedData', async () => {
+    // The session, not the name, is what decides — for Valora exactly as for anything else.
+    expect(await walletCanSignTypedData(wc(sessionWith(['eth_sendTransaction'], 'Valora')))).toBe(false);
   });
 
   it('treats an injected wallet (no session to read) as capable — it answers in-process', async () => {
