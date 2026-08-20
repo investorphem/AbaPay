@@ -27,6 +27,7 @@ import {
   probeInjectedConnectors,
   isUserRejection,
   isValoraBrowser,
+  isBaseAppBrowser,
   connectedWalletIsValora,
   walletApprovedChainIds,
   walletConnectSessionLive,
@@ -2167,14 +2168,26 @@ export default function Home() {
     if (address || environment !== 'WEB' || localStorage.getItem('abapay_explicit_logout') === 'true') return;
     if (connectStatus === 'pending') return; // a connection attempt is already in flight
 
-    // 🔴 NOT IN VALORA. Valora's in-app browser exposes something that answers `eth_accounts`,
-    // so this effect used to fire there and the app came up connected on its own — the "it
-    // auto connects after some time" report. That connection cannot complete a payment: the
-    // first request raises a prompt, Allow toasts "Connection to AbaPay was successful!", and
-    // nothing is ever returned to the page. Auto-connecting into a rail that cannot sign is
-    // worse than not connecting at all, because it hides the working one behind a Connect
-    // button the user has no reason to press. See isValoraBrowser().
-    if (isValoraBrowser()) return;
+    // 🔴 AUTO-CONNECT IS AN ALLOWLIST NOW, NOT A BLOCKLIST.
+    //
+    // This used to fire for ANY wallet that already had accounts for this site, with Valora
+    // carved out by name once it turned out to auto-connect into a rail that cannot sign. That
+    // had the polarity backwards: every new wallet was auto-connected by default and only
+    // removed after someone reported a problem, which is how "it connects by itself and there is
+    // no Connect button" kept coming back wearing a different wallet's name.
+    //
+    // Silent connect is only ever right where the app is running INSIDE the wallet — MiniPay,
+    // Base App and Farcaster. There the user already chose the account by opening AbaPay there,
+    // there is only one account it could mean, and no chooser is being hidden. In an ordinary
+    // browser, even one whose extension authorised this site months ago, connecting without
+    // being asked picks a wallet on the user's behalf and buries the real chooser (every
+    // detected injected wallet, plus WalletConnect) behind a button they have no reason to press.
+    //
+    // MiniPay and Farcaster never reach this effect — they are detected by their own SDKs and
+    // connect in the environment detector, so `environment` is not 'WEB' for them. Base App is
+    // the one allowed surface that arrives through wagmi, so it is the one named here.
+    // See AUTO_CONNECT_SURFACES in src/lib/walletEnv.ts.
+    if (!isBaseAppBrowser()) return;
 
     // The wallet that ALREADY has accounts for this site — not merely "an injected connector
     // exists". If none has answered `authorized` yet, bail WITHOUT marking the attempt: the

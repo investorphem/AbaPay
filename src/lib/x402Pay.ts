@@ -1,4 +1,4 @@
-import type { WalletClient } from 'viem';
+import { getAddress, type WalletClient } from 'viem';
 
 // ⚡ x402 PAYMENT, SIGNED BY THE WALLET THE USER ALREADY CONNECTED
 //
@@ -237,17 +237,27 @@ async function attemptX402Payment({ url, body, client, account, expectedChainId,
   //    signature can't outlive the offer it was made against.
   const now = Math.floor(Date.now() / 1000);
   const authorization = {
-    from: account,
-    to: accept.payTo as `0x${string}`,
+    // ⚡ CHECKSUMMED, AS THE WORKING CLIENT DID. EIP-712 encodes an `address` as 20 bytes, so
+    // casing cannot change the signature — but these same strings are also compared as TEXT by
+    // the facilitator against `paymentRequirements.payTo`, and there a case difference is a
+    // difference. thirdweb ran both through getAddress(); so does this.
+    from: getAddress(account) as `0x${string}`,
+    to: getAddress(accept.payTo as string) as `0x${string}`,
     value,
-    // Backdated a little: some chains' clocks run behind the browser's, and a validAfter in the
-    // future makes transferWithAuthorization revert for no reason a user could ever act on.
-    validAfter: String(now - 600),
-    // 🔴 AND FLOORED, NOT ONLY CAPPED. This end of the window is measured against the CHAIN's
-    // clock, not the browser's, so a device running fast can hand the facilitator an
-    // authorization that is already expired — which reverts gas estimation with nothing the
-    // user could act on ("unable to estimate gas", the Base rejection that was reported). A
-    // 15-minute floor keeps the window real however far the two clocks have drifted apart.
+    // 🔴 BACKDATED A FULL DAY — THIS IS THE KNOWN-GOOD VALUE, NOT A GUESS.
+    //
+    // thirdweb's client (node_modules/thirdweb/dist/esm/x402/sign.js, preparePaymentHeader) used
+    // `now - 86400`, and Base x402 worked under it for months. This file replaced that client
+    // and quietly narrowed the backdate to ten minutes, which is a much thinner margin against
+    // the one clock we do not control: the CHAIN's. `validAfter` is compared to `block.timestamp`
+    // inside transferWithAuthorization, and a validAfter even one second ahead of it reverts —
+    // surfacing as the facilitator's opaque "unable to estimate gas" with nothing the user could
+    // possibly act on. A day of margin costs nothing (the authorization's LIFETIME is governed by
+    // validBefore, and replay by the single-use nonce) and removes the failure mode entirely.
+    validAfter: String(now - 86_400),
+    // Likewise the challenge's own timeout, as thirdweb used it, so a signature cannot outlive
+    // the offer it was made against. Floored only so a challenge asking for a nonsensically
+    // short window can't produce an authorization that expires before settlement finishes.
     validBefore: String(now + Math.max(900, Math.min(accept.maxTimeoutSeconds ?? 3600, 86_400))),
     nonce: randomNonce(),
   };

@@ -380,6 +380,15 @@ export default function DocsPage() {
                 </>}
               />
               <FAQItem
+                q="Why do I have to tap Connect every time? It used to connect by itself."
+                a={<>
+                  <p>Because connecting your wallet should be your decision, not ours. AbaPay no longer restores a connection on its own when you open or refresh the page — you tap <strong>Connect</strong>, and you choose which wallet to use.</p>
+                  <p>Connecting by itself caused two real problems. It picked a wallet on your behalf when you had more than one, and it hid the chooser — including the <strong>WalletConnect</strong> option for phone wallets — behind a button there was no reason to press. It could also restore a connection that looked fine but had quietly gone dead, so payments vanished with no prompt and no error.</p>
+                  <p>There are three exceptions, where AbaPay is running <em>inside</em> your wallet and there is only one account it could possibly mean: <strong>MiniPay</strong>, <strong>Base App</strong> and <strong>Farcaster</strong>. Those still connect automatically.</p>
+                  <p>The trade is that refreshing the page means tapping Connect again. Nothing is lost when you do — your money never leaves your own wallet either way.</p>
+                </>}
+              />
+              <FAQItem
                 q="I opened AbaPay inside Valora's browser and it won't connect on its own."
                 a={<>
                   <p>That&apos;s deliberate. Inside Valora&apos;s built-in browser, AbaPay used to appear connected by itself — and then payments got stuck: an approval prompt would come up, you&apos;d tap <strong>Allow</strong>, Valora would say the connection succeeded, and the payment would keep loading with no second prompt ever arriving.</p>

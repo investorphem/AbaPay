@@ -207,9 +207,28 @@ describe('payWithX402 — the signed validity window', () => {
     expect((await windowFor(999_999)).validBefore - now).toBeLessThanOrEqual(86_400);
   });
 
-  it('backdates validAfter, because a chain clock behind the browser reverts for no reason', async () => {
+  /**
+   * 🔴 THE KNOWN-GOOD VALUE, RESTORED. thirdweb's client — under which Base x402 worked for
+   * months — backdated validAfter by a full day (see preparePaymentHeader in
+   * node_modules/thirdweb/dist/esm/x402/sign.js). Replacing that client narrowed it to ten
+   * minutes, which is a thin margin against the clock we do not control: `validAfter` is
+   * compared to `block.timestamp`, and one second over reverts as "unable to estimate gas".
+   */
+  it("backdates validAfter a full day, matching the client Base x402 worked under", async () => {
     const now = Math.floor(Date.now() / 1000);
-    expect((await windowFor(3600)).validAfter).toBeLessThanOrEqual(now - 600);
+    expect((await windowFor(3600)).validAfter).toBeLessThanOrEqual(now - 86_400);
+  });
+
+  it('signs checksummed addresses, which the facilitator also compares as text', async () => {
+    const wallet = fakeWallet();
+    let n = 0;
+    vi.stubGlobal('fetch', vi.fn(async () => (++n === 1
+      // A challenge whose payTo arrives lower-cased, as an env var easily does.
+      ? jsonResponse({ accepts: [{ ...accept, payTo: PAY_TO.toLowerCase() }] }, 402)
+      : jsonResponse({ success: true }, 200))));
+    await payWithX402({ url: '/api/pay/x402', body: {}, client: wallet.client, account: ACCOUNT });
+    expect(wallet.calls[0].message.to).toBe(PAY_TO);
+    expect(wallet.calls[0].message.from).toBe(ACCOUNT);
   });
 });
 

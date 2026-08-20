@@ -86,8 +86,9 @@ each one's own provider, and sends it a timed-out `eth_accounts` — a call that
 it is safe on every page load. Each wallet comes back `authorized` (already approved this site),
 `available` (real, not yet approved) or `none` (absent, or a stub that never answered).
 
-- **Any wallet `authorized`** → silent auto-connect, no popup, no Connect button. (Except with
-  Valora — see below.)
+- **Any wallet `authorized`** → nothing happens on its own. `authorized` decides which wallets the
+  chooser can offer *without* a permission popup, not whether to connect. See "Auto-connect is an
+  allowlist" below.
 - **One or more usable wallets** → a chooser lists them **plus WalletConnect**; cancelling ends
   the attempt rather than falling through to a QR code. One extension that is both
   EIP-6963-announced and parked on `window.ethereum` is de-duplicated, so it can't appear twice.
@@ -158,6 +159,33 @@ prompt before approving. So after 15s of processing the status banner grows a **
 control. It cannot abort the in-flight request (nothing on this side can) and deliberately does
 **not** claim the payment was cancelled: if the user approves a moment later it still settles, and
 saying otherwise is how someone pays twice.
+
+#### Auto-connect is an allowlist: MiniPay, Base App, Farcaster — and nothing else
+
+On the web, **the Connect button is the only way in.** No wallet is connected until the user asks
+for it, even one whose extension approved this site months ago.
+
+🔴 **The auto-connect nobody could find was in `WagmiProvider` itself.** wagmi persists the
+connector and, with the default `reconnectOnMount`, silently re-establishes it on *every page
+load* — inside the provider, before any effect in `page.tsx` runs and regardless of what those
+effects decide. So the app came up connected on its own no matter how carefully the rules
+downstream were written, and every attempt to fix it by editing those rules was editing the wrong
+thing. `Providers.tsx` now passes `reconnectOnMount={false}`.
+
+The rule downstream was also the wrong shape: it auto-connected **any** `authorized` wallet and
+carved out Valora by name. That made silent connect the default and removed wallets only after
+someone complained, which is how *"it connects by itself and there's no Connect button"* kept
+coming back wearing a different wallet's name. It is an allowlist now (`AUTO_CONNECT_SURFACES`).
+
+Those three are different in kind, not degree: the app is running **inside** the wallet, so there
+is exactly one account it could mean, the user chose it by opening AbaPay there, and no chooser is
+being suppressed because there is nothing to choose between. MiniPay and Farcaster are connected
+by their own SDKs and never touch wagmi; Base App arrives through wagmi and is matched by
+`looksLikeBaseApp()` — which deliberately refuses the Coinbase **desktop extension**, since that
+sets the same `isCoinbaseWallet` flag while being an ordinary injected wallet on an ordinary page.
+
+⚠️ **The trade:** a refresh ends a web session and the user presses **Connect** again. Being asked
+is the point, but it is a real cost on a page people reload.
 
 #### A restored WalletConnect session is not a live one
 

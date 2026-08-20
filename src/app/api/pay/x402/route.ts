@@ -541,6 +541,22 @@ async function handleX402Request(req: Request) {
         && isRetryableSettleFailure(res.status, res.text);
       if (!worthRetrying) break;
 
+      // 🔴 AND ONLY IF THE CHAIN SAYS THE AUTHORIZATION IS STILL UNSPENT.
+      //
+      // The single-use nonce makes a resubmission safe for the PAYER's balance, but it does not
+      // make it honest: if the first attempt broadcast successfully and merely lost its response,
+      // resubmitting produces a revert ("nonce already used"), which the facilitator reports as
+      // `unable to estimate gas` — and that manufactured error then OVERWRITES the real outcome
+      // in settleRawText, so a settled payment is reported to the payer as a failure. Asking the
+      // token first means the retry only ever happens when there is genuinely nothing to lose.
+      const stillUnspent = settledAuth
+        ? await authorizationWasConsumed(chainKey, isMainnet, usdc.address, settledAuth)
+        : null;
+      if (stillUnspent !== false) {
+        console.warn(`[Pay/x402] Settle refused (${chainKey}); NOT retrying — authorization is spent or unreadable:`, stillUnspent);
+        break;
+      }
+
       console.warn(`[Pay/x402] Settle refused (${chainKey}), retrying once:`, res.status, res.text.slice(0, 300));
       await new Promise((resolve) => setTimeout(resolve, SETTLE_RETRY_DELAY_MS));
     }
@@ -636,12 +652,27 @@ async function handleX402Request(req: Request) {
       // already been re-sent to the facilitator once by then, and is about to be re-signed once
       // on this rail before anything falls back. An alert that describes the old behaviour is
       // worse than none — it sends whoever reads it looking for the wrong thing.
+      // ⚡ AND CARRY THE AUTHORIZATION ITSELF. "unable to estimate gas" names none of the six
+      // things that actually revert transferWithAuthorization, so an alert without these fields
+      // sends whoever reads it to the RPC to reconstruct them by hand. `nowSec` is included
+      // because the two window fields are only meaningful next to the clock they are judged
+      // against — a validAfter above it is a revert, and nothing else in the message says so.
+      const nowSec = Math.floor(Date.now() / 1000);
+      const authLine = settledAuth
+        ? `payer \`${settledAuth.from}\` -> \`${settledAuth.to}\`\n` +
+          `value \`${settledAuth.value}\` · asset \`${usdc.address}\`\n` +
+          `validAfter \`${settledAuth.validAfter}\`${Number(settledAuth.validAfter) > nowSec ? ' ⛔ IN THE FUTURE' : ''} · ` +
+          `validBefore \`${settledAuth.validBefore}\`${Number(settledAuth.validBefore) <= nowSec ? ' ⛔ EXPIRED' : ''} · now \`${nowSec}\`\n` +
+          `nonce \`${settledAuth.nonce}\`\n`
+        : '';
+
       sendTelegramAlert(
         `⚠️ *x402 SETTLEMENT REJECTED (${chainKey})*\n\n` +
         (retryable
-          ? 'The payer signed, the facilitator refused twice, and their wallet is being asked to sign once more before anything falls back to the contract-call rail.'
+          ? 'The payer signed, the facilitator refused, and their wallet is being asked to sign once more before anything falls back to the contract-call rail.'
           : 'The payer signed, the facilitator refused, and they have been sent to the contract-call rail instead.') + '\n\n' +
         `HTTP ${settleHttpStatus} · ${requestedTokenSymbol} · ${chargedCrypto.toFixed(4)}\n` +
+        authLine +
         `\`${allText.slice(0, 400)}\``,
       ).catch(() => {});
     }

@@ -274,6 +274,59 @@ export function isMiniPayBrowser(): boolean {
 }
 
 /**
+ * Is this Base App's in-app browser? Pure, so it can be tested without a DOM.
+ *
+ * ⚡ WHY IT NEEDS ITS OWN DETECTOR. Auto-connect is deliberately limited to the three surfaces
+ * where it is the RIGHT behaviour — MiniPay, Base App and Farcaster (see AUTO_CONNECT_SURFACES).
+ * MiniPay and Farcaster identify themselves through their own SDKs and never reach the wagmi
+ * path, which left Base App as the one allowed surface with nothing to identify it by.
+ *
+ * Base App is Coinbase's, so its provider raises `isCoinbaseWallet`; newer builds also set
+ * `isBaseApp`. Both are accepted, along with the name in the user agent, because the same host
+ * has shipped under more than one of them and a missed detection here costs a returning user
+ * their silent connect.
+ *
+ * 🔴 `isCoinbaseWallet` IS DELIBERATELY NOT ENOUGH ON ITS OWN when it comes from a desktop
+ * EXTENSION rather than the app's browser — an extension is an ordinary injected wallet on an
+ * ordinary web page, and auto-connecting it is exactly what the Connect button exists to
+ * prevent. The mobile-webview check is what separates the two.
+ */
+export function looksLikeBaseApp(userAgent: string | undefined, ethereum: any): boolean {
+  const ua = String(userAgent ?? '');
+  if (ethereum && ethereum.isBaseApp === true) return true;
+  if (/\bbase ?app\b/i.test(ua)) return true;
+  // Coinbase's provider inside a mobile in-app browser. The extension sets the same flag on a
+  // desktop UA, and must NOT be auto-connected.
+  if (ethereum && ethereum.isCoinbaseWallet === true) {
+    return /\bcoinbasebrowser\b|\bcoinbasewallet\b/i.test(ua) || /android|iphone|ipad/i.test(ua);
+  }
+  return false;
+}
+
+/** `looksLikeBaseApp` against this browser's own globals. False during SSR. */
+export function isBaseAppBrowser(): boolean {
+  if (typeof window === 'undefined') return false;
+  return looksLikeBaseApp(
+    typeof navigator !== 'undefined' ? navigator.userAgent : undefined,
+    (window as any).ethereum,
+  );
+}
+
+/**
+ * The ONLY surfaces where the app connects a wallet without being asked to.
+ *
+ * 🔴 EVERYWHERE ELSE, THE CONNECT BUTTON IS THE WAY IN — including an ordinary browser whose
+ * extension has already authorised this site. A silent connect there is the app deciding which
+ * of the user's wallets they meant, on a page they may only be reading, and it hides the chooser
+ * (injected wallets AND WalletConnect) behind a button they have no reason to press.
+ *
+ * These three are different in kind rather than degree: the app is running INSIDE the wallet, so
+ * there is exactly one account it could ever mean, the user already chose it by opening the app
+ * there, and no chooser is being suppressed because there is nothing to choose between.
+ */
+export const AUTO_CONNECT_SURFACES = ['MiniPay', 'Base App', 'Farcaster'] as const;
+
+/**
  * The Valora rule, as a pure function so it can be tested without a DOM.
  *
  * 🔴 THE "FIRST PROMPT WORKS, THE SECOND NEVER COMES" HANG. Inside Valora's in-app browser
