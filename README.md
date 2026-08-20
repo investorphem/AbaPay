@@ -187,6 +187,44 @@ sets the same `isCoinbaseWallet` flag while being an ordinary injected wallet on
 ⚠️ **The trade:** a refresh ends a web session and the user presses **Connect** again. Being asked
 is the point, but it is a real cost on a page people reload.
 
+#### A connection the page did not establish is not a connection
+
+`reconnectOnMount={false}` stops wagmi **re-establishing** the connector. It does not stop it
+**rehydrating**: the config persists to `cookieStorage` with `ssr: true`, so on load wagmi
+restores `connections`/`current` from the cookie and `useAccount()` reports `isConnected` with an
+address — while no provider has been set up and no relay socket exists.
+
+🔴 That is one bug wearing two faces, and both were reported: *"Valora still auto connects"*, and
+then *"your wallet connection has dropped — tap Connect"* when paying a wallet that looks
+perfectly connected. Nothing had dropped. There was never a live session, only a cookie
+describing one. A connection this page did not itself establish is now dropped on mount
+(`userInitiatedConnect` is what separates the two). Base App is unaffected — its silent connect
+calls `connect()` explicitly.
+
+#### Proving the wallet is yours, once per session
+
+🔴 **A filter written by the client is not a permission.** History used to be read straight from
+the browser with the anon key, scoped only by `.ilike('wallet_address', address)`. Swap the
+address and PostgREST returns someone else's rows — phone numbers, meter numbers, amounts. A
+provider that merely *claimed* an address it did not hold was enough, because a wallet address is
+public information.
+
+After connecting, the wallet signs a plainly-worded ownership message (`src/lib/walletSession.ts`
+— shared by browser and server, because two copies of that string means one stray character
+failing every signature as "invalid signature"). `GET /api/history` derives the address **from
+that signature** and queries with the service-role client, so no parameter remains that could
+point at another person's records.
+
+- `verifySignatureAcrossChains` already covers EOAs *and* ERC-1271/6492 smart accounts, so Base
+  Account and Safe are not locked out by the signature being a shape we could not check.
+- A **rejection** disconnects — the user declined to prove the address is theirs.
+- Any **other** failure leaves them connected but unproven: they can still pay, because paying is
+  authorised by the payment signature itself, and only history is withheld. Locking someone out
+  of paying for owning an unusual wallet would be worse than the bug being closed.
+- Read-only, and for a session rather than five minutes, because a wallet popup on every History
+  refresh trains people to sign whatever they are shown. It is a bearer credential for that
+  window; mutations keep their own fresh, per-action signatures (`verifyWalletOwnership`).
+
 #### A restored WalletConnect session is not a live one
 
 🔴 **The "auto-connects, then hangs forever" failure.** wagmi persists the WalletConnect session

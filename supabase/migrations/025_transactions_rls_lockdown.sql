@@ -37,6 +37,26 @@
 --
 -- Rolling back re-opens the exposure. If History breaks, fix the deploy, not this file.
 
+-- ✅ AUDITED AND DELIBERATELY LEFT: `platform_settings`.
+--
+-- Sweeping every policy in the schema for this same `USING (true)` shape turned up exactly two
+-- tables. `transactions` is this migration. The other is
+--
+--   platform_settings  "Allow public read-only access on settings"  SELECT to public USING (true)
+--
+-- and it stays, for three reasons worth writing down so the next audit neither panics about it
+-- nor treats it as a precedent:
+--
+--   1. It is SELECT only. There is no anon INSERT or UPDATE, so nobody can move the exchange
+--      rate, flip a kill switch, or raise an agent cap — which is what would actually hurt.
+--   2. It holds no secrets: exchange_rate, kill_switches, the agent caps and some feature flags.
+--      The rate is displayed in the UI, and a kill switch is observable by trying the service.
+--   3. The BROWSER genuinely reads it (src/app/page.tsx — rate and kill switches on load), so
+--      dropping the policy breaks the app and buys nothing.
+--
+-- The lesson is not "USING (true) is fine here" — it is that the damage was never the SELECT on
+-- its own. It was pairing a world-readable table of PERSONAL DATA with anon INSERT and UPDATE.
+
 drop policy if exists "Allow public read-only access on transactions" on public.transactions;
 drop policy if exists "Allow admin to read transactions"              on public.transactions;
 drop policy if exists "Allow app to insert transactions"              on public.transactions;

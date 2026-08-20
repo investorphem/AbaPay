@@ -386,6 +386,15 @@ export default function DocsPage() {
                 </>}
               />
               <FAQItem
+                q="After I connect, my wallet asks me to sign something. What is it, and is it safe?"
+                a={<>
+                  <p>It&apos;s a <strong>proof that the wallet is yours</strong>, and it is safe: signing it moves no money, approves no payment, and grants no spending permission. The message says exactly that — read it in your wallet and you&apos;ll see.</p>
+                  <p>Here&apos;s why it&apos;s needed. Your wallet address is public information. Without a signature, anything that simply <em>claimed</em> your address could ask AbaPay to show that address&apos;s payment history — the numbers you&apos;ve recharged, the meters you&apos;ve paid, the amounts. A signature can only be produced by whoever actually holds the wallet, so it turns &quot;this address was claimed&quot; into &quot;this address was proven&quot;.</p>
+                  <p>You&apos;re asked once per browsing session, not per page. If you decline, you&apos;re disconnected — nothing breaks, and you can tap <strong>Connect</strong> and approve it whenever you like.</p>
+                  <p>If your wallet can&apos;t produce that kind of signature at all, you stay connected and can still pay as normal; only your history stays hidden, because that&apos;s the part that needs proof.</p>
+                </>}
+              />
+              <FAQItem
                 q="How do I disconnect my wallet, or switch between Base and Celo?"
                 a={<>
                   <p>Both live in the same place: tap the <strong>network badge</strong> at the top of the app — the small pill showing BASE or CELO. It opens a short menu with the networks you can switch to and a <strong>Disconnect</strong> option.</p>

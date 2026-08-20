@@ -98,7 +98,7 @@ export default function PrivacyPolicy() {
               <UserCheck size={18} className="text-slate-400 dark:text-slate-500"/> 5. Data Security & Retention
             </h2>
             <p className="mb-3">
-              Your transaction metadata and utility identifiers are stored securely on encrypted cloud servers. We implement strict access controls and API rate limiting to protect our database from unauthorized access, regardless of your geographical location.
+              Your transaction metadata and utility identifiers are stored on encrypted cloud servers, with API rate limiting, regardless of your geographical location. Access to your payment history is bound to your wallet: reading it requires a signature produced by the wallet the payments were made from, checked on our servers, so an address alone is never enough to see the records behind it.
             </p>
             <p>
               <strong>Retention:</strong> We retain your transaction history for a minimum of five (5) years as required by international financial compliance regulations, after which it may be anonymized or securely deleted.
