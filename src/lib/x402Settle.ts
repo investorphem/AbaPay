@@ -66,7 +66,13 @@ export function readAuthorization(decodedPayload: any): X402Authorization | null
 }
 
 export type AuthorizationCheck =
-  | { ok: true; chargedWei: bigint }
+  /**
+   * `shortfallWei` is how far the signed value sat BELOW the price recomputed at settle time —
+   * zero or absent on an ordinary payment. It is settled rather than refused (see the tolerance
+   * band below), and reported so that a shortfall appearing on every payment shows up as the
+   * pricing bug it would be, instead of being absorbed silently one bill at a time.
+   */
+  | { ok: true; chargedWei: bigint; shortfallWei?: bigint }
   | { ok: false; code: string; message: string; retryable: boolean };
 
 /**
@@ -87,6 +93,22 @@ export const MIN_REMAINING_VALIDITY_SECONDS = 60;
  * rather than charged.
  */
 export const MAX_OVERPAY_RATIO = 1.1;
+
+/**
+ * How far BELOW the recomputed price a signed amount may sit and still be settled.
+ *
+ * The mirror of MAX_OVERPAY_RATIO, and it exists for the same reason: the challenge quotes a
+ * price, the payer signs it, and the settle request recomputes that price from scratch a few
+ * seconds later. Any difference between the two is ours, not theirs — they signed exactly what
+ * they were shown. Refusing over it sent the payer back to their wallet for a second signature
+ * on a bill they had already approved.
+ *
+ * Deliberately tighter than the overpay ceiling (2% vs 10%): being paid slightly less than the
+ * bill is a real, if small, loss, whereas being paid slightly more is only ever refunded. Wide
+ * enough for rounding and a rate that changed under the payer, narrow enough that a genuinely
+ * wrong amount is still refused — and every use of it is reported (see `shortfallWei`).
+ */
+export const MAX_UNDERPAY_RATIO = 0.98;
 
 /**
  * Can this authorization settle, and for how much?
@@ -146,14 +168,31 @@ export function checkAuthorization(params: {
       message: 'That payment authorization expired before it could be settled.' };
   }
 
+  // 🔴 A SHORTFALL WITHIN TOLERANCE IS SETTLED, NOT SENT BACK FOR A SECOND SIGNATURE.
+  //
+  // THE BUG THIS FIXES: "every time, the first attempt is rejected and the second one goes
+  // through." This gate is the only one of the five here that can refuse an authorization and
+  // then accept its replacement — the others (wrong recipient, bad window, malformed) fail a
+  // re-sign exactly as they failed the original. So a reproducible fail-then-succeed was this
+  // check, sending the payer back to their wallet for a second signature over a difference of a
+  // few wei between the price quoted in the challenge and the price recomputed at settle.
+  //
+  // Rejecting that was the wrong trade in both directions. It cost the user a second prompt for
+  // a bill they had already authorised at a price they had already seen, and it was ASYMMETRIC:
+  // a signed value slightly ABOVE the recomputed price was accepted and charged without comment,
+  // while the same size of difference below it refused the payment outright. A tolerance band,
+  // applied the same way on both sides, is the honest version — and the signed value is what is
+  // charged either way, so the payer is never billed more than they approved.
   if (value < requiredWei) {
-    // Under by a little is a price tick between the challenge and the signature — worth
-    // re-signing at the current price. Under by a lot was never this bill.
-    const closeEnough = requiredWei > ZERO && value * BigInt(100) >= requiredWei * BigInt(90);
-    return { ok: false, code: closeEnough ? 'PRICE_MOVED' : 'AMOUNT_MISMATCH', retryable: closeEnough,
-      message: closeEnough
-        ? 'The exchange rate moved while you were approving — this payment needs to be signed again at the current rate.'
-        : 'The signed payment amount did not match this bill.' };
+    const floor = (requiredWei * BigInt(Math.round(MAX_UNDERPAY_RATIO * 1000))) / BigInt(1000);
+    // Beyond the band this is not a rounding difference — it was never this bill.
+    if (requiredWei > ZERO && value < floor) {
+      return { ok: false, code: 'AMOUNT_MISMATCH', retryable: false,
+        message: 'The signed payment amount did not match this bill.' };
+    }
+    // Inside it: settle, and let the caller report the shortfall so a systematic one is visible
+    // rather than quietly absorbed on every payment.
+    return { ok: true, chargedWei: value, shortfallWei: requiredWei - value };
   }
 
   const ceiling = (requiredWei * BigInt(Math.round(MAX_OVERPAY_RATIO * 100))) / BigInt(100);

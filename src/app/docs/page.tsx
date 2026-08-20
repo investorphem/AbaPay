@@ -129,6 +129,12 @@ export default function DocsPage() {
               AbaPay runs an <strong>MCP (Model Context Protocol)</strong> server, so an AI assistant you already use — Claude, or any MCP-speaking client — can pay your bills for you: Nigerian services, or international airtime/data across 170+ countries. It's the same engine chat uses, reached over JSON-RPC instead of a message. Nothing about it is a looser trust boundary: same on-chain allowance, same PIN gate, same kill switches, same operator caps, same spend alerts.
             </p>
             <div className="space-y-4">
+              <div className="bg-slate-50 dark:bg-[#1a1a1f] p-5 rounded-2xl border border-slate-100 dark:border-slate-800/80 transition-colors">
+                <h4 className="text-sm font-black text-slate-800 dark:text-slate-200 mb-1">The server URL your client needs</h4>
+                <p className="text-sm text-slate-600 dark:text-slate-400 font-medium leading-relaxed">
+                  Add <code className="font-mono text-[13px] bg-white dark:bg-[#111114] px-2 py-0.5 rounded-lg text-slate-900 dark:text-white">https://abapays.com/api/mcp</code> as the AbaPay server in your MCP client. It&apos;s shown with a copy button in <strong>Agent Hub → MCP</strong> too, so you never have to type it.
+                </p>
+              </div>
               <div className="bg-violet-50 dark:bg-violet-900/20 border border-violet-100 dark:border-violet-800/50 p-5 rounded-2xl transition-colors">
                 <h4 className="text-sm font-black text-violet-900 dark:text-violet-100 mb-1">OAuth, or an API key</h4>
                 <p className="text-sm text-violet-800 dark:text-violet-300 font-medium leading-relaxed">
@@ -377,6 +383,30 @@ export default function DocsPage() {
                   <p><strong>No — don&apos;t pay again.</strong> That message means AbaPay checked the blockchain itself and found that your payment really did leave your wallet, even though the payment service that handled it reported an error instead of a receipt.</p>
                   <p>AbaPay deliberately stops there rather than offering to retry. A retry in that situation would be a genuine second payment for the same bill, and the whole point of the check is to make sure that can&apos;t happen to you.</p>
                   <p>Your payment is flagged for us to reconcile by hand. Check your <strong>History</strong> tab — if the bill hasn&apos;t been delivered or refunded shortly after, contact support and we&apos;ll trace it from the payment itself.</p>
+                </>}
+              />
+              <FAQItem
+                q="After I connect, my wallet asks me to sign something. What is it, and is it safe?"
+                a={<>
+                  <p>It&apos;s a <strong>proof that the wallet is yours</strong>, and it is safe: signing it moves no money, approves no payment, and grants no spending permission. The message says exactly that — read it in your wallet and you&apos;ll see.</p>
+                  <p>Here&apos;s why it&apos;s needed. Your wallet address is public information. Without a signature, anything that simply <em>claimed</em> your address could ask AbaPay to show that address&apos;s payment history — the numbers you&apos;ve recharged, the meters you&apos;ve paid, the amounts. A signature can only be produced by whoever actually holds the wallet, so it turns &quot;this address was claimed&quot; into &quot;this address was proven&quot;.</p>
+                  <p>You&apos;re asked once per browsing session, not per page. If you decline, you&apos;re disconnected — nothing breaks, and you can tap <strong>Connect</strong> and approve it whenever you like.</p>
+                  <p>If your wallet can&apos;t produce that kind of signature at all, you stay connected and can still pay as normal; only your history stays hidden, because that&apos;s the part that needs proof.</p>
+                </>}
+              />
+              <FAQItem
+                q="How do I disconnect my wallet, or switch between Base and Celo?"
+                a={<>
+                  <p>Both live in the same place: tap the <strong>network badge</strong> at the top of the app — the small pill showing BASE or CELO. It opens a short menu with the networks you can switch to and a <strong>Disconnect</strong> option.</p>
+                  <p>The badge used to just flip to the other network the moment you touched it, which made a mis-tap awkward to undo. Now nothing happens until you actually choose something, and the menu closes as soon as you do.</p>
+                  <p>Disconnecting doesn&apos;t touch your money — it only ends this app&apos;s connection to your wallet. Your funds never left it in the first place. Tap <strong>Connect</strong> whenever you want to pay again.</p>
+                </>}
+              />
+              <FAQItem
+                q="I linked WhatsApp (or Telegram, or X) before and lost the chat. How do I get back to the bot?"
+                a={<>
+                  <p>Open <strong>Agent Hub</strong>, pick that channel, and use the <strong>Open</strong> button shown there. It takes you straight to the bot.</p>
+                  <p>You don&apos;t need to link again — your account is still connected. This is just a shortcut back to the conversation, which matters if you changed phone or cleared your chats.</p>
                 </>}
               />
               <FAQItem

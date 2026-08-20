@@ -78,10 +78,40 @@ describe('checkAuthorization', () => {
     expect(!result.ok && result.retryable).toBe(false);
   });
 
-  it('asks for a re-sign when the rate moved under the payer mid-approval', () => {
-    const result = check({ value: '1450000' }, 1_492_500n);
-    expect(!result.ok && result.code).toBe('PRICE_MOVED');
-    expect(!result.ok && result.retryable).toBe(true);
+  /**
+   * 🔴 THE "FIRST ATTEMPT ALWAYS FAILS, SECOND ALWAYS WORKS" BUG.
+   *
+   * This gate is the only one here that can refuse an authorization and then accept its
+   * replacement — every other refusal (wrong recipient, bad window, malformed) fails a re-sign
+   * exactly as it failed the original. So a reproducible fail-then-succeed was always going to be
+   * this check, turning a few wei of difference between the quoted price and the recomputed one
+   * into a second wallet prompt on every single payment.
+   *
+   * It was also asymmetric: the same size of difference ABOVE the price was accepted and charged
+   * without comment. Now both sides get a tolerance band, and the payer is charged what they
+   * signed either way.
+   */
+  it('settles a small shortfall instead of demanding a second signature for it', () => {
+    // Just inside the 2% band: the payer signed the price they were quoted, moments earlier.
+    const result = check({ value: '1470000' }, 1_492_500n);
+    expect(result.ok).toBe(true);
+    // Charged exactly what was signed — never more than the payer approved.
+    expect(result.ok && result.chargedWei).toBe(1_470_000n);
+    // …and the difference is reported, so a shortfall on EVERY payment is visible as a bug
+    // rather than absorbed a few wei at a time.
+    expect(result.ok && result.shortfallWei).toBe(22_500n);
+  });
+
+  it('reports no shortfall when the signed amount covers the bill', () => {
+    const result = check();
+    expect(result.ok && result.shortfallWei).toBeUndefined();
+  });
+
+  it('still refuses a shortfall beyond the band, and does not retry it', () => {
+    // 4% under — outside tolerance, so this was never a rounding difference.
+    const result = check({ value: '1432800' }, 1_492_500n);
+    expect(!result.ok && result.code).toBe('AMOUNT_MISMATCH');
+    expect(!result.ok && result.retryable).toBe(false);
   });
 
   it('refuses — without a retry — an amount that was never this bill', () => {

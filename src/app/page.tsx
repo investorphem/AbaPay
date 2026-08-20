@@ -2,16 +2,17 @@
 
 import React, { useState, useEffect, useMemo, useRef, useCallback } from "react";
 import sdk from "@farcaster/miniapp-sdk";
-import { createWalletClient, createPublicClient, custom, http, parseUnits, formatUnits, encodeFunctionData, type WalletClient } from "viem";
+import { createWalletClient, createPublicClient, custom, http, parseUnits, formatUnits, encodeFunctionData, type WalletClient, type Chain } from "viem";
 import { eip5792Actions } from "viem/experimental";
 import { celo, celoSepolia, base, baseSepolia } from "viem/chains";
 import Link from "next/link";
 import {
   ShieldCheck, Zap, AlertTriangle, CheckCircle2, ChevronDown,
   Loader2, Coins, Briefcase, ListPlus, Users, Landmark, XCircle,
-  RefreshCw, Tv, GraduationCap, Send, Globe, Sparkles
+  RefreshCw, Tv, GraduationCap, Send, Globe, Sparkles, LogOut, Check
 } from "lucide-react";
 import { supabase } from "@/utils/supabase";
+import { walletSessionMessage, WALLET_SESSION_MAX_AGE_MS } from "@/lib/walletSession";
 import { celoAttributionSuffix } from "@/lib/attribution";
 import { useProviders, useValidSelection, useProviderLimits } from "@/lib/useProviders";
 import { useAccount, useConnect, useDisconnect, useWalletClient, useSwitchChain } from 'wagmi';
@@ -143,6 +144,39 @@ export default function Home() {
 
   const [environment, setEnvironment] = useState<'MINIPAY' | 'FARCASTER' | 'WEB' | 'LOADING' | 'BASE'>('LOADING');
 
+  // ⚡ THE NETWORK BADGE IS A MENU, NOT A TOGGLE.
+  //
+  // 🔴 IT USED TO ROTATE THE CHAIN ON EVERY CLICK, which meant the only way to reach Celo from
+  // Base was to fire a real `wallet_switchEthereumChain` prompt and hope you had guessed right —
+  // and with two chains a mis-tap could only be undone by doing it again. It is now a menu that
+  // shows what is available and switches only once something is actually chosen.
+  //
+  // It is also where Disconnect lives. There was no way to disconnect at all before: the app
+  // called wagmi's disconnect() on error paths, but nothing in the UI offered it, so a user who
+  // wanted to change wallet had no way to say so. This is the one control that already
+  // represents "the wallet you are connected as", which makes it the honest place for it.
+  const [chainMenuOpen, setChainMenuOpen] = useState(false);
+  const chainMenuRef = useRef<HTMLDivElement | null>(null);
+
+
+  // Close on an outside click or Escape — a menu that can only be dismissed by choosing
+  // something is a trap, and this one has a destructive item in it.
+  useEffect(() => {
+    if (!chainMenuOpen) return;
+    const onPointerDown = (e: MouseEvent | TouchEvent) => {
+      if (chainMenuRef.current && !chainMenuRef.current.contains(e.target as Node)) setChainMenuOpen(false);
+    };
+    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') setChainMenuOpen(false); };
+    document.addEventListener('mousedown', onPointerDown);
+    document.addEventListener('touchstart', onPointerDown);
+    document.addEventListener('keydown', onKey);
+    return () => {
+      document.removeEventListener('mousedown', onPointerDown);
+      document.removeEventListener('touchstart', onPointerDown);
+      document.removeEventListener('keydown', onKey);
+    };
+  }, [chainMenuOpen]);
+
   /**
    * WHICH ROUTE the live wallet is on — read from the connector, not guessed from the page.
    *
@@ -195,6 +229,33 @@ export default function Home() {
 
   const [killSwitches, setKillSwitches] = useState<Record<string, boolean>>({});
   const [address, setAddress] = useState<string | null>(null);
+
+  // 🔐 PROOF THAT THE CONNECTED ADDRESS IS ACTUALLY YOURS.
+  //
+  // 🔴 WHAT AN UNPROVEN ADDRESS COULD REACH. History used to be read straight from the browser
+  // with `.ilike('wallet_address', address)` — a filter chosen by the client, which is not a
+  // permission. Any address the page believed it was connected to returned that address's
+  // payments: phone numbers, meter numbers, amounts. A provider that simply CLAIMS an address it
+  // does not hold was enough. The signature is what turns "the wallet told us this address" into
+  // "the wallet demonstrated it holds this address", and GET /api/history now derives the
+  // address from the signature rather than from anything the caller sends.
+  //
+  // Held in sessionStorage, not localStorage: it should not outlive the browser session, and it
+  // is a bearer credential for its lifetime (see WALLET_SESSION_MAX_AGE_MS). Read-only scope —
+  // every mutation keeps its own fresh, per-action signature.
+  const [walletProof, setWalletProof] = useState<{ address: string; signature: string; timestamp: string } | null>(null);
+  const walletProofInFlight = useRef(false);
+
+  /** Headers for a request that must prove wallet ownership, or null when unproven. */
+  const walletProofHeaders = useCallback((): Record<string, string> | null => {
+    if (!walletProof || !address) return null;
+    if (walletProof.address.toLowerCase() !== address.toLowerCase()) return null;
+    return {
+      'x-wallet-address': walletProof.address,
+      'x-wallet-signature': walletProof.signature,
+      'x-wallet-timestamp': walletProof.timestamp,
+    };
+  }, [walletProof, address]);
   const [client, setClient] = useState<WalletClient | null>(null);
 
   // ⚡ SMART MAINNET DETECTOR ⚡
@@ -1646,19 +1707,21 @@ export default function Home() {
         account: address as `0x${string}`,
         expectedChainId: activeChain?.id,
         wrapSignature: (p) => withWalletTimeout(p),
-        // ⚡ ONE AUTOMATIC RE-SIGN, WHICH IS WHAT PEOPLE WERE DOING BY HAND.
+        // ⚡ ONE SIGNATURE ON THIS RAIL. payWithX402 defaults to a single attempt, so no second
+        // prompt is raised here — if the payment cannot be completed, the catch below hands the
+        // bill to the contract call instead.
         //
-        // 🔴 "if I cancel and retry the same x402 it will now be successful" — reported on Base
-        // after the facilitator answered `unable to estimate gas`. The app's answer to that
-        // refusal was the contract-call rail, which costs TWO more prompts (approve + payBill)
-        // for a bill the fast rail settles on a second attempt costing one. payWithX402 now
-        // re-challenges and re-signs once when the SERVER marks the refusal retryable (nothing
-        // moved, and a fresh nonce/window/price plausibly fixes it) — and only then falls back.
+        // 🔴 WHY THE AUTOMATIC RE-SIGN WAS TAKEN BACK OUT. It was added to automate the
+        // workaround people had found by hand ("cancel and retry the same x402 and it goes
+        // through"), which was sound only while first attempts failed OCCASIONALLY. Once one
+        // started failing reproducibly, the rescue became a second wallet prompt on EVERY
+        // payment — indistinguishable, from the user's side, from an app that ignored the first
+        // one, which is exactly the suspicion this flow has spent months trying to shake.
         //
-        // The second prompt is announced. An unexplained one reads as an app that ignored the
-        // first, which is exactly the suspicion this whole flow has been trying to shake.
+        // The handler is kept because the capability is still there behind maxAttempts, and if it
+        // is ever turned back on the second prompt must be explained rather than just appearing.
         onRetry: (reason) => {
-          console.warn('[x402] Facilitator refused; re-signing once before falling back:', reason);
+          console.warn('[x402] Facilitator refused; re-signing before falling back:', reason);
           setStatus(walletApprovalPrompt('That payment was turned down — approve it once more'));
         },
       });
@@ -2153,6 +2216,34 @@ export default function Home() {
     return () => { cancelled = true; };
   }, [environment, connectors]);
 
+  // ⚡ DROP A CONNECTION THAT WAS ONLY EVER REHYDRATED FROM STORAGE ⚡
+  //
+  // 🔴 WHY `reconnectOnMount={false}` DID NOT, ON ITS OWN, STOP VALORA CONNECTING BY ITSELF.
+  // That flag stops wagmi RE-ESTABLISHING the connector on mount. It does not stop wagmi
+  // REHYDRATING its state: the config persists to `cookieStorage` with `ssr: true`, so on load
+  // wagmi restores `connections`/`current` from the cookie and `useAccount()` reports
+  // `isConnected` with an address — while no provider has been set up and no relay socket
+  // exists. The app looks connected because, as far as wagmi's state is concerned, it is.
+  //
+  // That is the exact pair of symptoms reported: Valora "still auto connects", and then paying
+  // says "your wallet connection has dropped — tap Connect" on a wallet that appears connected.
+  // Nothing had dropped; there was never a live session, only a cookie describing one.
+  //
+  // So a connection this page did not itself establish is not a connection. Base App's silent
+  // connect is unaffected — it calls connect() explicitly below, which sets
+  // `userInitiatedConnect`, as does the Connect button.
+  const rehydratedConnectionChecked = useRef(false);
+  useEffect(() => {
+    if (environment !== 'WEB' || rehydratedConnectionChecked.current) return;
+    if (!isWagmiConnected) return;
+    rehydratedConnectionChecked.current = true;
+    if (userInitiatedConnect.current) return; // established in this page session — genuine
+
+    console.warn('[wallet] dropping a connection restored from storage — nothing was actually connected.');
+    try { disconnect(); } catch { /* best effort — the release effect below clears the UI */ }
+    localStorage.removeItem('abapay_connected');
+  }, [environment, isWagmiConnected, disconnect]);
+
   // ⚡ NATIVE INJECTED AUTOCONNECT ⚡
   //
   // Fires ONLY when the wallet already has accounts for this site — i.e. an in-app wallet
@@ -2213,6 +2304,111 @@ export default function Home() {
       }
     );
   }, [address, environment, injectedCandidates, connect, connectStatus]);
+
+
+  /** Move the wallet — and the app — onto a chosen chain. Called only from the network menu. */
+  const switchToChain = useCallback(async (target: Chain) => {
+    setChainMenuOpen(false);
+    if (environment !== 'WEB' || !client || activeChain?.id === target.id) return;
+    try {
+      setIsProcessing(true);
+      await client.switchChain({ id: target.id });
+      setActiveChain(target);
+    } catch {
+      // A wallet that doesn't know the chain yet can usually be taught it.
+      try {
+        await client.addChain({ chain: target });
+        setActiveChain(target);
+      } catch {
+        showToast('Switch Failed', 'Please switch the network inside your wallet app.', 'error');
+      }
+    } finally {
+      setIsProcessing(false);
+    }
+  }, [environment, client, activeChain]);
+
+  /**
+   * Disconnect, and mean it.
+   *
+   * 🔴 `abapay_explicit_logout` IS THE LOAD-BEARING PART. Base App's auto-connect reconnects a
+   * wallet that already authorised this site, and without a record of the user having chosen to
+   * leave it would do exactly that on the next render — disconnecting them into an immediate
+   * reconnection. The flag is cleared by handleConnectClick, so pressing Connect is what opts
+   * back in.
+   */
+  const handleDisconnect = useCallback(() => {
+    setChainMenuOpen(false);
+    try { disconnect(); } catch { /* best effort — the local state below is what the UI reads */ }
+    localStorage.setItem('abapay_explicit_logout', 'true');
+    localStorage.removeItem('abapay_connected');
+    autoConnectTried.current = false;
+    userInitiatedConnect.current = false;
+    setAddress(null);
+    setClient(null);
+    setConnectError(null);
+    showToast('Wallet Disconnected', 'Your wallet is no longer connected. Tap Connect when you want to pay.', 'success');
+  }, [disconnect]);
+
+  // 🔐 ASK FOR THE OWNERSHIP SIGNATURE ONCE PER SESSION, RIGHT AFTER CONNECTING.
+  //
+  // Runs for EVERY environment, auto-connected ones included — MiniPay, Base App and Farcaster
+  // skip the Connect button, not the proof. verifySignatureAcrossChains handles both kinds of
+  // wallet: plain ECDSA for EOAs (MetaMask, Valora, MiniPay) and ERC-1271/6492 on-chain
+  // validation for smart accounts (Base Account, Safe), so no wallet is locked out by the
+  // signature simply being a shape the server could not check.
+  //
+  // 🔴 A WALLET THAT CANNOT SIGN IS NOT TREATED AS A WALLET THAT REFUSED. A rejection is the user
+  // saying no, and they are disconnected — they declined to prove the address is theirs. Any
+  // OTHER failure (a wallet with no personal_sign, a relay that dropped the request) leaves them
+  // connected but unproven: they can still pay, because paying is authorised by the payment
+  // signature itself, and only the history read is withheld. Locking someone out of paying
+  // because their wallet is unusual would be a worse bug than the one this closes.
+  useEffect(() => {
+    if (!address || !client) return;
+    if (walletProof && walletProof.address.toLowerCase() === address.toLowerCase()) return;
+    if (walletProofInFlight.current) return;
+
+    // A proof from earlier in this browser session is reused rather than re-prompted — a wallet
+    // popup on every reload is how people are trained to sign without reading.
+    try {
+      const cached = sessionStorage.getItem(`abapay_wallet_proof_${address.toLowerCase()}`);
+      if (cached) {
+        const parsed = JSON.parse(cached) as { address: string; signature: string; timestamp: string };
+        const age = Date.now() - parseInt(parsed.timestamp, 10);
+        if (parsed.signature && age >= 0 && age < WALLET_SESSION_MAX_AGE_MS) { setWalletProof(parsed); return; }
+        sessionStorage.removeItem(`abapay_wallet_proof_${address.toLowerCase()}`);
+      }
+    } catch { /* an unreadable cache just means we ask again */ }
+
+    walletProofInFlight.current = true;
+    let cancelled = false;
+    (async () => {
+      try {
+        const timestamp = Date.now().toString();
+        const signature = await withWalletTimeout(
+          client.signMessage({ account: address as `0x${string}`, message: walletSessionMessage(timestamp) }),
+        );
+        if (cancelled) return;
+        const proof = { address, signature, timestamp };
+        setWalletProof(proof);
+        try { sessionStorage.setItem(`abapay_wallet_proof_${address.toLowerCase()}`, JSON.stringify(proof)); } catch { /* private mode */ }
+      } catch (e) {
+        if (cancelled) return;
+        if (isUserRejection(e)) {
+          // They said no. Disconnect rather than leaving them in a half-state they never chose.
+          console.warn('[wallet] ownership signature declined — disconnecting.');
+          handleDisconnect();
+          setConnectError('Verifying your wallet was declined. Tap Connect and approve the signature to continue — it does not move any money.');
+          return;
+        }
+        // Unsupported, timed out, or dropped by the relay: stay connected, stay unproven.
+        console.warn('[wallet] ownership signature unavailable; history stays hidden:', (e as Error)?.message);
+      } finally {
+        if (!cancelled) walletProofInFlight.current = false;
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [address, client, walletProof, handleDisconnect]);
 
   // ⚡ THE MANUAL CONNECT PATH ⚡
   //
@@ -2683,14 +2879,31 @@ export default function Home() {
 
     async function fetchCloudHistory() {
       try {
-        const sixMonthsAgo = new Date(); sixMonthsAgo.setMonth(sixMonthsAgo.getMonth() - 6);
-        // 🔴 THE BUG THIS FIXES: this had no filter at all, so an abandoned pre-flight intent
-        // (created before the wallet even signs — see buildBackendPayload's intent_only call)
-        // showed up in the user's own History exactly like a real transaction, even though no
-        // crypto was ever charged for it. cleanupStalePreflights marks these EXPIRED after 20
-        // minutes rather than deleting them (so nothing here can ever accidentally erase a
-        // real payment), which means excluding them has to happen at the READ side instead.
-        const { data } = await supabase.from('transactions').select('*').ilike('wallet_address', address!).gte('created_at', sixMonthsAgo.toISOString()).not('tx_hash', 'like', 'preflight_%').neq('status', 'EXPIRED').order('created_at', { ascending: false });
+        // 🔴 READ THROUGH THE SERVER, AGAINST A PROVEN ADDRESS.
+        //
+        // This used to query Supabase straight from the browser with the anon key, scoped only
+        // by `.ilike('wallet_address', address)` — a filter written by the client, which is not
+        // a permission. Any address the page believed it held returned that address's payments:
+        // phone numbers, meter numbers, amounts. GET /api/history takes the address from the
+        // SIGNATURE instead (see walletProof), so there is no parameter left to point at someone
+        // else's records, and migration 025 removes the anon policies that allowed the old read.
+        //
+        // No proof yet means no history — not an error. The signature may still be sitting in
+        // the user's wallet, and this effect re-runs when it lands.
+        const headers = walletProofHeaders();
+        if (!headers) return;
+
+        const res = await fetch('/api/history', { headers });
+        if (!res.ok) {
+          // 401 here means the proof expired or was never valid — drop it so the effect above
+          // asks for a fresh signature rather than retrying a dead one forever.
+          if (res.status === 401) {
+            try { sessionStorage.removeItem(`abapay_wallet_proof_${address!.toLowerCase()}`); } catch { /* private mode */ }
+            setWalletProof(null);
+          }
+          return;
+        }
+        const { transactions: data } = await res.json() as { transactions: any[] };
         if (data && data.length > 0) {
           const cloudHistory = data.map((tx: any) => ({ 
              id: tx.tx_hash.slice(0, 8), date: new Date(tx.created_at).toLocaleString(), status: tx.status, 
@@ -2716,7 +2929,7 @@ export default function Home() {
       } catch (e) {}
     }
     fetchCloudHistory();
-  }, [address]);
+  }, [address, walletProofHeaders]);
 
   useEffect(() => {
     if (!address) { setBeneficiaries({}); return; }
@@ -3309,36 +3522,16 @@ export default function Home() {
           <div className="flex items-center flex-wrap justify-end gap-2" data-tour="wallet-connect">
 
             {address && (
-                <button 
-                  onClick={async () => {
-                      // Only allow network switching in WEB/WalletConnect environments
-                      if (environment !== 'WEB' || !client) return;
-                      
-                      const targetNetwork = activeChain.id === celo.id || activeChain.id === celoSepolia.id 
-                          ? (isMainnet ? base : baseSepolia) 
-                          : (isMainnet ? celo : celoSepolia);
-                      
-                      try {
-                          setIsProcessing(true);
-                          await client.switchChain({ id: targetNetwork.id });
-                          setActiveChain(targetNetwork);
-                      } catch (error: any) {
-                          // If the user's wallet doesn't have the network saved, try adding it automatically
-                          try {
-                              await client.addChain({ chain: targetNetwork });
-                              setActiveChain(targetNetwork);
-                          } catch (addError) {
-                              showToast("Switch Failed", "Please manually switch the network inside your wallet app.", "error");
-                          }
-                      } finally {
-                          setIsProcessing(false);
-                      }
-                  }}
+              <div className="relative shrink-0" ref={chainMenuRef}>
+                <button
+                  onClick={() => { if (environment === 'WEB' && !isProcessing) setChainMenuOpen((open) => !open); }}
                   disabled={environment !== 'WEB' || isProcessing}
-                  title={environment === 'WEB' ? "Click to switch network" : `Locked to ${activeChain?.name}`}
-                  className={`flex shrink-0 px-2.5 py-1.5 rounded-xl border items-center gap-1.5 shadow-sm transition-all ${
-                     activeChain?.name?.toLowerCase().includes('base') 
-                        ? 'bg-blue-50 dark:bg-blue-900/20 border-blue-200 dark:border-blue-800/50 text-blue-700 dark:text-blue-400' 
+                  aria-haspopup="menu"
+                  aria-expanded={chainMenuOpen}
+                  title={environment === 'WEB' ? 'Network and wallet' : `Locked to ${activeChain?.name}`}
+                  className={`flex w-full px-2.5 py-1.5 rounded-xl border items-center gap-1.5 shadow-sm transition-all ${
+                     activeChain?.name?.toLowerCase().includes('base')
+                        ? 'bg-blue-50 dark:bg-blue-900/20 border-blue-200 dark:border-blue-800/50 text-blue-700 dark:text-blue-400'
                         : 'bg-emerald-50 dark:bg-emerald-900/20 border-emerald-200 dark:border-emerald-800/50 text-emerald-700 dark:text-emerald-400'
                   } ${environment === 'WEB' ? 'cursor-pointer hover:scale-105 active:scale-95' : 'cursor-default opacity-80'}`}
                 >
@@ -3348,8 +3541,54 @@ export default function Home() {
                         <div className={`w-1.5 h-1.5 rounded-full animate-pulse ${activeChain?.name?.toLowerCase().includes('base') ? 'bg-blue-500' : 'bg-emerald-500'}`}></div>
                     )}
                     <span className="text-[9px] font-black uppercase tracking-widest">{activeNetworkDisplay}</span>
-                    {environment === 'WEB' && !isProcessing && <RefreshCw size={10} className="opacity-60 ml-0.5" />}
+                    {environment === 'WEB' && !isProcessing && (
+                      <ChevronDown size={10} className={`opacity-60 ml-0.5 transition-transform ${chainMenuOpen ? 'rotate-180' : ''}`} />
+                    )}
                 </button>
+
+                {/* Only on demand, and gone the moment something is chosen. */}
+                {chainMenuOpen && environment === 'WEB' && (
+                  <div
+                    role="menu"
+                    className="absolute right-0 top-full mt-1.5 z-50 w-48 rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-[#131317] shadow-xl overflow-hidden"
+                  >
+                    <div className="px-3 pt-2 pb-1 text-[8px] font-black uppercase tracking-widest text-slate-400 dark:text-slate-500">
+                      Network
+                    </div>
+                    {(isMainnet ? [base, celo] : [baseSepolia, celoSepolia]).map((chain) => {
+                      const isActive = activeChain?.id === chain.id;
+                      const isBaseChain = chain.name.toLowerCase().includes('base');
+                      return (
+                        <button
+                          key={chain.id}
+                          role="menuitem"
+                          onClick={() => { void switchToChain(chain); }}
+                          className={`w-full flex items-center gap-2 px-3 py-2 text-left text-[11px] font-bold transition-colors ${
+                            isActive
+                              ? 'text-slate-900 dark:text-white bg-slate-50 dark:bg-slate-800/50'
+                              : 'text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-800/50'
+                          }`}
+                        >
+                          <span className={`w-1.5 h-1.5 rounded-full ${isBaseChain ? 'bg-blue-500' : 'bg-emerald-500'}`} />
+                          <span className="flex-1 truncate">{chain.name}</span>
+                          {isActive && <Check size={12} className="text-emerald-500 shrink-0" />}
+                        </button>
+                      );
+                    })}
+
+                    <div className="h-px bg-slate-100 dark:bg-slate-800" />
+
+                    <button
+                      role="menuitem"
+                      onClick={handleDisconnect}
+                      className="w-full flex items-center gap-2 px-3 py-2 text-left text-[11px] font-bold text-rose-600 dark:text-rose-400 hover:bg-rose-50 dark:hover:bg-rose-900/20 transition-colors"
+                    >
+                      <LogOut size={12} className="shrink-0" />
+                      Disconnect
+                    </button>
+                  </div>
+                )}
+              </div>
             )}
 
                                     {/* ⚡ NEW: Dynamic Connect Button / Smart Environment Routing ⚡ */}

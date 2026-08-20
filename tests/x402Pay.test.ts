@@ -278,6 +278,8 @@ describe('payWithX402 — the one automatic re-sign', () => {
 
     const result = await payWithX402({
       url: '/api/pay/x402', body: {}, client: wallet.client, account: ACCOUNT,
+      // Opt IN — one signature is the default now, so the re-sign has to be asked for.
+      maxAttempts: 2,
       onRetry: (reason) => retries.push(reason),
     });
 
@@ -296,7 +298,7 @@ describe('payWithX402 — the one automatic re-sign', () => {
       return jsonResponse({ success: true }, 200);
     }));
 
-    await payWithX402({ url: '/api/pay/x402', body: {}, client: wallet.client, account: ACCOUNT });
+    await payWithX402({ url: '/api/pay/x402', body: {}, client: wallet.client, account: ACCOUNT, maxAttempts: 2 });
     expect(wallet.calls[0].message.nonce).not.toBe(wallet.calls[1].message.nonce);
   });
 
@@ -333,8 +335,32 @@ describe('payWithX402 — the one automatic re-sign', () => {
     let n = 0;
     vi.stubGlobal('fetch', vi.fn(async () => (++n % 2 === 1 ? jsonResponse({ accepts: [accept] }, 402) : settleRefusal(true))));
 
-    await expect(payWithX402({ url: '/api/pay/x402', body: {}, client: wallet.client, account: ACCOUNT }))
+    await expect(payWithX402({ url: '/api/pay/x402', body: {}, client: wallet.client, account: ACCOUNT, maxAttempts: 2 }))
       .rejects.toBeInstanceOf(X402PaymentError);
     expect(wallet.calls).toHaveLength(2);
+  });
+
+  /**
+   * 🔴 THE DEFAULT IS ONE PROMPT, AND THIS IS THE TEST THAT KEEPS IT THERE.
+   *
+   * Re-signing was made automatic to spare people the workaround they had found by hand. That
+   * only made sense while first attempts failed OCCASIONALLY; once one began failing every time,
+   * the "rescue" became a second wallet prompt on every payment — indistinguishable, from the
+   * user's side, from an app that ignored the first one. A retry needed every time is a bug with
+   * a workaround attached, so the rail now gets exactly one signature and the contract call
+   * takes it from there.
+   */
+  it('asks the wallet ONCE by default, even when the server says the refusal was retryable', async () => {
+    const wallet = fakeWallet();
+    let n = 0;
+    vi.stubGlobal('fetch', vi.fn(async () => (++n % 2 === 1 ? jsonResponse({ accepts: [accept] }, 402) : settleRefusal(true))));
+
+    const err = await payWithX402({ url: '/api/pay/x402', body: {}, client: wallet.client, account: ACCOUNT })
+      .catch((e) => e);
+
+    expect(err).toBeInstanceOf(X402PaymentError);
+    expect(wallet.calls).toHaveLength(1);
+    // Not settled, so the page is free to fall back to the contract call — once.
+    expect(err.settled).toBe(false);
   });
 });
