@@ -2394,21 +2394,41 @@ export default function Home() {
         try { sessionStorage.setItem(`abapay_wallet_proof_${address.toLowerCase()}`, JSON.stringify(proof)); } catch { /* private mode */ }
       } catch (e) {
         if (cancelled) return;
-        if (isUserRejection(e)) {
-          // They said no. Disconnect rather than leaving them in a half-state they never chose.
-          console.warn('[wallet] ownership signature declined — disconnecting.');
+        // 🔴 ON THE WEB, FAILING TO VERIFY DISCONNECTS — WHATEVER THE FAILURE LOOKED LIKE.
+        //
+        // This used to disconnect only on a recognised rejection and otherwise leave the user
+        // connected-but-unproven. That was wrong for the wallet it matters most for: Valora over
+        // WalletConnect sends NOTHING back when its sheet is dismissed (see the STOP WAITING
+        // note in walletEnv), so cancelling is not a rejection this code can recognise — it is
+        // silence, ending in a timeout. Reported exactly that way: "I cancel the verify wallet
+        // pop up and I'm still seeing my history and the chain connected."
+        //
+        // So the rule is the outcome, not the error shape: no proof, no session. A cancel and a
+        // dead relay are indistinguishable from here and both mean the same thing — this app
+        // cannot show you data belonging to an address nobody demonstrated they hold.
+        //
+        // MiniPay and Farcaster are exempt: the app runs INSIDE the wallet, there is exactly one
+        // account it could mean, and MiniPay in particular is not reliable at personal_sign —
+        // disconnecting there would lock users out of an environment where the spoofing this
+        // guards against cannot happen anyway.
+        const rejected = isUserRejection(e);
+        if (environment === 'WEB') {
+          console.warn('[wallet] ownership signature not obtained — disconnecting:', rejected ? 'declined' : (e as Error)?.message);
           handleDisconnect();
-          setConnectError('Verifying your wallet was declined. Tap Connect and approve the signature to continue — it does not move any money.');
+          setConnectError(
+            rejected
+              ? 'Verifying your wallet was cancelled, so it has been disconnected. Tap Connect and approve the signature — it moves no money and approves no payment.'
+              : "Your wallet didn't confirm it belongs to you, so it has been disconnected. Tap Connect to try again.",
+          );
           return;
         }
-        // Unsupported, timed out, or dropped by the relay: stay connected, stay unproven.
-        console.warn('[wallet] ownership signature unavailable; history stays hidden:', (e as Error)?.message);
+        console.warn('[wallet] ownership signature unavailable in', environment, '— history stays hidden:', (e as Error)?.message);
       } finally {
         if (!cancelled) walletProofInFlight.current = false;
       }
     })();
     return () => { cancelled = true; };
-  }, [address, client, walletProof, handleDisconnect]);
+  }, [address, client, walletProof, handleDisconnect, environment]);
 
   // ⚡ THE MANUAL CONNECT PATH ⚡
   //
@@ -2875,6 +2895,11 @@ export default function Home() {
 
   useEffect(() => {
     if (!address) { setTransactions([]); return; }
+    // 🔴 CACHED HISTORY IS STILL HISTORY. This restored the last-seen rows from localStorage
+    // BEFORE any ownership check, so cancelling the verification left the previous session's
+    // payments on screen — "I cancel the verify wallet pop up and I am still seeing my history".
+    // Proof first, then anything that reveals what this wallet has paid for.
+    if (!walletProofHeaders()) { setTransactions([]); return; }
     try { const savedLocalHistory = localStorage.getItem(`abapay_history_${address}`); if (savedLocalHistory) setTransactions(JSON.parse(savedLocalHistory)); } catch (e) {}
 
     async function fetchCloudHistory() {
@@ -3548,9 +3573,19 @@ export default function Home() {
 
                 {/* Only on demand, and gone the moment something is chosen. */}
                 {chainMenuOpen && environment === 'WEB' && (
+                  // 🔴 ANCHORED LEFT, NOT RIGHT — THE MENU WAS FALLING OFF THE SCREEN.
+                  //
+                  // The badge sits at the START of a right-aligned header row, so `right-0`
+                  // measured from the badge's own right edge and pushed the 12rem panel back
+                  // across — and straight off the left of the viewport on a phone, where it was
+                  // clipped by the card and unreadable. Screenshotted: the network options and
+                  // Disconnect were half off-screen.
+                  //
+                  // `left-0` opens it INTO the row instead of away from it, and the width caps
+                  // against the viewport so it can never be wider than the screen it is on.
                   <div
                     role="menu"
-                    className="absolute right-0 top-full mt-1.5 z-50 w-48 rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-[#131317] shadow-xl overflow-hidden"
+                    className="absolute left-0 top-full mt-1.5 z-50 w-48 max-w-[calc(100vw-2rem)] rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-[#131317] shadow-xl overflow-hidden"
                   >
                     <div className="px-3 pt-2 pb-1 text-[8px] font-black uppercase tracking-widest text-slate-400 dark:text-slate-500">
                       Network

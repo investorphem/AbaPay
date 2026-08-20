@@ -1,4 +1,4 @@
-import { http, createConfig, createStorage, cookieStorage, fallback } from 'wagmi';
+import { http, createConfig, fallback } from 'wagmi';
 import { base, baseSepolia, celo, celoAlfajores } from 'wagmi/chains';
 import { baseAccount, injected, walletConnect } from 'wagmi/connectors';
 import { rpcUrlsFor } from '@/lib/chain';
@@ -68,7 +68,29 @@ export const config = createConfig({
       }
     }),
   ],
-  storage: createStorage({ storage: cookieStorage }),
+  // ⚡ NOTHING IS PERSISTED, SO THERE IS NOTHING TO COME BACK BY ITSELF.
+  //
+  // 🔴 THIS IS THE AUTO-CONNECT THAT SURVIVED TWO FIXES. First the app's own auto-connect rules
+  // were narrowed to an allowlist; then `reconnectOnMount={false}` was set on WagmiProvider. It
+  // still connected on its own, because neither touches the actual mechanism: this config
+  // persisted wagmi's state to `cookieStorage`, so on every load wagmi REHYDRATED
+  // `connections`/`current` from the cookie and `useAccount()` reported `isConnected` with an
+  // address — no provider set up, no relay socket, just a cookie describing a connection that no
+  // longer existed. `reconnectOnMount` governs RE-ESTABLISHING; it does not govern rehydrating.
+  //
+  // That single fact produced both reported symptoms: the app "auto connects" on a wallet the
+  // user never chose, and then paying reports "your wallet connection has dropped — tap Connect"
+  // on a wallet that looks connected. Nothing had dropped. There was never a live session.
+  //
+  // `storage: null` disables the persistence outright, which is the honest expression of what
+  // this app now wants: on the web the Connect button is the only way in, so a connection that
+  // outlives the page is not a feature to restore. The three surfaces where silent connect IS
+  // right are unaffected — MiniPay and Farcaster connect through their own SDKs and never touch
+  // wagmi, and Base App is connected by an explicit connect() call.
+  //
+  // `ssr` stays true: it governs how wagmi hydrates on the server, and turning it off would
+  // reintroduce hydration mismatches. With no storage there is simply no state to hydrate FROM.
+  storage: null,
   ssr: true,
   transports: {
     // ⚡ TRANSPORTS ORDERED TO MATCH THE CHAINS ARRAY

@@ -324,6 +324,75 @@ export function parseAuthorizationState(raw: unknown): boolean | null {
   return null;
 }
 
+// ⚡ RECOVER THE SIGNER OURSELVES, BEFORE THE FACILITATOR IS ASKED TO
+//
+// 🔴 WHAT THIS WOULD HAVE TOLD US IMMEDIATELY. The Base rejection
+//
+//   "failed to send transaction: error (status 400): invalid_request: unable to estimate gas"
+//   "errorReason": "invalid_payload"
+//
+// was reproduced EXACTLY, byte for byte, by sending CDP a well-formed authorization with a
+// deliberately invalid signature. That is what the message means: the signature did not recover
+// to `from`, so `transferWithAuthorization` reverts on signature recovery, so estimating gas for
+// it fails. The facilitator never says "bad signature" — it says the last thing that went wrong,
+// several layers down, and every real cause (expiry, balance, nonce, blacklist, a paused token)
+// produces the same sentence.
+//
+// It is checkable here with no network call and no facilitator round-trip: EIP-712 is
+// deterministic, so the same typed data the payer signed can be rebuilt and the signer recovered.
+// A mismatch is then reported as what it is, naming the address that DID sign, instead of being
+// discovered as an opaque estimation failure after an alert has already fired.
+//
+// Smart-contract wallets are handled by the caller falling back to an on-chain ERC-1271 check —
+// those signatures are not ECDSA and must never be judged by recovery alone.
+
+/** The EIP-712 types for `transferWithAuthorization`, exactly as the payer signs them. */
+export const TRANSFER_WITH_AUTHORIZATION_TYPES = {
+  TransferWithAuthorization: [
+    { name: 'from', type: 'address' },
+    { name: 'to', type: 'address' },
+    { name: 'value', type: 'uint256' },
+    { name: 'validAfter', type: 'uint256' },
+    { name: 'validBefore', type: 'uint256' },
+    { name: 'nonce', type: 'bytes32' },
+  ],
+} as const;
+
+/**
+ * Rebuild the exact typed-data payload the payer signed.
+ *
+ * The domain has to match the token's own EIP712Domain to the character — Base USDC is
+ * "USD Coin"/"2", Celo's is "USDC"/"2" — which is why the challenge carries it in `extra` rather
+ * than anything guessing.
+ */
+export function transferAuthorizationTypedData(params: {
+  auth: X402Authorization;
+  chainId: number;
+  asset: string;
+  domainName: string;
+  domainVersion: string;
+}) {
+  const { auth, chainId, asset, domainName, domainVersion } = params;
+  return {
+    domain: {
+      name: domainName,
+      version: domainVersion,
+      chainId,
+      verifyingContract: asset as `0x${string}`,
+    },
+    types: TRANSFER_WITH_AUTHORIZATION_TYPES,
+    primaryType: 'TransferWithAuthorization' as const,
+    message: {
+      from: auth.from as `0x${string}`,
+      to: auth.to as `0x${string}`,
+      value: BigInt(auth.value),
+      validAfter: BigInt(auth.validAfter),
+      validBefore: BigInt(auth.validBefore),
+      nonce: auth.nonce as `0x${string}`,
+    },
+  };
+}
+
 /**
  * Did the facilitator's refusal nonetheless put a transaction on chain?
  *
