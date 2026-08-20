@@ -207,9 +207,57 @@ describe('payWithX402 — the signed validity window', () => {
     expect((await windowFor(999_999)).validBefore - now).toBeLessThanOrEqual(86_400);
   });
 
-  it('backdates validAfter, because a chain clock behind the browser reverts for no reason', async () => {
+  /**
+   * 🔴 THE KNOWN-GOOD VALUE, RESTORED. thirdweb's client — under which Base x402 worked for
+   * months — backdated validAfter by a full day (see preparePaymentHeader in
+   * node_modules/thirdweb/dist/esm/x402/sign.js). Replacing that client narrowed it to ten
+   * minutes, which is a thin margin against the clock we do not control: `validAfter` is
+   * compared to `block.timestamp`, and one second over reverts as "unable to estimate gas".
+   */
+  it("backdates validAfter a full day, matching the client Base x402 worked under", async () => {
     const now = Math.floor(Date.now() / 1000);
-    expect((await windowFor(3600)).validAfter).toBeLessThanOrEqual(now - 600);
+    expect((await windowFor(3600)).validAfter).toBeLessThanOrEqual(now - 86_400);
+  });
+
+  it('signs checksummed addresses, which the facilitator also compares as text', async () => {
+    const wallet = fakeWallet();
+    let n = 0;
+    vi.stubGlobal('fetch', vi.fn(async () => (++n === 1
+      // A challenge whose payTo arrives lower-cased, as an env var easily does.
+      ? jsonResponse({ accepts: [{ ...accept, payTo: PAY_TO.toLowerCase() }] }, 402)
+      : jsonResponse({ success: true }, 200))));
+    await payWithX402({ url: '/api/pay/x402', body: {}, client: wallet.client, account: ACCOUNT });
+    expect(wallet.calls[0].message.to).toBe(PAY_TO);
+    expect(wallet.calls[0].message.from).toBe(ACCOUNT);
+  });
+});
+
+describe('payWithX402 — settled without a transaction hash', () => {
+  /**
+   * 🔴 THE REAL DOUBLE CHARGE. The facilitator answered `unable to estimate gas` for an
+   * authorization it had ALREADY settled (a spent EIP-3009 nonce reverts on re-simulation), so
+   * the refusal named no transaction and looked perfectly safe to retry. On Base that charged a
+   * payer 1.4925 USDC twice, 140 seconds apart, for one bill. The server now asks the chain
+   * whether the nonce was spent and says `settled: true` when it was — with no hash to offer,
+   * because the facilitator never gave one. The client must believe it anyway.
+   */
+  it('treats settled:true as settled even with no tx_hash, and refuses to re-sign it', async () => {
+    const wallet = fakeWallet();
+    let n = 0;
+    vi.stubGlobal('fetch', vi.fn(async () => (++n === 1
+      ? jsonResponse({ accepts: [accept] }, 402)
+      // Note `retryable: true` is ALSO present: `settled` has to win, or the guard is useless.
+      : jsonResponse({ settled: true, retryable: true, error: 'Your payment went through, but we could not confirm it automatically.' }, 402))));
+
+    const err = await payWithX402({ url: '/api/pay/x402', body: {}, client: wallet.client, account: ACCOUNT })
+      .catch((e) => e);
+
+    expect(err).toBeInstanceOf(X402PaymentError);
+    expect(err.settled).toBe(true);
+    expect(err.retryable).toBe(false);
+    // One signature only. A second would be a second real payment.
+    expect(wallet.calls.length).toBe(1);
+    expect(n).toBe(2);
   });
 });
 

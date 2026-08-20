@@ -225,6 +225,66 @@ export function isRetryableSettleFailure(httpStatus: number, rawBody: string): b
   return false;
 }
 
+// ⚡ THE ONLY AUTHORITY ON "DID THIS AUTHORIZATION MOVE MONEY" IS THE CHAIN ITSELF
+//
+// 🔴 THE DOUBLE CHARGE THIS EXISTS TO STOP, WITH THE RECEIPTS:
+//
+//   09:21:31   1.4925 USDC   payer -> vault   0xe1f5043a…
+//   09:23:51   1.4925 USDC   payer -> vault   0x19aec564…   ← 140s later, same bill
+//
+// One bill, paid twice, and the facilitator's own words for the second attempt were the
+// familiar `unable to estimate gas` / `invalid_payload`. Decoding the first transaction shows
+// why: it is a real `transferWithAuthorization` that SUCCEEDED, and EIP-3009 nonces are
+// single-use — so re-simulating that same authorization afterwards necessarily reverts, and a
+// revert during simulation is reported as "unable to estimate gas". The message is therefore
+// ambiguous by construction: it is what a facilitator says both when nothing has happened yet
+// AND when everything has already happened. isRetryableSettleFailure reads it as the former,
+// the payer is asked to sign a FRESH nonce, and the token — correctly — accepts that too.
+//
+// No amount of message-parsing can separate those two cases, so this stops trying. USDC (every
+// EIP-3009 FiatToken) exposes `authorizationState(authorizer, nonce) -> bool`, which is the
+// chain's own record of whether that exact authorization has been consumed. Asked before any
+// retry is offered, it answers the only question that matters, with no ambiguity at all.
+//
+// Verified against the transaction above: the nonce it carried reads back `true`.
+
+/** `authorizationState(address,bytes32)` */
+const AUTHORIZATION_STATE_SELECTOR = '0xe94a0102';
+
+/**
+ * eth_call data asking the token whether this authorization has already been used.
+ *
+ * Pure string work so it can be tested without a network — the RPC call itself is the caller's
+ * business (see authorizationWasConsumed in the settle route).
+ */
+export function buildAuthorizationStateCall(authorizer: string, nonce: string): string | null {
+  const addr = String(authorizer || '').trim().toLowerCase();
+  const n = String(nonce || '').trim().toLowerCase();
+  if (!/^0x[0-9a-f]{40}$/.test(addr)) return null;
+  // The nonce is a bytes32. Accept it with or without the 0x, but never pad a short one —
+  // a guessed nonce would answer a question about a DIFFERENT authorization.
+  const bare = n.startsWith('0x') ? n.slice(2) : n;
+  if (!/^[0-9a-f]{64}$/.test(bare)) return null;
+  return `${AUTHORIZATION_STATE_SELECTOR}${'0'.repeat(24)}${addr.slice(2)}${bare}`;
+}
+
+/**
+ * Read the bool an `authorizationState` call returns.
+ *
+ * 🔴 ANYTHING UNREADABLE IS `null`, NEVER `false`. The caller treats null as "could not
+ * establish that the money is safe" and refuses to offer a retry — the failure mode of a
+ * wrong `false` here is charging someone twice.
+ */
+export function parseAuthorizationState(raw: unknown): boolean | null {
+  if (typeof raw !== 'string') return null;
+  const hex = raw.trim().toLowerCase();
+  if (!/^0x[0-9a-f]{64}$/.test(hex)) return null;
+  const value = BigInt(hex);
+  if (value === BigInt(0)) return false;
+  if (value === BigInt(1)) return true;
+  return null;
+}
+
 /**
  * Did the facilitator's refusal nonetheless put a transaction on chain?
  *

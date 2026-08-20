@@ -4,6 +4,8 @@ import {
   checkAuthorization,
   isRetryableSettleFailure,
   settleResponseNamesTransaction,
+  buildAuthorizationStateCall,
+  parseAuthorizationState,
   MIN_REMAINING_VALIDITY_SECONDS,
 } from '@/lib/x402Settle';
 
@@ -192,6 +194,55 @@ describe('isRetryableSettleFailure', () => {
     // same one settles on the next attempt.
     expect(isRetryableSettleFailure(500, 'nonce too low')).toBe(true);
     expect(isRetryableSettleFailure(500, 'replacement transaction underpriced')).toBe(true);
+  });
+});
+
+/**
+ * 🔴 THE CHECK THAT WOULD HAVE PREVENTED A REAL DOUBLE CHARGE.
+ *
+ * On Base, one bill was paid twice 140 seconds apart (0xe1f5043a…, then 0x19aec564…) because the
+ * facilitator answered `unable to estimate gas` for an authorization it had ALREADY settled —
+ * re-simulating a spent EIP-3009 nonce reverts, and that is how a revert during estimation
+ * reads. The values below are decoded from that first, real transaction.
+ */
+describe('buildAuthorizationStateCall / parseAuthorizationState', () => {
+  const PAYER = '0xec24bAfBc989a9bE5f6F0eAD8848753B5E4aE0B6';
+  const NONCE = '0x9b0f1bd5d0a4e451196db79550c0ea610c6d7da38ded60956638920c61fe59b7';
+
+  it('encodes the exact eth_call the token answers', () => {
+    const data = buildAuthorizationStateCall(PAYER, NONCE);
+    // selector + address left-padded to 32 bytes + the bytes32 nonce = 4 + 32 + 32 bytes.
+    expect(data).toBe(
+      '0xe94a0102' +
+      '000000000000000000000000ec24bafbc989a9be5f6f0ead8848753b5e4ae0b6' +
+      '9b0f1bd5d0a4e451196db79550c0ea610c6d7da38ded60956638920c61fe59b7',
+    );
+    expect(data!.length).toBe(2 + 8 + 64 + 64);
+  });
+
+  it('accepts a nonce with or without its 0x, since envelopes carry both', () => {
+    expect(buildAuthorizationStateCall(PAYER, NONCE.slice(2))).toBe(buildAuthorizationStateCall(PAYER, NONCE));
+  });
+
+  it('refuses to guess rather than ask about the WRONG authorization', () => {
+    // A short nonce padded to length would be a different authorization entirely, and the
+    // answer would be a confident lie about whether someone had been charged.
+    expect(buildAuthorizationStateCall(PAYER, '0xdeadbeef')).toBeNull();
+    expect(buildAuthorizationStateCall('0xnothex', NONCE)).toBeNull();
+    expect(buildAuthorizationStateCall('', NONCE)).toBeNull();
+  });
+
+  it('reads the bool the token returns', () => {
+    expect(parseAuthorizationState('0x' + '0'.repeat(63) + '1')).toBe(true);
+    expect(parseAuthorizationState('0x' + '0'.repeat(64))).toBe(false);
+  });
+
+  it('answers null — never false — for anything it cannot read', () => {
+    // 🔴 The asymmetry that matters: a wrong `false` here offers a retry on a payment that
+    // already went through, which is a second real charge. Callers treat null like "spent".
+    for (const bad of ['', '0x', '0xzz', 'true', null, undefined, 42, {}]) {
+      expect(parseAuthorizationState(bad as unknown)).toBeNull();
+    }
   });
 });
 

@@ -6,7 +6,8 @@ import { sendTelegramAlert } from '@/lib/telegram';
 import { getServiceRules } from '@/lib/serviceRules';
 import { isDuplicateElectricity } from '@/lib/parity';
 import { enqueueRefund } from '@/lib/refunds';
-import { readAuthorization, checkAuthorization, isRetryableSettleFailure, settleResponseNamesTransaction } from '@/lib/x402Settle';
+import { readAuthorization, checkAuthorization, isRetryableSettleFailure, settleResponseNamesTransaction, buildAuthorizationStateCall, parseAuthorizationState, type X402Authorization } from '@/lib/x402Settle';
+import { rpcUrlsFor } from '@/lib/chain';
 
 // ⚡ x402 SETTLEMENT — MAIN APP ONLY. Two rails, resolved by chainConfigFor():
 //   • CELO (default): Celo's own facilitator (api.x402.celo.org — "Built by Celo Core Co."),
@@ -78,6 +79,48 @@ const X402_DOMAINS_BY_CHAIN: Record<'CELO' | 'BASE', Record<string, { name: stri
 };
 
 type ChainKey = 'CELO' | 'BASE';
+
+/**
+ * Has this EIP-3009 authorization already been spent?
+ *
+ * `true` = the money moved (never retry, never fall back). `false` = it provably did not (a
+ * retry is safe). `null` = we could not find out, which callers must treat as `true` would be
+ * treated — the chain is the only authority here, and guessing in the payer's disfavour is the
+ * only guess that cannot cost them a second payment.
+ *
+ * Deliberately its own tiny fetch rather than a viem client: this runs on a path that has
+ * ALREADY failed, so it must add one cheap, short-timeout read and never a new way to hang.
+ */
+async function authorizationWasConsumed(
+  chainKey: ChainKey,
+  isMainnet: boolean,
+  tokenAddress: string,
+  auth: X402Authorization,
+): Promise<boolean | null> {
+  const chainId = chainKey === 'BASE' ? (isMainnet ? 8453 : 84532) : (isMainnet ? 42220 : 11142220);
+  const data = buildAuthorizationStateCall(auth.from, auth.nonce);
+  if (!data) return null;
+
+  for (const url of rpcUrlsFor(chainId)) {
+    try {
+      const res = await fetch(url, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          jsonrpc: '2.0', id: 1, method: 'eth_call',
+          params: [{ to: tokenAddress, data }, 'latest'],
+        }),
+        signal: AbortSignal.timeout(6_000),
+      });
+      const body = await res.json();
+      const state = parseAuthorizationState(body?.result);
+      if (state !== null) return state;
+    } catch {
+      // Try the next endpoint — one unreachable RPC is not an answer.
+    }
+  }
+  return null;
+}
 
 interface X402ChainConfig {
   chainKey: ChainKey;
@@ -384,6 +427,9 @@ async function handleX402Request(req: Request) {
   // What will ACTUALLY move: the amount the payer signed, which from here on replaces the
   // recomputed price everywhere it matters (the DB row, the vend, any refund). See below.
   let chargedCrypto = requiredCrypto;
+  // The authorization the payer signed, hoisted out of the try so a FAILURE can still ask the
+  // chain whether its nonce was spent. See authorizationWasConsumed below.
+  let settledAuth: X402Authorization | null = null;
   try {
     let decodedPayload: any;
     try {
@@ -402,6 +448,7 @@ async function handleX402Request(req: Request) {
     // disagrees with what we are about to declare as required) are decided HERE, where each one
     // has a specific answer and a specific message. See src/lib/x402Settle.ts.
     const auth = readAuthorization(decodedPayload);
+    settledAuth = auth; // kept for the on-chain "was this nonce spent?" check on failure
     const authCheck = checkAuthorization({
       auth,
       payTo,
@@ -494,6 +541,22 @@ async function handleX402Request(req: Request) {
         && isRetryableSettleFailure(res.status, res.text);
       if (!worthRetrying) break;
 
+      // 🔴 AND ONLY IF THE CHAIN SAYS THE AUTHORIZATION IS STILL UNSPENT.
+      //
+      // The single-use nonce makes a resubmission safe for the PAYER's balance, but it does not
+      // make it honest: if the first attempt broadcast successfully and merely lost its response,
+      // resubmitting produces a revert ("nonce already used"), which the facilitator reports as
+      // `unable to estimate gas` — and that manufactured error then OVERWRITES the real outcome
+      // in settleRawText, so a settled payment is reported to the payer as a failure. Asking the
+      // token first means the retry only ever happens when there is genuinely nothing to lose.
+      const stillUnspent = settledAuth
+        ? await authorizationWasConsumed(chainKey, isMainnet, usdc.address, settledAuth)
+        : null;
+      if (stillUnspent !== false) {
+        console.warn(`[Pay/x402] Settle refused (${chainKey}); NOT retrying — authorization is spent or unreadable:`, stillUnspent);
+        break;
+      }
+
       console.warn(`[Pay/x402] Settle refused (${chainKey}), retrying once:`, res.status, res.text.slice(0, 300));
       await new Promise((resolve) => setTimeout(resolve, SETTLE_RETRY_DELAY_MS));
     }
@@ -519,10 +582,55 @@ async function handleX402Request(req: Request) {
     const namesTransaction = settleResponseNamesTransaction(settleResult);
     // Retryable = a fresh signature is worth one prompt. Never when a transaction was named:
     // money may already have moved, and the client must not sign anything else.
-    const retryable = !namesTransaction && isRetryableSettleFailure(settleHttpStatus, allText);
+    let retryable = !namesTransaction && isRetryableSettleFailure(settleHttpStatus, allText);
     const reason = settleResult.errorMessage || settleResult.errorReason || (settleResult as any).error || (settleResult as any).message || 'Payment could not be settled';
 
-    console.error(`[Pay/x402] Settle rejected (${chainKey}):`, settleHttpStatus, 'token:', requestedTokenSymbol, 'asset:', usdc.address, 'retryable:', retryable, 'raw:', allText.slice(0, 800));
+    // 🔴 BEFORE OFFERING A RETRY, ASK THE CHAIN WHETHER THE MONEY ALREADY MOVED.
+    //
+    // The facilitator's `unable to estimate gas` is the same sentence for "nothing has happened
+    // yet" and "it already happened" — re-simulating a spent EIP-3009 nonce necessarily reverts,
+    // and a revert during estimation is reported exactly that way. Reading it as the former is
+    // what charged a payer 1.4925 USDC twice, 140 seconds apart, for one bill: the refusal named
+    // no transaction, so it looked safe, and the re-sign carried a fresh nonce the token
+    // accepted. No parsing of that message can tell the two apart, so we stop parsing and ask
+    // the token: `authorizationState(payer, nonce)` is the chain's own record of the answer.
+    let settledWithoutHash = false;
+    if (retryable && settledAuth) {
+      const consumed = await authorizationWasConsumed(chainKey, isMainnet, usdc.address, settledAuth);
+      if (consumed !== false) {
+        // `true` (spent) and `null` (could not read it) both land here on purpose. The cost of
+        // being wrong is asymmetric: a needless contract-call fallback costs two prompts, while
+        // a wrongly-offered retry costs the payer a second, real payment.
+        retryable = false;
+        settledWithoutHash = consumed === true;
+      }
+    }
+
+    console.error(`[Pay/x402] Settle rejected (${chainKey}):`, settleHttpStatus, 'token:', requestedTokenSymbol, 'asset:', usdc.address, 'retryable:', retryable, 'authorizationSpent:', settledWithoutHash, 'raw:', allText.slice(0, 800));
+
+    if (settledWithoutHash) {
+      // Money moved and the facilitator never told us the hash, so there is nothing to write a
+      // normal row against. Say so loudly: this needs a human to reconcile it against the payer
+      // and nonce below, and the payer must not be asked to pay again in the meantime.
+      sendTelegramAlert(
+        `🚨 *x402 PAID BUT UNCONFIRMED (${chainKey})*\n\n` +
+        `The facilitator refused, but the chain says the payer's authorization WAS spent — the money moved and no transaction hash came back. Reconcile this one by hand; the payer has NOT been asked to pay again.\n\n` +
+        `${requestedTokenSymbol} ${chargedCrypto.toFixed(4)} · payer \`${settledAuth?.from}\`\n` +
+        `nonce \`${settledAuth?.nonce}\`\n` +
+        `\`${allText.slice(0, 300)}\``,
+      ).catch(() => {});
+
+      return NextResponse.json(
+        {
+          x402Version: 1,
+          // `settled` is what stops the page falling back to the contract call — see x402Pay.ts.
+          settled: true,
+          error: "Your payment went through, but we couldn't confirm it automatically. Don't pay again — check your History tab, and contact support if it hasn't appeared shortly.",
+          retryable: false,
+        },
+        { status: 402 },
+      );
+    }
 
     // "0 credits" also comes back as a settle failure per Celo's own docs ("the facilitator
     // returns 402 Payment Required until you top up") — that's an operator problem, not a
@@ -544,12 +652,27 @@ async function handleX402Request(req: Request) {
       // already been re-sent to the facilitator once by then, and is about to be re-signed once
       // on this rail before anything falls back. An alert that describes the old behaviour is
       // worse than none — it sends whoever reads it looking for the wrong thing.
+      // ⚡ AND CARRY THE AUTHORIZATION ITSELF. "unable to estimate gas" names none of the six
+      // things that actually revert transferWithAuthorization, so an alert without these fields
+      // sends whoever reads it to the RPC to reconstruct them by hand. `nowSec` is included
+      // because the two window fields are only meaningful next to the clock they are judged
+      // against — a validAfter above it is a revert, and nothing else in the message says so.
+      const nowSec = Math.floor(Date.now() / 1000);
+      const authLine = settledAuth
+        ? `payer \`${settledAuth.from}\` -> \`${settledAuth.to}\`\n` +
+          `value \`${settledAuth.value}\` · asset \`${usdc.address}\`\n` +
+          `validAfter \`${settledAuth.validAfter}\`${Number(settledAuth.validAfter) > nowSec ? ' ⛔ IN THE FUTURE' : ''} · ` +
+          `validBefore \`${settledAuth.validBefore}\`${Number(settledAuth.validBefore) <= nowSec ? ' ⛔ EXPIRED' : ''} · now \`${nowSec}\`\n` +
+          `nonce \`${settledAuth.nonce}\`\n`
+        : '';
+
       sendTelegramAlert(
         `⚠️ *x402 SETTLEMENT REJECTED (${chainKey})*\n\n` +
         (retryable
-          ? 'The payer signed, the facilitator refused twice, and their wallet is being asked to sign once more before anything falls back to the contract-call rail.'
+          ? 'The payer signed, the facilitator refused, and their wallet is being asked to sign once more before anything falls back to the contract-call rail.'
           : 'The payer signed, the facilitator refused, and they have been sent to the contract-call rail instead.') + '\n\n' +
         `HTTP ${settleHttpStatus} · ${requestedTokenSymbol} · ${chargedCrypto.toFixed(4)}\n` +
+        authLine +
         `\`${allText.slice(0, 400)}\``,
       ).catch(() => {});
     }

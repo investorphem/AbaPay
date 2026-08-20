@@ -86,8 +86,9 @@ each one's own provider, and sends it a timed-out `eth_accounts` — a call that
 it is safe on every page load. Each wallet comes back `authorized` (already approved this site),
 `available` (real, not yet approved) or `none` (absent, or a stub that never answered).
 
-- **Any wallet `authorized`** → silent auto-connect, no popup, no Connect button. (Except with
-  Valora — see below.)
+- **Any wallet `authorized`** → nothing happens on its own. `authorized` decides which wallets the
+  chooser can offer *without* a permission popup, not whether to connect. See "Auto-connect is an
+  allowlist" below.
 - **One or more usable wallets** → a chooser lists them **plus WalletConnect**; cancelling ends
   the attempt rather than falling through to a QR code. One extension that is both
   EIP-6963-announced and parked on `window.ethereum` is de-duplicated, so it can't appear twice.
@@ -158,6 +159,33 @@ prompt before approving. So after 15s of processing the status banner grows a **
 control. It cannot abort the in-flight request (nothing on this side can) and deliberately does
 **not** claim the payment was cancelled: if the user approves a moment later it still settles, and
 saying otherwise is how someone pays twice.
+
+#### Auto-connect is an allowlist: MiniPay, Base App, Farcaster — and nothing else
+
+On the web, **the Connect button is the only way in.** No wallet is connected until the user asks
+for it, even one whose extension approved this site months ago.
+
+🔴 **The auto-connect nobody could find was in `WagmiProvider` itself.** wagmi persists the
+connector and, with the default `reconnectOnMount`, silently re-establishes it on *every page
+load* — inside the provider, before any effect in `page.tsx` runs and regardless of what those
+effects decide. So the app came up connected on its own no matter how carefully the rules
+downstream were written, and every attempt to fix it by editing those rules was editing the wrong
+thing. `Providers.tsx` now passes `reconnectOnMount={false}`.
+
+The rule downstream was also the wrong shape: it auto-connected **any** `authorized` wallet and
+carved out Valora by name. That made silent connect the default and removed wallets only after
+someone complained, which is how *"it connects by itself and there's no Connect button"* kept
+coming back wearing a different wallet's name. It is an allowlist now (`AUTO_CONNECT_SURFACES`).
+
+Those three are different in kind, not degree: the app is running **inside** the wallet, so there
+is exactly one account it could mean, the user chose it by opening AbaPay there, and no chooser is
+being suppressed because there is nothing to choose between. MiniPay and Farcaster are connected
+by their own SDKs and never touch wagmi; Base App arrives through wagmi and is matched by
+`looksLikeBaseApp()` — which deliberately refuses the Coinbase **desktop extension**, since that
+sets the same `isCoinbaseWallet` flag while being an ordinary injected wallet on an ordinary page.
+
+⚠️ **The trade:** a refresh ends a web session and the user presses **Connect** again. Being asked
+is the point, but it is a real cost on a page people reload.
 
 #### A restored WalletConnect session is not a live one
 
@@ -1106,14 +1134,35 @@ were doing that second attempt by hand; now it happens on its own, at three leve
    `retryable`, and never when it carries a `tx_hash`. The second prompt is announced, because an
    unexplained one reads as an app that ignored the first.
 
-🔴 **The one refusal that is never retried is an authorization that has already been consumed.**
-`FiatTokenV2: authorization is used or canceled` means that authorization *already moved the
-money* and only the response went missing — re-signing would mint a fresh nonce the token would
-accept, double-charging the one person who did nothing wrong. It is matched ahead of everything
-else, because a used authorization reverts during simulation and so arrives wearing the same
-"unable to estimate gas" wording as the transient case. Note that `nonce too low` and
-`replacement transaction underpriced` are the *facilitator's own* EOA racing itself and remain
-retryable — a different nonce entirely.
+🔴 **No retry is offered until the CHAIN says the money did not move.** This is the important
+one, and it was learned the expensive way — from on-chain receipts, not from reasoning:
+
+```
+09:21:31   1.4925 USDC   payer -> vault   0xe1f5043a…   ← paid
+09:23:51   1.4925 USDC   payer -> vault   0x19aec564…   ← paid AGAIN, 140s later, same bill
+```
+
+Both are real `transferWithAuthorization` calls that succeeded. The facilitator's answer for the
+second attempt was the same `unable to estimate gas` / `invalid_payload` as ever — because
+EIP-3009 nonces are single-use, so **re-simulating an authorization that already succeeded
+necessarily reverts**, and a revert during estimation is reported exactly that way. The sentence
+is therefore ambiguous *by construction*: a facilitator says it both when nothing has happened
+yet and when everything has already happened. Read as the former, it asked the payer to sign a
+fresh nonce, which the token correctly accepted — a second real payment for one bill.
+
+No amount of message-matching separates those two cases, so the code stops trying. Every
+EIP-3009 token exposes `authorizationState(authorizer, nonce) -> bool`, the chain's own record
+of whether that exact authorization was consumed, and it is asked before any retry is offered
+(`buildAuthorizationStateCall`, and `authorizationWasConsumed` in the settle route). Spent means
+the payment is reported as **settled with no transaction hash** — the client stops, the
+contract-call fallback is suppressed, and an operator alert carries the payer and nonce for
+manual reconciliation. An unreadable answer is treated the same as spent: a needless fallback
+costs two prompts, a wrongly-offered retry costs the payer real money.
+
+Wording is still used as a *cheap first filter* — `FiatTokenV2: authorization is used or
+canceled` is refused outright, while `nonce too low` and `replacement transaction underpriced`
+(the *facilitator's own* EOA racing itself, a different nonce entirely) stay retryable — but the
+chain, not the filter, is what actually authorises a retry.
 
 **Which rail a payment takes also depends on the wallet, not just the token.** x402 settles on
 an `eth_signTypedData_v4` signature that has to come *back* to the page, and a WalletConnect

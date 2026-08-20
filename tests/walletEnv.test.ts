@@ -4,6 +4,7 @@ import {
   probeInjectedConnectors,
   isUserRejection,
   looksLikeValora,
+  looksLikeBaseApp,
   walletConnectPeerName,
   connectedWalletIsValora,
   walletApprovedChainIds,
@@ -94,6 +95,47 @@ describe('isUserRejection', () => {
     const err: any = { message: 'boom' };
     err.cause = err;
     expect(isUserRejection(err)).toBe(false);
+  });
+});
+
+/**
+ * Auto-connect is an ALLOWLIST: MiniPay, Base App, Farcaster, and nothing else. MiniPay and
+ * Farcaster are connected by their own SDKs and never reach wagmi, so Base App is the only
+ * surface this has to recognise — and the only one whose silent connect is still allowed.
+ */
+describe('looksLikeBaseApp', () => {
+  const IPHONE = 'Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15 Mobile/15E148';
+  const DESKTOP = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/120.0.0.0 Safari/537.36';
+
+  it('recognises the flag Base App sets on its provider', () => {
+    expect(looksLikeBaseApp(DESKTOP, { isBaseApp: true })).toBe(true);
+  });
+
+  it('recognises it by name in the user agent', () => {
+    expect(looksLikeBaseApp(`${IPHONE} BaseApp/1.2`, undefined)).toBe(true);
+    expect(looksLikeBaseApp(`${IPHONE} CoinbaseBrowser/1.0`, { isCoinbaseWallet: true })).toBe(true);
+  });
+
+  it("accepts Coinbase's provider inside a mobile in-app browser", () => {
+    expect(looksLikeBaseApp(IPHONE, { isCoinbaseWallet: true })).toBe(true);
+  });
+
+  /**
+   * 🔴 THE CASE THAT MUST NOT AUTO-CONNECT. The Coinbase desktop EXTENSION sets the very same
+   * `isCoinbaseWallet` flag, but it is an ordinary injected wallet on an ordinary web page —
+   * exactly the situation the Connect button exists for. Auto-connecting it picks a wallet on
+   * the user's behalf and hides the chooser behind a button they have no reason to press.
+   */
+  it('does NOT treat the Coinbase desktop extension as an auto-connect surface', () => {
+    expect(looksLikeBaseApp(DESKTOP, { isCoinbaseWallet: true })).toBe(false);
+  });
+
+  it('leaves every other wallet to the Connect button', () => {
+    expect(looksLikeBaseApp(DESKTOP, { isMetaMask: true })).toBe(false);
+    expect(looksLikeBaseApp(IPHONE, { isMetaMask: true })).toBe(false);
+    expect(looksLikeBaseApp(IPHONE, undefined)).toBe(false);
+    expect(looksLikeBaseApp(undefined, undefined)).toBe(false);
+    expect(looksLikeBaseApp(`${IPHONE} Valora/1.100.0`, { isValora: true })).toBe(false);
   });
 });
 
