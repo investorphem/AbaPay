@@ -693,9 +693,16 @@ async function handleX402Request(req: Request) {
 
       sendTelegramAlert(
         `⚠️ *x402 SETTLEMENT REJECTED (${chainKey})*\n\n` +
-        (retryable
-          ? 'The payer signed, the facilitator refused, and their wallet is being asked to sign once more before anything falls back to the contract-call rail.'
-          : 'The payer signed, the facilitator refused, and they have been sent to the contract-call rail instead.') + '\n\n' +
+        // ⚡ SAY WHAT ACTUALLY HAPPENS NEXT, WHICH IS NO LONGER A SECOND PROMPT.
+        //
+        // This claimed the payer's "wallet is being asked to sign once more" whenever the refusal
+        // was retryable. That stopped being true when payWithX402's default dropped to a single
+        // attempt: `retryable` now only means the SERVER re-sent the same authorization by
+        // itself. An alert describing a prompt the user never sees sends whoever reads it looking
+        // for the wrong thing — which is the same mistake this alert was written to fix.
+        'The payer signed and the facilitator refused' +
+        (retryable ? ' twice — the server re-sent the same authorization once by itself. ' : '. ') +
+        'Their wallet was asked to sign once, and only once; the bill has gone to the contract-call rail.' + '\n\n' +
         `HTTP ${settleHttpStatus} · ${requestedTokenSymbol} · ${chargedCrypto.toFixed(4)}\n` +
         authLine +
         `\`${allText.slice(0, 400)}\``,
