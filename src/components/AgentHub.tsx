@@ -122,6 +122,18 @@ export function AgentHub({ address, selectedToken, activeChainName, onApproveAll
     if (result) setApprovalResult(result);
   };
 
+  /**
+   * The URL an MCP client needs, taken from the origin the user is actually on.
+   *
+   * Read from `window.location` rather than a build-time constant so a preview deployment hands
+   * out its own URL instead of production's — a copied URL that points somewhere else is worse
+   * than none, because it fails with the client's credentials looking like the problem. Falls
+   * back to the canonical domain during SSR, where there is no origin to read.
+   */
+  const mcpServerUrl = typeof window !== 'undefined'
+    ? `${window.location.origin}/api/mcp`
+    : 'https://abapays.com/api/mcp';
+
   const handleCopy = async (text?: string | null) => {
     const value = text ?? linkCode;
     if (!value) return;
@@ -366,6 +378,55 @@ export function AgentHub({ address, selectedToken, activeChainName, onApproveAll
             For AI agents (Claude, or any MCP-speaking client) to check balances and pay bills on your behalf. Same PIN + on-chain limit protection as the chat channels.
           </p>
         )}
+
+        {/*
+          ⚡ HOW TO ACTUALLY REACH THIS CHANNEL — ALWAYS, NOT ONLY MID-LINK.
+          🔴 The "Open {channel}" button lived INSIDE the link-code block, so it existed only
+          during an active linking flow and disappeared the moment linking finished. A user who
+          had linked WhatsApp weeks ago, or who never had the bot saved in the first place, had
+          nothing anywhere in the app that would take them to it — the channel was set up and
+          unreachable. MCP was worse: an API key with no server URL beside it is not something a
+          user can act on at all, since the URL is the one thing their client actually needs.
+          Both now live here, beside the channel they belong to, whatever state linking is in.
+        */}
+        {/* Hidden mid-link on a chat channel: the flow below already shows the same button as its
+            primary call to action, with the code pre-filled, and two of them side by side reads
+            as two different destinations. MCP has no such step, so its URL is always shown. */}
+        <div className={`mb-3 p-3 rounded-2xl bg-slate-50 dark:bg-[#1a1a1f] border border-slate-100 dark:border-slate-800/80 ${linkCode && channel !== 'MCP' ? 'hidden' : ''}`}>
+          {channel === 'MCP' ? (
+            <>
+              <p className="text-[9px] uppercase tracking-widest font-black text-slate-400 mb-1.5">MCP server URL</p>
+              <div className="flex items-center gap-2">
+                <code className="flex-1 bg-white dark:bg-[#111114] px-3 py-2 rounded-xl font-mono font-bold text-[11px] text-slate-900 dark:text-white break-all">{mcpServerUrl}</code>
+                <button
+                  onClick={() => handleCopy(mcpServerUrl)}
+                  title="Copy the MCP server URL"
+                  className="p-2.5 bg-white dark:bg-[#111114] rounded-xl border border-slate-100 dark:border-slate-800/80 shrink-0"
+                >
+                  {copied ? <Check size={14} className="text-emerald-600" /> : <Copy size={14} className="text-slate-500" />}
+                </button>
+              </div>
+              <p className="mt-2 text-[10px] text-slate-400 leading-relaxed">
+                Add this as the AbaPay server in your MCP client, then authorise it in the browser — or paste an API key created below. Either way it asks for your PIN on every payment.
+              </p>
+            </>
+          ) : (
+            <>
+              <p className="text-[9px] uppercase tracking-widest font-black text-slate-400 mb-1.5">Open the {activeChannel.name} bot</p>
+              <a
+                href={buildChannelLinkUrl(activeChannel, linkCode)}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="w-full py-2.5 bg-white dark:bg-[#111114] border border-slate-100 dark:border-slate-800/80 rounded-xl text-[11px] font-black text-slate-700 dark:text-slate-200 flex items-center justify-center gap-2 transition-colors hover:border-emerald-300 dark:hover:border-emerald-700"
+              >
+                {activeChannel.name} <ExternalLink size={12} />
+              </a>
+              <p className="mt-2 text-[10px] text-slate-400 leading-relaxed">
+                Lost the chat, or on a new phone? This opens it again — you don&apos;t need to re-link.
+              </p>
+            </>
+          )}
+        </div>
 
         {!linkCode && !apiKey ? (
           <>

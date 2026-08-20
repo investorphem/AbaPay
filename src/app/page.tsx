@@ -2,14 +2,14 @@
 
 import React, { useState, useEffect, useMemo, useRef, useCallback } from "react";
 import sdk from "@farcaster/miniapp-sdk";
-import { createWalletClient, createPublicClient, custom, http, parseUnits, formatUnits, encodeFunctionData, type WalletClient } from "viem";
+import { createWalletClient, createPublicClient, custom, http, parseUnits, formatUnits, encodeFunctionData, type WalletClient, type Chain } from "viem";
 import { eip5792Actions } from "viem/experimental";
 import { celo, celoSepolia, base, baseSepolia } from "viem/chains";
 import Link from "next/link";
 import {
   ShieldCheck, Zap, AlertTriangle, CheckCircle2, ChevronDown,
   Loader2, Coins, Briefcase, ListPlus, Users, Landmark, XCircle,
-  RefreshCw, Tv, GraduationCap, Send, Globe, Sparkles
+  RefreshCw, Tv, GraduationCap, Send, Globe, Sparkles, LogOut, Check
 } from "lucide-react";
 import { supabase } from "@/utils/supabase";
 import { celoAttributionSuffix } from "@/lib/attribution";
@@ -142,6 +142,38 @@ export default function Home() {
   const { switchChain } = useSwitchChain(); // ⚡ used by the DeAI deep-link handler to land on the right chain
 
   const [environment, setEnvironment] = useState<'MINIPAY' | 'FARCASTER' | 'WEB' | 'LOADING' | 'BASE'>('LOADING');
+
+  // ⚡ THE NETWORK BADGE IS A MENU, NOT A TOGGLE.
+  //
+  // 🔴 IT USED TO ROTATE THE CHAIN ON EVERY CLICK, which meant the only way to reach Celo from
+  // Base was to fire a real `wallet_switchEthereumChain` prompt and hope you had guessed right —
+  // and with two chains a mis-tap could only be undone by doing it again. It is now a menu that
+  // shows what is available and switches only once something is actually chosen.
+  //
+  // It is also where Disconnect lives. There was no way to disconnect at all before: the app
+  // called wagmi's disconnect() on error paths, but nothing in the UI offered it, so a user who
+  // wanted to change wallet had no way to say so. This is the one control that already
+  // represents "the wallet you are connected as", which makes it the honest place for it.
+  const [chainMenuOpen, setChainMenuOpen] = useState(false);
+  const chainMenuRef = useRef<HTMLDivElement | null>(null);
+
+  // Close on an outside click or Escape — a menu that can only be dismissed by choosing
+  // something is a trap, and this one has a destructive item in it.
+  useEffect(() => {
+    if (!chainMenuOpen) return;
+    const onPointerDown = (e: MouseEvent | TouchEvent) => {
+      if (chainMenuRef.current && !chainMenuRef.current.contains(e.target as Node)) setChainMenuOpen(false);
+    };
+    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') setChainMenuOpen(false); };
+    document.addEventListener('mousedown', onPointerDown);
+    document.addEventListener('touchstart', onPointerDown);
+    document.addEventListener('keydown', onKey);
+    return () => {
+      document.removeEventListener('mousedown', onPointerDown);
+      document.removeEventListener('touchstart', onPointerDown);
+      document.removeEventListener('keydown', onKey);
+    };
+  }, [chainMenuOpen]);
 
   /**
    * WHICH ROUTE the live wallet is on — read from the connector, not guessed from the page.
@@ -2216,6 +2248,49 @@ export default function Home() {
     );
   }, [address, environment, injectedCandidates, connect, connectStatus]);
 
+  /** Move the wallet — and the app — onto a chosen chain. Called only from the network menu. */
+  const switchToChain = useCallback(async (target: Chain) => {
+    setChainMenuOpen(false);
+    if (environment !== 'WEB' || !client || activeChain?.id === target.id) return;
+    try {
+      setIsProcessing(true);
+      await client.switchChain({ id: target.id });
+      setActiveChain(target);
+    } catch {
+      // A wallet that doesn't know the chain yet can usually be taught it.
+      try {
+        await client.addChain({ chain: target });
+        setActiveChain(target);
+      } catch {
+        showToast('Switch Failed', 'Please switch the network inside your wallet app.', 'error');
+      }
+    } finally {
+      setIsProcessing(false);
+    }
+  }, [environment, client, activeChain]);
+
+  /**
+   * Disconnect, and mean it.
+   *
+   * 🔴 `abapay_explicit_logout` IS THE LOAD-BEARING PART. Base App's auto-connect reconnects a
+   * wallet that already authorised this site, and without a record of the user having chosen to
+   * leave it would do exactly that on the next render — disconnecting them into an immediate
+   * reconnection. The flag is cleared by handleConnectClick, so pressing Connect is what opts
+   * back in.
+   */
+  const handleDisconnect = useCallback(() => {
+    setChainMenuOpen(false);
+    try { disconnect(); } catch { /* best effort — the local state below is what the UI reads */ }
+    localStorage.setItem('abapay_explicit_logout', 'true');
+    localStorage.removeItem('abapay_connected');
+    autoConnectTried.current = false;
+    userInitiatedConnect.current = false;
+    setAddress(null);
+    setClient(null);
+    setConnectError(null);
+    showToast('Wallet Disconnected', 'Your wallet is no longer connected. Tap Connect when you want to pay.', 'success');
+  }, [disconnect]);
+
   // ⚡ THE MANUAL CONNECT PATH ⚡
   //
   // The old handler fired `connect()` and walked away: no await, no timeout, no error
@@ -3311,36 +3386,16 @@ export default function Home() {
           <div className="flex items-center flex-wrap justify-end gap-2" data-tour="wallet-connect">
 
             {address && (
-                <button 
-                  onClick={async () => {
-                      // Only allow network switching in WEB/WalletConnect environments
-                      if (environment !== 'WEB' || !client) return;
-                      
-                      const targetNetwork = activeChain.id === celo.id || activeChain.id === celoSepolia.id 
-                          ? (isMainnet ? base : baseSepolia) 
-                          : (isMainnet ? celo : celoSepolia);
-                      
-                      try {
-                          setIsProcessing(true);
-                          await client.switchChain({ id: targetNetwork.id });
-                          setActiveChain(targetNetwork);
-                      } catch (error: any) {
-                          // If the user's wallet doesn't have the network saved, try adding it automatically
-                          try {
-                              await client.addChain({ chain: targetNetwork });
-                              setActiveChain(targetNetwork);
-                          } catch (addError) {
-                              showToast("Switch Failed", "Please manually switch the network inside your wallet app.", "error");
-                          }
-                      } finally {
-                          setIsProcessing(false);
-                      }
-                  }}
+              <div className="relative shrink-0" ref={chainMenuRef}>
+                <button
+                  onClick={() => { if (environment === 'WEB' && !isProcessing) setChainMenuOpen((open) => !open); }}
                   disabled={environment !== 'WEB' || isProcessing}
-                  title={environment === 'WEB' ? "Click to switch network" : `Locked to ${activeChain?.name}`}
-                  className={`flex shrink-0 px-2.5 py-1.5 rounded-xl border items-center gap-1.5 shadow-sm transition-all ${
-                     activeChain?.name?.toLowerCase().includes('base') 
-                        ? 'bg-blue-50 dark:bg-blue-900/20 border-blue-200 dark:border-blue-800/50 text-blue-700 dark:text-blue-400' 
+                  aria-haspopup="menu"
+                  aria-expanded={chainMenuOpen}
+                  title={environment === 'WEB' ? 'Network and wallet' : `Locked to ${activeChain?.name}`}
+                  className={`flex w-full px-2.5 py-1.5 rounded-xl border items-center gap-1.5 shadow-sm transition-all ${
+                     activeChain?.name?.toLowerCase().includes('base')
+                        ? 'bg-blue-50 dark:bg-blue-900/20 border-blue-200 dark:border-blue-800/50 text-blue-700 dark:text-blue-400'
                         : 'bg-emerald-50 dark:bg-emerald-900/20 border-emerald-200 dark:border-emerald-800/50 text-emerald-700 dark:text-emerald-400'
                   } ${environment === 'WEB' ? 'cursor-pointer hover:scale-105 active:scale-95' : 'cursor-default opacity-80'}`}
                 >
@@ -3350,8 +3405,54 @@ export default function Home() {
                         <div className={`w-1.5 h-1.5 rounded-full animate-pulse ${activeChain?.name?.toLowerCase().includes('base') ? 'bg-blue-500' : 'bg-emerald-500'}`}></div>
                     )}
                     <span className="text-[9px] font-black uppercase tracking-widest">{activeNetworkDisplay}</span>
-                    {environment === 'WEB' && !isProcessing && <RefreshCw size={10} className="opacity-60 ml-0.5" />}
+                    {environment === 'WEB' && !isProcessing && (
+                      <ChevronDown size={10} className={`opacity-60 ml-0.5 transition-transform ${chainMenuOpen ? 'rotate-180' : ''}`} />
+                    )}
                 </button>
+
+                {/* Only on demand, and gone the moment something is chosen. */}
+                {chainMenuOpen && environment === 'WEB' && (
+                  <div
+                    role="menu"
+                    className="absolute right-0 top-full mt-1.5 z-50 w-48 rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-[#131317] shadow-xl overflow-hidden"
+                  >
+                    <div className="px-3 pt-2 pb-1 text-[8px] font-black uppercase tracking-widest text-slate-400 dark:text-slate-500">
+                      Network
+                    </div>
+                    {(isMainnet ? [base, celo] : [baseSepolia, celoSepolia]).map((chain) => {
+                      const isActive = activeChain?.id === chain.id;
+                      const isBaseChain = chain.name.toLowerCase().includes('base');
+                      return (
+                        <button
+                          key={chain.id}
+                          role="menuitem"
+                          onClick={() => { void switchToChain(chain); }}
+                          className={`w-full flex items-center gap-2 px-3 py-2 text-left text-[11px] font-bold transition-colors ${
+                            isActive
+                              ? 'text-slate-900 dark:text-white bg-slate-50 dark:bg-slate-800/50'
+                              : 'text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-800/50'
+                          }`}
+                        >
+                          <span className={`w-1.5 h-1.5 rounded-full ${isBaseChain ? 'bg-blue-500' : 'bg-emerald-500'}`} />
+                          <span className="flex-1 truncate">{chain.name}</span>
+                          {isActive && <Check size={12} className="text-emerald-500 shrink-0" />}
+                        </button>
+                      );
+                    })}
+
+                    <div className="h-px bg-slate-100 dark:bg-slate-800" />
+
+                    <button
+                      role="menuitem"
+                      onClick={handleDisconnect}
+                      className="w-full flex items-center gap-2 px-3 py-2 text-left text-[11px] font-bold text-rose-600 dark:text-rose-400 hover:bg-rose-50 dark:hover:bg-rose-900/20 transition-colors"
+                    >
+                      <LogOut size={12} className="shrink-0" />
+                      Disconnect
+                    </button>
+                  </div>
+                )}
+              </div>
             )}
 
                                     {/* ⚡ NEW: Dynamic Connect Button / Smart Environment Routing ⚡ */}
