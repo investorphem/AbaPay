@@ -458,6 +458,18 @@ async function handleX402Request(req: Request) {
 
     if (!authCheck.ok) {
       console.error(`[Pay/x402] Authorization refused before settling (${chainKey}):`, authCheck.code, 'required:', requiredWei.toString(), 'signed:', auth?.value);
+      // 🔴 AND IT IS ANNOUNCED. This gate refuses a payment BEFORE the facilitator is ever
+      // called, so it produced no facilitator error, no database row and — until now — no alert:
+      // a rejection whose only trace was a console line in the hosting platform's logs. That is
+      // how a gate that was refusing the first attempt of EVERY payment went unattributed while
+      // the payer simply signed a second time. Anything that turns a payer away belongs on the
+      // same channel as everything else that costs them a prompt.
+      sendTelegramAlert(
+        `⚠️ *x402 AUTHORIZATION REFUSED BEFORE SETTLING (${chainKey})*\n\n` +
+        `\`${authCheck.code}\` — the facilitator was never called, so nothing moved.\n\n` +
+        `required \`${requiredWei.toString()}\` · signed \`${auth?.value ?? 'none'}\`\n` +
+        `payer \`${auth?.from ?? 'unknown'}\` · retryable \`${authCheck.retryable}\``,
+      ).catch(() => {});
       return NextResponse.json(
         // `retryable` is what the client reads to decide between re-signing once on this rail
         // and dropping to the contract call — see X402PaymentError.retryable. `accepts` carries
@@ -478,6 +490,19 @@ async function handleX402Request(req: Request) {
     // both — and the figure the user is actually charged, which is what gets recorded.
     const chargedWei = authCheck.chargedWei;
     chargedCrypto = Number(chargedWei) / 10 ** usdc.decimals;
+
+    // A shortfall inside the tolerance band is settled rather than refused (see MAX_UNDERPAY_RATIO)
+    // — but it is never silent. One is a rounding difference; one on EVERY payment is a pricing
+    // bug between the challenge and the settle, and this is the line that makes that visible
+    // instead of leaving it to be absorbed a few wei at a time.
+    if (authCheck.shortfallWei && authCheck.shortfallWei > BigInt(0)) {
+      console.warn(`[Pay/x402] Settled under the recomputed price (${chainKey}): required ${requiredWei.toString()}, signed ${chargedWei.toString()}, short by ${authCheck.shortfallWei.toString()}`);
+      sendTelegramAlert(
+        `ℹ️ *x402 SETTLED UNDER THE RECOMPUTED PRICE (${chainKey})*\n\n` +
+        `Accepted inside tolerance — the payer signed the price they were quoted, and was charged exactly that. If this appears on every payment, the challenge and the settle are pricing the same bill differently.\n\n` +
+        `required \`${requiredWei.toString()}\` · signed \`${chargedWei.toString()}\` · short \`${authCheck.shortfallWei.toString()}\``,
+      ).catch(() => {});
+    }
     const settleRequirements = { ...acceptEntry, amount: chargedWei.toString(), maxAmountRequired: chargedWei.toString() };
 
     const facilitatorPaymentPayload = { ...decodedPayload, x402Version: chainCfg.settleX402Version, network: chainCfg.settleNetworkName };

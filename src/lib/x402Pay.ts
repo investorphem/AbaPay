@@ -187,7 +187,19 @@ export interface X402PayParams {
  * the refusal was retryable and nothing moved — see maxAttempts.
  */
 export async function payWithX402(params: X402PayParams): Promise<Record<string, unknown>> {
-  const attempts = Math.max(1, params.maxAttempts ?? 2);
+  // 🔴 ONE SIGNATURE. The default is 1 — the wallet is asked once, and if that payment cannot be
+  // completed the page falls back to the contract call rather than asking again on this rail.
+  //
+  // It defaulted to 2, to automate the workaround people had found by hand ("cancel and retry the
+  // same x402 and it goes through"). That reasoning was sound only while the first attempt failed
+  // for a genuinely transient reason. It stopped being true the moment the FIRST attempt began
+  // failing reproducibly: the re-sign then stopped being a rescue and became a second wallet
+  // prompt on every single payment, which looks exactly like an app that ignored the first one.
+  //
+  // A retry that is needed every time is not a retry, it is a bug with a workaround attached.
+  // The server still retries once on its own, against the SAME authorization and only while the
+  // chain says its nonce is unspent — that costs the payer nothing and asks them for nothing.
+  const attempts = Math.max(1, params.maxAttempts ?? 1);
 
   for (let attempt = 1; ; attempt++) {
     try {

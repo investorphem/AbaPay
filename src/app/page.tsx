@@ -1646,19 +1646,21 @@ export default function Home() {
         account: address as `0x${string}`,
         expectedChainId: activeChain?.id,
         wrapSignature: (p) => withWalletTimeout(p),
-        // ⚡ ONE AUTOMATIC RE-SIGN, WHICH IS WHAT PEOPLE WERE DOING BY HAND.
+        // ⚡ ONE SIGNATURE ON THIS RAIL. payWithX402 defaults to a single attempt, so no second
+        // prompt is raised here — if the payment cannot be completed, the catch below hands the
+        // bill to the contract call instead.
         //
-        // 🔴 "if I cancel and retry the same x402 it will now be successful" — reported on Base
-        // after the facilitator answered `unable to estimate gas`. The app's answer to that
-        // refusal was the contract-call rail, which costs TWO more prompts (approve + payBill)
-        // for a bill the fast rail settles on a second attempt costing one. payWithX402 now
-        // re-challenges and re-signs once when the SERVER marks the refusal retryable (nothing
-        // moved, and a fresh nonce/window/price plausibly fixes it) — and only then falls back.
+        // 🔴 WHY THE AUTOMATIC RE-SIGN WAS TAKEN BACK OUT. It was added to automate the
+        // workaround people had found by hand ("cancel and retry the same x402 and it goes
+        // through"), which was sound only while first attempts failed OCCASIONALLY. Once one
+        // started failing reproducibly, the rescue became a second wallet prompt on EVERY
+        // payment — indistinguishable, from the user's side, from an app that ignored the first
+        // one, which is exactly the suspicion this flow has spent months trying to shake.
         //
-        // The second prompt is announced. An unexplained one reads as an app that ignored the
-        // first, which is exactly the suspicion this whole flow has been trying to shake.
+        // The handler is kept because the capability is still there behind maxAttempts, and if it
+        // is ever turned back on the second prompt must be explained rather than just appearing.
         onRetry: (reason) => {
-          console.warn('[x402] Facilitator refused; re-signing once before falling back:', reason);
+          console.warn('[x402] Facilitator refused; re-signing before falling back:', reason);
           setStatus(walletApprovalPrompt('That payment was turned down — approve it once more'));
         },
       });
