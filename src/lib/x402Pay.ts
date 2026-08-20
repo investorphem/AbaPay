@@ -274,6 +274,35 @@ async function attemptX402Payment({ url, body, client, account, expectedChainId,
     nonce: randomNonce(),
   };
 
+  // 🔴 SIGN WITH THE ACCOUNT THE WALLET IS ACTUALLY ON — OR DO NOT SIGN AT ALL.
+  //
+  // `from` is baked into the EIP-712 message, so if the wallet signs with a DIFFERENT account
+  // than the one we named, the signature recovers to that other address and
+  // transferWithAuthorization reverts on signature recovery. The facilitator reports that as
+  // "unable to estimate gas" — reproduced byte for byte against CDP with a deliberately mismatched
+  // signature — which names neither the real cause nor the address involved, and costs the payer
+  // a prompt plus a fallback before anyone learns anything.
+  //
+  // The two can drift apart easily: the user switches account inside their wallet after
+  // connecting, or the page is holding an address restored from storage rather than from a live
+  // session (see the storage note in src/config/wagmi.ts). Asking the wallet who it is now costs
+  // one in-process call and turns an opaque post-payment failure into a precise pre-payment one.
+  //
+  // A wallet that will not answer is NOT treated as a mismatch — an unknowable account is no
+  // evidence of a wrong one, and refusing there would block payers over a missing convenience.
+  try {
+    const live = await client.getAddresses();
+    const activeAccount = live?.[0];
+    if (activeAccount && activeAccount.toLowerCase() !== String(account).toLowerCase()) {
+      throw new X402ChallengeError(
+        'Your wallet switched to a different account. Reconnect it, then try the payment again.',
+      );
+    }
+  } catch (e) {
+    if (e instanceof X402ChallengeError) throw e;
+    // Could not ask — proceed and let the signature itself be the judge.
+  }
+
   const signPromise = client.signTypedData({
     account,
     domain: {

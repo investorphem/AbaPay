@@ -6,8 +6,11 @@ import { sendTelegramAlert } from '@/lib/telegram';
 import { getServiceRules } from '@/lib/serviceRules';
 import { isDuplicateElectricity } from '@/lib/parity';
 import { enqueueRefund } from '@/lib/refunds';
-import { readAuthorization, checkAuthorization, isRetryableSettleFailure, settleResponseNamesTransaction, buildAuthorizationStateCall, parseAuthorizationState, type X402Authorization } from '@/lib/x402Settle';
+import { readAuthorization, checkAuthorization, isRetryableSettleFailure, settleResponseNamesTransaction, buildAuthorizationStateCall, parseAuthorizationState, transferAuthorizationTypedData, type X402Authorization } from '@/lib/x402Settle';
 import { rpcUrlsFor } from '@/lib/chain';
+import { verifyTypedData, recoverTypedDataAddress } from 'viem';
+import { verifyTypedData as verifyTypedDataOnChain } from 'viem/actions';
+import { getPublicClient } from '@/lib/chain';
 
 // ⚡ x402 SETTLEMENT — MAIN APP ONLY. Two rails, resolved by chainConfigFor():
 //   • CELO (default): Celo's own facilitator (api.x402.celo.org — "Built by Celo Core Co."),
@@ -504,6 +507,74 @@ async function handleX402Request(req: Request) {
       ).catch(() => {});
     }
     const settleRequirements = { ...acceptEntry, amount: chargedWei.toString(), maxAmountRequired: chargedWei.toString() };
+
+    // 🔴 RECOVER THE SIGNER BEFORE SPENDING A FACILITATOR ROUND-TRIP ON IT.
+    //
+    // A signature that does not recover to `from` makes transferWithAuthorization revert on
+    // signature recovery, which makes gas estimation fail, which CDP reports as
+    // "unable to estimate gas" / invalid_payload — a sentence it also uses for expiry, balance,
+    // a spent nonce, a blacklisted address and a paused token. Reproduced exactly, byte for byte,
+    // by sending CDP a well-formed authorization with a deliberately bad signature.
+    //
+    // EIP-712 is deterministic, so this is decidable here for nothing: rebuild the typed data,
+    // recover, compare. When it fails we can name the address that actually signed instead of
+    // handing the payer an estimation error and an alert nobody can act on.
+    const signature = decodedPayload?.payload?.signature ?? decodedPayload?.signature;
+    if (auth && typeof signature === 'string') {
+      const typedData = transferAuthorizationTypedData({
+        auth,
+        chainId: Number(String(chainCfg.caip2).split(':')[1]),
+        asset: usdc.address,
+        domainName: tokenDomain.name,
+        domainVersion: tokenDomain.version,
+      });
+
+      let signerOk = false;
+      try {
+        signerOk = await verifyTypedData({ ...typedData, address: auth.from as `0x${string}`, signature: signature as `0x${string}` });
+      } catch { signerOk = false; }
+
+      if (!signerOk) {
+        // ⚡ A SMART-CONTRACT WALLET IS NOT A BAD SIGNATURE. Base Account, Safe and friends sign
+        // via ERC-1271/6492, which ecrecover cannot judge — asking the wallet's own contract is
+        // the only correct check, and skipping it here would reject every smart-account payer.
+        try {
+          const publicClient = getPublicClient(chainKey);
+          signerOk = await verifyTypedDataOnChain(publicClient, {
+            ...typedData,
+            address: auth.from as `0x${string}`,
+            signature: signature as `0x${string}`,
+          });
+        } catch { signerOk = false; }
+      }
+
+      if (!signerOk) {
+        let recovered = 'unrecoverable';
+        try { recovered = await recoverTypedDataAddress({ ...typedData, signature: signature as `0x${string}` }); } catch { /* keep the placeholder */ }
+
+        console.error(`[Pay/x402] Signature does not authorise this payment (${chainKey}): claimed`, auth.from, 'recovered', recovered);
+        sendTelegramAlert(
+          `⚠️ *x402 SIGNATURE DID NOT MATCH THE PAYER (${chainKey})*\n\n` +
+          `Refused before the facilitator was called — this is what its "unable to estimate gas" actually meant.\n\n` +
+          `claimed \`${auth.from}\`\nrecovered \`${recovered}\`\n` +
+          `domain \`${tokenDomain.name}\` v\`${tokenDomain.version}\` · chainId \`${Number(String(chainCfg.caip2).split(':')[1])}\`\n` +
+          `asset \`${usdc.address}\``,
+        ).catch(() => {});
+
+        return NextResponse.json(
+          {
+            x402Version: 1,
+            error: "That payment approval didn't match your wallet, so nothing was charged. Please try again.",
+            errorCode: 'SIGNATURE_MISMATCH',
+            // Not retryable on this rail: a fresh signature from the same wallet over the same
+            // domain reproduces it. The contract call is the honest next step.
+            retryable: false,
+            accepts: [acceptEntry],
+          },
+          { status: 402 },
+        );
+      }
+    }
 
     const facilitatorPaymentPayload = { ...decodedPayload, x402Version: chainCfg.settleX402Version, network: chainCfg.settleNetworkName };
     const facilitatorPaymentRequirements = { ...settleRequirements, network: chainCfg.settleNetworkName };
