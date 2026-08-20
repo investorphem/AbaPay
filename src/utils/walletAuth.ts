@@ -2,6 +2,7 @@ import 'server-only';
 import { verifyMessage as verifyMessageEOA } from 'viem';
 import { verifyMessage as verifyMessageOnChain } from 'viem/actions';
 import { getPublicClient } from '@/lib/chain';
+import { walletSessionMessage, WALLET_SESSION_MAX_AGE_MS } from '@/lib/walletSession';
 
 // 🔐 WALLET OWNERSHIP PROOF
 //
@@ -76,6 +77,55 @@ export async function verifySignatureAcrossChains(address: string, message: stri
   }
 
   return false;
+}
+
+// 🔐 WALLET SESSION — PROOF OF OWNERSHIP FOR READING YOUR OWN DATA
+//
+// Separate from the action signatures above, and deliberately so. Those authorise a single
+// MUTATION and last five minutes. This one authorises READS of the caller's own records for a
+// browsing session, because the alternative is a wallet prompt every time the History tab
+// refreshes — which trains people to sign whatever they are shown, the exact habit that makes
+// phishing work.
+//
+// ⚠️ WHAT THIS IS, HONESTLY: for its lifetime this is a bearer token. Anyone holding the header
+// triple can replay it to read that wallet's history until it expires. That is the same trade
+// src/utils/adminAuth.ts already makes for the admin dashboard, and it is acceptable HERE only
+// because the scope is read-only and limited to records the wallet owner can already see. It
+// must never be widened to authorise a mutation — those keep their own five-minute, per-action
+// signatures.
+// Both come from src/lib/walletSession.ts, which carries no `server-only` marker so the BROWSER
+// can import the exact same message builder it signs with. Defining it twice would mean a stray
+// character silently invalidating every signature, reported as "invalid signature".
+
+/**
+ * Verify a wallet-session proof carried in headers. Read paths only — see the note above.
+ *
+ * Returns the verified address rather than a bare boolean, so a caller cannot accidentally query
+ * on an address it never actually checked.
+ */
+export async function verifyWalletSession(req: Request): Promise<{ ok: true; address: string } | { ok: false; message: string }> {
+  const address = req.headers.get('x-wallet-address');
+  const signature = req.headers.get('x-wallet-signature');
+  const timestamp = req.headers.get('x-wallet-timestamp');
+
+  if (!address || !/^0x[a-fA-F0-9]{40}$/.test(address)) {
+    return { ok: false, message: 'Valid wallet address required.' };
+  }
+  if (!signature || !timestamp) {
+    return { ok: false, message: 'Missing wallet signature — reconnect your wallet and try again.' };
+  }
+
+  const ts = parseInt(timestamp, 10);
+  // The future bound matters as much as the past one: without it a signature timestamped years
+  // ahead would never expire.
+  if (!Number.isFinite(ts) || Date.now() - ts > WALLET_SESSION_MAX_AGE_MS || ts > Date.now() + 60_000) {
+    return { ok: false, message: 'Wallet session expired — reconnect your wallet.' };
+  }
+
+  const valid = await verifySignatureAcrossChains(address, walletSessionMessage(timestamp), signature);
+  if (!valid) return { ok: false, message: 'Invalid signature — could not verify wallet ownership.' };
+
+  return { ok: true, address };
 }
 
 export async function verifyWalletOwnership(req: Request, claimedWallet: string, action: string): Promise<{ ok: boolean; message?: string }> {
