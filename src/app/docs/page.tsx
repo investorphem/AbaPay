@@ -239,7 +239,7 @@ export default function DocsPage() {
                 <p className="text-lg sm:text-2xl font-black text-emerald-600 dark:text-emerald-400 bg-white dark:bg-[#111114] px-4 py-2 rounded-2xl shadow-sm border border-purple-100 dark:border-purple-800/50 transition-colors">1 Stablecoin = <span className="text-purple-600 dark:text-purple-400">1.00 Point</span></p>
               </div>
               <p className="text-sm text-purple-800 dark:text-purple-300 font-medium leading-relaxed">
-                AbaPoints are globally pegged to the stablecoin (cUSD/USDm, USDC, USD₮) value of your utility purchase. Spend exactly 5.50 USDC on a utility bill? You earn exactly 5.50 points instantly. This ensures your rewards are completely protected against local fiat currency inflation!
+                AbaPoints are globally pegged to the stablecoin (USDC, USD₮, USAT) value of your utility purchase. Spend exactly 5.50 USDC on a utility bill? You earn exactly 5.50 points instantly. This ensures your rewards are completely protected against local fiat currency inflation!
               </p>
             </div>
 
@@ -423,7 +423,7 @@ export default function DocsPage() {
                 a={<>
                   <p>That&apos;s deliberate. Inside Valora&apos;s built-in browser, AbaPay used to appear connected by itself — and then payments got stuck: an approval prompt would come up, you&apos;d tap <strong>Allow</strong>, Valora would say the connection succeeded, and the payment would keep loading with no second prompt ever arriving.</p>
                   <p>Valora connects properly over <strong>WalletConnect</strong>, so that is the only route AbaPay now uses there. Tap <strong>Connect</strong> and choose Valora — it&apos;s the same app you&apos;re already in, so it takes one tap — and payments go through normally after that.</p>
-                  <p>Valora works on <strong>Celo</strong>. If AbaPay is showing Base when you connect, it switches itself to Celo to match your wallet; pick a Celo token (USDC, USD₮ or USDm) and pay as usual.</p>
+                  <p>Valora works on <strong>Celo</strong>. If AbaPay is showing Base when you connect, it switches itself to Celo to match your wallet; pick a Celo token (USDC, USD₮ or USAT) and pay as usual.</p>
                 </>}
               />
               <FAQItem
@@ -445,7 +445,7 @@ export default function DocsPage() {
               <FAQItem
                 q="Which chains and stablecoins are supported?"
                 a={<>
-                  <p>Base and Celo — those two, plus their public test networks, and nothing else. <strong>Base is the default</strong>: it&apos;s what AbaPay connects to unless your wallet puts you somewhere else, and you can switch to Celo at any time. USD₮ and USDC work on both chains; cUSD/USDm is Celo-only.</p>
+                  <p>Base and Celo — those two, plus their public test networks, and nothing else. <strong>Base is the default</strong>: it&apos;s what AbaPay connects to unless your wallet puts you somewhere else, and you can switch to Celo at any time. USD₮ and USDC work on both chains; USAT is Celo-only.</p>
                   <p>The token picker filters itself to whatever chain your wallet is on, so you can&apos;t accidentally choose one that doesn&apos;t exist there. On Base it offers <strong>USDC first, then USD₮</strong>; on Celo, USD₮ first. Sending funds to our contract by hand, on another network or in another token, is not a payment and can&apos;t be matched to an order.</p>
                 </>}
               />

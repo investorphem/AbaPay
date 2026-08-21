@@ -1,6 +1,6 @@
 # ⚡ AbaPay Protocol
 
-AbaPay is a decentralized, Web3-native utility payment platform built on **Base** (the default chain) and **Celo**. It lets users pay for real-world bills — Airtime, Mobile Data, Electricity, Cable TV, Bank Transfers, Education PINs, and International Airtime/Data — using on-chain stablecoins (**USDT**, **USDC**, **cUSD/USDm**), with instant fiat settlement handled server-side via the VTpass API. Payments can be made directly in the web app, or hands-free through a conversational, autonomous AI agent ("DeAI") on Telegram, WhatsApp, and X — a real on-chain identity under [ERC-8004](https://eips.ethereum.org/EIPS/eip-8004), discoverable on [8004scan.io](https://8004scan.io) — that can pay bills unattended, run recurring/scheduled autopay, and settle multi-recipient batch payments, all spending from a bounded, user-revocable on-chain allowance — no custody, no server-side keys.
+AbaPay is a decentralized, Web3-native utility payment platform built on **Base** (the default chain) and **Celo**. It lets users pay for real-world bills — Airtime, Mobile Data, Electricity, Cable TV, Bank Transfers, Education PINs, and International Airtime/Data — using on-chain stablecoins (**USDT**, **USDC**, **USAT**), with instant fiat settlement handled server-side via the VTpass API. Payments can be made directly in the web app, or hands-free through a conversational, autonomous AI agent ("DeAI") on Telegram, WhatsApp, and X — a real on-chain identity under [ERC-8004](https://eips.ethereum.org/EIPS/eip-8004), discoverable on [8004scan.io](https://8004scan.io) — that can pay bills unattended, run recurring/scheduled autopay, and settle multi-recipient batch payments, all spending from a bounded, user-revocable on-chain allowance — no custody, no server-side keys.
 
 Designed for low fees, cross-border utility vending (Nigeria + every country VTpass's live international catalogue returns), and mobile-first accessibility — MiniPay, Valora, Farcaster Mini Apps, Coinbase Smart Wallet / Base Account, MetaMask, and any other WalletConnect-compatible wallet (see [Supported Wallets & Environments](#-supported-wallets--environments)).
 
@@ -10,7 +10,7 @@ Designed for low fees, cross-border utility vending (Nigeria + every country VTp
 
 ## 🌟 Key Features
 
-* **Multi-Chain Payments:** Pay bills directly with USDT, USDC, or cUSD on Base (Mainnet/Sepolia) or Celo (Mainnet/Alfajores). **Base is the default chain**; Celo remains fully supported and switchable. The app auto-detects the connected chain and filters/reorders available stablecoins accordingly — **USDC leads on Base, USD₮ leads on Celo**, and cUSD/USDm is Celo-exclusive.
+* **Multi-Chain Payments:** Pay bills directly with USDT, USDC, or USAT on Base (Mainnet/Sepolia) or Celo (Mainnet/Alfajores). **Base is the default chain**; Celo remains fully supported and switchable. The app auto-detects the connected chain and filters/reorders available stablecoins accordingly — **USDC leads on Base, USD₮ leads on Celo**, and **USAT is Celo-mainnet-exclusive**.
 * **Live VTpass Catalogue — nothing about a provider is hardcoded any more:** every provider name, logo, and amount limit for airtime, data, electricity, cable and education is fetched live from VTpass (`src/lib/vtpassCatalog.ts`, served to the browser by `/api/providers`) rather than from four separate hardcoded lists. The app, chat, MCP and the admin dashboard all read the same in-process cache, so there is exactly one source of truth. See [Live provider catalogue](#live-provider-catalogue-vtpass-sourced) below.
 * **Per-Provider Amount Limits, Enforced Live:** the ceiling is VTpass's real published `minimium_amount`/`maximum_amount` *per provider*, not one flat number per service — airtime alone ranges MTN ₦200,000 / Glo ₦100,000 / Airtel ₦50,000 / 9mobile ₦50,000, and electricity minimums range ₦100 (Ikeja, Aba) to ₦2,000 (Ibadan). A flat cap either wrongly refused a valid MTN top-up or wrongly accepted an Airtel one that VTpass rejects *after* the user has already paid on-chain.
 * **International Bill Pay:** Users can select a country and pay for foreign airtime/data in that country's own currency and rate — transaction history and receipts reflect the *local* currency, not just Naira. The country list is fetched live from VTpass (`/get-international-airtime-countries`) on every channel, so the app, chat and MCP can never disagree about which countries are covered.
@@ -29,7 +29,7 @@ Designed for low fees, cross-border utility vending (Nigeria + every country VTp
 * **MCP Server (AI Agent Payments):** AbaPay is reachable by any MCP-speaking AI client (Claude, or any other agent that supports the Model Context Protocol) as a real tool server — `describe_capabilities`, `check_balance`, `list_plans`, and `pay_bill` — over Streamable HTTP JSON-RPC at `/api/mcp`. This is a fourth channel alongside Telegram/WhatsApp/X, not a new trust boundary: it runs through the exact same allowance-bounded, kill-switch-gated, discount-aware execution pipeline as the chat channels, on **either Celo or Base** depending on what the linking wallet approved. See [MCP Server](#mcp-server-ai-agent-payments) below.
 * **MCP OAuth 2.1 (authorize once, not once per conversation):** the connector supports a full OAuth 2.1 authorization-code + PKCE (S256) flow with Dynamic Client Registration (`/api/oauth/register`, `/api/oauth/authorize`, `/api/oauth/token`, discovery under `/.well-known/`). A user authorizes once in a browser — proving their API key **and** PIN on AbaPay's own hand-rendered consent page — and every future conversation reconnects with a Bearer token instead of retyping an API key. **OAuth never authorizes a spend:** the PIN is still required on every single `pay_bill` call, and a Bearer token alone can only read a balance. The `api_key` tool argument remains the fallback for clients that can't do OAuth.
 * **`list_plans` — real VTpass plan codes and prices, never guessed:** `variation_code` used to be something an agent had to invent for DATA/CABLE/EDUCATION. `list_plans` returns the currently purchasable plans with their exact codes and live VTpass prices, and both the tool description and the server instructions tell the client to call it before `pay_bill` rather than guessing.
-* **x402 Settlement (main app, both chains):** Payments made directly in the web app settle via the [x402](https://x402.org) HTTP-payment protocol — Celo's own facilitator for **USDC/USD₮ on Celo**, the Coinbase CDP facilitator for **USDC on Base** — so they're genuinely indexed on x402scan, not relabeled contract calls. Everything else (cUSD/USDm) uses the on-chain `payBill` flow, including Base's sponsored-gas path. ⚠️ x402 needs an EIP-3009 `transferWithAuthorization` signature, which is structurally what a drainer asks for, so some wallet scanners flag it as risky — a known, deliberate trade for x402scan visibility; `NEXT_PUBLIC_X402_ENABLED=false` opts out. The signature-free agent-initiated flow is untouched either way. See [x402 settlement](#x402-settlement-main-app-only) below.
+* **x402 Settlement (main app, both chains):** Payments made directly in the web app settle via the [x402](https://x402.org) HTTP-payment protocol — Celo's own facilitator for **USDC/USD₮/USAT on Celo**, the Coinbase CDP facilitator for **USDC on Base** — so they're genuinely indexed on x402scan, not relabeled contract calls. Anything without EIP-3009 uses the on-chain `payBill` flow, including Base's sponsored-gas path. ⚠️ x402 needs an EIP-3009 `transferWithAuthorization` signature, which is structurally what a drainer asks for, so some wallet scanners flag it as risky — a known, deliberate trade for x402scan visibility; `NEXT_PUBLIC_X402_ENABLED=false` opts out. The signature-free agent-initiated flow is untouched either way. See [x402 settlement](#x402-settlement-main-app-only) below.
 * **Dynamic Exchange Engine:** Live market rate conversions with admin-configurable exchange rate and automated profit spread calculation, verified server-side to prevent underpayment exploits.
 * **Executive Admin Dashboard:** Real-time monitoring of VTpass fiat balance, on-chain vault balances per token/chain, transaction analytics, manual refund tools, and CSV export — protected behind admin auth.
 * **Kill Switches That Actually Stop Every Channel:** the dashboard's "pause a service" toggles are a **two-level** model — a per-service master (`MASTER_AIRTIME`, `MASTER_INTERNET`, `MASTER_ELECTRICITY`, `MASTER_CABLE`, `MASTER_EDUCATION`, `MASTER_INTERNATIONAL`) plus a per-provider switch keyed by VTpass serviceID (`AIRTIME_mtn`, `INTERNET_airtel-data`, `ELEC_ikeja-electric`, `CABLE_dstv`, `EDU_waec`). A payment is refused when **either** level is off. `src/lib/serviceRules.ts`'s `killSwitchKeysFor()` maps an agent intent (+ provider, normalised through `resolveServiceId` so `ELEC_ikeja` can't miss `ELEC_ikeja-electric`) onto exactly those keys, so chat, MCP and the autonomous scheduler now honour the same switches the web app does. See [Kill switches](#kill-switches-two-level-master--per-provider) below.
@@ -283,9 +283,9 @@ written and were all on Celo. It must not follow `DEFAULT_CHAIN`: reading an old
 Base would send the webhook hunting for a receipt on the wrong chain and strand a real payment
 as unvended.
 
-Stablecoins: **USD₮** and **USDC** on both chains, plus **cUSD/USDm** on Celo only. Which token
+Stablecoins: **USD₮** and **USDC** on both chains, plus **USAT** on Celo mainnet only. Which token
 a chain *leads* with, and in what order the rest follow, is `TOKEN_ORDER_BY_CHAIN` in
-`src/constants/index.ts` — **Base: USDC then USD₮; Celo: USD₮, USDC, USDm**. One
+`src/constants/index.ts` — **Base: USDC then USD₮; Celo: USD₮, USDC, USAT**. One
 `tokensForChain()` serves the Pay tab, the Agent Hub, the chat agent and the MCP tools, which
 each used to filter `SUPPORTED_TOKENS` themselves and could therefore disagree.
 
@@ -606,7 +606,7 @@ NEXT_PUBLIC_X402_ENABLED=                      # Default ON. Set to "false" to u
 
 **x402 is the default settlement rail on both chains** — **USDC or USD₮ on Celo** (each settling
 against its own EIP-712 domain) and **USDC on Base** — so payments are genuinely indexed on
-x402scan rather than being relabeled contract calls. Everything else (cUSD/USDm) uses the normal
+x402scan rather than being relabeled contract calls. Anything without EIP-3009 uses the normal
 contract call. It never touches the agent-initiated flow, since x402 needs a fresh signature per
 payment. Distinct infra from `RELAYER_PRIVATE_KEY` above.
 
@@ -1138,7 +1138,7 @@ facilitator** (`api.x402.celo.org`, built by Celo Core Co. — see
 USD₮ on Celo**. Each token settles against its own EIP-712 domain (`X402_TOKEN_EIP712` in that
 route) since Circle's USDC and Tether's USD₮ deployments don't share one. The same "Confirm &
 Pay" button routes through x402 for either token on Celo and through the normal `payBill`
-contract call for everything else (cUSD/USDm, Base when `NEXT_PUBLIC_BASE_X402_ENABLED=false`,
+contract call for everything else (a token without EIP-3009, Base when `NEXT_PUBLIC_BASE_X402_ENABLED=false`,
 or x402 unconfigured). This makes the payment genuinely visible on x402scan — not a
 relabeled transaction — because x402 settlement requires an EIP-3009
 (`transferWithAuthorization`) signature from the payer for that specific payment. That
@@ -1238,7 +1238,7 @@ without needing x402.
 
 - **Scope: Celo + USDC/USD₮, confirmed live** — not just a caution. Native Celo USDC (Circle's
   FiatTokenV2) and native Celo USD₮ (Tether's deployment) both implement EIP-3009
-  `transferWithAuthorization`; cUSD/USDm doesn't, so there's no signature scheme to settle it
+  `transferWithAuthorization`; USDm doesn't (Mento tokens expose only EIP-2612 `permit()`), so there's no signature scheme to settle it — which is exactly why USAT replaced it in the picker
   with. Not a self-imposed limit — if support is added for another token later, no code change
   is needed beyond adding its EIP-712 domain, since the token/decimals are already resolved
   generically via `resolveTokenOnChain`.

@@ -3352,7 +3352,13 @@ export default function Home() {
                       // live one uses — it was mainnet-only here while processX402Payment below
                       // already accepted both, so testing on Celo Sepolia silently rehearsed the
                       // contract call and proved nothing about x402.
-                      const celoX402 = (activeChain?.id === celo.id || activeChain?.id === celoSepolia.id) && (selectedToken.symbol === "USDC" || selectedToken.symbol === "USD₮");
+                      // USAT settles on x402 exactly like Celo USD₮ — it implements EIP-3009 and
+                      // its EIP-712 domain is verified against the contract's own
+                      // DOMAIN_SEPARATOR (see X402_DOMAINS_BY_CHAIN.CELO). Leaving it out of this
+                      // list is what would quietly demote it to the contract call — the same way
+                      // arriving on Base with USD₮ selected used to.
+                      const celoX402 = (activeChain?.id === celo.id || activeChain?.id === celoSepolia.id)
+                        && (selectedToken.symbol === "USDC" || selectedToken.symbol === "USD₮" || selectedToken.symbol === "USAT");
                       const baseX402 = (activeChain?.id === base.id || activeChain?.id === baseSepolia.id) && selectedToken.symbol === "USDC" && process.env.NEXT_PUBLIC_BASE_X402_ENABLED !== 'false';
 
                       // ⚠️ IT BRANCHES ON THE WALLET'S CAPABILITY — NOT ON A WALLET BLOCKLIST,
