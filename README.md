@@ -89,10 +89,20 @@ it is safe on every page load. Each wallet comes back `authorized` (already appr
 - **Any wallet `authorized`** → nothing happens on its own. `authorized` decides which wallets the
   chooser can offer *without* a permission popup, not whether to connect. See "Auto-connect is an
   allowlist" below.
-- **One or more usable wallets** → a chooser lists them **plus WalletConnect**; cancelling ends
-  the attempt rather than falling through to a QR code. One extension that is both
-  EIP-6963-announced and parked on `window.ethereum` is de-duplicated, so it can't appear twice.
-- **None** → straight to WalletConnect, no pointless one-item modal.
+- The chooser lists every usable injected wallet **plus Base Account plus WalletConnect**, each
+  with its own EIP-6963 logo and a status badge (`Recent` for a wallet that already approved this
+  site, `Installed` otherwise). Cancelling ends the attempt rather than falling through to a QR
+  code. One extension that is both EIP-6963-announced and parked on `window.ethereum` is
+  de-duplicated, so it can't appear twice.
+- **Base Account was configured but never offered.** The connector has been in
+  `src/config/wagmi.ts` all along, yet `probeInjectedConnectors()` only returns connectors of type
+  `injected` and Base Account is its own type — so nothing ever put it in front of a user. It
+  matters most on Base, the default chain, where it is the smart-account experience carrying
+  sponsored gas; `verifySignatureAcrossChains` already validates the ERC-1271 signatures it
+  produces, so nothing else had to change to accept it.
+- Because those two are always present, the chooser always appears — a browser with no extension
+  still gets a real choice between signing in with Base Account and pairing a phone wallet,
+  rather than being dropped straight onto a QR code.
 
 🔴 **WalletConnect is always an option, never only a fallback.** The chooser used to require
 *two or more* injected wallets before it appeared, so the very common "one extension installed"

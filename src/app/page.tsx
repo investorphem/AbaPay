@@ -2490,9 +2490,21 @@ export default function Home() {
       // extension and was never offered WalletConnect at all — there was no way to pair a phone
       // wallet short of uninstalling the extension. Building the option list first and deciding
       // on the chooser from ITS length is what makes the single-wallet case a real choice.
-      const options: InjectedCandidate[] = wcConnector
-        ? [...usable, { connector: wcConnector, name: 'WalletConnect', status: 'available' as const }]
-        : usable;
+      // ⚡ BASE ACCOUNT IS A FIRST-CLASS OPTION, NOT A HIDDEN ONE.
+      //
+      // The connector has been configured in src/config/wagmi.ts all along, but nothing ever
+      // offered it: probeInjectedConnectors only returns connectors of type 'injected', and Base
+      // Account is its own type. So a user with no extension could reach it only by accident.
+      // It matters most on Base — the app's default chain — where it is the smart-account
+      // experience that carries sponsored gas, and signature verification already handles the
+      // ERC-1271 signatures it produces (see verifySignatureAcrossChains).
+      const baseAccountConnector = connectors.find(c => c.id === 'baseAccount' || c.type === 'baseAccount');
+
+      const options: InjectedCandidate[] = [
+        ...usable,
+        ...(baseAccountConnector ? [{ connector: baseAccountConnector, name: 'Base Account', status: 'available' as const }] : []),
+        ...(wcConnector ? [{ connector: wcConnector, name: 'WalletConnect', status: 'available' as const }] : []),
+      ];
 
       // One option is not a decision — a browser with no injected wallet still goes straight to
       // WalletConnect without a pointless one-item modal.
@@ -3464,52 +3476,88 @@ export default function Home() {
           WalletConnect. So this appears exactly when the app genuinely cannot know the answer.
           Backdrop click and Cancel both resolve null, which ends the attempt quietly rather
           than falling through to a QR code the user didn't ask for. */}
+      {/* ⚡ THE WALLET CHOOSER — the first screen a new user meets, so it is built like one.
+          Rows carry the wallet's OWN logo (EIP-6963 hands us one per wallet) and a status badge,
+          because "which of these is the one I already use" is the only question being asked here.
+          Base Account and WalletConnect get drawn marks rather than being left as bare letters —
+          they have no EIP-6963 icon to offer, and a chooser where two rows look unfinished reads
+          as a chooser that does not know what it is offering. */}
       {walletChoice && (
         <div
           className="fixed inset-0 z-[110] bg-slate-900/80 dark:bg-black/90 backdrop-blur-md flex justify-center items-center p-6 animate-in fade-in"
           onClick={() => walletChoice.resolve(null)}
         >
           <div
-            className="bg-white dark:bg-[#111114] w-full max-w-xs rounded-[2rem] p-6 shadow-2xl animate-in zoom-in-95 transition-colors"
+            className="bg-white dark:bg-[#0e0e11] w-full max-w-sm rounded-[2rem] p-5 shadow-2xl ring-1 ring-slate-200/70 dark:ring-white/10 animate-in zoom-in-95 transition-colors"
             onClick={(e) => e.stopPropagation()}
           >
-            <h3 className="text-base font-black text-slate-900 dark:text-white tracking-tight">Choose a wallet</h3>
-            <p className="mt-1 text-xs font-medium text-slate-500 dark:text-slate-400 leading-relaxed">
-              More than one wallet is installed in this browser.
-            </p>
-            <div className="mt-5 flex flex-col gap-2">
-              {walletChoice.options.map((option) => (
-                <button
-                  key={option.connector.uid || option.connector.id}
-                  onClick={() => walletChoice.resolve(option)}
-                  className="flex items-center gap-3 p-3 rounded-2xl bg-slate-50 dark:bg-[#1a1a1f] border border-slate-100 dark:border-slate-800/80 hover:bg-emerald-50 dark:hover:bg-emerald-900/20 hover:border-emerald-200 dark:hover:border-emerald-900/50 transition-all active:scale-[0.98] text-left"
-                >
-                  {option.icon ? (
-                    /* eslint-disable-next-line @next/next/no-img-element */
-                    <img src={option.icon} alt="" className="w-8 h-8 rounded-lg object-contain shrink-0" />
-                  ) : (
-                    <span className="w-8 h-8 rounded-lg bg-slate-200 dark:bg-slate-800 flex items-center justify-center text-xs font-black text-slate-500 shrink-0">
-                      {option.name.slice(0, 1).toUpperCase()}
-                    </span>
-                  )}
-                  <span className="flex-1 min-w-0">
-                    <span className="block text-sm font-black text-slate-900 dark:text-slate-100 truncate">{option.name}</span>
-                    {/* `authorized` means this wallet has already approved AbaPay, so picking
-                        it reconnects with no prompt at all. Worth surfacing — it tells the user
-                        which one they used last. */}
-                    {option.status === 'authorized' && (
-                      <span className="block text-[10px] font-bold uppercase tracking-widest text-emerald-600 dark:text-emerald-400">Connected before</span>
-                    )}
-                  </span>
-                </button>
-              ))}
+            <div className="flex items-center gap-2">
+              <button
+                onClick={() => walletChoice.resolve(null)}
+                aria-label="Cancel"
+                className="w-9 h-9 rounded-full bg-slate-100 dark:bg-white/5 hover:bg-slate-200 dark:hover:bg-white/10 flex items-center justify-center transition-colors shrink-0"
+              >
+                <ChevronDown size={16} className="rotate-90 text-slate-500 dark:text-slate-400" />
+              </button>
+              <h3 className="flex-1 text-center text-base font-black text-slate-900 dark:text-white tracking-tight pr-9">
+                Choose a wallet
+              </h3>
             </div>
-            <button
-              onClick={() => walletChoice.resolve(null)}
-              className="mt-4 w-full text-[10px] font-black uppercase tracking-widest text-slate-400 hover:text-slate-600 dark:hover:text-slate-300 transition-colors"
-            >
-              Cancel
-            </button>
+
+            <div className="mt-4 flex flex-col gap-2">
+              {walletChoice.options.map((option) => {
+                const isWalletConnect = /walletconnect/i.test(option.connector?.id || option.name);
+                const isBaseAccount = /baseaccount/i.test(option.connector?.id || '') || /base account/i.test(option.name);
+                // "Recent" for a wallet that already approved this site — picking it reconnects
+                // with no prompt at all, which is exactly what someone returning wants to know.
+                const badge = option.status === 'authorized'
+                  ? 'Recent'
+                  : isWalletConnect ? 'Scan or link'
+                  : isBaseAccount ? 'Sign in'
+                  : 'Installed';
+                return (
+                  <button
+                    key={option.connector.uid || option.connector.id}
+                    onClick={() => walletChoice.resolve(option)}
+                    className="group flex items-center gap-3 p-3 rounded-2xl bg-slate-50 dark:bg-white/[0.04] border border-slate-100 dark:border-white/5 hover:bg-emerald-50 dark:hover:bg-white/[0.08] hover:border-emerald-200 dark:hover:border-white/10 transition-all active:scale-[0.98] text-left"
+                  >
+                    {option.icon ? (
+                      /* eslint-disable-next-line @next/next/no-img-element */
+                      <img src={option.icon} alt="" className="w-9 h-9 rounded-xl object-contain shrink-0" />
+                    ) : isWalletConnect ? (
+                      <span className="w-9 h-9 rounded-xl bg-[#3396FF]/15 flex items-center justify-center shrink-0">
+                        <svg width="20" height="14" viewBox="0 0 32 20" fill="none" aria-hidden="true">
+                          <path d="M6.6 5.3c5.2-5.1 13.6-5.1 18.8 0l.6.6c.3.3.3.7 0 1l-2.1 2.1c-.1.1-.4.1-.5 0l-.9-.9c-3.6-3.5-9.5-3.5-13.1 0l-1 1c-.1.1-.4.1-.5 0L5.8 7c-.3-.3-.3-.7 0-1l.8-.7Zm23.2 4.4 1.9 1.8c.3.3.3.7 0 1l-8.4 8.2c-.3.3-.7.3-1 0l-6-5.8c-.1-.1-.2-.1-.3 0l-6 5.8c-.3.3-.7.3-1 0L.6 12.5c-.3-.3-.3-.7 0-1l1.9-1.8c.3-.3.7-.3 1 0l6 5.8c.1.1.2.1.3 0l6-5.8c.3-.3.7-.3 1 0l6 5.8c.1.1.2.1.3 0l6-5.8c.2-.3.7-.3.9 0Z" fill="#3396FF"/>
+                        </svg>
+                      </span>
+                    ) : isBaseAccount ? (
+                      <span className="w-9 h-9 rounded-xl bg-[#0052FF] flex items-center justify-center shrink-0">
+                        <span className="w-3.5 h-3.5 rounded-full bg-white" />
+                      </span>
+                    ) : (
+                      <span className="w-9 h-9 rounded-xl bg-slate-200 dark:bg-white/10 flex items-center justify-center text-xs font-black text-slate-500 dark:text-slate-300 shrink-0">
+                        {option.name.slice(0, 1).toUpperCase()}
+                      </span>
+                    )}
+
+                    <span className="flex-1 min-w-0">
+                      <span className="block text-sm font-black text-slate-900 dark:text-slate-100 truncate">{option.name}</span>
+                    </span>
+
+                    <span className="shrink-0 text-[9px] font-black uppercase tracking-widest px-2 py-1 rounded-lg bg-white dark:bg-white/10 text-slate-400 dark:text-slate-400 border border-slate-100 dark:border-transparent">
+                      {badge}
+                    </span>
+                  </button>
+                );
+              })}
+            </div>
+
+            <p className="mt-4 text-center text-[10px] font-medium text-slate-400 dark:text-slate-500 leading-relaxed">
+              By continuing, you agree to our{' '}
+              <Link href="/privacy" className="font-bold text-slate-500 dark:text-slate-400 hover:text-emerald-600 dark:hover:text-emerald-400">Privacy Policy</Link>
+              {' '}and{' '}
+              <Link href="/terms" className="font-bold text-slate-500 dark:text-slate-400 hover:text-emerald-600 dark:hover:text-emerald-400">Terms of use</Link>
+            </p>
           </div>
         </div>
       )}
