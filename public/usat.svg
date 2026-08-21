@@ -1,0 +1,21 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="USAT">
+  <!--
+    USAT — Tether America USD, on Celo.
+
+    Drawn rather than borrowed. The first version of this token entry reused /usdt.png, which
+    made USAT and USD₮ pixel-identical in the Celo picker — two different contracts, two
+    different balances, one icon. Picking the wrong one is a real mistake a user cannot see.
+
+    It is deliberately Tether-family teal (USAT is Tether's US-regulated dollar) but carries its
+    own wordmark, so it reads as related without pretending to be USD₮.
+
+    ⚠️ Placeholder for the official asset. If Tether publishes a USAT logo, drop it in as
+    public/usat.png and point SUPPORTED_TOKENS' `logo` at it — nothing else needs to change.
+  -->
+  <circle cx="32" cy="32" r="32" fill="#0B8A80"/>
+  <circle cx="32" cy="32" r="26" fill="none" stroke="#ffffff" stroke-opacity="0.28" stroke-width="2"/>
+  <text x="32" y="38.5"
+        font-family="Inter, 'Helvetica Neue', Helvetica, Arial, sans-serif"
+        font-size="17.5" font-weight="800" letter-spacing="-0.6"
+        text-anchor="middle" fill="#ffffff">USAT</text>
+</svg>

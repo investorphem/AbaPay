@@ -217,7 +217,7 @@ Rules:
        { ..., "chain": "CELO", "token": "USDC" },
        { ..., "chain": "BASE", "token": "USD₮" }
      ]
-   Valid chain values: "CELO" | "BASE". Valid token values: "USDC" | "USD₮" | "USDm" (USDm is
+   Valid chain values: "CELO" | "BASE". Valid token values: "USDC" | "USD₮" | "USAT" (USAT is
    Celo-only — never pair it with "BASE"). Leave null when the user doesn't name one; the
    app falls back to whatever chain/token the user currently has selected.
 
@@ -367,7 +367,10 @@ function fallbackIntent(): ParsedIntent {
 }
 
 const MAX_SCHEDULE_MINUTES = 10080; // 7 days — beyond that, this isn't a "near-term one-off" anymore
-const VALID_TOKENS = ['USDC', 'USD₮', 'USDm'];
+// USAT replaced USDm as Celo's third payment token (USDm has no EIP-3009 so it could never
+// settle on x402). USDm stays out of this list for the same reason it left the picker: the agent
+// must not offer a token new payments are no longer taken in.
+const VALID_TOKENS = ['USDC', 'USD₮', 'USAT'];
 
 function normalizeChain(raw: any): 'CELO' | 'BASE' | null {
   const v = typeof raw === 'string' ? raw.toUpperCase() : null;
@@ -392,9 +395,9 @@ function normalizeRecipients(raw: any): ParsedRecipient[] | null {
         provider: typeof r?.provider === 'string' ? r.provider.toUpperCase() : null,
         amount_ngn: Number.isFinite(amt) && amt > 0 ? amt : null,
         destination_account: typeof r?.destination_account === 'string' ? r.destination_account.replace(/\s+/g, '') : null,
-        // USDm is Celo-only — an impossible pairing means the model got it wrong; drop the
+        // USAT is Celo-only — an impossible pairing means the model got it wrong; drop the
         // override entirely rather than propagate a request that can never be fulfilled.
-        chain, token: token === 'USDm' && chain === 'BASE' ? null : token,
+        chain, token: token === 'USAT' && chain === 'BASE' ? null : token,
       };
     })
     // A recipient we can't actually act on (no amount or no account) is worse than useless —

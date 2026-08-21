@@ -481,7 +481,7 @@ async function fetchAllChainBalances(walletAddress: string) {
 }
 
 function formatChainBalances(balances: { celo: Record<string, string>; base: Record<string, string> }): string {
-    const celoLine = `⚫ Celo: ${balances.celo['USD₮'] || '0.0000'} USDT | ${balances.celo['USDC'] || '0.0000'} USDC | ${balances.celo['USDm'] || '0.0000'} cUSD`;
+    const celoLine = `⚫ Celo: ${balances.celo['USD₮'] || '0.0000'} USDT | ${balances.celo['USDC'] || '0.0000'} USDC | ${balances.celo['USAT'] || '0.0000'} USAT`;
     const baseLine = `🔵 Base: ${balances.base['USD₮'] || '0.0000'} USDT | ${balances.base['USDC'] || '0.0000'} USDC`;
     return `${celoLine}\n${baseLine}`;
 }
@@ -501,7 +501,7 @@ function formatChainBalancesInFiat(
             .map(([k, lbl]) => `${lbl} ${fmt(bals[k])}`);
         return parts.length ? `${label} ${parts.join(' | ')}` : null;
     };
-    const celo = line('⚫ Celo:', balances.celo, [['USD₮', 'USDT'], ['USDC', 'USDC'], ['USDm', 'cUSD']]);
+    const celo = line('⚫ Celo:', balances.celo, [['USD₮', 'USDT'], ['USDC', 'USDC'], ['USAT', 'USAT']]);
     const base = line('🔵 Base:', balances.base, [['USD₮', 'USDT'], ['USDC', 'USDC']]);
     return [celo, base].filter(Boolean).join('\n') || `_No stablecoin balance yet._`;
 }
