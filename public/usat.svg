@@ -1,21 +1,29 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="USAT">
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" role="img" aria-label="USAT">
   <!--
-    USAT — Tether America USD, on Celo.
+    USAT — Tether America USD. Redrawn from the official mark: a red-rimmed shield with a navy
+    field and a white five-pointed star.
 
-    Drawn rather than borrowed. The first version of this token entry reused /usdt.png, which
-    made USAT and USD₮ pixel-identical in the Celo picker — two different contracts, two
-    different balances, one icon. Picking the wrong one is a real mistake a user cannot see.
+    🔴 WHY THIS FILE EXISTS AT ALL. The token entry first pointed `logo` at /usdt.png, which made
+    USAT and USD₮ pixel-identical in the Celo picker — two different contracts, two different
+    balances, one icon. Choosing the wrong one is a mistake the user cannot see before they pay.
 
-    It is deliberately Tether-family teal (USAT is Tether's US-regulated dollar) but carries its
-    own wordmark, so it reads as related without pretending to be USD₮.
+    Built as ONE path rather than two stacked shapes: the shield is filled navy and stroked red,
+    so the rim is a constant width all the way round including the point at the bottom, which is
+    exactly where two hand-inset polygons drift apart. Round joins match the softened corners of
+    the original. The star is a true 5-point star (outer 94, inner 41, first point at -90°), so
+    its arms are even rather than eyeballed.
 
-    ⚠️ Placeholder for the official asset. If Tether publishes a USAT logo, drop it in as
-    public/usat.png and point SUPPORTED_TOKENS' `logo` at it — nothing else needs to change.
+    Geometry is in a 512 box with the stroke's outer edge kept inside the viewBox, so the icon
+    never clips at any render size.
   -->
-  <circle cx="32" cy="32" r="32" fill="#0B8A80"/>
-  <circle cx="32" cy="32" r="26" fill="none" stroke="#ffffff" stroke-opacity="0.28" stroke-width="2"/>
-  <text x="32" y="38.5"
-        font-family="Inter, 'Helvetica Neue', Helvetica, Arial, sans-serif"
-        font-size="17.5" font-weight="800" letter-spacing="-0.6"
-        text-anchor="middle" fill="#ffffff">USAT</text>
+  <path d="M 161 118 L 351 118 L 471 200 L 256 458 L 41 200 Z"
+        fill="#0E2050"
+        stroke="#EE0000"
+        stroke-width="42"
+        stroke-linejoin="round"/>
+  <path d="M 256.0 156.0 L 280.1 216.8 L 345.4 221.0 L 295.0 262.7 L 311.3 326.0 L 256.0 291.0 L 200.7 326.0 L 217.0 262.7 L 166.6 221.0 L 231.9 216.8 Z"
+        fill="#E8EDF2"
+        stroke="#E8EDF2"
+        stroke-width="6"
+        stroke-linejoin="round"/>
 </svg>
