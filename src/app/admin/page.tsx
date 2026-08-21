@@ -63,10 +63,29 @@ const ERC20_ABI = [
 ];
 
 // ⚡ MULTI-CHAIN TOKENS CONFIG ⚡
-const TOKENS = {
+//
+// Addresses are OPTIONAL per chain, and the type says so. Not every token exists on every
+// network — USDm is Celo-only, USAT is Celo-MAINNET-only — and the alternative to an optional
+// field is a placeholder address, which would have the admin read and withdraw against the wrong
+// contract. Every consumer already guards with `if (!tokenAddr) continue;`.
+const TOKENS: Record<string, {
+  decimals: number;
+  celoMainnet?: string;
+  celoSepolia?: string;
+  baseMainnet?: string;
+  baseSepolia?: string;
+}> = {
   "USD₮": { decimals: 6, celoMainnet: "0x48065fbbe25f71c9282ddf5e1cd6d6a887483d5e", celoSepolia: "0xd077A400968890Eacc75cdc901F0356c943e4fDb", baseMainnet: "0xfde4C96c8593536E31F229EA8f37b2ADa2699bb2", baseSepolia: "0x1d5728a887e1fa1a191467094ac7761d019b4c2c" },
   "USDC": { decimals: 6, celoMainnet: "0xcebA9300f2b948710d2653dD7B07f33A8B32118C", celoSepolia: "0x2F25deB3848C207fc8E0c34035B3Ba7fC157602B", baseMainnet: "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913", baseSepolia: "0x036CbD53842c5426634e7929541eC2318f3dCF7e" },
-  "USDm": { decimals: 18, celoMainnet: "0x765DE816845861e75A25fCA122bb6898B8B1282a", celoSepolia: "0xdE9e4C3ce781b4bA68120d6261cbad65ce0aB00b" } // Exclusive to Celo
+  // 🔴 USDm STAYS. It is no longer offered for NEW payments (it has no EIP-3009, so it could
+  // never settle on x402 — see TOKEN_ORDER_BY_CHAIN in src/constants), but the vault still holds
+  // it and historical rows still name it, so the admin must be able to see and withdraw it.
+  // Removing it here would strand a real balance with no control to move it.
+  "USDm": { decimals: 18, celoMainnet: "0x765DE816845861e75A25fCA122bb6898B8B1282a", celoSepolia: "0xdE9e4C3ce781b4bA68120d6261cbad65ce0aB00b" }, // Exclusive to Celo
+  // ⚡ USAT — Tether America USD, Celo only. Decimals read off the contract (6, not 18: a second
+  // USAT on Celo has 18 decimals and no DOMAIN_SEPARATOR — this is the EIP-3009 one). Not
+  // deployed on Alfajores, so it has no testnet address and the testnet reads below skip it.
+  "USAT": { decimals: 6, celoMainnet: "0xD2ab3C9A02DBBAB236BfEC45D1d755DF4267F771" }
 };
 
 const ITEMS_PER_PAGE = 10;
@@ -81,7 +100,7 @@ export default function AdminDashboard() {
   const [authError, setAuthError] = useState(""); 
 
   // ⚡ SPLIT VAULT BALANCES ⚡
-  const [celoVaults, setCeloVaults] = useState({ usdt: "0.00", usdc: "0.00", usdm: "0.00" });
+  const [celoVaults, setCeloVaults] = useState({ usdt: "0.00", usdc: "0.00", usdm: "0.00", usat: "0.00" });
   const [baseVaults, setBaseVaults] = useState({ usdt: "0.00", usdc: "0.00" });
 
   // ⚡ TIMELOCKED WITHDRAWALS (V2/V3) — keyed by `${network}-${tokenSymbol}` ⚡
@@ -300,13 +319,21 @@ export default function AdminDashboard() {
           const cUsdcBal = await celoPublic.readContract({ address: (isMainnet ? TOKENS["USDC"].celoMainnet : TOKENS["USDC"].celoSepolia) as `0x${string}`, abi: ERC20_ABI, functionName: 'balanceOf', args: [CELO_CONTRACT] }) as bigint;
           const cUsdmBal = await celoPublic.readContract({ address: (isMainnet ? TOKENS["USDm"].celoMainnet : TOKENS["USDm"].celoSepolia) as `0x${string}`, abi: ERC20_ABI, functionName: 'balanceOf', args: [CELO_CONTRACT] }) as bigint;
 
+          // USAT is mainnet-only (not deployed on Alfajores), so the read is guarded rather than
+          // given a placeholder address — a wrong address would report someone else's balance.
+          const usatAddr = isMainnet ? (TOKENS["USAT"] as any).celoMainnet : undefined;
+          const cUsatBal = usatAddr
+            ? await celoPublic.readContract({ address: usatAddr as `0x${string}`, abi: ERC20_ABI, functionName: 'balanceOf', args: [CELO_CONTRACT] }) as bigint
+            : BigInt(0);
+
           setCeloVaults({
               usdt: formatUnits(cUsdtBal, TOKENS["USD₮"].decimals),
               usdc: formatUnits(cUsdcBal, TOKENS["USDC"].decimals),
               usdm: formatUnits(cUsdmBal, TOKENS["USDm"].decimals),
+              usat: formatUnits(cUsatBal, TOKENS["USAT"].decimals),
           });
 
-          for (const symbol of ['USD₮', 'USDC', 'USDm'] as const) {
+          for (const symbol of ['USD₮', 'USDC', 'USDm', 'USAT'] as const) {
             const tokenAddr = (isMainnet ? (TOKENS[symbol] as any).celoMainnet : (TOKENS[symbol] as any).celoSepolia) as `0x${string}` | undefined;
             if (!tokenAddr) continue;
             newQueued[`CELO-${symbol}`] = await readPendingWithdrawal(celoPublic, CELO_CONTRACT, tokenAddr);
@@ -417,7 +444,7 @@ export default function AdminDashboard() {
 
     const [celoResult, baseResult] = await Promise.all([
       CELO_CONTRACT && CELO_CONTRACT.length === 42
-        ? readOneChain(celoPublic, CELO_CONTRACT, ['USD₮', 'USDC', 'USDm'], 'celoMainnet', 'celoSepolia')
+        ? readOneChain(celoPublic, CELO_CONTRACT, ['USD₮', 'USDC', 'USDm', 'USAT'], 'celoMainnet', 'celoSepolia')
         : Promise.resolve({ supported: false }),
       BASE_CONTRACT && BASE_CONTRACT.length === 42
         ? readOneChain(basePublic, BASE_CONTRACT, ['USD₮', 'USDC'], 'baseMainnet', 'baseSepolia')
@@ -612,7 +639,7 @@ export default function AdminDashboard() {
   // queueWithdrawal() -> wait 24h -> executeWithdrawal() flow (contracts/AbaPayV3.sol),
   // so a compromised owner key can't unilaterally drain the vault instantly. This function
   // detects which flow the target contract supports and drives it through each stage.
-  const handleWithdrawal = async (tokenSymbol: 'USD₮' | 'USDC' | 'USDm', network: 'CELO' | 'BASE') => {
+  const handleWithdrawal = async (tokenSymbol: 'USD₮' | 'USDC' | 'USDm' | 'USAT', network: 'CELO' | 'BASE') => {
     if (!client || !address) return;
     const key = `${network}-${tokenSymbol}`;
 
@@ -703,7 +730,7 @@ export default function AdminDashboard() {
     finally { setWithdrawalBusyKey(null); }
   };
 
-  const handleCancelWithdrawal = async (tokenSymbol: 'USD₮' | 'USDC' | 'USDm', network: 'CELO' | 'BASE') => {
+  const handleCancelWithdrawal = async (tokenSymbol: 'USD₮' | 'USDC' | 'USDm' | 'USAT', network: 'CELO' | 'BASE') => {
     if (!client || !address) return;
     const key = `${network}-${tokenSymbol}`;
 
@@ -927,6 +954,7 @@ export default function AdminDashboard() {
 
   const currentVaultTotal = 
     parseFloat(celoVaults.usdt) + parseFloat(celoVaults.usdc) + parseFloat(celoVaults.usdm) +
+    parseFloat(celoVaults.usat) +
     parseFloat(baseVaults.usdt) + parseFloat(baseVaults.usdc);
 
   const timeFilteredTransactions = useMemo(() => {
@@ -1646,6 +1674,14 @@ export default function AdminDashboard() {
                         <span className="text-xs text-yellow-500 font-bold uppercase tracking-widest bg-yellow-500/10 px-3 py-1 rounded-full">USDm Vault</span>
                         <WithdrawControl tokenSymbol="USDm" network="CELO" hoverClass="hover:bg-yellow-500" queued={queuedWithdrawals['CELO-USDm']} busy={withdrawalBusyKey === 'CELO-USDm'} onWithdraw={handleWithdrawal} onCancel={handleCancelWithdrawal} />
                     </div>
+                    {/* USAT replaces USDm for NEW payments (it settles on x402; USDm cannot), but
+                        both need vault controls: USDm because the balance and its history are
+                        real, USAT because it is what arrives from here on. */}
+                    <div className="bg-slate-900 border border-slate-800 p-6 rounded-3xl text-center">
+                        <h2 className="text-4xl font-black mb-1">${Number(parseFloat(celoVaults.usat).toFixed(4))}</h2>
+                        <span className="text-xs text-teal-400 font-bold uppercase tracking-widest bg-teal-500/10 px-3 py-1 rounded-full">USAT Vault</span>
+                        <WithdrawControl tokenSymbol="USAT" network="CELO" hoverClass="hover:bg-teal-500" queued={queuedWithdrawals['CELO-USAT']} busy={withdrawalBusyKey === 'CELO-USAT'} onWithdraw={handleWithdrawal} onCancel={handleCancelWithdrawal} />
+                    </div>
                 </div>
 
                 {/* BASE VAULTS */}
@@ -1674,7 +1710,7 @@ export default function AdminDashboard() {
                 {(['CELO', 'BASE'] as const).map((network) => {
                   const cc = contractControls[network];
                   const accentColor = network === 'CELO' ? 'emerald' : 'blue';
-                  const tokenSymbols = network === 'CELO' ? ['USD₮', 'USDC', 'USDm'] as const : ['USD₮', 'USDC'] as const;
+                  const tokenSymbols = network === 'CELO' ? ['USD₮', 'USDC', 'USDm', 'USAT'] as const : ['USD₮', 'USDC'] as const;
 
                   return (
                     <div key={network} className="bg-[#111114] border border-slate-800 rounded-3xl p-8">
@@ -1901,13 +1937,13 @@ export default function AdminDashboard() {
 }
 
 function WithdrawControl({ tokenSymbol, network, hoverClass, queued, busy, onWithdraw, onCancel }: {
-  tokenSymbol: 'USD₮' | 'USDC' | 'USDm';
+  tokenSymbol: 'USD₮' | 'USDC' | 'USDm' | 'USAT';
   network: 'CELO' | 'BASE';
   hoverClass: string;
   queued?: QueuedWithdrawal;
   busy: boolean;
-  onWithdraw: (t: 'USD₮' | 'USDC' | 'USDm', n: 'CELO' | 'BASE') => void;
-  onCancel: (t: 'USD₮' | 'USDC' | 'USDm', n: 'CELO' | 'BASE') => void;
+  onWithdraw: (t: 'USD₮' | 'USDC' | 'USDm' | 'USAT', n: 'CELO' | 'BASE') => void;
+  onCancel: (t: 'USD₮' | 'USDC' | 'USDm' | 'USAT', n: 'CELO' | 'BASE') => void;
 }) {
   const baseBtn = `mt-8 w-full font-black py-3 rounded-xl flex items-center justify-center gap-2 transition-all disabled:opacity-50`;
 

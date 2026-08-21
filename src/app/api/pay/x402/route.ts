@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server';
 import { supabaseAdmin as supabase } from '@/utils/supabase';
 import { executeVend, getStrictRequestId } from '@/lib/vend';
-import { resolveTokenOnChain } from '@/constants';
+import { resolveTokenOnChain, DEFAULT_CHAIN } from '@/constants';
 import { sendTelegramAlert } from '@/lib/telegram';
 import { getServiceRules } from '@/lib/serviceRules';
 import { isDuplicateElectricity } from '@/lib/parity';
@@ -75,6 +75,11 @@ const X402_DOMAINS_BY_CHAIN: Record<'CELO' | 'BASE', Record<string, { name: stri
   CELO: {
     USDC: { name: 'USDC', version: '2' },
     'USD₮': { name: 'Tether USD', version: '1' },
+    // ⚡ USAT (Tether America USD) — verified the same way every other entry here was: its
+    // on-chain DOMAIN_SEPARATOR (0xe6bbb792…) is reproduced exactly by this name/version pair
+    // against chainId 42220 and 0xD2ab3C9A…F771. Note the name is the TOKEN's full name, not
+    // its symbol — signing "USAT" here would recover to an unrelated address and revert.
+    USAT: { name: 'Tether America USD', version: '1' },
   },
   BASE: {
     USDC: { name: 'USD Coin', version: '2' },
@@ -268,7 +273,22 @@ async function handleX402Request(req: Request) {
   // client signals its chain via `blockchain` (same field the contract-call path uses).
   // Normalize once — the frontend sends the viem chain NAME ("Base", "Base Sepolia", "Celo"),
   // so match on a substring rather than an exact 'BASE'.
-  const requestedChain: ChainKey = (blockchain || '').toUpperCase().includes('BASE') ? 'BASE' : 'CELO';
+  //
+  // 🔴 AN UNSPECIFIED CHAIN NOW MEANS THE APP'S DEFAULT, NOT CELO. This read `includes('BASE')`,
+  // so ANY request without a `blockchain` — every discovery crawler probe, which sends no body
+  // at all — was answered with a CELO challenge. Confirmed against Coinbase's own validator
+  // (POST /platform/v2/x402/validate), which failed us on exactly that:
+  //
+  //   FAIL  accepts[0].network: Network "eip155:42220" is not supported
+  //   FAIL  accepts[0].asset:   Asset "0xceba93…" is not USDC
+  //
+  // CDP's catalog only indexes the chains its facilitator settles, so while a bare probe
+  // advertised Celo the Base route could never be listed no matter how many payments settled.
+  // A request that NAMES a chain is still honoured exactly as before — only the "didn't say"
+  // case moves, and it moves to the chain the app itself defaults to.
+  const requestedChain: ChainKey = blockchain
+    ? (String(blockchain).toUpperCase().includes('BASE') ? 'BASE' : 'CELO')
+    : (DEFAULT_CHAIN === 'BASE' ? 'BASE' : 'CELO');
   const chainCfg = (await chainConfigFor(requestedChain, isMainnet)) || (await chainConfigFor('CELO', isMainnet));
   if (!chainCfg) {
     return NextResponse.json({ success: false, status: 'FAILED_VENDING', message: 'This payment method is temporarily unavailable.' }, { status: 500 });
@@ -370,7 +390,96 @@ async function handleX402Request(req: Request) {
       error: 'Payment required',
       resource: { url: resourceUrl, description: acceptEntry.description, mimeType: acceptEntry.mimeType },
       accepts: [acceptEntry],
-      extensions: {},
+      // ⚡ BAZAAR DISCOVERY — WHAT MAKES THIS ENDPOINT FINDABLE BY AGENTS.
+      //
+      // Coinbase's Bazaar is one of the catalogs agent wallets search for x402 services, and
+      // there is no submission form: CDP indexes a resource the first time a real payment
+      // SETTLES through its facilitator for that URL, and only if the 402 advertises this block.
+      // `extensions` was an empty object, so every check below failed and the route could never
+      // have been listed however much traffic it took.
+      //
+      // The shape is not guessed. It is what CDP's own validator
+      // (POST /platform/v2/x402/validate) demands — it names each missing path individually,
+      // `bazaar.info`, `bazaar.info.input.type`, `bazaar.info.input.method`, `bazaar.schema`
+      // required, `bazaar.info.output.example` advisory — and it matches the blocks live
+      // listings publish today (read back from GET /platform/v2/x402/discovery/resources).
+      //
+      // The description is written for an AGENT deciding whether this service does what its
+      // user asked, which is also how the catalog ranks quality: a bare endpoint name scores
+      // nothing. Say the country, the services, the currency and the settlement asset.
+      extensions: {
+        bazaar: {
+          info: {
+            input: {
+              type: 'http',
+              method: 'POST',
+              discoverable: true,
+              body: {
+                type: 'object',
+                required: ['serviceID', 'amount'],
+                properties: {
+                  serviceID: { type: 'string', description: 'Biller code, e.g. "mtn", "ikeja-electric", "dstv".' },
+                  serviceCategory: { type: 'string', enum: ['AIRTIME', 'DATA', 'ELECTRICITY', 'CABLE', 'EDUCATION', 'INTERNATIONAL'], description: 'Which kind of bill is being paid.' },
+                  amount: { type: 'number', description: 'Face value of the bill in Nigerian Naira (NGN).' },
+                  phone: { type: 'string', description: 'Recipient phone number for airtime, data, or the delivery receipt.' },
+                  billersCode: { type: 'string', description: 'Meter number, smartcard number, or account identifier for the biller.' },
+                  variation_code: { type: 'string', description: 'Plan code for DATA, CABLE and EDUCATION — obtained from the provider catalogue.' },
+                },
+              },
+            },
+            output: {
+              type: 'json',
+              example: {
+                success: true,
+                status: 'SUCCESS',
+                message: 'Airtime purchase successful',
+                tx_hash: '0xe1f5043ae4250e570dcdedfd0944b1f5b230b51d78046019c6e1ad711f786e64',
+                request_id: '2026082109476tc53yp30jk3',
+                amount_naira: 1000,
+                token_used: 'USDC',
+              },
+            },
+          },
+          schema: {
+            $schema: 'https://json-schema.org/draft/2020-12/schema',
+            type: 'object',
+            properties: {
+              input: {
+                type: 'object',
+                properties: {
+                  body: {
+                    type: 'object',
+                    required: ['serviceID', 'amount'],
+                    properties: {
+                      serviceID: { type: 'string' },
+                      serviceCategory: { type: 'string' },
+                      amount: { type: 'number' },
+                      phone: { type: 'string' },
+                      billersCode: { type: 'string' },
+                      variation_code: { type: 'string' },
+                    },
+                  },
+                  method: { type: 'string', enum: ['POST'] },
+                },
+              },
+              output: {
+                type: 'object',
+                properties: {
+                  example: {
+                    type: 'object',
+                    properties: {
+                      success: { type: 'boolean' },
+                      status: { type: 'string' },
+                      tx_hash: { type: 'string' },
+                      request_id: { type: 'string' },
+                    },
+                  },
+                },
+              },
+            },
+          },
+        },
+      },
     };
     const v1Body = { x402Version: 1, error: 'Payment required', accepts: [acceptEntry] };
     return NextResponse.json(v1Body, {
