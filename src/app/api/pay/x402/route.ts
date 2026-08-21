@@ -433,6 +433,9 @@ async function handleX402Request(req: Request) {
   // The authorization the payer signed, hoisted out of the try so a FAILURE can still ask the
   // chain whether its nonce was spent. See authorizationWasConsumed below.
   let settledAuth: X402Authorization | null = null;
+  // The payer's signature, hoisted for the same reason: a failed settlement can only be
+  // replayed against the facilitator if the alert carries the signature it was made with.
+  let settledSignature = "";
   try {
     let decodedPayload: any;
     try {
@@ -452,6 +455,8 @@ async function handleX402Request(req: Request) {
     // has a specific answer and a specific message. See src/lib/x402Settle.ts.
     const auth = readAuthorization(decodedPayload);
     settledAuth = auth; // kept for the on-chain "was this nonce spent?" check on failure
+    settledSignature = typeof (decodedPayload?.payload?.signature ?? decodedPayload?.signature) === "string"
+      ? String(decodedPayload?.payload?.signature ?? decodedPayload?.signature) : "";
     const authCheck = checkAuthorization({
       auth,
       payTo,
@@ -754,12 +759,56 @@ async function handleX402Request(req: Request) {
       // because the two window fields are only meaningful next to the clock they are judged
       // against — a validAfter above it is a revert, and nothing else in the message says so.
       const nowSec = Math.floor(Date.now() / 1000);
+      // ⚡ AND THE PAYER'S ON-CHAIN BALANCE, BECAUSE THE MARGIN IS THE ONE THING THAT VARIES.
+      //
+      // 🔴 EVERY OTHER CAUSE HAS BEEN ELIMINATED FROM THE OUTSIDE. Against CDP directly: the
+      // network/scheme/version combination is what /supported lists, the payload SHAPE is
+      // accepted (a real signature replayed through /verify reached a precise, named window
+      // error), and "unable to estimate gas" is reproducible byte for byte with a bad signature
+      // — but the signature is verified HERE now, before this point, so it is not that either.
+      // On-chain: window valid, nonce unspent, neither address blacklisted, token not paused.
+      //
+      // What the two failures share is how close the payment sat to the payer's whole balance —
+      // 0.042 USDC of headroom on one, 0.000518 on the next — while the payments that settled
+      // had orders of magnitude more. That is the remaining variable, so it goes in the alert
+      // rather than being reconstructed by hand afterwards.
+      //
+      // The SIGNATURE goes in too. Everything else about a failure can be re-derived from the
+      // chain; the signature cannot, and without it a failed settlement cannot be replayed
+      // against the facilitator to see what it actually objects to.
+      let balanceLine = '';
+      try {
+        const balData = `0x70a08231${'0'.repeat(24)}${String(settledAuth?.from ?? '').replace(/^0x/, '').toLowerCase()}`;
+        for (const url of rpcUrlsFor(Number(String(chainCfg.caip2).split(':')[1]))) {
+          const r = await fetch(url, {
+            method: 'POST', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'eth_call', params: [{ to: usdc.address, data: balData }, 'latest'] }),
+            signal: AbortSignal.timeout(5_000),
+          });
+          const b = await r.json();
+          if (typeof b?.result === 'string' && /^0x[0-9a-f]+$/i.test(b.result)) {
+            const bal = BigInt(b.result);
+            const need = BigInt(settledAuth?.value ?? '0');
+            const spare = bal - need;
+            balanceLine =
+              `balance \`${bal.toString()}\` · spare \`${spare.toString()}\`` +
+              `${spare < BigInt(0) ? ' ⛔ SHORT' : spare < BigInt(10_000) ? ' ⚠️ RAZOR-THIN' : ''}\n`;
+            break;
+          }
+        }
+      } catch { /* diagnostics must never break the error path */ }
+
+      const sigForReplay = settledSignature;
+
       const authLine = settledAuth
         ? `payer \`${settledAuth.from}\` -> \`${settledAuth.to}\`\n` +
           `value \`${settledAuth.value}\` · asset \`${usdc.address}\`\n` +
+          balanceLine +
           `validAfter \`${settledAuth.validAfter}\`${Number(settledAuth.validAfter) > nowSec ? ' ⛔ IN THE FUTURE' : ''} · ` +
           `validBefore \`${settledAuth.validBefore}\`${Number(settledAuth.validBefore) <= nowSec ? ' ⛔ EXPIRED' : ''} · now \`${nowSec}\`\n` +
-          `nonce \`${settledAuth.nonce}\`\n`
+          `maxTimeoutSeconds \`${acceptEntry.maxTimeoutSeconds}\` · window left \`${Number(settledAuth.validBefore) - nowSec}\`\n` +
+          `nonce \`${settledAuth.nonce}\`\n` +
+          (sigForReplay ? `sig \`${sigForReplay}\`\n` : '')
         : '';
 
       sendTelegramAlert(

@@ -3361,7 +3361,40 @@ export default function Home() {
                       // hands the bill to the contract call automatically. That is the
                       // "otherwise fall back to the initial contract call" behaviour, arrived at
                       // by evidence instead of by name. See walletCanSignTypedData.
-                      const useX402 = x402Enabled && walletSupportsX402 && (celoX402 || baseX402);
+                      // 🔴 x402 NEEDS HEADROOM ABOVE THE BILL. THE CONTRACT CALL DOES NOT.
+                      //
+                      // Two Base settlements were refused with the facilitator's opaque
+                      // "unable to estimate gas", and everything else about them was provably
+                      // fine — signature valid (the server recovers it before settling now),
+                      // window valid, nonce unspent, neither address blacklisted, token not
+                      // paused, balance covering the amount. What they shared was how little
+                      // room was left over:
+                      //
+                      //     authorized 175.074627 of 175.117085   spare 0.042
+                      //     authorized 194.386567 of 194.387085   spare 0.000518
+                      //
+                      // while every settlement that succeeded had orders of magnitude more. And
+                      // the decisive part: the CONTRACT-CALL rail moves those exact amounts
+                      // without complaint. So the token transfer is affordable; it is the
+                      // facilitator that needs more than the transfer — a fee taken on top is
+                      // the only thing that explains a rail refusing what the chain accepts.
+                      //
+                      // Rather than spend the user a prompt to discover that, the rail is only
+                      // offered when there is room for it. Below the buffer the contract call
+                      // takes the bill directly: the payment still goes through, with no failed
+                      // attempt and no operator alert first. Deliberately a rail choice and not
+                      // a block — nobody is stopped from spending their balance.
+                      const balanceForRail = parseFloat(walletBalance);
+                      const chargeForRail = parseFloat(cryptoToCharge);
+                      const railHeadroomOk =
+                        !Number.isFinite(balanceForRail) || !Number.isFinite(chargeForRail)
+                          ? true // unknown balance is not evidence of a thin one
+                          : balanceForRail - chargeForRail >= Math.max(0.01, chargeForRail * 0.005);
+
+                      const useX402 = x402Enabled && walletSupportsX402 && railHeadroomOk && (celoX402 || baseX402);
+                      if (!railHeadroomOk) {
+                        console.warn('[x402] balance leaves no headroom for facilitator fees; using the contract call:', balanceForRail, 'vs', chargeForRail);
+                      }
                       if (useX402) processX402Payment(); else processBlockchainPayment();
                   }}
                   className={`w-full text-white dark:text-slate-900 font-black py-5 rounded-2xl flex items-center justify-center gap-2.5 transition-all active:scale-95 shadow-xl text-lg tracking-tight ${hasPendingDuplicate ? 'bg-orange-500 dark:bg-orange-500 hover:bg-orange-600 dark:hover:bg-orange-600 text-white shadow-orange-500/20' : 'bg-slate-900 dark:bg-white hover:bg-black dark:hover:bg-slate-200 shadow-slate-900/20 dark:shadow-white/10'}`}
