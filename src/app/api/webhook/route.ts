@@ -278,6 +278,32 @@ export async function POST(req: Request) {
             }
 
             if (!matchedEvent) {
+                // 🔴 A REFUND IS NOT A FAILED PAYMENT. CHECK BEFORE CRYING WOLF.
+                //
+                // Reported: "🛑 WEBHOOK BLOCKED: NO CONTRACT EVENT" for a transaction that had
+                // succeeded — because it was a REFUND the operator had just issued from the Ops
+                // panel. A refund moves tokens OUT of the vault and emits a refund event, so of
+                // course there is no PaymentReceived in it; verifying one as a payment can only
+                // ever fail. The row it was attached to was a stale intent from a different
+                // attempt entirely, so the alert named a real hash, described a real absence,
+                // and meant nothing.
+                //
+                // An alert that fires on correct behaviour is worse than no alert: it teaches
+                // whoever reads it to discount the next one, and this channel also carries
+                // genuine money-affecting failures. So a hash already banked as some row's
+                // `refund_hash` is recognised for what it is — left alone, not marked
+                // FAILED_VENDING, and not announced.
+                const { data: asRefund } = await supabaseAdmin
+                    .from('transactions')
+                    .select('tx_hash')
+                    .ilike('refund_hash', txHash)
+                    .limit(1);
+
+                if (asRefund && asRefund.length > 0) {
+                    console.warn('[Webhook] Hash is a recorded REFUND, not a payment — ignoring:', txHash);
+                    return NextResponse.json({ status: 'Hash is a recorded refund, not a payment. Ignored.' }, { status: 200 });
+                }
+
                 await supabaseAdmin.from('transactions').update({ status: 'FAILED_VENDING', error_code: 'NO_CONTRACT_EVENT', api_response: 'Transaction succeeded but AbaPay contract did not emit PaymentReceived' }).eq('tx_hash', txHash);
                 try { await sendTelegramAlert(`🛑 *WEBHOOK BLOCKED: NO CONTRACT EVENT*\nTx succeeded but the AbaPay contract never emitted PaymentReceived — refusing to vend.\nHash: \`${txHash}\`\n🔍 *Explorer:* ${explorerUrl}`); } catch (err) {}
                 return NextResponse.json({ status: "No AbaPay PaymentReceived event found. Blocked." }, { status: 200 });
