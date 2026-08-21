@@ -91,6 +91,16 @@ const TRANSFER_WITH_AUTHORIZATION_TYPES = {
   ],
 } as const;
 
+/**
+ * The EIP-712 domain is not something a payment can be guessed into. A challenge without one is
+ * unsignable, and saying so beats producing a signature that authorises nothing.
+ */
+function throwMissingDomain(): never {
+  throw new X402ChallengeError(
+    'This payment could not be prepared — the payment challenge did not say which token contract to sign against.',
+  );
+}
+
 function randomNonce(): `0x${string}` {
   const bytes = new Uint8Array(32);
   crypto.getRandomValues(bytes);
@@ -306,8 +316,20 @@ async function attemptX402Payment({ url, body, client, account, expectedChainId,
   const signPromise = client.signTypedData({
     account,
     domain: {
-      name: accept.extra?.name ?? 'USDC',
-      version: accept.extra?.version ?? '2',
+      // 🔴 NO DEFAULT DOMAIN. THIS USED TO FALL BACK TO CELO'S.
+      //
+      // The fallback was `name: 'USDC'`, which is CELO USDC's EIP-712 domain name. Base USDC's
+      // is "USD Coin" — a different contract entirely. So a Base challenge that arrived without
+      // `extra` would be signed against Celo's domain, and the resulting signature authorises
+      // nothing: it recovers to some unrelated address, and `transferWithAuthorization` reverts.
+      // Confirmed against CDP — that mistake is reported as "invalid signature", one more
+      // unhelpful sentence for the payer to receive after approving a payment.
+      //
+      // Guessing was never worth it. The domain is the one thing a signature cannot be right
+      // about by accident, and the challenge always carries it. Absent, the honest move is to
+      // stop before asking the wallet for a signature that could not possibly be honoured.
+      name: accept.extra?.name ?? throwMissingDomain(),
+      version: accept.extra?.version ?? throwMissingDomain(),
       chainId,
       verifyingContract: accept.asset as `0x${string}`,
     },
