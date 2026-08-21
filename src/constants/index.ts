@@ -159,7 +159,9 @@ export const SUPPORTED_TOKENS = [
     // there and the token simply isn't offered on testnet — which is the correct behaviour, not
     // a gap to paper over with a wrong address.
     symbol: "USAT",
-    logo: "/usdt.png",
+    // Its OWN mark, not USD₮'s. Pointing both at /usdt.png made two different contracts with
+    // two different balances look identical in the Celo picker — an error the user cannot see.
+    logo: "/usat.svg",
     decimals: 6,
     celoMainnet: "0xD2ab3C9A02DBBAB236BfEC45D1d755DF4267F771",
     supportedNetworks: ["celo"]
