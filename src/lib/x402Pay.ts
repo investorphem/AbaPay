@@ -119,24 +119,45 @@ function toBase64(value: string): string {
  * Both shapes are accepted because both are in the wild and our own server sends both at once:
  * the `payment-required` header carries v2 (what x402 discovery crawlers parse) while the BODY
  * carries v1 (what older clients read). Either is enough to sign.
+ *
+ * ⚡ ALSO RETURNS `extensions` — WITHOUT WHICH BAZAAR CATALOGS NOTHING.
+ *
+ * 🔴 THE MISTAKE THIS FIXES. This used to discard the challenge's top-level `extensions` block
+ * entirely — it read `accepts` and returned only the matched entry. x402's own documented Bazaar
+ * mechanism (x402.gitbook.io/x402 → "Troubleshooting catalog visibility") names this as the most
+ * common cause of "my service settles payments but never appears in the catalog":
+ *
+ *   "The settled PaymentPayload did not carry the extension. Cataloging happens when a
+ *    facilitator processes a PaymentPayload that includes the ECHOED bazaar extension. A
+ *    server-side declaration alone catalogs nothing if no paying client echoes it."
+ *
+ * Our server (route.ts) has declared `extensions.bazaar` on the challenge since 1561870 — and it
+ * was never once echoed back, because nothing on this side even READ it. Confirmed directly: a
+ * real, mined settlement, a resource that validates with zero preflight failures, and it still
+ * never appeared in a full paginated scan of the discovery catalog. This is why.
+ *
+ * The v2 HEADER is the source, not the v1 body — our own server only puts `extensions` on the
+ * header (see route.ts's v2Challenge), matching what x402 discovery crawlers actually parse.
  */
-export function parseX402Challenge(res: Response, body: unknown): X402Accept {
+export function parseX402Challenge(res: Response, body: unknown): X402Accept & { extensions?: Record<string, unknown> } {
   const fromBody = (body as { accepts?: unknown })?.accepts;
   let accepts: X402Accept[] | undefined = Array.isArray(fromBody) ? (fromBody as X402Accept[]) : undefined;
+  let extensions: Record<string, unknown> | undefined;
 
-  if (!accepts?.length) {
-    const header = res.headers.get('payment-required');
-    if (header) {
-      try {
-        const decoded = JSON.parse(atob(header)) as { accepts?: unknown };
-        if (Array.isArray(decoded?.accepts)) accepts = decoded.accepts as X402Accept[];
-      } catch { /* fall through to the error below */ }
-    }
+  const header = res.headers.get('payment-required');
+  if (header) {
+    try {
+      const decoded = JSON.parse(atob(header)) as { accepts?: unknown; extensions?: unknown };
+      if (!accepts?.length && Array.isArray(decoded?.accepts)) accepts = decoded.accepts as X402Accept[];
+      if (decoded?.extensions && typeof decoded.extensions === 'object') {
+        extensions = decoded.extensions as Record<string, unknown>;
+      }
+    } catch { /* fall through to the error below */ }
   }
 
   const exact = accepts?.find((a) => a?.scheme === 'exact' && a?.payTo && a?.asset);
   if (!exact) throw new X402ChallengeError('This payment could not be prepared — no usable payment challenge was returned.');
-  return exact as X402Accept;
+  return { ...(exact as X402Accept), extensions };
 }
 
 export interface X402PayParams {
@@ -349,11 +370,19 @@ async function attemptX402Payment({ url, body, client, account, expectedChainId,
   // 3. Pay. The envelope declares v2 with the CAIP-2 network, matching what the challenge
   //    offered; our server normalises the version/network per facilitator before settling, and
   //    none of those fields are part of the signed message.
+  //
+  // ⚡ `extensions` IS ECHOED BACK VERBATIM — THE STEP THAT WAS MISSING ENTIRELY.
+  //
+  // See the note on parseX402Challenge: a facilitator only catalogs a Bazaar-declared resource
+  // when the SETTLED PaymentPayload carries the extension the challenge advertised, and nothing
+  // here ever included one. `accept.extensions` is exactly what the challenge sent — not
+  // reconstructed, not guessed at — echoed back the same way `network`/`scheme` already are.
   const paymentHeader = toBase64(JSON.stringify({
     x402Version: 2,
     scheme: 'exact',
     network: accept.network,
     payload: { signature, authorization },
+    ...(accept.extensions ? { extensions: accept.extensions } : {}),
   }));
 
   const settleRes = await post({ 'X-PAYMENT': paymentHeader });

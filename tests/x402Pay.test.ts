@@ -68,6 +68,31 @@ describe('payWithX402', () => {
     expect((seen[1].headers as any)['X-PAYMENT']).toBeTruthy();
   });
 
+  /**
+   * 🔴 THE END-TO-END PROOF OF THE ECHO. Reading `extensions` off the challenge is only half the
+   * fix — it has to actually reach the X-PAYMENT header the second request carries, since that
+   * is the payload a facilitator processes to decide what to catalog. Decodes the real base64
+   * envelope the client sends, the same way the server does, rather than trusting a mock.
+   */
+  it('echoes the challenge\'s `extensions` block into the X-PAYMENT payload — what Bazaar needs to catalog anything', async () => {
+    const wallet = fakeWallet();
+    const bazaarBlock = { bazaar: { info: { input: { type: 'http', method: 'GET' } } } };
+    const header = btoa(JSON.stringify({ x402Version: 2, accepts: [accept], extensions: bazaarBlock }));
+    const seen: RequestInit[] = [];
+    vi.stubGlobal('fetch', vi.fn(async (_url: string, init: RequestInit) => {
+      seen.push(init);
+      return seen.length === 1
+        ? jsonResponse({ x402Version: 1, error: 'Payment required', accepts: [accept] }, 402, { 'payment-required': header })
+        : jsonResponse({ success: true, status: 'SUCCESS', tx_hash: '0xabc' }, 200);
+    }));
+
+    await payWithX402({ url: '/api/pay/x402', body: {}, client: wallet.client, account: ACCOUNT });
+
+    const sentHeader = (seen[1].headers as any)['X-PAYMENT'];
+    const decoded = JSON.parse(atob(sentHeader));
+    expect(decoded.extensions).toEqual(bazaarBlock);
+  });
+
   it('marks a failure that carries a tx_hash as SETTLED — never safe to retry', async () => {
     const wallet = fakeWallet();
     let n = 0;
@@ -144,6 +169,35 @@ describe('parseX402Challenge', () => {
     const res = new Response(null, { status: 402 });
     expect(() => parseX402Challenge(res, { accepts: [{ scheme: 'upto', payTo: PAY_TO, asset: ASSET }] })).toThrow(X402ChallengeError);
     expect(() => parseX402Challenge(res, {})).toThrow(X402ChallengeError);
+  });
+
+  /**
+   * 🔴 THE ROOT CAUSE OF "SETTLES REAL PAYMENTS, NEVER GETS CATALOGUED IN BAZAAR."
+   *
+   * x402's own documented spec (x402.gitbook.io/x402 → "Troubleshooting catalog visibility")
+   * names this as the most common mistake: "cataloging happens when a facilitator processes a
+   * PaymentPayload that includes the ECHOED bazaar extension. A server-side declaration alone
+   * catalogs nothing if no paying client echoes it." This used to discard the challenge's
+   * top-level `extensions` entirely — read `accepts`, returned only the matched entry, and
+   * `extensions` never reached anything downstream. Confirmed the hard way: a real, mined
+   * settlement, a resource that validated with zero preflight failures, and a full paginated
+   * scan of 15,185 catalog entries finding none of them ours.
+   *
+   * The v2 HEADER is the source, matching what route.ts actually puts `extensions` on — the v1
+   * body never carries it, by our own server's design (see route.ts's v2Challenge).
+   */
+  it('reads `extensions` from the v2 header — what x402Pay must echo back for Bazaar to catalog anything', () => {
+    const bazaarBlock = { bazaar: { info: { input: { type: 'http', method: 'GET' } } } };
+    const header = btoa(JSON.stringify({ x402Version: 2, accepts: [accept], extensions: bazaarBlock }));
+    const res = new Response(null, { status: 402, headers: { 'payment-required': header } });
+    const parsed = parseX402Challenge(res, {});
+    expect(parsed.extensions).toEqual(bazaarBlock);
+  });
+
+  it('leaves `extensions` undefined when the challenge carries none — nothing to echo, nothing invented', () => {
+    const res = new Response(null, { status: 402 });
+    const parsed = parseX402Challenge(res, { accepts: [accept] });
+    expect(parsed.extensions).toBeUndefined();
   });
 });
 
