@@ -75,11 +75,11 @@ const X402_DOMAINS_BY_CHAIN: Record<'CELO' | 'BASE', Record<string, { name: stri
   CELO: {
     USDC: { name: 'USDC', version: '2' },
     'USD₮': { name: 'Tether USD', version: '1' },
-    // ⚡ USAT (Tether America USD) — verified the same way every other entry here was: its
+    // ⚡ USA₮ (Tether America USD) — verified the same way every other entry here was: its
     // on-chain DOMAIN_SEPARATOR (0xe6bbb792…) is reproduced exactly by this name/version pair
     // against chainId 42220 and 0xD2ab3C9A…F771. Note the name is the TOKEN's full name, not
-    // its symbol — signing "USAT" here would recover to an unrelated address and revert.
-    USAT: { name: 'Tether America USD', version: '1' },
+    // its symbol — signing "USA₮" here would recover to an unrelated address and revert.
+    'USA₮': { name: 'Tether America USD', version: '1' },
   },
   BASE: {
     USDC: { name: 'USD Coin', version: '2' },
@@ -662,28 +662,40 @@ async function handleX402Request(req: Request) {
       // Mirroring the token's order turns that into a precise local refusal: no facilitator
       // round-trip, no opaque alert, and the page falls back to the contract call — which a 7702
       // account signs and sends perfectly well, since only EIP-3009 consults 1271.
+      // ⚡ THE ON-CHAIN CHECK IS THE AUTHORITY, BECAUSE IT IS THE ONE THE TOKEN PERFORMS.
+      //
+      // viem's public-client `verifyTypedData` already branches exactly as SignatureChecker does:
+      // an account WITH code is asked over ERC-1271 (6492-aware), an account without is verified
+      // by ecrecover. So it is asked FIRST and on its own, rather than being a fallback after an
+      // offline ecrecover that the token would never have consulted.
+      //
+      // 🔴 THE EARLIER VERSION HAD A HOLE. It read eth_getCode itself and, if that call failed
+      // for any reason, quietly set `payerHasCode = false` and accepted an offline ecrecover —
+      // the precise combination that lets a delegated account's signature through to the
+      // facilitator. An RPC hiccup should never widen what we accept.
       let payerHasCode = false;
+      let signerOk = false;
+      let onChainAnswered = false;
       try {
         const publicClient = getPublicClient(chainKey);
-        const code = await publicClient.getCode({ address: auth.from as `0x${string}` });
+        const code = await publicClient.getCode({ address: auth.from as `0x${string}` }).catch(() => undefined);
         payerHasCode = Boolean(code && code !== '0x');
+        signerOk = await verifyTypedDataOnChain(publicClient, {
+          ...typedData,
+          address: auth.from as `0x${string}`,
+          signature: signature as `0x${string}`,
+        });
+        onChainAnswered = true;
       } catch {
-        // Couldn't tell — fall back to trying both, which is strictly more permissive.
+        onChainAnswered = false;
       }
 
-      let signerOk = false;
-      if (payerHasCode) {
-        // Code present: ERC-1271 is the only authority the token consults, so it is the only one
-        // we consult. Passing on ecrecover here is what let the bad payload reach the facilitator.
-        try {
-          const publicClient = getPublicClient(chainKey);
-          signerOk = await verifyTypedDataOnChain(publicClient, {
-            ...typedData,
-            address: auth.from as `0x${string}`,
-            signature: signature as `0x${string}`,
-          });
-        } catch { signerOk = false; }
-      } else {
+      if (!onChainAnswered) {
+        // The chain could not be reached at all. Offline ecrecover is the only thing left, and it
+        // is correct for a plain EOA — which is the overwhelming majority. Logged, because if a
+        // delegated account slips through here the facilitator error will be the opaque one again
+        // and this line is the only thing that will explain why.
+        console.warn(`[Pay/x402] On-chain signature check unavailable (${chainKey}); falling back to ecrecover for`, auth.from);
         try {
           signerOk = await verifyTypedData({ ...typedData, address: auth.from as `0x${string}`, signature: signature as `0x${string}` });
         } catch { signerOk = false; }
