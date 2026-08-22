@@ -70,14 +70,14 @@ export const LEGACY_RECORD_CHAIN: ChainName = 'CELO';
 // always shown there.
 const TOKEN_ORDER_BY_CHAIN: Record<ChainName, string[]> = {
   BASE: ['USDC', 'USD₮'],
-  // 🔴 USDm IS NO LONGER OFFERED FOR PAYMENT — USAT REPLACES IT.
+  // 🔴 USDm IS NO LONGER OFFERED FOR PAYMENT — USA₮ REPLACES IT.
   //
   // USDm is a Mento stable token: EIP-2612 `permit()` only, no `transferWithAuthorization`,
   // so the x402 "exact" scheme can never settle it. Every USDm payment therefore had to take
   // the contract-call rail, which is two prompts and no facilitator receipt — an odd one out
   // in a picker whose other entries all settle on x402.
   //
-  // USAT (Tether America USD) does implement EIP-3009, verified on-chain: its own
+  // USA₮ (Tether America USD) does implement EIP-3009, verified on-chain: its own
   // DOMAIN_SEPARATOR is reproduced exactly by name "Tether America USD" / version "1", which
   // is what makes a payer's signature verifiable. So it behaves like Celo USD₮ — same rail,
   // same one prompt — and takes the slot USDm held.
@@ -85,7 +85,7 @@ const TOKEN_ORDER_BY_CHAIN: Record<ChainName, string[]> = {
   // ⚠️ The USDm entry stays in SUPPORTED_TOKENS on purpose. Dropping it from THIS list stops it
   // being offered for new payments; deleting the token would break the admin vault controls
   // that still hold and withdraw it, and would strip the symbol from historical rows.
-  CELO: ['USD₮', 'USDC', 'USAT'],
+  CELO: ['USD₮', 'USDC', 'USA₮'],
 };
 
 /**
@@ -141,24 +141,24 @@ export const SUPPORTED_TOKENS = [
     supportedNetworks: ["celo"]
   },
   {
-    // ⚡ USAT — Tether America USD, Celo only, and settleable on x402 exactly like Celo USD₮.
+    // ⚡ USA₮ — Tether America USD, Celo only, and settleable on x402 exactly like Celo USD₮.
     //
     // Every field here was read off the contract rather than taken from a listing, because a
     // wrong decimals silently misprices every payment and a wrong EIP-712 domain makes every
     // signature unverifiable:
-    //   symbol()           -> "USAT"
+    //   symbol()           -> "USA₮"
     //   name()             -> "Tether America USD"
-    //   decimals()         -> 6            (NOT 18 — a second USAT contract on Celo has 18
+    //   decimals()         -> 6            (NOT 18 — a second USA₮ contract on Celo has 18
     //                                       decimals and no DOMAIN_SEPARATOR; it is not this one)
     //   DOMAIN_SEPARATOR() -> 0xe6bbb792…  reproduced exactly by
     //                                       name "Tether America USD", version "1", chainId 42220
     // The domain pair lives in X402_DOMAINS_BY_CHAIN.CELO in the x402 route, which is what the
     // challenge advertises and what the payer's wallet signs against.
     //
-    // No testnet address: USAT is not deployed on Alfajores, so resolveTokenOnChain returns null
+    // No testnet address: USA₮ is not deployed on Alfajores, so resolveTokenOnChain returns null
     // there and the token simply isn't offered on testnet — which is the correct behaviour, not
     // a gap to paper over with a wrong address.
-    symbol: "USAT",
+    symbol: "USA₮",
     // Its OWN mark, not USD₮'s. Pointing both at /usdt.png made two different contracts with
     // two different balances look identical in the Celo picker — an error the user cannot see.
     logo: "/usat.svg",

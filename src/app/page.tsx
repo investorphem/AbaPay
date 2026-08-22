@@ -94,6 +94,22 @@ function withWalletTimeout<T>(promise: Promise<T>, ms = 90_000): Promise<T> {
   });
 }
 
+/**
+ * The Celo tokens that can settle on x402 — i.e. the ones that implement EIP-3009
+ * `transferWithAuthorization` and whose EIP-712 domain is registered in the settle route's
+ * X402_DOMAINS_BY_CHAIN.
+ *
+ * 🔴 ONE LIST, BECAUSE TWO DRIFTED. This existed twice — once at the pay button's rail decision
+ * and once as a guard inside processX402Payment. Adding USA₮ to the first and not the second
+ * routed Celo USA₮ payments to x402 and had x402 itself refuse them with "This token isn't
+ * supported on this network yet.", on a token whose domain was verified on-chain and whose vault
+ * support was already configured. Both now read this.
+ *
+ * USDm is deliberately absent: Mento tokens expose only EIP-2612 permit(), so there is no
+ * signature scheme the "exact" scheme could settle.
+ */
+const CELO_X402_TOKENS = ['USDC', 'USD₮', 'USA₮'];
+
 export default function Home() {
   const { address: wagmiAddress, isConnected: isWagmiConnected, chain: wagmiChain, connector: wagmiConnector } = useAccount();
   const { connectors, connect, connectAsync, status: connectStatus } = useConnect();
@@ -1661,7 +1677,15 @@ export default function Home() {
     // routing decision (see `useX402` below), never something the user chose or should see.
     // A USDm/USDT transaction on Celo looks identical to the user whichever rail settles it.
     if (!onCelo && !(onBase && baseX402Enabled)) return setStatus("This network isn't supported for this token yet.");
-    if (onCelo && selectedToken.symbol !== "USDC" && selectedToken.symbol !== "USD₮") return setStatus("This token isn't supported on this network yet.");
+    // 🔴 A SECOND COPY OF THE TOKEN LIST LIVED HERE AND WENT STALE. The rail decision at the pay
+    // button was updated for USA₮; this guard was not, so a Celo USA₮ payment was routed to x402
+    // and then refused by x402 itself with "This token isn't supported on this network yet." —
+    // reported exactly that way, on a token whose EIP-3009 domain had been verified on-chain and
+    // whose vault support was already set.
+    //
+    // Kept as one list rather than two: CELO_X402_TOKENS is what both this guard and the rail
+    // decision read, so the next token can only be added in one place.
+    if (onCelo && !CELO_X402_TOKENS.includes(selectedToken.symbol)) return setStatus("This token isn't supported on this network yet.");
     if (onBase && selectedToken.symbol !== "USDC") return setStatus("This token isn't supported on this network yet.");
     // 🔴 Was missing entirely — x402 payments failed at settlement on a low balance instead
     // of being caught here first.
@@ -2363,20 +2387,46 @@ export default function Home() {
   // connected but unproven: they can still pay, because paying is authorised by the payment
   // signature itself, and only the history read is withheld. Locking someone out of paying
   // because their wallet is unusual would be a worse bug than the one this closes.
+  // ⚡ ON THE WEB IT SIGNS WITH THE WAGMI WALLET, NOT THE APP'S `client`.
+  //
+  // 🔴 THE "CONNECT, THEN VERIFY, AND MY BALANCE IS ALREADY SHOWING" REPORT. This used to wait
+  // for the app's own `address`/`client`, which the wagmi bridge publishes the instant the wallet
+  // connects — so the address, the balance and the history were on screen BEFORE anyone had
+  // proven the account was theirs, and cancelling the signature left all of it sitting there.
+  //
+  // Verification now runs off wagmi's own address and wallet client, which exist as soon as the
+  // connector does, and the bridge below refuses to publish anything until the proof matches.
+  // One app-initiated prompt — the signature — and nothing is revealed until it succeeds.
+  const proofAddress = environment === 'WEB' ? (wagmiAddress as string | undefined) : address;
+  const proofSigner: any = environment === 'WEB' ? wagmiWalletClient : client;
+
+  /**
+   * A wallet is attached but has not yet proven itself — the window between the connector
+   * appearing and the ownership signature landing.
+   *
+   * The Connect button reads this so it keeps spinning through the signature instead of going
+   * idle the moment the handshake completes, which is what made a half-finished connect look
+   * finished. Nothing else in the app is allowed to treat this state as connected.
+   */
+  const awaitingProof = Boolean(
+    environment === 'WEB' && proofAddress &&
+    !(walletProof && walletProof.address.toLowerCase() === proofAddress.toLowerCase()),
+  );
+
   useEffect(() => {
-    if (!address || !client) return;
-    if (walletProof && walletProof.address.toLowerCase() === address.toLowerCase()) return;
+    if (!proofAddress || !proofSigner) return;
+    if (walletProof && walletProof.address.toLowerCase() === proofAddress.toLowerCase()) return;
     if (walletProofInFlight.current) return;
 
     // A proof from earlier in this browser session is reused rather than re-prompted — a wallet
     // popup on every reload is how people are trained to sign without reading.
     try {
-      const cached = sessionStorage.getItem(`abapay_wallet_proof_${address.toLowerCase()}`);
+      const cached = sessionStorage.getItem(`abapay_wallet_proof_${proofAddress.toLowerCase()}`);
       if (cached) {
         const parsed = JSON.parse(cached) as { address: string; signature: string; timestamp: string };
         const age = Date.now() - parseInt(parsed.timestamp, 10);
         if (parsed.signature && age >= 0 && age < WALLET_SESSION_MAX_AGE_MS) { setWalletProof(parsed); return; }
-        sessionStorage.removeItem(`abapay_wallet_proof_${address.toLowerCase()}`);
+        sessionStorage.removeItem(`abapay_wallet_proof_${proofAddress.toLowerCase()}`);
       }
     } catch { /* an unreadable cache just means we ask again */ }
 
@@ -2385,13 +2435,13 @@ export default function Home() {
     (async () => {
       try {
         const timestamp = Date.now().toString();
-        const signature = await withWalletTimeout(
-          client.signMessage({ account: address as `0x${string}`, message: walletSessionMessage(timestamp) }),
-        );
+        const signature = String(await withWalletTimeout(
+          proofSigner.signMessage({ account: proofAddress as `0x${string}`, message: walletSessionMessage(timestamp) }) as Promise<string>,
+        ));
         if (cancelled) return;
-        const proof = { address, signature, timestamp };
+        const proof = { address: proofAddress, signature, timestamp };
         setWalletProof(proof);
-        try { sessionStorage.setItem(`abapay_wallet_proof_${address.toLowerCase()}`, JSON.stringify(proof)); } catch { /* private mode */ }
+        try { sessionStorage.setItem(`abapay_wallet_proof_${proofAddress.toLowerCase()}`, JSON.stringify(proof)); } catch { /* private mode */ }
       } catch (e) {
         if (cancelled) return;
         // 🔴 ON THE WEB, FAILING TO VERIFY DISCONNECTS — WHATEVER THE FAILURE LOOKED LIKE.
@@ -2424,11 +2474,21 @@ export default function Home() {
         }
         console.warn('[wallet] ownership signature unavailable in', environment, '— history stays hidden:', (e as Error)?.message);
       } finally {
-        if (!cancelled) walletProofInFlight.current = false;
+        // 🔴 ALWAYS RELEASED — THIS GUARD IS WHAT LOCKED PEOPLE OUT.
+        //
+        // It used to read `if (!cancelled)`, and the failure path CAUSES cancellation: refusing
+        // the signature calls handleDisconnect, the dependencies change, React runs the cleanup,
+        // and `cancelled` is true by the time this runs. So the flag stayed true for the life of
+        // the page and the early-return at the top silently swallowed every later attempt —
+        // reported as "even if I refresh and want to sign, it won't pop up again and keeps
+        // throwing the error", with no way back in short of a new tab.
+        //
+        // A latch that is only ever set on the failure path is a trap. Released unconditionally.
+        walletProofInFlight.current = false;
       }
     })();
     return () => { cancelled = true; };
-  }, [address, client, walletProof, handleDisconnect, environment]);
+  }, [proofAddress, proofSigner, walletProof, handleDisconnect, environment]);
 
   // ⚡ THE MANUAL CONNECT PATH ⚡
   //
@@ -2620,6 +2680,23 @@ export default function Home() {
   useEffect(() => {
     if (environment !== 'WEB' || !isWagmiConnected || !wagmiAddress) return;
 
+    // 🔴 NOTHING IS PUBLISHED UNTIL THE WALLET HAS PROVEN ITSELF.
+    //
+    // `address` is what the entire app keys off — the header, the balance, the history, the pay
+    // button. Setting it the moment wagmi connects is what put a user's address and balance on
+    // screen BEFORE the ownership signature, and left them there when the signature was
+    // cancelled: "I cancel the verify wallet pop up and it still shows my data."
+    //
+    // Holding it back until `walletProof` matches makes connecting a single act from the user's
+    // side: press Connect, approve one signature, and the app fills in. Refuse, and there was
+    // never anything to take away.
+    //
+    // Only WEB is gated. MiniPay and Farcaster set `address` themselves in the environment
+    // detector and never reach this bridge — the app runs inside those wallets, where there is
+    // one possible account and nothing to spoof.
+    const verified = Boolean(walletProof && walletProof.address.toLowerCase() === wagmiAddress.toLowerCase());
+    if (!verified) return;
+
     setAddress(wagmiAddress);
     localStorage.removeItem('abapay_explicit_logout');
 
@@ -2666,7 +2743,7 @@ export default function Home() {
       }
     })();
     return () => { cancelled = true; };
-  }, [environment, isWagmiConnected, wagmiAddress, wagmiChain, isMainnet, client, wagmiWalletClient, wagmiConnector]);
+  }, [environment, isWagmiConnected, wagmiAddress, wagmiChain, isMainnet, client, wagmiWalletClient, wagmiConnector, walletProof]);
 
   // ⚡ AND LET GO THE MOMENT WAGMI DOES ⚡
   //
@@ -3352,13 +3429,13 @@ export default function Home() {
                       // live one uses — it was mainnet-only here while processX402Payment below
                       // already accepted both, so testing on Celo Sepolia silently rehearsed the
                       // contract call and proved nothing about x402.
-                      // USAT settles on x402 exactly like Celo USD₮ — it implements EIP-3009 and
+                      // USA₮ settles on x402 exactly like Celo USD₮ — it implements EIP-3009 and
                       // its EIP-712 domain is verified against the contract's own
                       // DOMAIN_SEPARATOR (see X402_DOMAINS_BY_CHAIN.CELO). Leaving it out of this
                       // list is what would quietly demote it to the contract call — the same way
                       // arriving on Base with USD₮ selected used to.
                       const celoX402 = (activeChain?.id === celo.id || activeChain?.id === celoSepolia.id)
-                        && (selectedToken.symbol === "USDC" || selectedToken.symbol === "USD₮" || selectedToken.symbol === "USAT");
+                        && CELO_X402_TOKENS.includes(selectedToken.symbol);
                       const baseX402 = (activeChain?.id === base.id || activeChain?.id === baseSepolia.id) && selectedToken.symbol === "USDC" && process.env.NEXT_PUBLIC_BASE_X402_ENABLED !== 'false';
 
                       // ⚠️ IT BRANCHES ON THE WALLET'S CAPABILITY — NOT ON A WALLET BLOCKLIST,
@@ -3697,13 +3774,24 @@ export default function Home() {
 
                                     {/* ⚡ NEW: Dynamic Connect Button / Smart Environment Routing ⚡ */}
             {!address && environment === 'WEB' ? (
+                // ⚡ CONNECTING DOES NOT END AT THE HANDSHAKE — IT ENDS AT THE SIGNATURE.
+                //
+                // 🔴 The button used to return to "Connect" as soon as wagmi reported a
+                // connector, while the ownership signature was still sitting in the wallet. The
+                // whole flow then read as finished-but-broken: an idle Connect button, nothing on
+                // screen, and a prompt the user had no reason to associate with it.
+                //
+                // `awaitingProof` keeps the spinner running through the part that actually
+                // matters. Paired with the bridge, which publishes nothing until the proof lands,
+                // pressing Connect is one continuous act: spinner → one signature → the app fills
+                // in. Refuse, and it returns to Connect with nothing half-shown.
                 <button
                   onClick={() => { void handleConnectClick(); }}
-                  disabled={isProcessing || isConnecting}
+                  disabled={isProcessing || isConnecting || awaitingProof}
                   className="bg-emerald-50 dark:bg-emerald-900/20 hover:bg-emerald-100 dark:hover:bg-emerald-900/40 border border-emerald-200 dark:border-emerald-800/50 text-emerald-700 dark:text-emerald-400 font-black text-[10px] px-3 py-1.5 rounded-xl transition-all shadow-sm active:scale-95 disabled:opacity-50 flex shrink-0 items-center gap-1.5 uppercase tracking-widest"
                 >
-                  {(isProcessing || isConnecting) ? <Loader2 size={12} className="animate-spin"/> : <Zap size={12}/>}
-                  {isProcessing ? "Wait" : isConnecting ? "Connecting" : "Connect"}
+                  {(isProcessing || isConnecting || awaitingProof) ? <Loader2 size={12} className="animate-spin"/> : <Zap size={12}/>}
+                  {isProcessing ? "Wait" : awaitingProof ? "Verifying" : isConnecting ? "Connecting" : "Connect"}
                 </button>
             ) : (
                 <PointsBadge walletAddress={address || undefined} />
