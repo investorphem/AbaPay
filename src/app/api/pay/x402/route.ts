@@ -448,7 +448,16 @@ async function handleX402Request(req: Request) {
           info: {
             input: {
               type: 'http',
-              method: 'POST',
+              // 🔴 WAS 'POST' — WHICH IS TRUE, BUT NOT WHAT ANY DISCOVERY CRAWLER ACTUALLY USES.
+              //
+              // CDP's own /validate probes this endpoint with GET and reported a REQUIRED
+              // failure: "declares method POST but was probed with GET". This route exports
+              // BOTH `GET` and `POST` (route.ts) — both call the identical handler — so GET was
+              // never wrong to probe with; the metadata just claimed a method nothing discovers
+              // it by. That mismatch is why `valid` stayed false even after a real settlement:
+              // one required check failing keeps the resource out of the catalog regardless of
+              // how many payments have gone through.
+              method: 'GET',
               discoverable: true,
               body: {
                 type: 'object',
@@ -495,7 +504,7 @@ async function handleX402Request(req: Request) {
                       variation_code: { type: 'string' },
                     },
                   },
-                  method: { type: 'string', enum: ['POST'] },
+                  method: { type: 'string', enum: ['GET'] },
                 },
               },
               output: {
