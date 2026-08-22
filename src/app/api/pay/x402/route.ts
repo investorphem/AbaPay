@@ -424,7 +424,18 @@ async function handleX402Request(req: Request) {
     const v2Challenge = {
       x402Version: 2,
       error: 'Payment required',
-      resource: { url: resourceUrl, description: acceptEntry.description, mimeType: acceptEntry.mimeType },
+      resource: {
+        url: resourceUrl, description: acceptEntry.description, mimeType: acceptEntry.mimeType,
+        // ⚡ OPTIONAL, PER x402's OWN "Service Metadata" SPEC — worth setting now that a resource
+        // can actually be found: these are what a Bazaar SEARCH result shows, separately from
+        // being catalogued at all. All three are soft-dropped individually on a validation
+        // failure per the spec, so a mistake here costs nothing beyond that one field being
+        // silently absent — never the listing itself.
+        serviceName: 'AbaPay', // ≤32 printable-ASCII chars per spec; well under
+        tags: ['bills', 'airtime', 'utility', 'nigeria', 'payments'], // ≤5 tags, each ≤32 chars
+        iconUrl: 'https://abapays.com/logo.png', // absolute https, matches the URL already used
+                                                  // for wagmi's WalletConnect metadata icon
+      },
       accepts: [acceptEntry],
       // ⚡ BAZAAR DISCOVERY — WHAT MAKES THIS ENDPOINT FINDABLE BY AGENTS.
       //
@@ -783,15 +794,21 @@ async function handleX402Request(req: Request) {
       }
     }
 
-    // ⚡ `resource` ON THE PAYLOAD, NOT ONLY ON THE REQUIREMENTS — BAZAAR NEEDS BOTH.
+    // ⚡ `resource` ON THE PAYLOAD, NOT ONLY ON THE REQUIREMENTS.
     //
-    // `decodedPayload` is what the CLIENT sent us (x402Pay.ts never puts `resource` on the
-    // payload — only the challenge's `paymentRequirements` carries it, which is what a client
-    // needs to sign against). Coinbase's own Bazaar guidance is specific about this: the
-    // settle-time `paymentPayload.resource` is what lets the facilitator associate a settled
-    // payment with the resource it indexes, separately from `paymentRequirements.resource`,
-    // which already carries it. Missing here, it costs nothing at settle time — the facilitator
-    // still moves the money — but the listing this settlement was meant to earn never appears.
+    // `decodedPayload` is what the CLIENT sent us. `resourceUrl` is added here as a courtesy
+    // since it costs nothing and some facilitator implementations key on it directly — it does
+    // NOT, on its own, explain why this resource never got catalogued; see the note just below.
+    //
+    // 🔴 THE ACTUAL MECHANISM, PER x402's OWN DOCUMENTED SPEC (x402.gitbook.io/x402 →
+    // "Troubleshooting catalog visibility"): cataloging happens when a facilitator processes a
+    // PaymentPayload that includes the ECHOED bazaar extension — the same block the challenge
+    // advertised, sent BACK by the client at settle time. A server-side declaration alone
+    // catalogs nothing if no paying client echoes it. x402Pay.ts never read the challenge's
+    // `extensions` field at all until now (see parseX402Challenge), so `decodedPayload.extensions`
+    // was always undefined here — every settlement forwarded a payload with nothing to catalog,
+    // no matter how correct the challenge's own declaration was. The spread below now carries
+    // whatever the client echoed straight through to CDP; nothing else needed to change here.
     const facilitatorPaymentPayload = { ...decodedPayload, resource: resourceUrl, x402Version: chainCfg.settleX402Version, network: chainCfg.settleNetworkName };
     const facilitatorPaymentRequirements = { ...settleRequirements, network: chainCfg.settleNetworkName };
 
