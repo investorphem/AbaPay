@@ -116,10 +116,27 @@ export const BANK_SEED: SeedBank[] = [
 // show live but we still need something bundled for the offline path. Keyed by serviceID so a
 // newly-added VTpass service simply has no entry and falls back to /logo.png, rather than the
 // old `/${provider}.png` string-building that guessed a path and relied on an onError handler.
-export const LOCAL_LOGO_BY_SERVICE_ID: Record<string, string> = Object.fromEntries(
-  [...AIRTIME_SEED, ...DATA_SEED, ...ELECTRICITY_SEED, ...CABLE_SEED, ...EDUCATION_SEED]
-    .map(s => [s.serviceID, s.logo])
-);
+export const LOCAL_LOGO_BY_SERVICE_ID: Record<string, string> = {
+  ...Object.fromEntries(
+    [...AIRTIME_SEED, ...DATA_SEED, ...ELECTRICITY_SEED, ...CABLE_SEED, ...EDUCATION_SEED]
+      .map(s => [s.serviceID, s.logo]),
+  ),
+  // 🔴 TWO WHOLE CATEGORIES WERE MISSING — NOT MISSING PROVIDERS, MISSING CATEGORIES.
+  //
+  // buildBackendPayload() (src/app/page.tsx) sends a FIXED serviceID for these, never a
+  // per-provider one: every bank transfer is 'moniepoint-transfer' and every international
+  // top-up — all 170+ countries — is 'foreign-airtime'. Neither string was ever in the seed
+  // arrays above, so every row in either category fell straight through to /logo.png. That is
+  // not a gap in provider coverage (every seeded provider here has real art, verified against
+  // what actually ships in /public) — it is two entire transaction TYPES with no entry at all,
+  // which is why the generic mark showed up "most of the time" rather than occasionally.
+  'moniepoint-transfer': '/bank.svg',
+  'foreign-airtime': '/globe.svg',
+  // ⚠️ SVG, unlike every entry above. Renders fine in the app's own History tab (every current
+  // browser draws SVG in an <img>), which is what was actually reported broken. Some older email
+  // clients (Outlook desktop's Word engine, chiefly) do not render SVG in a receipt <img> — a
+  // narrower, separate risk than the one this fixes. Worth a PNG export if that surfaces.
+};
 
 /**
  * The logo to show for a completed transaction — receipts (email, modal) and the history list.

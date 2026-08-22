@@ -130,6 +130,42 @@ async function authorizationWasConsumed(
   return null;
 }
 
+/**
+ * The same read, but given the time a real submission needs to actually land.
+ *
+ * 🔴 THE INCIDENT THIS EXISTS FOR. A Celo USA₮ payment came back
+ * `"nonce too low: next nonce 762330, tx nonce 762329"` — the FACILITATOR's own account nonce,
+ * meaning it had just submitted (or was about to finish submitting) the very transaction that
+ * carries this authorization. `authorizationWasConsumed` was still asked ONCE, immediately, and
+ * read "unspent" — because the transaction was in flight, not yet mined, not yet visible to any
+ * RPC. On that single read we told the payer their payment failed and sent them to the
+ * contract-call rail, and wrote NO row anywhere, because the row is only ever written on a
+ * confirmed outcome. Ten minutes later the transfer WAS mined — payer to vault, signed by the
+ * facilitator's own signer, confirmed on-chain — with nothing in `transactions`, nothing in
+ * History, nothing in Admin. The payer's only recourse was noticing the balance move themselves.
+ *
+ * One immediate read can never be enough evidence for a decision this expensive to get wrong:
+ * a false "unspent" here is a payment that vanishes from every record we keep, and a false
+ * "spent" would tell someone their payment succeeded when it did not. So this spends up to ~14s
+ * — cheap next to either mistake — checking again as the chain has time to catch up, and returns
+ * the moment a read stops being ambiguous.
+ */
+async function authorizationWasConsumedAfterSettling(
+  chainKey: ChainKey,
+  isMainnet: boolean,
+  tokenAddress: string,
+  auth: X402Authorization,
+): Promise<boolean | null> {
+  const delaysMs = [0, 2_000, 4_000, 8_000];
+  let lastAnswer: boolean | null = null;
+  for (const delay of delaysMs) {
+    if (delay) await new Promise((resolve) => setTimeout(resolve, delay));
+    lastAnswer = await authorizationWasConsumed(chainKey, isMainnet, tokenAddress, auth);
+    if (lastAnswer === true) return true; // Settled — no reason to keep polling.
+  }
+  return lastAnswer; // false or null after every attempt agreed.
+}
+
 interface X402ChainConfig {
   chainKey: ChainKey;
   caip2: string;            // signed into the payer's EIP-712 domain via the CAIP-2 string
@@ -738,7 +774,16 @@ async function handleX402Request(req: Request) {
       }
     }
 
-    const facilitatorPaymentPayload = { ...decodedPayload, x402Version: chainCfg.settleX402Version, network: chainCfg.settleNetworkName };
+    // ⚡ `resource` ON THE PAYLOAD, NOT ONLY ON THE REQUIREMENTS — BAZAAR NEEDS BOTH.
+    //
+    // `decodedPayload` is what the CLIENT sent us (x402Pay.ts never puts `resource` on the
+    // payload — only the challenge's `paymentRequirements` carries it, which is what a client
+    // needs to sign against). Coinbase's own Bazaar guidance is specific about this: the
+    // settle-time `paymentPayload.resource` is what lets the facilitator associate a settled
+    // payment with the resource it indexes, separately from `paymentRequirements.resource`,
+    // which already carries it. Missing here, it costs nothing at settle time — the facilitator
+    // still moves the money — but the listing this settlement was meant to earn never appears.
+    const facilitatorPaymentPayload = { ...decodedPayload, resource: resourceUrl, x402Version: chainCfg.settleX402Version, network: chainCfg.settleNetworkName };
     const facilitatorPaymentRequirements = { ...settleRequirements, network: chainCfg.settleNetworkName };
 
     const authHeaders = await chainCfg.authFor(CDP_FACILITATOR_SETTLE_PATH);
@@ -854,7 +899,7 @@ async function handleX402Request(req: Request) {
     // the token: `authorizationState(payer, nonce)` is the chain's own record of the answer.
     let settledWithoutHash = false;
     if (retryable && settledAuth) {
-      const consumed = await authorizationWasConsumed(chainKey, isMainnet, usdc.address, settledAuth);
+      const consumed = await authorizationWasConsumedAfterSettling(chainKey, isMainnet, usdc.address, settledAuth);
       if (consumed !== false) {
         // `true` (spent) and `null` (could not read it) both land here on purpose. The cost of
         // being wrong is asymmetric: a needless contract-call fallback costs two prompts, while
@@ -867,12 +912,47 @@ async function handleX402Request(req: Request) {
     console.error(`[Pay/x402] Settle rejected (${chainKey}):`, settleHttpStatus, 'token:', requestedTokenSymbol, 'asset:', usdc.address, 'retryable:', retryable, 'authorizationSpent:', settledWithoutHash, 'raw:', allText.slice(0, 800));
 
     if (settledWithoutHash) {
-      // Money moved and the facilitator never told us the hash, so there is nothing to write a
-      // normal row against. Say so loudly: this needs a human to reconcile it against the payer
-      // and nonce below, and the payer must not be asked to pay again in the meantime.
+      // 🔴 THIS IS THE ROW THAT WAS MISSING. The alert used to say "reconcile this one by hand"
+      // while leaving NOTHING to reconcile — no transactions row, invisible to History, invisible
+      // to Admin, the payer's only proof their own wallet balance moving. Confirmed against a
+      // real incident: a Celo USA₮ payment settled on-chain (transferWithAuthorization, signed by
+      // the facilitator's own signer, mined minutes later) while this branch told the payer it
+      // had failed and recorded nothing anywhere.
+      //
+      // No real tx_hash exists yet — the facilitator never returned one — so a unique synthetic
+      // one is used instead, in the SAME shape History's query already excludes preflight rows
+      // by (`not tx_hash like 'preflight_%'`) so this one, deliberately NOT matching that prefix,
+      // stays visible. status/error_code follow the pattern the webhook already uses for
+      // "something is wrong, an admin needs to look" (FAILED_VENDING + a specific code) rather
+      // than inventing a new status the rest of the admin UI does not know how to render.
+      //
+      // Not vended, not refunded automatically: we know the authorization was consumed, not that
+      // it went where THIS row expects — the honest move is to make the payment visible and flag
+      // it, not to guess at the rest.
+      const unconfirmedTxHash = `x402_unconfirmed_${chainKey}_${settledAuth?.nonce ?? vtRequestId}`;
+      await supabase.from('transactions').upsert({
+        tx_hash: unconfirmedTxHash, request_id: vtRequestId,
+        service_category: serviceCategory || 'UNKNOWN', service_id: serviceID || 'UNKNOWN',
+        variation_code: variation_code, network: network || 'UNKNOWN', blockchain: chainKey,
+        account_number: billersCode || phone || 'N/A', phone: phone || null,
+        amount_usdt: chargedCrypto, amount_naira: vendAmount, fee_naira: serviceFee, stamp_duty_ngn: stampDutyNgn,
+        status: 'FAILED_VENDING', error_code: 'X402_SETTLED_UNCONFIRMED',
+        api_response: `Facilitator refused (${allText.slice(0, 300)}) but the chain shows the authorization was consumed — money moved, hash unknown. Needs manual reconciliation.`,
+        wallet_address: (settledAuth?.from || wallet_address || 'UNKNOWN').toLowerCase(),
+        customer_name: customer_name || null, customer_address: customer_address || null,
+        source_channel: source_channel || 'WEB', token_used: requestedTokenSymbol,
+        meter_account_type: meter_account_type || null, customer_email: email || null,
+        operator_id: operator_id || null, country_code: country_code || null, product_type_id: product_type_id || null,
+        subscription_type: subscription_type || null,
+        foreign_amount: foreignAmount || null, display_amount: displayAmount || null,
+        payment_method: 'X402',
+      }, { onConflict: 'tx_hash' }).then(({ error }) => {
+        if (error) console.error(`[Pay/x402] Could not write the unconfirmed-settlement row (${chainKey}):`, error.message);
+      });
+
       sendTelegramAlert(
         `🚨 *x402 PAID BUT UNCONFIRMED (${chainKey})*\n\n` +
-        `The facilitator refused, but the chain says the payer's authorization WAS spent — the money moved and no transaction hash came back. Reconcile this one by hand; the payer has NOT been asked to pay again.\n\n` +
+        `The facilitator refused, but the chain says the payer's authorization WAS spent — the money moved and no transaction hash came back. A row is now recorded (\`${unconfirmedTxHash}\`) so this is visible in Admin and the payer's History; reconcile the real tx hash by hand. The payer has NOT been asked to pay again.\n\n` +
         `${requestedTokenSymbol} ${chargedCrypto.toFixed(4)} · payer \`${settledAuth?.from}\`\n` +
         `nonce \`${settledAuth?.nonce}\`\n` +
         `\`${allText.slice(0, 300)}\``,

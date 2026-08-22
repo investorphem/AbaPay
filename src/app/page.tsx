@@ -160,6 +160,18 @@ export default function Home() {
 
   const [environment, setEnvironment] = useState<'MINIPAY' | 'FARCASTER' | 'WEB' | 'LOADING' | 'BASE'>('LOADING');
 
+  // 🔴 MINIPAY HAD ITS OWN, UNGATED PATH TO `address`/`client`.
+  //
+  // The proof-before-publish rule only wrapped the WEB bridge. MiniPay's branch in the
+  // environment detector called setAddress/setClient DIRECTLY — so the account and balance were
+  // live before any ownership signature, exactly the "connect, then verify" ordering the WEB
+  // fix was built to close. Declining the signature did nothing because there was nothing left
+  // to take away: the app was already usable.
+  //
+  // Held here instead, and published through the SAME gated bridge pattern WEB uses, so
+  // "nothing is shown until the signature succeeds" is one rule instead of two.
+  const [minipayPending, setMinipayPending] = useState<{ address: string; client: any } | null>(null);
+
   // ⚡ THE NETWORK BADGE IS A MENU, NOT A TOGGLE.
   //
   // 🔴 IT USED TO ROTATE THE CHAIN ON EVERY CLICK, which meant the only way to reach Celo from
@@ -2397,8 +2409,15 @@ export default function Home() {
   // Verification now runs off wagmi's own address and wallet client, which exist as soon as the
   // connector does, and the bridge below refuses to publish anything until the proof matches.
   // One app-initiated prompt — the signature — and nothing is revealed until it succeeds.
-  const proofAddress = environment === 'WEB' ? (wagmiAddress as string | undefined) : address;
-  const proofSigner: any = environment === 'WEB' ? wagmiWalletClient : client;
+  // MiniPay signs from the pending pair (not yet published to `address`/`client`); WEB signs from
+  // wagmi's own state for the same reason; Farcaster and Base App still sign from the published
+  // `client` — see the note above minipayPending for why MiniPay was the one that needed moving.
+  const proofAddress = environment === 'WEB' ? (wagmiAddress as string | undefined)
+    : environment === 'MINIPAY' ? minipayPending?.address
+    : address;
+  const proofSigner: any = environment === 'WEB' ? wagmiWalletClient
+    : environment === 'MINIPAY' ? minipayPending?.client
+    : client;
 
   /**
    * A wallet is attached but has not yet proven itself — the window between the connector
@@ -2409,9 +2428,20 @@ export default function Home() {
    * finished. Nothing else in the app is allowed to treat this state as connected.
    */
   const awaitingProof = Boolean(
-    environment === 'WEB' && proofAddress &&
+    (environment === 'WEB' || environment === 'MINIPAY') && proofAddress &&
     !(walletProof && walletProof.address.toLowerCase() === proofAddress.toLowerCase()),
   );
+
+  // Forces the verification effect below to run again after a decline. On the web, "declined"
+  // means disconnected and the Connect button is the natural way back in. MiniPay has no such
+  // button — it is a captive webview with exactly one wallet — so a decline there needs its own
+  // retry, or the account is held back forever with nothing on screen and no way out.
+  const [proofRetryTick, setProofRetryTick] = useState(0);
+  const retryWalletVerification = useCallback(() => { setMinipayVerifyFailed(false); setProofRetryTick((t) => t + 1); }, []);
+  // True only AFTER an actual decline/failure — never while the first request is still pending,
+  // which `awaitingProof` alone cannot distinguish (it is true from the moment a pending pair
+  // exists, before the wallet has answered at all).
+  const [minipayVerifyFailed, setMinipayVerifyFailed] = useState(false);
 
   useEffect(() => {
     if (!proofAddress || !proofSigner) return;
@@ -2473,6 +2503,7 @@ export default function Home() {
           return;
         }
         console.warn('[wallet] ownership signature unavailable in', environment, '— history stays hidden:', (e as Error)?.message);
+        if (environment === 'MINIPAY') setMinipayVerifyFailed(true);
       } finally {
         // 🔴 ALWAYS RELEASED — THIS GUARD IS WHAT LOCKED PEOPLE OUT.
         //
@@ -2488,7 +2519,7 @@ export default function Home() {
       }
     })();
     return () => { cancelled = true; };
-  }, [proofAddress, proofSigner, walletProof, handleDisconnect, environment]);
+  }, [proofAddress, proofSigner, walletProof, handleDisconnect, environment, proofRetryTick]);
 
   // ⚡ THE MANUAL CONNECT PATH ⚡
   //
@@ -2691,9 +2722,9 @@ export default function Home() {
     // side: press Connect, approve one signature, and the app fills in. Refuse, and there was
     // never anything to take away.
     //
-    // Only WEB is gated. MiniPay and Farcaster set `address` themselves in the environment
-    // detector and never reach this bridge — the app runs inside those wallets, where there is
-    // one possible account and nothing to spoof.
+    // WEB is gated here. MiniPay is gated by its own bridge just below, for the same reason —
+    // see minipayPending. Farcaster still sets `address` directly in the environment detector;
+    // no bug has been reported there and it is left alone rather than changed on spec.
     const verified = Boolean(walletProof && walletProof.address.toLowerCase() === wagmiAddress.toLowerCase());
     if (!verified) return;
 
@@ -2744,6 +2775,27 @@ export default function Home() {
     })();
     return () => { cancelled = true; };
   }, [environment, isWagmiConnected, wagmiAddress, wagmiChain, isMainnet, client, wagmiWalletClient, wagmiConnector, walletProof]);
+
+  // ⚡ MINIPAY BRIDGE — THE SAME GATE, FOR THE ONE ENVIRONMENT THAT DIDN'T HAVE IT ⚡
+  //
+  // 🔴 "IN MINIPAY, AUTO-CONNECT IS WORKING AND THE SIGNATURE POP-UP FIRES, BUT DESPITE THE USER
+  // DECLINING IT STILL GOES AHEAD WITH THE AUTO-CONNECT WITHOUT RECEIVING A SIGNATURE." The
+  // environment detector's MiniPay branch used to call setAddress/setClient directly, the instant
+  // the wallet answered requestAddresses — before any ownership signature. So the account and
+  // balance were live regardless of what happened to the verification prompt, and declining it
+  // did nothing because there was nothing left to take away.
+  //
+  // The detector now only sets `minipayPending`; this is what turns that into `address`/`client`,
+  // and it does that ONLY once `walletProof` matches — same rule as the WEB bridge, same
+  // publish-nothing-until-proven principle, just fed by MiniPay's own account/client pair instead
+  // of wagmi's.
+  useEffect(() => {
+    if (environment !== 'MINIPAY' || !minipayPending) return;
+    const verified = Boolean(walletProof && walletProof.address.toLowerCase() === minipayPending.address.toLowerCase());
+    if (!verified) return;
+    setAddress(minipayPending.address);
+    setClient(minipayPending.client);
+  }, [environment, minipayPending, walletProof]);
 
   // ⚡ AND LET GO THE MOMENT WAGMI DOES ⚡
   //
@@ -2924,7 +2976,9 @@ export default function Home() {
           const [acc] = await miniPayClient.requestAddresses();
           const currentChainId = await miniPayClient.getChainId();
           if (currentChainId !== targetChain.id) await miniPayClient.switchChain({ id: targetChain.id }).catch(()=>{});
-          setAddress(acc); setClient(miniPayClient);
+          // Held pending, not published — see minipayPending above. The proof effect and the
+          // gated bridge below take it from here.
+          setMinipayPending({ address: acc, client: miniPayClient });
           return;
         }
 
@@ -3841,6 +3895,34 @@ export default function Home() {
                     Check my network
                   </Link>
                 </div>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* ⚡ MINIPAY'S WAY BACK IN AFTER A DECLINE ⚡
+            🔴 THE "AUTO-CONNECTS AND TRANSACTS DESPITE DECLINING" BUG. MiniPay's environment
+            detector used to publish `address`/`client` directly, before any ownership signature —
+            so declining the verification prompt did nothing, because the app was already usable.
+            It is now held back until the signature succeeds, exactly like the web. But MiniPay has
+            no Connect button to retry from — it is a captive webview with exactly one wallet — so
+            a decline needs its own way back in, or the account is stuck unproven with no address on
+            screen and no path forward. This is that path: visible only while MiniPay is waiting on
+            a signature that has not yet arrived, gone the moment it does. */}
+        {environment === 'MINIPAY' && awaitingProof && minipayVerifyFailed && (
+          <div className="mb-4 rounded-2xl border border-amber-300 dark:border-amber-800/60 bg-amber-50 dark:bg-amber-900/20 p-4 shadow-sm">
+            <div className="flex items-start gap-2.5">
+              <AlertTriangle size={16} className="text-amber-600 dark:text-amber-400 shrink-0 mt-0.5" />
+              <div className="min-w-0">
+                <p className="text-[11px] font-bold text-amber-900 dark:text-amber-200 leading-relaxed">
+                  Verifying your wallet was declined. AbaPay needs that signature to show your balance and history — it approves no payment.
+                </p>
+                <button
+                  onClick={retryWalletVerification}
+                  className="mt-2 text-[10px] font-black uppercase tracking-widest text-amber-800 dark:text-amber-300 underline underline-offset-2"
+                >
+                  Try again
+                </button>
               </div>
             </div>
           </div>
