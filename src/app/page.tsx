@@ -1223,12 +1223,16 @@ export default function Home() {
   // pay paths so a low balance is caught with a clear message BEFORE the user commits to a
   // transaction that would otherwise fail confusingly at settlement (the x402 path had no
   // balance check at all, so it always failed the hard way).
-  const hasEnoughBalanceOnChain = async (): Promise<boolean> => {
+  // `chainOverride` lets a caller that just resynced the chain (see ensureWalletReachable) pass
+  // the CURRENT chain directly, rather than reading the `activeChain` closure this function
+  // would otherwise capture — which, within that same call, can still be one render behind.
+  const hasEnoughBalanceOnChain = async (chainOverride?: any): Promise<boolean> => {
+    const chain = chainOverride || activeChain;
     try {
-      if (!address || !activeChain) return false;
-      const tokenAddress = getAgentTokenAddress();
+      if (!address || !chain) return false;
+      const tokenAddress = getAgentTokenAddress(chain);
       if (!tokenAddress) return false;
-      const publicClient = createPublicClient({ chain: activeChain, transport: http() });
+      const publicClient = createPublicClient({ chain, transport: http() });
       const balanceWei = await publicClient.readContract({ address: tokenAddress as `0x${string}`, abi: ERC20_ABI, functionName: 'balanceOf', args: [address] }) as bigint;
       const balance = parseFloat(formatUnits(balanceWei, selectedToken.decimals));
       setWalletBalance(balance.toFixed(4)); // keep the UI figure in sync while we're here
@@ -1260,7 +1264,14 @@ export default function Home() {
    * Returns true when it is safe to proceed. Disconnects on a dead session so the Connect
    * button pairs fresh rather than restoring the same corpse.
    */
-  const ensureWalletReachable = useCallback(async (): Promise<boolean> => {
+  // 🔴 RETURNS THE RESOLVED CHAIN, NOT JUST A BOOLEAN — A RESYNC WITHIN THIS CALL IS INVISIBLE TO
+  // ITS CALLER OTHERWISE. `setActiveChain` schedules a state update for the NEXT render; it does
+  // not rewrite the `activeChain` binding the caller already closed over earlier in the SAME
+  // function execution. So a resync performed here would fix the chain for the click AFTER this
+  // one and silently do nothing for the payment actually in flight — precisely the report ("it
+  // didn't grab the changes yet") this function exists to close. Callers use the returned chain
+  // for whatever guard checks come immediately after, instead of their own `activeChain` closure.
+  const ensureWalletReachable = useCallback(async (): Promise<{ chain: any } | false> => {
     const live = await walletConnectSessionLive(wagmiConnector);
     if (live === false) {
       setStatus("Your wallet connection has dropped — tap Connect to reconnect, then try again.");
@@ -1270,14 +1281,52 @@ export default function Home() {
       return false;
     }
 
+    let resolvedChain = activeChain;
+
+    // 🔴 ASK THE WALLET WHAT CHAIN IT IS ACTUALLY ON, RIGHT NOW — DON'T TRUST REACT STATE ALONE.
+    //
+    // "I switch chains and it sometimes complains the network isn't supported — like it didn't
+    // grab the change yet." That is exactly what happens for an INJECTED wallet: the
+    // WalletConnect check just below only ever constrains a WalletConnect session —
+    // walletApprovedChainIds() reads null ("unknowable") for anything injected, so for a
+    // MetaMask/Base-Account-shaped wallet this function did nothing at all to verify the chain
+    // before proceeding. `activeChain` only updates when wagmi's OWN `chainChanged` listener
+    // fires and that update propagates through the wagmi bridge — real, but not instantaneous,
+    // and a payment attempted in the gap between switching in the wallet and that propagation
+    // landing sees the OLD `activeChain`.
+    //
+    // `client.getChainId()` asks the wallet directly, at the moment it matters, and is the one
+    // source neither wagmi's event timing nor React's render timing can make stale. A mismatch
+    // means our state hasn't caught up yet — not that the wallet is on an unsupported network —
+    // so it is resynced here rather than reported as an error. The guards that run right after
+    // this function returns then see the CURRENT chain instead of a lagging one.
+    if (client && resolvedChain) {
+      try {
+        const liveChainId = await client.getChainId();
+        if (liveChainId !== resolvedChain.id) {
+          const liveChain = [base, baseSepolia, celo, celoSepolia].find((c) => c.id === liveChainId);
+          if (liveChain) {
+            console.warn(`[wallet] activeChain (${resolvedChain.id}) was behind the wallet's real chain (${liveChainId}) — resynced to ${liveChain.name}.`);
+            setActiveChain(liveChain); // for the NEXT render — resolvedChain is what THIS call uses
+            resolvedChain = liveChain;
+          }
+          // An unrecognised chain ID is left for the balance/token guards below to report — this
+          // function's job is only to correct a LAG, not to invent support for a chain we don't have.
+        }
+      } catch {
+        // Couldn't ask — proceed on whatever `activeChain` already said, exactly as before this
+        // check existed. A failed read is not evidence of anything.
+      }
+    }
+
     // null = unknowable (an injected wallet), which must read as "no constraint" — never as
     // "supports nothing", or every in-browser wallet would be blocked on a false negative.
     const approved = await walletApprovedChainIds(wagmiConnector);
-    if (approved && activeChain && !approved.includes(activeChain.id)) {
+    if (approved && resolvedChain && !approved.includes(resolvedChain.id)) {
       const usable = [base, baseSepolia, celo, celoSepolia].find((c) => approved.includes(c.id));
       setStatus(
         usable
-          ? `Your wallet isn't connected to ${activeChain.name}. Switch AbaPay to ${usable.name} and try again.`
+          ? `Your wallet isn't connected to ${resolvedChain.name}. Switch AbaPay to ${usable.name} and try again.`
           : `Your wallet isn't connected to a network AbaPay supports. Reconnect it on Base or Celo.`,
       );
       setIsProcessing(false);
@@ -1286,15 +1335,21 @@ export default function Home() {
       return false;
     }
 
-    return true; // reachable, on a chain it agreed to — or not a WalletConnect wallet at all
-  }, [wagmiConnector, disconnect, activeChain]);
+    // Reachable, on a chain it agreed to — or not a WalletConnect wallet at all. `resolvedChain`
+    // carries any correction made above; falls back to the app's default only if there was never
+    // an activeChain to begin with (shouldn't happen once connected, but keeps this total).
+    return { chain: resolvedChain || (isMainnet ? base : baseSepolia) };
+  }, [wagmiConnector, disconnect, activeChain, client, isMainnet]);
 
   const processBlockchainPayment = async () => {
     if (!address || !client) return setStatus("Connect Wallet First");
-    if (!(await ensureWalletReachable())) return;
-    if (!(await hasEnoughBalanceOnChain())) return setStatus(`Insufficient ${selectedToken.symbol} balance — you need ${cryptoToCharge} ${selectedToken.symbol}. Top up and try again.`);
+    const reach = await ensureWalletReachable();
+    if (!reach) return;
+    // See the matching note in processX402Payment — `reach.chain` is what that call just
+    // verified against the wallet; `activeChain` here can still be one render behind it.
+    if (!(await hasEnoughBalanceOnChain(reach.chain))) return setStatus(`Insufficient ${selectedToken.symbol} balance — you need ${cryptoToCharge} ${selectedToken.symbol}. Top up and try again.`);
 
-    setIsProcessing(true); 
+    setIsProcessing(true);
     setStatus("Initiating Blockchain Escrow...");
 
             // ⚡ FIX: Add a safety flag to track if crypto left the wallet!
@@ -1679,11 +1734,21 @@ export default function Home() {
     // `client` is required now that the signature is taken from the app's own wallet client
     // rather than a parallel SDK — same precondition the contract-call path has always had.
     if (!address || !client) return setStatus("Connect Wallet First");
-    if (!(await ensureWalletReachable())) return;
+    const reach = await ensureWalletReachable();
+    if (!reach) return;
+    // 🔴 `reach.chain`, NOT `activeChain`, FOR EVERYTHING IMMEDIATELY BELOW.
+    //
+    // ensureWalletReachable() may have just resynced the chain against what the wallet is
+    // actually on — but that resync is a setState, visible on the NEXT render, not to this
+    // function's own `activeChain` closure captured back when it started running. Reading
+    // `activeChain` here would be exactly the staleness this whole check exists to close:
+    // "I switch chains and it sometimes says the network isn't supported — like it didn't grab
+    // the change yet." `reach.chain` is the answer that call just verified, not React's copy.
+    const payChain = reach.chain;
     // Celo: USDC + USD₮ (both have EIP-3009). Base: USDC only (Base USD₮ has no
     // transferWithAuthorization) and only when the Coinbase-facilitator rail is enabled.
-    const onCelo = activeChain?.id === celo.id || activeChain?.id === celoSepolia.id;
-    const onBase = activeChain?.id === base.id || activeChain?.id === baseSepolia.id;
+    const onCelo = payChain?.id === celo.id || payChain?.id === celoSepolia.id;
+    const onBase = payChain?.id === base.id || payChain?.id === baseSepolia.id;
     const baseX402Enabled = process.env.NEXT_PUBLIC_BASE_X402_ENABLED !== 'false';
     // ⚡ Deliberately generic wording — x402 vs. the normal contract-call rail is an internal
     // routing decision (see `useX402` below), never something the user chose or should see.
@@ -1701,7 +1766,7 @@ export default function Home() {
     if (onBase && selectedToken.symbol !== "USDC") return setStatus("This token isn't supported on this network yet.");
     // 🔴 Was missing entirely — x402 payments failed at settlement on a low balance instead
     // of being caught here first.
-    if (!(await hasEnoughBalanceOnChain())) return setStatus(`Insufficient ${selectedToken.symbol} balance — you need ${cryptoToCharge} ${selectedToken.symbol}. Top up and try again.`);
+    if (!(await hasEnoughBalanceOnChain(payChain))) return setStatus(`Insufficient ${selectedToken.symbol} balance — you need ${cryptoToCharge} ${selectedToken.symbol}. Top up and try again.`);
 
     setIsProcessing(true);
     // 🔴 WAS "Confirming on blockchain... Please hold." — SET BEFORE ANYTHING WAS SIGNED.
@@ -1874,11 +1939,12 @@ export default function Home() {
   ] as const), []);
 
   // Resolve the selected token's address on the ACTIVE chain (mirrors the payment flow).
-  const getAgentTokenAddress = useCallback((): string | undefined => {
-    if (!activeChain) return undefined;
-    if (activeChain.id === base.id) return (selectedToken as any).baseMainnet || selectedToken.mainnet;
-    if (activeChain.id === baseSepolia.id) return (selectedToken as any).baseSepolia || selectedToken.sepolia;
-    if (activeChain.id === celo.id) return (selectedToken as any).celoMainnet || selectedToken.mainnet;
+  const getAgentTokenAddress = useCallback((chainOverride?: any): string | undefined => {
+    const chain = chainOverride || activeChain;
+    if (!chain) return undefined;
+    if (chain.id === base.id) return (selectedToken as any).baseMainnet || selectedToken.mainnet;
+    if (chain.id === baseSepolia.id) return (selectedToken as any).baseSepolia || selectedToken.sepolia;
+    if (chain.id === celo.id) return (selectedToken as any).celoMainnet || selectedToken.mainnet;
     return (selectedToken as any).celoSepolia || selectedToken.sepolia;
   }, [activeChain, selectedToken]);
 
@@ -2342,6 +2408,55 @@ export default function Home() {
   }, [address, environment, injectedCandidates, connect, connectStatus]);
 
 
+  /**
+   * The MiniPay connection sequence, factored out of the environment detector so it can be
+   * called TWICE: once automatically on load, and once from a real Connect button — the escape
+   * hatch this needs. MiniPay is a captive webview with exactly one wallet, but that is not the
+   * same as needing no way back in: a decline (or a signature that simply never answers — real,
+   * documented uncertainty about MiniPay's personal_sign) used to leave the account permanently
+   * unverified with only a refresh to fall back on, and even a refresh sometimes reported nothing
+   * detected — because the automatic retry alone had no way to distinguish "still waiting" from
+   * "genuinely stuck," and there was no button to force a clean restart.
+   *
+   * A fresh call here always requests accounts again and builds a NEW client, rather than
+   * reusing whatever `minipayPending` already held — the difference between an actual retry and
+   * repeating a request that already went nowhere once.
+   */
+  const connectMiniPay = useCallback(async () => {
+    if (typeof window === "undefined" || !(window as any).ethereum?.isMiniPay) return;
+    setIsConnecting(true);
+    setMinipayVerifyFailed(false);
+    try {
+      const targetChain = isMainnet ? celo : celoSepolia;
+      setActiveChain(targetChain);
+      const miniPayClient = createWalletClient({ chain: targetChain, transport: custom((window as any).ethereum) });
+      const [acc] = await miniPayClient.requestAddresses();
+      const currentChainId = await miniPayClient.getChainId();
+      if (currentChainId !== targetChain.id) await miniPayClient.switchChain({ id: targetChain.id }).catch(() => {});
+      setMinipayPending({ address: acc, client: miniPayClient });
+    } catch {
+      setConnectError("Couldn't reach your MiniPay wallet. Tap Connect to try again.");
+    } finally {
+      setIsConnecting(false);
+    }
+  }, [isMainnet]);
+
+  /**
+   * MiniPay's own Disconnect. Clears the pending pair, the published address/client and any
+   * cached proof for it — a full reset, so Connect afterward is a genuinely fresh attempt rather
+   * than one that silently reuses whatever was stuck.
+   */
+  const handleMiniPayDisconnect = useCallback(() => {
+    const addr = minipayPending?.address || address;
+    if (addr) { try { sessionStorage.removeItem(`abapay_wallet_proof_${addr.toLowerCase()}`); } catch { /* private mode */ } }
+    setMinipayPending(null);
+    setAddress(null);
+    setClient(null);
+    setWalletProof(null);
+    setMinipayVerifyFailed(false);
+    showToast('Wallet Disconnected', 'Tap Connect when you want to pay.', 'success');
+  }, [minipayPending, address]);
+
   /** Move the wallet — and the app — onto a chosen chain. Called only from the network menu. */
   const switchToChain = useCallback(async (target: Chain) => {
     setChainMenuOpen(false);
@@ -2432,12 +2547,6 @@ export default function Home() {
     !(walletProof && walletProof.address.toLowerCase() === proofAddress.toLowerCase()),
   );
 
-  // Forces the verification effect below to run again after a decline. On the web, "declined"
-  // means disconnected and the Connect button is the natural way back in. MiniPay has no such
-  // button — it is a captive webview with exactly one wallet — so a decline there needs its own
-  // retry, or the account is held back forever with nothing on screen and no way out.
-  const [proofRetryTick, setProofRetryTick] = useState(0);
-  const retryWalletVerification = useCallback(() => { setMinipayVerifyFailed(false); setProofRetryTick((t) => t + 1); }, []);
   // True only AFTER an actual decline/failure — never while the first request is still pending,
   // which `awaitingProof` alone cannot distinguish (it is true from the moment a pending pair
   // exists, before the wallet has answered at all).
@@ -2519,7 +2628,7 @@ export default function Home() {
       }
     })();
     return () => { cancelled = true; };
-  }, [proofAddress, proofSigner, walletProof, handleDisconnect, environment, proofRetryTick]);
+  }, [proofAddress, proofSigner, walletProof, handleDisconnect, environment]);
 
   // ⚡ THE MANUAL CONNECT PATH ⚡
   //
@@ -2966,19 +3075,11 @@ export default function Home() {
           return;
         }
 
-        // Option 2: Opera MiniPay
+        // Option 2: Opera MiniPay — connectMiniPay() is the same sequence a Connect-button
+        // retry uses, factored out so there is exactly one place this logic lives.
         if (typeof window !== "undefined" && (window as any).ethereum && (window as any).ethereum.isMiniPay) {
           setEnvironment('MINIPAY');
-          const targetChain = isMainnet ? celo : celoSepolia;
-          setActiveChain(targetChain);
-          const miniPayClient = createWalletClient({ chain: targetChain, transport: custom((window as any).ethereum) });
-
-          const [acc] = await miniPayClient.requestAddresses();
-          const currentChainId = await miniPayClient.getChainId();
-          if (currentChainId !== targetChain.id) await miniPayClient.switchChain({ id: targetChain.id }).catch(()=>{});
-          // Held pending, not published — see minipayPending above. The proof effect and the
-          // gated bridge below take it from here.
-          setMinipayPending({ address: acc, client: miniPayClient });
+          await connectMiniPay();
           return;
         }
 
@@ -2997,7 +3098,7 @@ export default function Home() {
     detectAndConnect();
 
     return () => clearTimeout(timeoutId);
-  }, [isMainnet, environment]);
+  }, [isMainnet, environment, connectMiniPay]);
 
   useEffect(() => {
     fetch('https://open.er-api.com/v6/latest/USD')
@@ -3005,36 +3106,6 @@ export default function Home() {
       .then(data => { if(data && data.rates) setGlobalFiatRates(data.rates); })
       .catch(() => {});
   }, []);
-
-  const connectWebWallet = async () => {
-    if (typeof window !== "undefined" && (window as any).ethereum) {
-      try {
-        setIsProcessing(true);
-        const ethWeb = (window as any).ethereum;
-        let webTargetChain: any = isMainnet ? base : baseSepolia; 
-        const webClient = createWalletClient({ chain: webTargetChain, transport: custom(ethWeb) });
-
-        const [acc] = await webClient.requestAddresses();
-        localStorage.setItem('abapay_connected', 'true'); 
-
-        const currentChainId = await webClient.getChainId();
-        if (currentChainId === celo.id || currentChainId === celoSepolia.id) {
-           webTargetChain = currentChainId === celo.id ? celo : celoSepolia;
-        } else if (currentChainId !== webTargetChain.id) {
-           await webClient.switchChain({ id: webTargetChain.id }).catch(() => {});
-        }
-        setActiveChain(webTargetChain);
-        setAddress(acc); 
-        setClient(webClient);
-      } catch (error) {
-        setStatus("Wallet connection cancelled.");
-      } finally {
-        setIsProcessing(false);
-      }
-    } else {
-      setStatus("No Web3 wallet detected.");
-    }
-  };
 
   useEffect(() => {
     if (!address) { setTransactions([]); return; }
@@ -3827,7 +3898,7 @@ export default function Home() {
             )}
 
                                     {/* ⚡ NEW: Dynamic Connect Button / Smart Environment Routing ⚡ */}
-            {!address && environment === 'WEB' ? (
+            {!address && (environment === 'WEB' || environment === 'MINIPAY') ? (() => {
                 // ⚡ CONNECTING DOES NOT END AT THE HANDSHAKE — IT ENDS AT THE SIGNATURE.
                 //
                 // 🔴 The button used to return to "Connect" as soon as wagmi reported a
@@ -3839,16 +3910,52 @@ export default function Home() {
                 // matters. Paired with the bridge, which publishes nothing until the proof lands,
                 // pressing Connect is one continuous act: spinner → one signature → the app fills
                 // in. Refuse, and it returns to Connect with nothing half-shown.
-                <button
-                  onClick={() => { void handleConnectClick(); }}
-                  disabled={isProcessing || isConnecting || awaitingProof}
-                  className="bg-emerald-50 dark:bg-emerald-900/20 hover:bg-emerald-100 dark:hover:bg-emerald-900/40 border border-emerald-200 dark:border-emerald-800/50 text-emerald-700 dark:text-emerald-400 font-black text-[10px] px-3 py-1.5 rounded-xl transition-all shadow-sm active:scale-95 disabled:opacity-50 flex shrink-0 items-center gap-1.5 uppercase tracking-widest"
-                >
-                  {(isProcessing || isConnecting || awaitingProof) ? <Loader2 size={12} className="animate-spin"/> : <Zap size={12}/>}
-                  {isProcessing ? "Wait" : awaitingProof ? "Verifying" : isConnecting ? "Connecting" : "Connect"}
-                </button>
-            ) : (
-                <PointsBadge walletAddress={address || undefined} />
+                //
+                // 🔴 MINIPAY GETS THIS BUTTON TOO, NOW — IT DIDN'T BEFORE. Declining the
+                // ownership signature there left `address` unset with no button anywhere to
+                // press: no Connect (WEB-only), and the automatic retry alone had no way to
+                // distinguish "still waiting" from "genuinely stuck." This is the same button,
+                // routed to connectMiniPay() instead of the wagmi chooser — a real, explicit way
+                // back in rather than only an automatic retry.
+                //
+                // 🔴 AND `awaitingProof` MUST NOT DISABLE IT AFTER A MINIPAY DECLINE. On the web
+                // a decline disconnects entirely (proofAddress goes away with it), so
+                // `awaitingProof` there only ever means "genuinely still waiting." MiniPay never
+                // clears `minipayPending` on decline — the whole point of holding it is a clean
+                // retry — so `awaitingProof` stays true afterward too, and disabling the button
+                // on it would lock out the exact tap meant to recover from that state.
+                const minipayShowingFailure = environment === 'MINIPAY' && minipayVerifyFailed;
+                const spinning = isProcessing || isConnecting || (awaitingProof && !minipayShowingFailure);
+                return (
+                  <button
+                    onClick={() => { void (environment === 'MINIPAY' ? connectMiniPay() : handleConnectClick()); }}
+                    disabled={spinning}
+                    className="bg-emerald-50 dark:bg-emerald-900/20 hover:bg-emerald-100 dark:hover:bg-emerald-900/40 border border-emerald-200 dark:border-emerald-800/50 text-emerald-700 dark:text-emerald-400 font-black text-[10px] px-3 py-1.5 rounded-xl transition-all shadow-sm active:scale-95 disabled:opacity-50 flex shrink-0 items-center gap-1.5 uppercase tracking-widest"
+                  >
+                    {spinning ? <Loader2 size={12} className="animate-spin"/> : <Zap size={12}/>}
+                    {isProcessing ? "Wait" : spinning && awaitingProof ? "Verifying" : isConnecting ? "Connecting" : "Connect"}
+                  </button>
+                );
+              })() : (
+                <div className="flex shrink-0 items-center gap-2">
+                  <PointsBadge walletAddress={address || undefined} />
+                  {/* ⚡ MINIPAY GETS A REAL DISCONNECT TOO, SCOPED TO MINIPAY ONLY.
+                      The network menu (Disconnect's usual home) never renders outside
+                      `environment === 'WEB'` — MiniPay has no chain to switch between (Celo
+                      only) and was never meant to see that dropdown. This sits beside the
+                      points badge rather than replacing it: same "start over cleanly"
+                      guarantee, without losing the points display or offering a Base option
+                      that was never real for this wallet. */}
+                  {address && environment === 'MINIPAY' && (
+                    <button
+                      onClick={handleMiniPayDisconnect}
+                      title="Disconnect"
+                      className="p-1.5 rounded-lg bg-rose-50 dark:bg-rose-900/20 hover:bg-rose-100 dark:hover:bg-rose-900/40 border border-rose-200 dark:border-rose-800/50 text-rose-700 dark:text-rose-400 transition-all active:scale-95"
+                    >
+                      <LogOut size={12} />
+                    </button>
+                  )}
+                </div>
             )}
 
             <button 
@@ -3904,11 +4011,12 @@ export default function Home() {
             🔴 THE "AUTO-CONNECTS AND TRANSACTS DESPITE DECLINING" BUG. MiniPay's environment
             detector used to publish `address`/`client` directly, before any ownership signature —
             so declining the verification prompt did nothing, because the app was already usable.
-            It is now held back until the signature succeeds, exactly like the web. But MiniPay has
-            no Connect button to retry from — it is a captive webview with exactly one wallet — so
-            a decline needs its own way back in, or the account is stuck unproven with no address on
-            screen and no path forward. This is that path: visible only while MiniPay is waiting on
-            a signature that has not yet arrived, gone the moment it does. */}
+            It is now held back until the signature succeeds, exactly like the web.
+
+            Says WHY nothing is showing — the header's Connect button (which routes to the same
+            connectMiniPay() this one does, not the weaker signature-only retry) is the actual
+            escape hatch; this banner is what explains it needs pressing at all, since a MiniPay
+            user has no reason to expect a decline to have gone anywhere. */}
         {environment === 'MINIPAY' && awaitingProof && minipayVerifyFailed && (
           <div className="mb-4 rounded-2xl border border-amber-300 dark:border-amber-800/60 bg-amber-50 dark:bg-amber-900/20 p-4 shadow-sm">
             <div className="flex items-start gap-2.5">
@@ -3918,7 +4026,7 @@ export default function Home() {
                   Verifying your wallet was declined. AbaPay needs that signature to show your balance and history — it approves no payment.
                 </p>
                 <button
-                  onClick={retryWalletVerification}
+                  onClick={() => { void connectMiniPay(); }}
                   className="mt-2 text-[10px] font-black uppercase tracking-widest text-amber-800 dark:text-amber-300 underline underline-offset-2"
                 >
                   Try again
