@@ -643,15 +643,38 @@ async function handleX402Request(req: Request) {
         domainVersion: tokenDomain.version,
       });
 
-      let signerOk = false;
+      // 🔴 VALIDATE THE SIGNATURE THE WAY THE TOKEN WILL. THE ORDER IS THE WHOLE BUG.
+      //
+      // USDC (FiatTokenV2_2) checks signatures through SignatureChecker: when
+      // `from.code.length > 0` it calls ERC-1271 `isValidSignature` on the account and NEVER
+      // falls back to ecrecover. This code did the opposite — ecrecover first, 1271 only if that
+      // failed — so a signature ecrecover accepts sailed through to the facilitator even when the
+      // token would refuse it.
+      //
+      // Not hypothetical. The reported Base failures came from a wallet that is an EIP-7702
+      // DELEGATED EOA on Base (code 0xef0100… → delegate 0x490aac77…) and a PLAIN EOA on Celo:
+      //   • ecrecover recovers the payer perfectly — a real private key did sign it — so we passed
+      //   • the token sees code, asks the delegate over 1271, is refused, and reverts with
+      //     "FiatTokenV2: invalid signature" (confirmed by simulating the call on Base)
+      //   • CDP surfaces that revert as "unable to estimate gas"
+      // which is precisely why the SAME wallet always worked on Celo and kept failing on Base.
+      //
+      // Mirroring the token's order turns that into a precise local refusal: no facilitator
+      // round-trip, no opaque alert, and the page falls back to the contract call — which a 7702
+      // account signs and sends perfectly well, since only EIP-3009 consults 1271.
+      let payerHasCode = false;
       try {
-        signerOk = await verifyTypedData({ ...typedData, address: auth.from as `0x${string}`, signature: signature as `0x${string}` });
-      } catch { signerOk = false; }
+        const publicClient = getPublicClient(chainKey);
+        const code = await publicClient.getCode({ address: auth.from as `0x${string}` });
+        payerHasCode = Boolean(code && code !== '0x');
+      } catch {
+        // Couldn't tell — fall back to trying both, which is strictly more permissive.
+      }
 
-      if (!signerOk) {
-        // ⚡ A SMART-CONTRACT WALLET IS NOT A BAD SIGNATURE. Base Account, Safe and friends sign
-        // via ERC-1271/6492, which ecrecover cannot judge — asking the wallet's own contract is
-        // the only correct check, and skipping it here would reject every smart-account payer.
+      let signerOk = false;
+      if (payerHasCode) {
+        // Code present: ERC-1271 is the only authority the token consults, so it is the only one
+        // we consult. Passing on ecrecover here is what let the bad payload reach the facilitator.
         try {
           const publicClient = getPublicClient(chainKey);
           signerOk = await verifyTypedDataOnChain(publicClient, {
@@ -660,6 +683,10 @@ async function handleX402Request(req: Request) {
             signature: signature as `0x${string}`,
           });
         } catch { signerOk = false; }
+      } else {
+        try {
+          signerOk = await verifyTypedData({ ...typedData, address: auth.from as `0x${string}`, signature: signature as `0x${string}` });
+        } catch { signerOk = false; }
       }
 
       if (!signerOk) {
@@ -667,10 +694,17 @@ async function handleX402Request(req: Request) {
         try { recovered = await recoverTypedDataAddress({ ...typedData, signature: signature as `0x${string}` }); } catch { /* keep the placeholder */ }
 
         console.error(`[Pay/x402] Signature does not authorise this payment (${chainKey}): claimed`, auth.from, 'recovered', recovered);
+        // Two different faults land here and they deserve different words. A SMART/DELEGATED
+        // account whose 1271 refuses the signature is not a mismatched signature — the key that
+        // signed is the payer's, and ecrecover proves it; the ACCOUNT simply will not vouch for
+        // it. Saying "didn't match your wallet" about that sends everyone hunting the wrong thing.
         sendTelegramAlert(
-          `⚠️ *x402 SIGNATURE DID NOT MATCH THE PAYER (${chainKey})*\n\n` +
-          `Refused before the facilitator was called — this is what its "unable to estimate gas" actually meant.\n\n` +
-          `claimed \`${auth.from}\`\nrecovered \`${recovered}\`\n` +
+          `⚠️ *x402 SIGNATURE REFUSED BY THE PAYER'S ACCOUNT (${chainKey})*\n\n` +
+          (payerHasCode
+            ? 'The account has CODE (smart account, or an EIP-7702 delegated EOA), so the token validates via ERC-1271 — and the account refused its own signature. ecrecover is not consulted for such accounts. Sent to the contract-call rail, which these accounts sign fine.'
+            : 'Refused before the facilitator was called — this is what its "unable to estimate gas" actually meant.') + '\n\n' +
+          `payer \`${auth.from}\`${payerHasCode ? ' · has code ⚠️' : ''}\n` +
+          `ecrecover gives \`${recovered}\`\n` +
           `domain \`${tokenDomain.name}\` v\`${tokenDomain.version}\` · chainId \`${Number(String(chainCfg.caip2).split(':')[1])}\`\n` +
           `asset \`${usdc.address}\``,
         ).catch(() => {});
@@ -678,10 +712,12 @@ async function handleX402Request(req: Request) {
         return NextResponse.json(
           {
             x402Version: 1,
-            error: "That payment approval didn't match your wallet, so nothing was charged. Please try again.",
-            errorCode: 'SIGNATURE_MISMATCH',
-            // Not retryable on this rail: a fresh signature from the same wallet over the same
-            // domain reproduces it. The contract call is the honest next step.
+            error: payerHasCode
+              ? "Your wallet's smart-account mode can't authorise this fast payment, so nothing was charged. Switching to the standard payment — approve once more."
+              : "That payment approval didn't match your wallet, so nothing was charged. Please try again.",
+            errorCode: payerHasCode ? 'SMART_ACCOUNT_UNSUPPORTED' : 'SIGNATURE_MISMATCH',
+            // Not retryable on this rail either way: signing again from the same wallet over the
+            // same domain reproduces it exactly. The contract call is the honest next step.
             retryable: false,
             accepts: [acceptEntry],
           },
