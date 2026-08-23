@@ -431,6 +431,7 @@ export default function DocsPage() {
                 a={<>
                   <p>MiniPay (Opera Mini&apos;s Celo wallet), Valora, MetaMask, Coinbase Smart Wallet / Base Account, and any other wallet reachable over WalletConnect or injected into your browser. AbaPay also runs as a Farcaster Mini App. Valora connects over WalletConnect — tap <strong>Connect</strong> and pick it — which is the only route it handles reliably.</p>
                   <p>Wallets that support smart-account gas sponsorship on Base get it automatically — the app detects the capability and batches the token approval and the payment into one sponsored transaction. Every other wallet just pays normal network fees, with no difference in behaviour.</p>
+                  <p>Open AbaPay inside <strong>MiniPay</strong> and it locks to Celo; inside <strong>Base App</strong> or <strong>Farcaster</strong> and it locks to Base — there&apos;s only ever one chain either wallet can pay on, so the network switcher, balances and token list all show that one chain, with an Exit button to disconnect. Everywhere else — an ordinary browser, any WalletConnect wallet — both chains stay available and switchable.</p>
                 </>}
               />
               <FAQItem
