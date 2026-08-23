@@ -284,7 +284,24 @@ interface CeloSettleResponse {
   payer: string;
   errorReason?: string;
   errorMessage?: string;
+  // ⚡ Celo's facilitator is prepaid — every successful /settle response carries the remaining
+  // balance, e.g. `{ "settled": true, "credits": 499 }` (docs.celo.org, x402-rs). One credit is
+  // spent per settled payment. Used below to warn BEFORE this hits zero, not just after — the
+  // reactive `/credit/i.test(allText)` alert further down only ever fires once payments are
+  // already failing.
+  credits?: number;
 }
+
+// ⚡ HOW LONG TO STAY QUIET ONCE A LOW-CREDITS WARNING HAS FIRED.
+//
+// Module-level, so it resets on a cold start and is per-instance under concurrent traffic — an
+// imperfect dedup, but the alternative is a new DB table and migration for what is fundamentally
+// "don't send the same warning on every payment for the next six hours." Good enough: the first
+// payment on a warm instance after credits drop below the line still gets one alert promptly,
+// and a real top-up (credits rising back above the line) clears it immediately rather than
+// waiting out the cooldown.
+const LOW_CREDITS_ALERT_COOLDOWN_MS = 30 * 60 * 1_000;
+let lastLowCreditsAlertAt = 0;
 
 async function handleX402Request(req: Request) {
   let body: any = {};
@@ -1045,8 +1062,37 @@ async function handleX402Request(req: Request) {
     // payer one, so alert rather than silently telling the payer to just retry. Scan every
     // stringy field on the response, not just the two we used to know about, since the
     // facilitator's error shape has varied.
-    if (/credit/i.test(allText)) {
-      sendTelegramAlert(`🚨 *x402 FACILITATOR OUT OF CREDITS*\n\n${chainKey} x402 settlement is failing — top up credits at x402.celo.org.\n\n${allText.slice(0, 300)}`).catch(() => {});
+    //
+    // 🔴 THIS USED TO SAY "top up credits at x402.celo.org" REGARDLESS OF WHICH CHAIN FAILED.
+    // Harmless for Celo (the only facilitator that actually works this way — see the proactive
+    // low-credits check above), but a wrong, confusing pointer if the word "credit" ever showed
+    // up in a CDP/Base response for an unrelated reason. Named per-chain now instead of assuming.
+    //
+    // ⚡ AND CDP/BASE GETS ITS OWN CHECK, BECAUSE IT HAS NO CREDITS TO RUN OUT OF.
+    //
+    // Coinbase's own docs describe CDP's facilitator as consumption-billed against the
+    // developer's CDP account (1,000 free transactions/month, then $0.001 each) — there is no
+    // prepaid balance for this route to watch the way Celo's `credits` field allows. The
+    // equivalent failure mode there is the CDP ACCOUNT itself — an expired/invalid API key, a
+    // suspended account, a declined payment method on file — which shows up as the facilitator
+    // rejecting the request outright (401/403) rather than refusing one specific payment's
+    // signature or amount. That is worth its own alert instead of blending into the generic
+    // "SETTLEMENT REJECTED" below, which reads as a per-payment problem when this is an
+    // every-payment-from-now-on one.
+    if (chainKey === 'BASE' && (settleHttpStatus === 401 || settleHttpStatus === 403)) {
+      sendTelegramAlert(
+        `🚨 *x402 CDP FACILITATOR AUTH FAILURE*\n\n` +
+        `Base settlements are being rejected with HTTP ${settleHttpStatus} — the CDP API key or account itself, not this one payment. ` +
+        `Every Base x402 payment will fail until this is fixed: check the CDP dashboard for an expired key, a suspended account, or a billing issue.\n\n` +
+        `${allText.slice(0, 300)}`,
+      ).catch(() => {});
+    } else if (/credit/i.test(allText)) {
+      sendTelegramAlert(
+        `🚨 *x402 FACILITATOR OUT OF CREDITS (${chainKey})*\n\n` +
+        `${chainKey} x402 settlement is failing.` +
+        (chainKey === 'CELO' ? ' Top up at x402.celo.org.' : '') +
+        `\n\n${allText.slice(0, 300)}`,
+      ).catch(() => {});
     } else {
       // 🔴 A CONSOLE LINE IS NOT A REPORT. A rejected settlement leaves NO database row (the row
       // is only written once money has moved), so this console line was the single trace that
@@ -1146,6 +1192,37 @@ async function handleX402Request(req: Request) {
   const payer = settleResult.payer;
   const explorerUrl = `${explorerBase}/tx/${txHash}`;
   const settledWallet = (payer || wallet_address || 'UNKNOWN').toLowerCase();
+
+  // ⚡ WARN BEFORE ZERO, NOT JUST AFTER. "my balance just ran to zero on the facilitator end and
+  // the transaction just failed" — the only alert that existed before this fired reactively,
+  // AFTER a payment had already been refused with a message containing the word "credit" (see
+  // the OUT OF CREDITS alert further up this file). This runs on every SUCCESSFUL Celo
+  // settlement instead, reading the balance the facilitator already hands back for free, and
+  // fires while there is still runway to top up before the next payer hits a real failure.
+  //
+  // Threshold is a low-water mark, not a percentage of the top-up size (which this route has no
+  // way to know) — `X402_CELO_LOW_CREDITS_THRESHOLD` overrides it per-deployment; 20 is a
+  // deliberately cautious default (roughly 20 payments of runway, which is comfortably more
+  // than the couple of minutes an operator needs to see a Telegram alert and top up).
+  if (chainKey === 'CELO' && typeof settleResult.credits === 'number') {
+    const threshold = Number(process.env.X402_CELO_LOW_CREDITS_THRESHOLD) || 20;
+    if (settleResult.credits <= threshold) {
+      const now = Date.now();
+      if (now - lastLowCreditsAlertAt > LOW_CREDITS_ALERT_COOLDOWN_MS) {
+        lastLowCreditsAlertAt = now;
+        const urgent = settleResult.credits <= Math.max(1, Math.floor(threshold / 4));
+        sendTelegramAlert(
+          `${urgent ? '🚨' : '⚠️'} *x402 CELO FACILITATOR CREDITS ${urgent ? 'CRITICALLY ' : ''}LOW*\n\n` +
+          `\`${settleResult.credits}\` credit${settleResult.credits === 1 ? '' : 's'} left (1 credit = 1 settled payment). ` +
+          `Top up at x402.celo.org before this reaches 0 — every Celo x402 payment fails with a 402 the moment it does.`,
+        ).catch(() => {});
+      }
+    } else if (lastLowCreditsAlertAt !== 0) {
+      // A real top-up landed — clear the cooldown so a FUTURE dip warns immediately rather than
+      // waiting out a cooldown that was measured from before the top-up.
+      lastLowCreditsAlertAt = 0;
+    }
+  }
 
   const dbPayload = {
     tx_hash: txHash, request_id: vtRequestId, service_category: serviceCategory || 'UNKNOWN', service_id: serviceID || 'UNKNOWN',
