@@ -8,9 +8,21 @@ import { isDuplicateElectricity } from '@/lib/parity';
 import { enqueueRefund } from '@/lib/refunds';
 import { readAuthorization, checkAuthorization, isRetryableSettleFailure, settleResponseNamesTransaction, buildAuthorizationStateCall, parseAuthorizationState, transferAuthorizationTypedData, type X402Authorization } from '@/lib/x402Settle';
 import { rpcUrlsFor } from '@/lib/chain';
-import { verifyTypedData, recoverTypedDataAddress } from 'viem';
+import { verifyTypedData, recoverTypedDataAddress, hashTypedData } from 'viem';
 import { verifyTypedData as verifyTypedDataOnChain } from 'viem/actions';
 import { getPublicClient } from '@/lib/chain';
+
+// ⚡ THE RAW ERC-1271 CHECK — deliberately not viem's `verifyTypedData`/`verifyHash`, which
+// falls back to ecrecover on any failure here (see the long comment where this is used). This
+// ABI fragment is the entire surface: one read, one exact-match comparison against the ERC-1271
+// magic value, nothing upstream to quietly widen a "no" into a "yes".
+const ERC1271_IS_VALID_SIGNATURE_ABI = [{
+  name: 'isValidSignature',
+  type: 'function',
+  stateMutability: 'view',
+  inputs: [{ name: 'hash', type: 'bytes32' }, { name: 'signature', type: 'bytes' }],
+  outputs: [{ name: '', type: 'bytes4' }],
+}] as const;
 
 // ⚡ x402 SETTLEMENT — MAIN APP ONLY. Two rails, resolved by chainConfigFor():
 //   • CELO (default): Celo's own facilitator (api.x402.celo.org — "Built by Celo Core Co."),
@@ -729,6 +741,27 @@ async function handleX402Request(req: Request) {
       // for any reason, quietly set `payerHasCode = false` and accepted an offline ecrecover —
       // the precise combination that lets a delegated account's signature through to the
       // facilitator. An RPC hiccup should never widen what we accept.
+      //
+      // 🔴 A SECOND, DEEPER HOLE: viem's `verifyTypedData`/`verifyHash` (viem/actions) is NOT a
+      // faithful stand-in for "what will SignatureChecker decide", even though it looks like one.
+      // Read its source (verifyHash.js): when the ERC-1271/6492 call THROWS — which is exactly
+      // what happens when `isValidSignature` answers anything other than the magic value —
+      // it catches that and falls back to `recoverAddress` (plain ecrecover) on its own, wrapped
+      // in a comment that says so outright: "Fallback attempt to verify the signature via ECDSA
+      // recovery". That is precisely the fallback this whole check exists to NOT have for a
+      // code-having account. So `verifyTypedDataOnChain` reported this exact payment's signature
+      // as valid — confirmed live: it returned `true` for the payer above — while a RAW
+      // `isValidSignature` call (no library, no fallback) against the same digest returns
+      // `0xffffffff`, and simulating `transferWithAuthorization` itself reverts with
+      // "FiatTokenV2: invalid signature". Three ways of asking the same question, and viem's own
+      // convenience wrapper is the one that disagrees with the token — because it quietly widens
+      // "invalid" back into "valid" the moment the delegate says no.
+      //
+      // The fix is to stop asking viem's wrapper the question at all and ask the token's own
+      // check directly: `isValidSignature` via `readContract`, nothing upstream of it, no catch
+      // that turns a refusal into ecrecover. A revert here (a delegate with no ERC-1271 at all)
+      // is treated the same as an explicit `0xffffffff` — both mean the account will not vouch
+      // for this signature, which is all `transferWithAuthorization` cares about either way.
       let payerHasCode = false;
       let signerOk = false;
       let onChainAnswered = false;
@@ -736,11 +769,22 @@ async function handleX402Request(req: Request) {
         const publicClient = getPublicClient(chainKey);
         const code = await publicClient.getCode({ address: auth.from as `0x${string}` }).catch(() => undefined);
         payerHasCode = Boolean(code && code !== '0x');
-        signerOk = await verifyTypedDataOnChain(publicClient, {
-          ...typedData,
-          address: auth.from as `0x${string}`,
-          signature: signature as `0x${string}`,
-        });
+        const digest = hashTypedData(typedData as any);
+        if (payerHasCode) {
+          const magic = await publicClient.readContract({
+            address: auth.from as `0x${string}`,
+            abi: ERC1271_IS_VALID_SIGNATURE_ABI,
+            functionName: 'isValidSignature',
+            args: [digest, signature as `0x${string}`],
+          }).catch(() => null);
+          signerOk = magic === '0x1626ba7e';
+        } else {
+          signerOk = await verifyTypedDataOnChain(publicClient, {
+            ...typedData,
+            address: auth.from as `0x${string}`,
+            signature: signature as `0x${string}`,
+          });
+        }
         onChainAnswered = true;
       } catch {
         onChainAnswered = false;
