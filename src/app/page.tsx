@@ -298,6 +298,33 @@ export default function Home() {
   // pointed at a different chain from the one the app was about to connect on.
   const [activeChain, setActiveChain] = useState<any>(isMainnet ? base : baseSepolia);
 
+  // ⚡ THE ONE PLACE THAT DECIDES "WHICH CHAINS CAN THIS ENVIRONMENT EVEN SEE."
+  //
+  // 🔴 BASE APP WAS NEVER ACTUALLY A LOCKED ENVIRONMENT — IT WAS PLAIN 'WEB' THAT HAPPENED TO
+  // AUTO-CONNECT. `environment` has a 'BASE' member in its type, but nothing ever sets it;
+  // isBaseAppBrowser() was only ever consulted for silent auto-connect (see AUTO_CONNECT_SURFACES
+  // in walletEnv.ts). So a Base App user got the full WEB experience underneath — both chains in
+  // the picker, an interactive network menu offering Celo, exactly the surface area someone
+  // running inside a Base-only wallet has no way to act on correctly.
+  //
+  // Adding a real 'BASE' environment state would touch every place `environment === 'WEB'` gates
+  // the proof-before-publish bridge, the auto-connect allowlist, the connect button — all
+  // machinery this is not meant to change. `chainLock` is deliberately a SEPARATE, PURELY
+  // DERIVED value: which single chain (if any) this surface is confined to, regardless of which
+  // `environment` bucket it falls under. Nothing here is state — it is recomputed every render
+  // from `environment` and the same browser signal Base App auto-connect already trusts, so nulling
+  // it out never requires its own effect or cleanup.
+  //
+  //   MINIPAY              -> Celo only  (MiniPay does not run on Base)
+  //   FARCASTER             -> Base only  (the Farcaster mini-app path targets Base)
+  //   WEB, inside Base App  -> Base only  (Base App is a Base wallet; Celo was never reachable)
+  //   anything else (plain WEB) -> null   (both chains, full switcher)
+  const chainLock: 'CELO' | 'BASE' | null =
+    environment === 'MINIPAY' ? 'CELO'
+    : environment === 'FARCASTER' ? 'BASE'
+    : (environment === 'WEB' && isBaseAppBrowser()) ? 'BASE'
+    : null;
+
   const [nairaAmount, setNairaAmount] = useState(""); 
   const [accountNumber, setAccountNumber] = useState("");
   const [customerPhone, setCustomerPhone] = useState("");
@@ -487,12 +514,21 @@ export default function Home() {
   const isInternational = activeCountry.code !== "NG";
 
   // ⚡ DYNAMIC NETWORK TEXT ⚡
+  //
+  // 🔴 PRE-CONNECT USED TO HARDCODE "Base & Celo" NO MATTER WHAT — even in MiniPay, even in
+  // Farcaster, even in Base App, all of which are already locked to one chain before a wallet is
+  // ever connected (connectMiniPay sets activeChain to Celo, the Farcaster branch sets it to
+  // Base, both BEFORE requesting addresses — see the Chameleon Environment Detector). This text
+  // was the one place that ignored that and showed both chains regardless, which is exactly the
+  // leak the user meant by "whether a user has connect wallet or not": AppFooter renders this
+  // unconditionally, so a MiniPay user who hasn't tapped Connect yet saw "Base & Celo" in the
+  // footer despite the rest of the app already behaving as Celo-only underneath.
   const activeNetworkDisplay = useMemo(() => {
-    if (!address) return "Base & Celo";
+    if (!address) return chainLock === 'CELO' ? 'Celo' : chainLock === 'BASE' ? 'Base' : 'Base & Celo';
     if (activeChain?.name?.toLowerCase().includes("base")) return "Base";
     if (activeChain?.name?.toLowerCase().includes("celo")) return "Celo";
     return activeChain?.name || "Base & Celo";
-  }, [address, activeChain]);
+  }, [address, activeChain, chainLock]);
 
   // ⚡ MULTI-CHAIN TOKEN FILTER & AUTO-SWITCHER ⚡
   //
@@ -1925,6 +1961,18 @@ export default function Home() {
 
   useEffect(() => { if (status && !isProcessing) { const timer = setTimeout(() => setStatus(""), 5000); return () => clearTimeout(timer); } }, [status, isProcessing]);
 
+  // ⚡ THE CONNECT-ERROR BANNER TIMES OUT TOO — IT USED TO SIT ON SCREEN UNTIL DISMISSED BY HAND.
+  //
+  // Every `setConnectError(...)` across the connect flow (declined, unreachable, no connector,
+  // Valora needing a fresh session, and more) fed one banner that never cleared itself. Once one
+  // fired, it stayed exactly as written — "Verifying your wallet was cancelled..." — until the
+  // NEXT connect attempt overwrote or cleared it, which reads as the app being stuck on an old
+  // message rather than a text banner that already did its job. Same rule the `status` line
+  // above already uses: long enough to actually read (10s — this one carries more to read than a
+  // one-line status), gone on its own after that. A brand new error arriving mid-countdown
+  // restarts the clock rather than racing the old timer to clear it early.
+  useEffect(() => { if (connectError) { const timer = setTimeout(() => setConnectError(null), 10_000); return () => clearTimeout(timer); } }, [connectError]);
+
   // ⚡ DeAI AGENT ALLOWANCE (AbaPayV3) ⚡
   //
   // Two on-chain transactions, both signed BY THE USER from their own wallet:
@@ -2574,8 +2622,21 @@ export default function Home() {
     (async () => {
       try {
         const timestamp = Date.now().toString();
+        // 🔴 A SHORTER BUDGET THAN A REAL PAYMENT SIGNATURE GETS, ON PURPOSE.
+        //
+        // "Cancel and it keeps rolling — supposed to stop and show Connect right away." Some
+        // wallets (MiniPay among them — the same uncertainty already documented elsewhere in
+        // this file) don't reliably REJECT a declined signMessage; the promise can simply never
+        // settle, and the only thing that ends it is withWalletTimeout's own budget. The default
+        // is 90s, sized for a real payment the user might be reading carefully before approving.
+        // Proving wallet ownership is not that — it is one quick prompt with nothing to weigh —
+        // so a decline that never rejects should not cost the user a minute and a half of a
+        // spinner reading "Verifying" before Connect reappears. 20s is still generous for
+        // actually reading and tapping Approve; it just stops pretending a silent decline might
+        // still resolve on its own past that point.
         const signature = String(await withWalletTimeout(
           proofSigner.signMessage({ account: proofAddress as `0x${string}`, message: walletSessionMessage(timestamp) }) as Promise<string>,
+          20_000,
         ));
         if (cancelled) return;
         const proof = { address: proofAddress, signature, timestamp };
@@ -3817,19 +3878,28 @@ export default function Home() {
           </div>
           <div className="flex items-center flex-wrap justify-end gap-2" data-tour="wallet-connect">
 
-            {address && (
+            {address && (() => {
+              // 🔴 INTERACTIVE ONLY WHEN NOTHING LOCKS THE CHAIN — NOT MERELY "environment IS WEB."
+              //
+              // Base App used to read as plain WEB here, so it got the full interactive switcher
+              // — Celo included, on a wallet that never runs on Celo. `chainLock` is the one
+              // source of truth for whether there is anything to switch between at all; `menuInteractive`
+              // collapses to exactly the old `environment === 'WEB'` check for ordinary WEB (chainLock
+              // is null there), so nothing changes for the case this always worked for.
+              const menuInteractive = environment === 'WEB' && !chainLock;
+              return (
               <div className="relative shrink-0" ref={chainMenuRef}>
                 <button
-                  onClick={() => { if (environment === 'WEB' && !isProcessing) setChainMenuOpen((open) => !open); }}
-                  disabled={environment !== 'WEB' || isProcessing}
+                  onClick={() => { if (menuInteractive && !isProcessing) setChainMenuOpen((open) => !open); }}
+                  disabled={!menuInteractive || isProcessing}
                   aria-haspopup="menu"
                   aria-expanded={chainMenuOpen}
-                  title={environment === 'WEB' ? 'Network and wallet' : `Locked to ${activeChain?.name}`}
+                  title={menuInteractive ? 'Network and wallet' : `Locked to ${activeChain?.name}`}
                   className={`flex w-full px-2.5 py-1.5 rounded-xl border items-center gap-1.5 shadow-sm transition-all ${
                      activeChain?.name?.toLowerCase().includes('base')
                         ? 'bg-blue-50 dark:bg-blue-900/20 border-blue-200 dark:border-blue-800/50 text-blue-700 dark:text-blue-400'
                         : 'bg-emerald-50 dark:bg-emerald-900/20 border-emerald-200 dark:border-emerald-800/50 text-emerald-700 dark:text-emerald-400'
-                  } ${environment === 'WEB' ? 'cursor-pointer hover:scale-105 active:scale-95' : 'cursor-default opacity-80'}`}
+                  } ${menuInteractive ? 'cursor-pointer hover:scale-105 active:scale-95' : 'cursor-default opacity-80'}`}
                 >
                     {isProcessing ? (
                         <Loader2 size={10} className="animate-spin" />
@@ -3837,13 +3907,13 @@ export default function Home() {
                         <div className={`w-1.5 h-1.5 rounded-full animate-pulse ${activeChain?.name?.toLowerCase().includes('base') ? 'bg-blue-500' : 'bg-emerald-500'}`}></div>
                     )}
                     <span className="text-[9px] font-black uppercase tracking-widest">{activeNetworkDisplay}</span>
-                    {environment === 'WEB' && !isProcessing && (
+                    {menuInteractive && !isProcessing && (
                       <ChevronDown size={10} className={`opacity-60 ml-0.5 transition-transform ${chainMenuOpen ? 'rotate-180' : ''}`} />
                     )}
                 </button>
 
                 {/* Only on demand, and gone the moment something is chosen. */}
-                {chainMenuOpen && environment === 'WEB' && (
+                {chainMenuOpen && menuInteractive && (
                   // 🔴 ANCHORED LEFT, NOT RIGHT — THE MENU WAS FALLING OFF THE SCREEN.
                   //
                   // The badge sits at the START of a right-aligned header row, so `right-0`
@@ -3895,6 +3965,24 @@ export default function Home() {
                   </div>
                 )}
               </div>
+              );
+            })()}
+
+            {/* ⚡ THE EXIT BUTTON — FARCASTER AND BASE APP GET ONE TOO, NOW.
+                Both are chain-locked (chainLock='BASE') exactly like MiniPay is locked to Celo,
+                but only MiniPay ever had a way to disconnect and start over. `handleDisconnect`
+                already exists and already does the right thing for a wagmi-backed connection —
+                both Farcaster and Base App connect through it — so this is the same control
+                MiniPay gets, offered wherever chainLock says the environment is a single-chain
+                one, standing alone rather than inside a menu that has nothing else to offer. */}
+            {address && chainLock && environment !== 'MINIPAY' && (
+              <button
+                onClick={handleDisconnect}
+                title="Disconnect"
+                className="p-1.5 rounded-lg bg-rose-50 dark:bg-rose-900/20 hover:bg-rose-100 dark:hover:bg-rose-900/40 border border-rose-200 dark:border-rose-800/50 text-rose-700 dark:text-rose-400 transition-all active:scale-95 shrink-0"
+              >
+                <LogOut size={12} />
+              </button>
             )}
 
                                     {/* ⚡ NEW: Dynamic Connect Button / Smart Environment Routing ⚡ */}
