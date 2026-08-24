@@ -312,14 +312,43 @@ async function handleX402Request(req: Request) {
     // body; the price fallback below still produces a valid 402 challenge.
   }
 
+  // 🔴 THE PUBLISHED CONTRACT WAS NOT ACTUALLY CALLABLE. Two mismatches, both silent:
+  //
+  //   1. `extensions.bazaar.info.input.method` declares GET (it must — CDP's own /validate
+  //      probes with GET and REJECTED our earlier 'POST' declaration outright), but every
+  //      parameter was read from `await req.json()`. A GET carries no JSON body, so an agent
+  //      following our advertised contract to the letter got a challenge back and had no way
+  //      to say what it wanted to buy.
+  //   2. The declared body names the amount field `amount`; this handler destructured
+  //      `nairaAmount`. An agent sending exactly what we published produced `undefined` here,
+  //      then NaN, then a null vendAmount — a bill for nothing.
+  //
+  // Both are fixed by meeting the published contract where it actually is rather than by
+  // rewriting the declaration to match the internals: query params are accepted as a fallback
+  // (which is how a GET-declared HTTP resource is meant to be parameterised — see the
+  // `queryParams` block the indexed listings publish, mirrored in our declaration now), and
+  // `amount` is accepted as an alias for `nairaAmount`.
+  //
+  // Precedence is deliberate: the JSON body WINS. The real app posts a body and must behave
+  // exactly as before — query params are strictly an additive path for agents, never something
+  // that can override what a paying client actually sent.
+  let query: Record<string, string> = {};
+  try {
+    query = Object.fromEntries(new URL(req.url).searchParams.entries());
+  } catch { /* an unparseable URL is not worth failing a payment over */ }
+  const params: any = { ...query, ...body };
+
   const {
     serviceID, serviceCategory, network, billersCode, phone,
     token: tokenSymbol, variation_code, subscription_type,
-    nairaAmount, foreignAmount, displayAmount, wallet_address,
+    foreignAmount, displayAmount, wallet_address,
     operator_id, country_code, product_type_id, email,
     meter_account_type, blockchain,
     customer_name, customer_address, source_channel,
-  } = body;
+  } = params;
+  // `amount` is the PUBLISHED name, `nairaAmount` the one the first-party client has always
+  // sent. Accept both; the first-party name wins so nothing about the existing flow shifts.
+  const nairaAmount = params.nairaAmount ?? params.amount;
 
   const isMainnet = process.env.NEXT_PUBLIC_NETWORK === 'mainnet' || process.env.NEXT_PUBLIC_NETWORK === 'celo' || process.env.NEXT_PUBLIC_NETWORK === 'base';
   const isForeign = serviceID === 'foreign-airtime';
@@ -462,8 +491,13 @@ async function handleX402Request(req: Request) {
         // silently absent — never the listing itself.
         serviceName: 'AbaPay', // ≤32 printable-ASCII chars per spec; well under
         tags: ['bills', 'airtime', 'utility', 'nigeria', 'payments'], // ≤5 tags, each ≤32 chars
-        iconUrl: 'https://abapays.com/logo.png', // absolute https, matches the URL already used
-                                                  // for wagmi's WalletConnect metadata icon
+        // 🔴 www, NOT THE APEX. `abapays.com` 307-redirects to `www.abapays.com` (Vercel domain
+        // config), so the apex URL this used to carry was a redirect, not an image. Service
+        // metadata is soft-dropped FIELD BY FIELD on a validation failure, so the cost was a
+        // silently missing icon rather than a lost listing — which is exactly why it survived
+        // this long unnoticed. `resource.url` never had the problem: it comes from `req.url`,
+        // so it already self-reports whichever host actually served the request.
+        iconUrl: 'https://www.abapays.com/logo.png',
       },
       accepts: [acceptEntry],
       // ⚡ BAZAAR DISCOVERY — WHAT MAKES THIS ENDPOINT FINDABLE BY AGENTS.
@@ -511,6 +545,26 @@ async function handleX402Request(req: Request) {
                   variation_code: { type: 'string', description: 'Plan code for DATA, CABLE and EDUCATION — obtained from the provider catalogue.' },
                 },
               },
+              // ⚡ THE PARAMETER PATH THAT MATCHES THE DECLARED METHOD.
+              //
+              // Declaring GET while describing only a JSON body was a contract nothing could
+              // actually call — a GET has no body to put those fields in. The indexed listings
+              // that DO work publish both (the live catalogue entry we read back from
+              // /discovery/resources declares `body`, `queryParams` and `method: GET` together),
+              // and the handler now reads query params as a fallback to match. Same fields, same
+              // meanings — this is the GET-shaped way to send them, not a second API.
+              queryParams: {
+                type: 'object',
+                required: ['serviceID', 'amount'],
+                properties: {
+                  serviceID: { type: 'string', description: 'Biller code, e.g. "mtn", "ikeja-electric", "dstv".' },
+                  serviceCategory: { type: 'string', enum: ['AIRTIME', 'DATA', 'ELECTRICITY', 'CABLE', 'EDUCATION', 'INTERNATIONAL'], description: 'Which kind of bill is being paid.' },
+                  amount: { type: 'number', description: 'Face value of the bill in Nigerian Naira (NGN).' },
+                  phone: { type: 'string', description: 'Recipient phone number for airtime, data, or the delivery receipt.' },
+                  billersCode: { type: 'string', description: 'Meter number, smartcard number, or account identifier for the biller.' },
+                  variation_code: { type: 'string', description: 'Plan code for DATA, CABLE and EDUCATION — obtained from the provider catalogue.' },
+                },
+              },
             },
             output: {
               type: 'json',
@@ -533,6 +587,20 @@ async function handleX402Request(req: Request) {
                 type: 'object',
                 properties: {
                   body: {
+                    type: 'object',
+                    required: ['serviceID', 'amount'],
+                    properties: {
+                      serviceID: { type: 'string' },
+                      serviceCategory: { type: 'string' },
+                      amount: { type: 'number' },
+                      phone: { type: 'string' },
+                      billersCode: { type: 'string' },
+                      variation_code: { type: 'string' },
+                    },
+                  },
+                  // Mirrors the `queryParams` block in `info.input` above — the schema and the
+                  // info block describing DIFFERENT shapes is itself a validation failure.
+                  queryParams: {
                     type: 'object',
                     required: ['serviceID', 'amount'],
                     properties: {
