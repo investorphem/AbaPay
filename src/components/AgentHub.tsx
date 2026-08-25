@@ -310,7 +310,20 @@ export function AgentHub({ address, selectedToken, activeChainName, onApproveAll
           </div>
         </div>
 
-        {hasAllowance ? (
+        {/* 🔴 WITH NO WALLET CONNECTED WE KNOW NOTHING — SO SAY NOTHING, RATHER THAN "NO LIMIT SET".
+            An allowance lives on chain against a specific address. With no address there is no
+            allowance to have an opinion about, and the "the agent can't spend anything yet"
+            branch below was being rendered anyway: a positive claim about the chain made from an
+            unread state. That matters most in the one case where someone would come looking —
+            checking whether an agent is still authorised to spend — where it would reassure them
+            wrongly. Not connected is its own state, and it asks rather than asserts. */}
+        {!address ? (
+          <div className="mb-3 p-3 rounded-2xl bg-slate-50 dark:bg-[#1a1a1f] border border-slate-100 dark:border-slate-800/80">
+            <p className="text-xs text-slate-500 dark:text-slate-400">
+              Connect your wallet to see whether the agent has a spending limit for {approvalTokenSymbol} on {approvalChain}. Any limit you set previously stays live on chain until you change it — connecting or disconnecting here doesn&apos;t affect it.
+            </p>
+          </div>
+        ) : hasAllowance ? (
           <div className="mb-3 p-3 rounded-2xl bg-emerald-50 dark:bg-emerald-900/20 border border-emerald-100 dark:border-emerald-900/40">
             <p className="text-[10px] uppercase tracking-widest font-black text-emerald-700 dark:text-emerald-400">Agent can spend up to</p>
             <p className="text-2xl font-black text-emerald-700 dark:text-emerald-400">{Number(currentAllowance).toFixed(2)} {approvalTokenSymbol} <span className="text-xs font-bold text-emerald-600/70 dark:text-emerald-400/70">on {approvalChain}</span></p>

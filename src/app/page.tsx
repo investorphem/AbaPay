@@ -3366,14 +3366,20 @@ export default function Home() {
     try { const saved = localStorage.getItem(`abapay_beneficiaries_${address}`); if (saved) setBeneficiaries(JSON.parse(saved)); else setBeneficiaries({}); } catch (e) {}
   }, [address]);
 
-  // 🔴 THE SAME STALE-AFTER-DISCONNECT CLASS AS THE BALANCE BELOW, FOUND WHILE AUDITING FOR IT.
+  // 🔴 DELIBERATELY NOT CLEARED ON DISCONNECT — AN ALLOWANCE IS AN ON-CHAIN FACT.
   //
-  // `agentAllowance` is only ever cleared by checkAgentAllowanceFor, and that runs from the Agent
-  // Hub — nothing calls it when the wallet leaves. So opening the Agent Hub, disconnecting, and
-  // looking again showed the previous wallet's "Agent can spend up to…" figure, which is both
-  // wrong and reads as though the departed wallet still has a live approval. Not reported yet;
-  // it is the identical shape of bug and cheap to close now rather than after someone hits it.
-  useEffect(() => { if (!address) setAgentAllowance(null); }, [address]);
+  // A previous version of this cleared `agentAllowance` when `address` went null, by analogy with
+  // the balance below. That was wrong, and worse than doing nothing: `null` makes AgentHub render
+  // "No limit set … the agent can't spend anything yet for this combo" (see hasAllowance there),
+  // which is a POSITIVE CLAIM ABOUT THE CHAIN. Disconnecting from this app revokes nothing — the
+  // ERC-20 approval is still live, and the agent can still spend against it — so that message
+  // would have been a lie told at exactly the moment a user might be checking whether they are
+  // exposed.
+  //
+  // Connecting is about who may USE the app, not about what is true on chain. The right lever for
+  // anything a disconnected user shouldn't see is to withhold it (the balance below, history,
+  // beneficiaries — all of which are per-wallet readouts that mean nothing without a wallet), not
+  // to overwrite it with a value that asserts something false.
 
   useEffect(() => {
     // 🔴 DISCONNECTING MUST ZERO THE BALANCE — IT USED TO LEAVE THE LAST ONE ON SCREEN.
