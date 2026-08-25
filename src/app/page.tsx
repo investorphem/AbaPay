@@ -273,6 +273,16 @@ export default function Home() {
   // every mutation keeps its own fresh, per-action signature.
   const [walletProof, setWalletProof] = useState<{ address: string; signature: string; timestamp: string } | null>(null);
   const walletProofInFlight = useRef(false);
+  // 🔴 WHICH ADDRESS THE APP CURRENTLY CARES ABOUT — read by the in-flight verification to decide
+  // whether its result is still wanted. It replaces the per-run `cancelled` flag that used to make
+  // that call, and the difference is the whole bug: `cancelled` asks "was my effect run
+  // superseded?", which is NOT the same question as "is this signature still useful?". A signature
+  // proves ownership of the address it was made for no matter how many times the effect re-ran
+  // while the wallet was thinking. See the verification effect below.
+  // `string | null | undefined` mirrors proofAddress exactly: it is wagmiAddress (undefined when
+  // absent) for WEB, minipayPending?.address for MiniPay, and `address` (null when absent)
+  // elsewhere. Narrowing it would just move the null-handling somewhere less honest.
+  const proofAddressRef = useRef<string | null | undefined>(undefined);
 
   /** Headers for a request that must prove wallet ownership, or null when unproven. */
   const walletProofHeaders = useCallback((): Record<string, string> | null => {
@@ -2600,6 +2610,18 @@ export default function Home() {
   // exists, before the wallet has answered at all).
   const [minipayVerifyFailed, setMinipayVerifyFailed] = useState(false);
 
+  // Kept current every render so the in-flight verification can ask "is this signature still for
+  // the address the app cares about?" instead of "was my effect run superseded?" — see the note
+  // on proofAddressRef, and the deadlock described in the effect below.
+  proofAddressRef.current = proofAddress;
+
+  // Bumped when an in-flight verification finishes for an address the app has since moved off.
+  // Without it the OTHER half of the same deadlock stays open: the in-flight guard makes a run
+  // for the new address bail while the old one is still pending, and when the old one finally
+  // returns it is correctly discarded — leaving nothing to ask for the new address's signature.
+  // That is a real case (switching accounts in the wallet mid-prompt), not a theoretical one.
+  const [proofRecheck, setProofRecheck] = useState(0);
+
   useEffect(() => {
     if (!proofAddress || !proofSigner) return;
     if (walletProof && walletProof.address.toLowerCase() === proofAddress.toLowerCase()) return;
@@ -2617,8 +2639,36 @@ export default function Home() {
       }
     } catch { /* an unreadable cache just means we ask again */ }
 
+    // 🔴 THE "I SIGN AND IT SAYS VERIFYING FOR LIFE" DEADLOCK — AND THE CANCEL ONE, SAME CAUSE.
+    //
+    // This used to guard every outcome with a per-run `cancelled` flag set by the effect cleanup.
+    // Combined with the `walletProofInFlight` ref above, that produced a permanent hang the moment
+    // ANYTHING changed this effect's dependencies while the wallet was showing its prompt:
+    //
+    //   1. the effect starts, sets walletProofInFlight = true, awaits signMessage
+    //   2. a dependency changes (in MiniPay: the environment detector re-ran and handed us a
+    //      brand-new wallet client — see the re-entry guard on that effect), so React runs this
+    //      cleanup and sets cancelled = true
+    //   3. the effect re-runs, hits `if (walletProofInFlight.current) return` and bails — correct
+    //      on its face, since a prompt IS already open, so no second prompt is raised
+    //   4. the user signs. The promise resolves. `if (cancelled) return` THROWS THE SIGNATURE AWAY
+    //   5. `finally` clears the in-flight flag — but nothing is left to re-trigger the effect,
+    //      because the dependency change that started all this already happened
+    //   6. walletProof is never set, so `awaitingProof` stays true forever: "Verifying" spins for
+    //      life. Declining took the identical path — the catch's `if (cancelled) return` skipped
+    //      setMinipayVerifyFailed too, so the retry UI never appeared either.
+    //
+    // That is why shortening the signature timeout didn't help: the timeout fires correctly, and
+    // its rejection is then discarded by the same guard.
+    //
+    // The fix is to ask the right question. A signature is valid for the address it was made for,
+    // regardless of how many times this effect re-ran while the wallet was thinking — so the
+    // result is applied whenever it still matches the address the app currently wants
+    // (proofAddressRef), and only discarded when the user has genuinely moved to a different
+    // wallet. No `cancelled` flag, so no way to strand a completed result.
     walletProofInFlight.current = true;
-    let cancelled = false;
+    const stillWanted = () =>
+      proofAddressRef.current?.toLowerCase() === proofAddress.toLowerCase();
     (async () => {
       try {
         const timestamp = Date.now().toString();
@@ -2638,12 +2688,15 @@ export default function Home() {
           proofSigner.signMessage({ account: proofAddress as `0x${string}`, message: walletSessionMessage(timestamp) }) as Promise<string>,
           20_000,
         ));
-        if (cancelled) return;
         const proof = { address: proofAddress, signature, timestamp };
-        setWalletProof(proof);
+        // Cached FIRST, before the still-wanted check: the cache is keyed by address, so storing a
+        // proof the user just made is right even if they have since switched away — coming back to
+        // that address in this session then costs no second prompt.
         try { sessionStorage.setItem(`abapay_wallet_proof_${proofAddress.toLowerCase()}`, JSON.stringify(proof)); } catch { /* private mode */ }
+        if (!stillWanted()) return;
+        setWalletProof(proof);
       } catch (e) {
-        if (cancelled) return;
+        if (!stillWanted()) return;
         // 🔴 ON THE WEB, FAILING TO VERIFY DISCONNECTS — WHATEVER THE FAILURE LOOKED LIKE.
         //
         // This used to disconnect only on a recognised rejection and otherwise leave the user
@@ -2686,10 +2739,19 @@ export default function Home() {
         //
         // A latch that is only ever set on the failure path is a trap. Released unconditionally.
         walletProofInFlight.current = false;
+        // The app moved to a different address while this one was in the wallet, so the run that
+        // would have asked for THAT address's signature bailed on the in-flight guard above.
+        // Nothing else will re-trigger it — the dependency change that superseded us has already
+        // happened — so it is re-triggered explicitly here. See proofRecheck.
+        if (!stillWanted()) setProofRecheck((n) => n + 1);
       }
     })();
-    return () => { cancelled = true; };
-  }, [proofAddress, proofSigner, walletProof, handleDisconnect, environment]);
+    // No cleanup: there is deliberately nothing to cancel. An in-flight signature request cannot
+    // be recalled from the wallet anyway, and the only thing the old cleanup did was set the flag
+    // that stranded the answer when it came back. Whether the result is still wanted is decided
+    // by stillWanted() at the moment it arrives, which is when the question can actually be
+    // answered correctly.
+  }, [proofAddress, proofSigner, walletProof, handleDisconnect, environment, proofRecheck]);
 
   // ⚡ THE MANUAL CONNECT PATH ⚡
   //
@@ -3100,7 +3162,33 @@ export default function Home() {
   }, [wagmiConnector, isWagmiConnected]);
 
   // ⚡ 2. THE CHAMELEON ENVIRONMENT DETECTOR ⚡
+  //
+  // 🔴 IT USED TO RE-DETECT EVERY TIME IT DETECTED SOMETHING — AND RECONNECT THE WALLET EACH TIME.
+  //
+  // `environment` was in this effect's dependency array while `detectAndConnect` is what SETS
+  // `environment`. So the very first successful detection changed a dependency and re-ran the
+  // whole effect: detect MiniPay, setEnvironment('MINIPAY'), connectMiniPay() — then immediately
+  // detect MiniPay again and call connectMiniPay() a SECOND time. That second call builds a brand
+  // new viem wallet client and hands it to setMinipayPending, which changes `proofSigner`'s
+  // identity, which changes the verification effect's dependencies WHILE the wallet is showing
+  // its signature prompt. The deadlock that produced is written up in full on that effect; the
+  // short version is that the signature came back to an effect run that had already been told to
+  // throw its answer away, and "Verifying" then span forever whether the user signed or cancelled.
+  //
+  // It also meant MiniPay was asked for accounts twice on every load, and Farcaster likewise got
+  // a fresh client and a repeat setAddress/setClient on each pass.
+  //
+  // Detection is a once-per-page-load question, so it is now guarded by a ref and no longer
+  // depends on its own output. The 2-second LOADING fallback reads `environment` through a ref
+  // for the same reason — it needs the current value without making that value a trigger.
+  const environmentDetectionStarted = useRef(false);
+  const environmentRef = useRef(environment);
+  environmentRef.current = environment;
+
   useEffect(() => {
+    if (environmentDetectionStarted.current) return;
+    environmentDetectionStarted.current = true;
+
     let timeoutId: NodeJS.Timeout;
 
     const detectAndConnect = async () => {
@@ -3153,13 +3241,17 @@ export default function Home() {
     };
 
     timeoutId = setTimeout(() => {
-        if (environment === 'LOADING') setEnvironment('WEB');
+        if (environmentRef.current === 'LOADING') setEnvironment('WEB');
     }, 2000);
 
     detectAndConnect();
 
     return () => clearTimeout(timeoutId);
-  }, [isMainnet, environment, connectMiniPay]);
+    // `environment` is deliberately NOT a dependency — this effect sets it, and depending on it is
+    // what made detection re-enter and reconnect the wallet mid-verification (see above). The two
+    // remaining deps are stable for the life of the page (`isMainnet` comes from an env var,
+    // `connectMiniPay` is a useCallback over it), so with the ref guard this runs exactly once.
+  }, [isMainnet, connectMiniPay]);
 
   useEffect(() => {
     fetch('https://open.er-api.com/v6/latest/USD')
