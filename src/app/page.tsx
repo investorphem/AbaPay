@@ -2544,6 +2544,27 @@ export default function Home() {
    * leave it would do exactly that on the next render — disconnecting them into an immediate
    * reconnection. The flag is cleared by handleConnectClick, so pressing Connect is what opts
    * back in.
+   *
+   * 🔴 …AND THE PROOF HAS TO GO WITH IT, WHICH IS WHAT WAS ACTUALLY BROKEN IN BASE APP.
+   *
+   * "I click exit, I see the disconnected notification, but it immediately connects again and
+   * shows the balance." The logout flag above was never the problem — clearing `walletProof` was
+   * missing, and the WEB bridge republishes on exactly three conditions: wagmi still reports a
+   * connection, it has an address, and `walletProof` matches that address. wagmi's disconnect()
+   * is asynchronous, so for at least one render after this runs all three were still true — the
+   * bridge then called setAddress(wagmiAddress) again AND
+   * `localStorage.removeItem('abapay_explicit_logout')`, destroying the very guard that was
+   * supposed to prevent the reconnect. The user was disconnected and re-connected in the same
+   * tick, with the flag wiped on the way through.
+   *
+   * Dropping the proof removes the bridge's third condition, so there is nothing to republish
+   * while wagmi finishes tearing the session down. The cached copy in sessionStorage goes too:
+   * leaving it means the verification effect reads it back on its very next run and restores
+   * `walletProof` from cache, which reopens the same hole a moment later. Every key is cleared
+   * rather than just this address's, so no dependency on which address was live is needed here —
+   * and after an explicit disconnect no wallet's proof should survive anyway.
+   * handleMiniPayDisconnect has always done both of these, which is why MiniPay's own Disconnect
+   * never showed this bug.
    */
   const handleDisconnect = useCallback(() => {
     setChainMenuOpen(false);
@@ -2554,6 +2575,12 @@ export default function Home() {
     userInitiatedConnect.current = false;
     setAddress(null);
     setClient(null);
+    setWalletProof(null);
+    try {
+      Object.keys(sessionStorage)
+        .filter((k) => k.startsWith('abapay_wallet_proof_'))
+        .forEach((k) => sessionStorage.removeItem(k));
+    } catch { /* private mode — nothing was cached to begin with */ }
     setConnectError(null);
     showToast('Wallet Disconnected', 'Your wallet is no longer connected. Tap Connect when you want to pay.', 'success');
   }, [disconnect]);
@@ -2626,6 +2653,17 @@ export default function Home() {
     if (!proofAddress || !proofSigner) return;
     if (walletProof && walletProof.address.toLowerCase() === proofAddress.toLowerCase()) return;
     if (walletProofInFlight.current) return;
+    // 🔴 DON'T CHASE A SIGNATURE FROM SOMEONE WHO JUST LEFT.
+    //
+    // handleDisconnect now clears `walletProof` (without that, Base App reconnected itself
+    // instantly — see the note there). But wagmi's disconnect() is asynchronous, so for a render
+    // or two afterwards `proofAddress`/`proofSigner` are still populated from wagmi while the
+    // proof is gone — precisely the state this effect exists to resolve, which would have it pop
+    // a signature request at someone who just pressed Exit. The same flag the auto-connect
+    // effect already respects, and handleConnectClick already clears, is the honest answer to
+    // "did the user ask to be here?". MiniPay is excluded because it never sets that flag: its
+    // own Disconnect clears minipayPending outright, so proofAddress goes away by itself.
+    if (environment === 'WEB' && localStorage.getItem('abapay_explicit_logout') === 'true') return;
 
     // A proof from earlier in this browser session is reused rather than re-prompted — a wallet
     // popup on every reload is how people are trained to sign without reading.
@@ -3328,7 +3366,39 @@ export default function Home() {
     try { const saved = localStorage.getItem(`abapay_beneficiaries_${address}`); if (saved) setBeneficiaries(JSON.parse(saved)); else setBeneficiaries({}); } catch (e) {}
   }, [address]);
 
+  // 🔴 DELIBERATELY NOT CLEARED ON DISCONNECT — AN ALLOWANCE IS AN ON-CHAIN FACT.
+  //
+  // A previous version of this cleared `agentAllowance` when `address` went null, by analogy with
+  // the balance below. That was wrong, and worse than doing nothing: `null` makes AgentHub render
+  // "No limit set … the agent can't spend anything yet for this combo" (see hasAllowance there),
+  // which is a POSITIVE CLAIM ABOUT THE CHAIN. Disconnecting from this app revokes nothing — the
+  // ERC-20 approval is still live, and the agent can still spend against it — so that message
+  // would have been a lie told at exactly the moment a user might be checking whether they are
+  // exposed.
+  //
+  // Connecting is about who may USE the app, not about what is true on chain. The right lever for
+  // anything a disconnected user shouldn't see is to withhold it (the balance below, history,
+  // beneficiaries — all of which are per-wallet readouts that mean nothing without a wallet), not
+  // to overwrite it with a value that asserts something false.
+
   useEffect(() => {
+    // 🔴 DISCONNECTING MUST ZERO THE BALANCE — IT USED TO LEAVE THE LAST ONE ON SCREEN.
+    //
+    // "When I exit the wallet the balance is not turning to zero in MiniPay." This effect re-runs
+    // when `address` goes null, and `fetchBalance` then bailed on its own `if (!address) return`
+    // WITHOUT touching `walletBalance` — so the last figure fetched for the wallet that just left
+    // stayed rendered, and `isFetchingBalance` kept whatever value it had. Every sibling effect
+    // already gets this right (`if (!address) { setTransactions([]); return; }` and the
+    // beneficiaries one directly above); this was the one that only guarded and never cleared.
+    //
+    // Not MiniPay-specific despite where it was noticed — it is keyed on `address`, so any
+    // disconnect in any environment left a stale balance behind.
+    if (!address || !activeChain) {
+      setWalletBalance("0.00");
+      setIsFetchingBalance(false);
+      return;
+    }
+
     async function fetchBalance() {
       if (!address || !activeChain) return;
       setIsFetchingBalance(true);
