@@ -295,6 +295,18 @@ export default function Home() {
     };
   }, [walletProof, address]);
   const [client, setClient] = useState<WalletClient | null>(null);
+  // 🔴 THE BASE SIGNATURE REFUSAL WAS THIS RACE, CONFIRMED LIVE, NOT THE ACCOUNT.
+  //
+  // Proven with the same wallet, same delegated Base account, minutes apart: one payment
+  // settled over x402, the next was refused by the account's own ERC-1271, the retry (a fresh
+  // connection) settled again. The diagnostic added to pin this down reported `usingWagmiClient:
+  // false` on the refused one — `client` had locked onto the manually-built fallback below
+  // instead of wagmi's own WalletClient, and stayed there, because the effect that builds it
+  // returns early the instant `client` is non-null and never looks again. Whichever one won the
+  // race at connect time is what every payment for that session signs with — permanently, even
+  // after wagmi's resolves a moment later. This ref is what lets the effect tell the two apart
+  // so it can upgrade instead of staying locked to whichever arrived first.
+  const clientSourceRef = useRef<'wagmi' | 'fallback' | null>(null);
 
   // ⚡ SMART MAINNET DETECTOR ⚡
   const isMainnet = 
@@ -2527,6 +2539,7 @@ export default function Home() {
     setMinipayPending(null);
     setAddress(null);
     setClient(null);
+    clientSourceRef.current = null;
     setWalletProof(null);
     setMinipayVerifyFailed(false);
     showToast('Wallet Disconnected', 'Tap Connect when you want to pay.', 'success');
@@ -2592,6 +2605,7 @@ export default function Home() {
     userInitiatedConnect.current = false;
     setAddress(null);
     setClient(null);
+    clientSourceRef.current = null;
     setWalletProof(null);
     try {
       Object.keys(sessionStorage)
@@ -3021,13 +3035,23 @@ export default function Home() {
     const targetChain = wagmiChain || (isMainnet ? base : baseSepolia);
     setActiveChain(targetChain);
 
-    if (client) return;
-
-    // ⚡ Wagmi's official WalletClient, so WalletConnect sockets can properly sign.
+    // ⚡ Wagmi's official WalletClient, so WalletConnect sockets can properly sign — and the one
+    // that ALWAYS wins when it's available, even if a fallback client (below) already got set
+    // first. See the note on clientSourceRef: staying locked onto the fallback once wagmi's
+    // client resolves is the exact race that produced a signature Base's SignatureChecker
+    // accepted from ecrecover but the payer's own smart account refused via ERC-1271 — signed
+    // fine again the moment a fresh connection happened to win the race the other way.
     if (wagmiWalletClient) {
-      setClient((wagmiWalletClient as any).extend(eip5792Actions()));
+      if (clientSourceRef.current !== 'wagmi') {
+        clientSourceRef.current = 'wagmi';
+        setClient((wagmiWalletClient as any).extend(eip5792Actions()));
+      }
       return;
     }
+
+    // Already have a fallback client and wagmi's still isn't ready — keep using it rather than
+    // rebuilding on every render; the block above will upgrade the moment wagmi's client exists.
+    if (client) return;
 
     // 🔴 …AND A FALLBACK, BECAUSE `useWalletClient()` CAN SIMPLY NOT RESOLVE.
     //
@@ -3044,7 +3068,9 @@ export default function Home() {
     // Building the client straight from the connector's own provider — the same shape the
     // MiniPay and Farcaster paths already use — removes the dependency on that query
     // succeeding at all. The switch-to-a-supported-chain effect below fixes the underlying
-    // mismatch; this makes sure a wallet is usable either way.
+    // mismatch; this makes sure a wallet is usable either way. It is deliberately a LAST resort
+    // now, not a permanent one — the block above reclaims the wallet the moment wagmi's own
+    // client is ready, so this only ever signs while that gap lasts.
     let cancelled = false;
     (async () => {
       try {
@@ -3055,7 +3081,10 @@ export default function Home() {
           chain: targetChain,
           transport: custom(provider as any),
         }).extend(eip5792Actions());
-        if (!cancelled) setClient(fallbackClient);
+        if (!cancelled) {
+          clientSourceRef.current = 'fallback';
+          setClient(fallbackClient);
+        }
       } catch (e) {
         console.error('[wallet] Could not build a wallet client from the connector:', e);
       }
@@ -3104,6 +3133,9 @@ export default function Home() {
     if (address === null && client === null) return;
     setAddress(null);
     setClient(null);
+    // Otherwise a session that ended on 'wagmi' leaves the next connection's fallback client
+    // (built before wagmi's own resolves again) permanently unreachable — see clientSourceRef.
+    clientSourceRef.current = null;
   }, [environment, isWagmiConnected, wagmiAddress, address, client]);
 
   // ⚡ NO AUTO-CONNECT IN VALORA — PAIR FRESH OR NOT AT ALL ⚡
