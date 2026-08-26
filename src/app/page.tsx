@@ -1827,6 +1827,23 @@ export default function Home() {
 
     const { backendPayload, uiCategory, displayNetwork, payloadBillersCode, currentBlockchainName } = buildBackendPayload();
 
+    // 🔎 TEMPORARY DIAGNOSTIC — pinning down a live Base signature refusal (delegated/smart
+    // account whose ERC-1271 sometimes accepts this wallet's x402 signature and sometimes
+    // refuses it, on the same wallet, days apart, with nothing in AbaPay's own code visibly
+    // different between the two). Rides along in the POST body so the server's existing
+    // "SIGNATURE REFUSED" alert can report exactly which wallet-client path and connector
+    // produced the rejected signature, instead of guessing after the fact. Safe to delete once
+    // this is root-caused: it changes nothing about how the payment is signed or settled.
+    const clientDiag = {
+      usingWagmiClient: client === wagmiWalletClient,
+      connectorId: (wagmiConnector as any)?.id,
+      connectorName: (wagmiConnector as any)?.name,
+      environment,
+      activeChainId: activeChain?.id,
+      walletReportedChainId: await client.getChainId().catch((e: any) => `error: ${e?.message}`),
+    };
+    console.log('[x402][diag]', clientDiag);
+
     try {
       // 🔴 AND IT COULD HANG FOREVER. The contract-call path wraps its wallet interaction in
       // withWalletTimeout; this one had nothing, so a signature request that never reached the
@@ -1849,7 +1866,7 @@ export default function Home() {
       // double charge. See the WalletTimeoutError branch there.
       const finalStatus: any = await payWithX402({
         url: '/api/pay/x402',
-        body: backendPayload,
+        body: { ...backendPayload, _clientDiag: clientDiag },
         client,
         account: address as `0x${string}`,
         expectedChainId: activeChain?.id,

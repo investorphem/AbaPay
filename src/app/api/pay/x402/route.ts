@@ -850,18 +850,27 @@ async function handleX402Request(req: Request) {
       let payerHasCode = false;
       let signerOk = false;
       let onChainAnswered = false;
+      // 🔎 TEMPORARY DIAGNOSTIC — see the matching note in page.tsx's processX402Payment.
+      // Captured regardless of outcome so a refusal alert carries the exact digest and the
+      // ERC-1271 call's own error (currently swallowed to `null` for the pass/fail decision,
+      // which is correct there — a revert must mean "refused", same as an explicit 0xffffffff —
+      // but throws away the *reason*, which is exactly what's missing to root-cause a refusal
+      // that comes and goes on the same wallet).
+      let debugDigest: string | undefined;
+      let debugMagicError: string | undefined;
       try {
         const publicClient = getPublicClient(chainKey);
         const code = await publicClient.getCode({ address: auth.from as `0x${string}` }).catch(() => undefined);
         payerHasCode = Boolean(code && code !== '0x');
         const digest = hashTypedData(typedData as any);
+        debugDigest = digest;
         if (payerHasCode) {
           const magic = await publicClient.readContract({
             address: auth.from as `0x${string}`,
             abi: ERC1271_IS_VALID_SIGNATURE_ABI,
             functionName: 'isValidSignature',
             args: [digest, signature as `0x${string}`],
-          }).catch(() => null);
+          }).catch((err: any) => { debugMagicError = err?.shortMessage || err?.message || String(err); return null; });
           signerOk = magic === '0x1626ba7e';
         } else {
           signerOk = await verifyTypedDataOnChain(publicClient, {
@@ -903,7 +912,13 @@ async function handleX402Request(req: Request) {
           `payer \`${auth.from}\`${payerHasCode ? ' · has code ⚠️' : ''}\n` +
           `ecrecover gives \`${recovered}\`\n` +
           `domain \`${tokenDomain.name}\` v\`${tokenDomain.version}\` · chainId \`${Number(String(chainCfg.caip2).split(':')[1])}\`\n` +
-          `asset \`${usdc.address}\``,
+          `asset \`${usdc.address}\`` +
+          // 🔎 TEMPORARY DIAGNOSTIC — remove once the intermittent refusal is root-caused.
+          `\n\n*diagnostic*\n` +
+          `digest \`${debugDigest || 'n/a'}\`\n` +
+          `signature \`${signature}\`\n` +
+          `1271 call \`${debugMagicError || '(no error — got an explicit non-magic return)'}\`\n` +
+          `client \`${JSON.stringify(body?._clientDiag || 'not sent')}\``,
         ).catch(() => {});
 
         return NextResponse.json(
