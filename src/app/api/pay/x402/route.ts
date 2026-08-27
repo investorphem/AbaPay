@@ -9,7 +9,6 @@ import { enqueueRefund } from '@/lib/refunds';
 import { readAuthorization, checkAuthorization, isRetryableSettleFailure, settleResponseNamesTransaction, buildAuthorizationStateCall, parseAuthorizationState, transferAuthorizationTypedData, type X402Authorization } from '@/lib/x402Settle';
 import { rpcUrlsFor } from '@/lib/chain';
 import { verifyTypedData, recoverTypedDataAddress, hashTypedData } from 'viem';
-import { verifyTypedData as verifyTypedDataOnChain } from 'viem/actions';
 import { getPublicClient } from '@/lib/chain';
 
 // ⚡ THE RAW ERC-1271 CHECK — deliberately not viem's `verifyTypedData`/`verifyHash`, which
@@ -22,6 +21,47 @@ const ERC1271_IS_VALID_SIGNATURE_ABI = [{
   stateMutability: 'view',
   inputs: [{ name: 'hash', type: 'bytes32' }, { name: 'signature', type: 'bytes' }],
   outputs: [{ name: '', type: 'bytes4' }],
+}] as const;
+
+// ⚡ THE CALL THE FACILITATOR ACTUALLY MAKES — both EIP-3009 overloads.
+//
+// 🔴 WHY THIS EXISTS, AND WHY THE ERC-1271 READ ABOVE IS NO LONGER THE GATE. Asking the payer's
+// account "do you vouch for this signature?" is a PROXY for the question that matters, and the
+// proxy was observed disagreeing with reality on a live payment: the same delegated Base account,
+// same 65-byte ECDSA shape, same delegate, minutes apart — one authorization settled on-chain
+// while its neighbour was refused by `isValidSignature`, both signatures recovering to the payer
+// over their own digest. A stateless "recover and compare" cannot do that, so whatever that
+// delegate consults, WE cannot model it — and every model of it we ship is a guess that can
+// refuse a payment the token would have accepted.
+//
+// So stop modelling. `transferWithAuthorization` is the call the facilitator submits and the only
+// verdict that binds: simulate exactly it, against the real token, with the real signature, and
+// let it answer. Right for a plain EOA, a 7702-delegated EOA, a smart account, and whatever
+// validation scheme any of them use — because it never asks how the token decides, only what it
+// decides. The revert reason it hands back is also specific ("invalid signature" vs "expired" vs
+// "authorization is used") where the 1271 read could only ever say a bare no.
+const TRANSFER_WITH_AUTHORIZATION_VRS_ABI = [{
+  name: 'transferWithAuthorization',
+  type: 'function',
+  stateMutability: 'nonpayable',
+  inputs: [
+    { name: 'from', type: 'address' }, { name: 'to', type: 'address' }, { name: 'value', type: 'uint256' },
+    { name: 'validAfter', type: 'uint256' }, { name: 'validBefore', type: 'uint256' }, { name: 'nonce', type: 'bytes32' },
+    { name: 'v', type: 'uint8' }, { name: 'r', type: 'bytes32' }, { name: 's', type: 'bytes32' },
+  ],
+  outputs: [],
+}] as const;
+
+const TRANSFER_WITH_AUTHORIZATION_BYTES_ABI = [{
+  name: 'transferWithAuthorization',
+  type: 'function',
+  stateMutability: 'nonpayable',
+  inputs: [
+    { name: 'from', type: 'address' }, { name: 'to', type: 'address' }, { name: 'value', type: 'uint256' },
+    { name: 'validAfter', type: 'uint256' }, { name: 'validBefore', type: 'uint256' }, { name: 'nonce', type: 'bytes32' },
+    { name: 'signature', type: 'bytes' },
+  ],
+  outputs: [],
 }] as const;
 
 // ⚡ x402 SETTLEMENT — MAIN APP ONLY. Two rails, resolved by chainConfigFor():
@@ -858,26 +898,67 @@ async function handleX402Request(req: Request) {
       // that comes and goes on the same wallet).
       let debugDigest: string | undefined;
       let debugMagicError: string | undefined;
+      let debugRevert: string | undefined;
+      let authorizationAlreadyUsed = false;
       try {
         const publicClient = getPublicClient(chainKey);
         const code = await publicClient.getCode({ address: auth.from as `0x${string}` }).catch(() => undefined);
         payerHasCode = Boolean(code && code !== '0x');
-        const digest = hashTypedData(typedData as any);
-        debugDigest = digest;
+        debugDigest = hashTypedData(typedData as any);
+
+        // Kept purely as an observation for the alert — it is NO LONGER what decides. When the
+        // simulation and this disagree, the simulation is right and this line is the evidence of
+        // the disagreement, which is exactly how the false refusal above was caught.
         if (payerHasCode) {
           const magic = await publicClient.readContract({
             address: auth.from as `0x${string}`,
             abi: ERC1271_IS_VALID_SIGNATURE_ABI,
             functionName: 'isValidSignature',
-            args: [digest, signature as `0x${string}`],
+            args: [debugDigest as `0x${string}`, signature as `0x${string}`],
           }).catch((err: any) => { debugMagicError = err?.shortMessage || err?.message || String(err); return null; });
-          signerOk = magic === '0x1626ba7e';
-        } else {
-          signerOk = await verifyTypedDataOnChain(publicClient, {
-            ...typedData,
-            address: auth.from as `0x${string}`,
-            signature: signature as `0x${string}`,
-          });
+          debugMagicError = debugMagicError ?? `returned ${magic}`;
+        }
+
+        // 🔴 THE AUTHORITATIVE CHECK: simulate the facilitator's own call against the token.
+        // Matched to the overload CDP actually submits (0xe3ee160e, the v/r/s one) for a plain
+        // 65-byte signature, and the `bytes` overload for anything longer — a smart account's
+        // wrapped signature has no v/r/s to split and must go through as opaque bytes.
+        const sigHex = signature as `0x${string}`;
+        const sigBytes = (sigHex.length - 2) / 2;
+        const simArgs = [
+          auth.from as `0x${string}`, auth.to as `0x${string}`, BigInt(auth.value),
+          BigInt(auth.validAfter), BigInt(auth.validBefore), auth.nonce as `0x${string}`,
+        ] as const;
+        try {
+          if (sigBytes === 65) {
+            await publicClient.simulateContract({
+              address: usdc.address as `0x${string}`,
+              abi: TRANSFER_WITH_AUTHORIZATION_VRS_ABI,
+              functionName: 'transferWithAuthorization',
+              args: [...simArgs, parseInt(sigHex.slice(130, 132), 16),
+                     `0x${sigHex.slice(2, 66)}` as `0x${string}`, `0x${sigHex.slice(66, 130)}` as `0x${string}`],
+              // transferWithAuthorization is permissionless — the submitter is irrelevant to
+              // whether it reverts, so any sender simulates the facilitator faithfully.
+              account: auth.from as `0x${string}`,
+            });
+          } else {
+            await publicClient.simulateContract({
+              address: usdc.address as `0x${string}`,
+              abi: TRANSFER_WITH_AUTHORIZATION_BYTES_ABI,
+              functionName: 'transferWithAuthorization',
+              args: [...simArgs, sigHex],
+              account: auth.from as `0x${string}`,
+            });
+          }
+          signerOk = true;
+        } catch (err: any) {
+          const reason = err?.shortMessage || err?.message || String(err);
+          debugRevert = reason;
+          // ⚠️ "Already used" is NOT a bad signature and MUST NOT fall back — the money has
+          // moved. Let the settle path and authorizationWasConsumed handle it as they already do,
+          // rather than sending the payer to sign a second payment for a bill they just paid.
+          authorizationAlreadyUsed = /authorization is used|already (been )?used|nonce.{0,20}used/i.test(reason);
+          signerOk = authorizationAlreadyUsed;
         }
         onChainAnswered = true;
       } catch {
@@ -913,11 +994,14 @@ async function handleX402Request(req: Request) {
           `ecrecover gives \`${recovered}\`\n` +
           `domain \`${tokenDomain.name}\` v\`${tokenDomain.version}\` · chainId \`${Number(String(chainCfg.caip2).split(':')[1])}\`\n` +
           `asset \`${usdc.address}\`` +
-          // 🔎 TEMPORARY DIAGNOSTIC — remove once the intermittent refusal is root-caused.
-          `\n\n*diagnostic*\n` +
+          `\n\n*why*\n` +
+          // The token's own verdict, in its own words — this is what decided, not the 1271 read.
+          `simulated \`transferWithAuthorization\` reverted:\n\`${(debugRevert || 'n/a').slice(0, 300)}\`\n\n` +
+          `*diagnostic*\n` +
           `digest \`${debugDigest || 'n/a'}\`\n` +
           `signature \`${signature}\`\n` +
-          `1271 call \`${debugMagicError || '(no error — got an explicit non-magic return)'}\`\n` +
+          `erc-1271 (observation only) \`${debugMagicError || 'n/a'}\`\n` +
+          `auth \`${JSON.stringify({ value: String(auth.value), validAfter: String(auth.validAfter), validBefore: String(auth.validBefore), nonce: auth.nonce, to: auth.to })}\`\n` +
           `client \`${JSON.stringify(body?._clientDiag || 'not sent')}\``,
         ).catch(() => {});
 
