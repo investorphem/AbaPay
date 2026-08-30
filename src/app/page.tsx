@@ -308,6 +308,40 @@ export default function Home() {
   // so it can upgrade instead of staying locked to whichever arrived first.
   const clientSourceRef = useRef<'wagmi' | 'fallback' | null>(null);
 
+  // 🔴 THE SAME "THE USER LEFT" SIGNAL THE EFFECTS USE, BUT READABLE DURING RENDER.
+  //
+  // `abapay_explicit_logout` is what stops auto-connect and the ownership-signature effect from
+  // dragging someone back in after they press Disconnect. Both of those are effects, so reading
+  // localStorage there is fine. `awaitingProof` is computed during RENDER, where localStorage is
+  // off-limits — it does not exist during SSR, and a read there cannot re-render when the value
+  // changes — so the same fact has to exist as React state.
+  //
+  // 🔴 WITHOUT IT, BASE APP DEADLOCKS ON DISCONNECT. Base App is not its own environment; it runs
+  // as 'WEB' with an injected wallet (see the chainLock note above), and that wallet stays
+  // connected straight through wagmi's disconnect() — so `wagmiAddress`, and therefore
+  // `proofAddress`, SURVIVES the disconnect. The verification effect then does exactly the right
+  // thing and refuses to ask for a signature, because the user just left. But that leaves
+  // `walletProof` null forever, and `awaitingProof` reads "there is an address and no proof" as
+  // "still verifying" — so the Connect button sat spinning and DISABLED, reading "Verifying",
+  // with a page reload the only way out. Reported exactly that way.
+  //
+  // A reload cleared it only because the flag also blocks auto-connect, so `wagmiAddress` was
+  // never repopulated on the way back in — the deadlock needed a live wallet to hold it open.
+  const [explicitLogout, setExplicitLogout] = useState(false);
+  useEffect(() => {
+    try { setExplicitLogout(localStorage.getItem('abapay_explicit_logout') === 'true'); } catch { /* private mode */ }
+  }, []);
+  // Every write goes through these two, so the stored flag and the render-visible state cannot
+  // disagree — which is the only way this fix stays true as the flag gains more call sites.
+  const markExplicitLogout = useCallback(() => {
+    try { localStorage.setItem('abapay_explicit_logout', 'true'); } catch { /* private mode */ }
+    setExplicitLogout(true);
+  }, []);
+  const clearExplicitLogout = useCallback(() => {
+    try { localStorage.removeItem('abapay_explicit_logout'); } catch { /* private mode */ }
+    setExplicitLogout(false);
+  }, []);
+
   // ⚡ SMART MAINNET DETECTOR ⚡
   const isMainnet = 
     process.env.NEXT_PUBLIC_NETWORK === "mainnet" || 
@@ -2599,7 +2633,7 @@ export default function Home() {
   const handleDisconnect = useCallback(() => {
     setChainMenuOpen(false);
     try { disconnect(); } catch { /* best effort — the local state below is what the UI reads */ }
-    localStorage.setItem('abapay_explicit_logout', 'true');
+    markExplicitLogout();
     localStorage.removeItem('abapay_connected');
     autoConnectTried.current = false;
     userInitiatedConnect.current = false;
@@ -2614,7 +2648,7 @@ export default function Home() {
     } catch { /* private mode — nothing was cached to begin with */ }
     setConnectError(null);
     showToast('Wallet Disconnected', 'Your wallet is no longer connected. Tap Connect when you want to pay.', 'success');
-  }, [disconnect]);
+  }, [disconnect, markExplicitLogout]);
 
   // 🔐 ASK FOR THE OWNERSHIP SIGNATURE ONCE PER SESSION, RIGHT AFTER CONNECTING.
   //
@@ -2660,7 +2694,13 @@ export default function Home() {
    */
   const awaitingProof = Boolean(
     (environment === 'WEB' || environment === 'MINIPAY') && proofAddress &&
-    !(walletProof && walletProof.address.toLowerCase() === proofAddress.toLowerCase()),
+    !(walletProof && walletProof.address.toLowerCase() === proofAddress.toLowerCase()) &&
+    // 🔴 AND ONLY WHILE A SIGNATURE IS ACTUALLY COMING. This condition mirrors, exactly, the
+    // guard the verification effect uses to decide NOT to ask — see explicitLogout. Claiming to
+    // wait for a signature nobody is going to request is what left Base App's Connect button
+    // spinning on "Verifying" and disabled after a disconnect, recoverable only by reloading.
+    // If we will not ask, we are not waiting.
+    !(environment === 'WEB' && explicitLogout),
   );
 
   // True only AFTER an actual decline/failure — never while the first request is still pending,
@@ -2694,7 +2734,12 @@ export default function Home() {
     // effect already respects, and handleConnectClick already clears, is the honest answer to
     // "did the user ask to be here?". MiniPay is excluded because it never sets that flag: its
     // own Disconnect clears minipayPending outright, so proofAddress goes away by itself.
-    if (environment === 'WEB' && localStorage.getItem('abapay_explicit_logout') === 'true') return;
+    // Either source is enough to stop, deliberately. The state is what `awaitingProof` can see
+    // during render, so checking it here keeps the two from disagreeing — but on the very first
+    // commit the state is still its initial `false` while the init effect has not landed yet, and
+    // the stored flag is right immediately. Asking a user who already left to sign is the worse
+    // failure of the two, so the stored flag stays in the condition rather than being replaced.
+    if (environment === 'WEB' && (explicitLogout || localStorage.getItem('abapay_explicit_logout') === 'true')) return;
 
     // A proof from earlier in this browser session is reused rather than re-prompted — a wallet
     // popup on every reload is how people are trained to sign without reading.
@@ -2820,7 +2865,7 @@ export default function Home() {
     // that stranded the answer when it came back. Whether the result is still wanted is decided
     // by stillWanted() at the moment it arrives, which is when the question can actually be
     // answered correctly.
-  }, [proofAddress, proofSigner, walletProof, handleDisconnect, environment, proofRecheck]);
+  }, [proofAddress, proofSigner, walletProof, handleDisconnect, environment, proofRecheck, explicitLogout]);
 
   // ⚡ THE MANUAL CONNECT PATH ⚡
   //
@@ -2838,7 +2883,7 @@ export default function Home() {
   const handleConnectClick = useCallback(async () => {
     if (isConnecting) return;
 
-    localStorage.removeItem('abapay_explicit_logout');
+    clearExplicitLogout();
     userInitiatedConnect.current = true; // this one is deliberate — never auto-dropped below
     setConnectError(null);
     setIsConnecting(true);
@@ -3003,7 +3048,7 @@ export default function Home() {
     } finally {
       setIsConnecting(false);
     }
-  }, [connectors, connectAsync, isConnecting, injectedCandidates, askWhichWallet]);
+  }, [connectors, connectAsync, isConnecting, injectedCandidates, askWhichWallet, clearExplicitLogout]);
 
   // =======================================================================
 
@@ -3030,7 +3075,7 @@ export default function Home() {
     if (!verified) return;
 
     setAddress(wagmiAddress);
-    localStorage.removeItem('abapay_explicit_logout');
+    clearExplicitLogout();
 
     const targetChain = wagmiChain || (isMainnet ? base : baseSepolia);
     setActiveChain(targetChain);
@@ -3090,7 +3135,7 @@ export default function Home() {
       }
     })();
     return () => { cancelled = true; };
-  }, [environment, isWagmiConnected, wagmiAddress, wagmiChain, isMainnet, client, wagmiWalletClient, wagmiConnector, walletProof]);
+  }, [environment, isWagmiConnected, wagmiAddress, wagmiChain, isMainnet, client, wagmiWalletClient, wagmiConnector, walletProof, clearExplicitLogout]);
 
   // ⚡ MINIPAY BRIDGE — THE SAME GATE, FOR THE ONE ENVIRONMENT THAT DIDN'T HAVE IT ⚡
   //
