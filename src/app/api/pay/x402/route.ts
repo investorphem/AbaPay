@@ -485,6 +485,151 @@ async function handleX402Request(req: Request) {
   const resourceUrl = req.url;
   const caip2Network = chainCfg.caip2;
 
+  // ⚡ BAZAAR DISCOVERY — WHAT MAKES THIS ENDPOINT FINDABLE BY AGENTS.
+  //
+  // Coinbase's Bazaar is one of the catalogs agent wallets search for x402 services, and
+  // there is no submission form: CDP indexes a resource the first time a real payment
+  // SETTLES through its facilitator for that URL, and only if the settled PaymentRequirements
+  // carries this block.
+  //
+  // The shape is not guessed. It is what CDP's own validator
+  // (POST /platform/v2/x402/validate) demands — it names each missing path individually,
+  // `bazaar.info`, `bazaar.info.input.type`, `bazaar.info.input.method`, `bazaar.schema`
+  // required, `bazaar.info.output.example` advisory — and it matches the blocks live
+  // listings publish today (read back from GET /platform/v2/x402/discovery/resources).
+  //
+  // The description is written for an AGENT deciding whether this service does what its
+  // user asked, which is also how the catalog ranks quality: a bare endpoint name scores
+  // nothing. Say the country, the services, the currency and the settlement asset.
+  //
+  // 🔴 DEFINED HERE, NOT INLINE ON THE 402 CHALLENGE BELOW — attaching it only to the
+  // buyer-facing challenge was the actual reason CDP never catalogued this route despite
+  // real settlements. Per x402-foundation/x402#2112 (multiple independently-confirmed
+  // reproductions, most recently a controlled test against CDP's own /verify error output
+  // changing shape once this landed on the right object): CDP validates and catalogs the
+  // extension it finds on the `paymentRequirements` object POSTed to `/verify` and
+  // `/settle` — a *separate* object from the 402 body, built fresh at settle time below
+  // (see `settleRequirements` / `facilitatorPaymentRequirements`). A declaration that only
+  // exists on the challenge is invisible to that call no matter how it's worded. Building
+  // it once here and spreading `acceptEntry` into both the challenge's `accepts[0]` AND the
+  // settle-time requirements is what makes the same object reach both places.
+  const bazaarExtension = {
+    bazaar: {
+      info: {
+        input: {
+          type: 'http',
+          // 🔴 WAS 'POST' — WHICH IS TRUE, BUT NOT WHAT ANY DISCOVERY CRAWLER ACTUALLY USES.
+          //
+          // CDP's own /validate probes this endpoint with GET and reported a REQUIRED
+          // failure: "declares method POST but was probed with GET". This route exports
+          // BOTH `GET` and `POST` (route.ts) — both call the identical handler — so GET was
+          // never wrong to probe with; the metadata just claimed a method nothing discovers
+          // it by. That mismatch is why `valid` stayed false even after a real settlement:
+          // one required check failing keeps the resource out of the catalog regardless of
+          // how many payments have gone through.
+          method: 'GET',
+          discoverable: true,
+          body: {
+            type: 'object',
+            required: ['serviceID', 'amount'],
+            properties: {
+              serviceID: { type: 'string', description: 'Biller code, e.g. "mtn", "ikeja-electric", "dstv".' },
+              serviceCategory: { type: 'string', enum: ['AIRTIME', 'DATA', 'ELECTRICITY', 'CABLE', 'EDUCATION', 'INTERNATIONAL'], description: 'Which kind of bill is being paid.' },
+              amount: { type: 'number', description: 'Face value of the bill in Nigerian Naira (NGN).' },
+              phone: { type: 'string', description: 'Recipient phone number for airtime, data, or the delivery receipt.' },
+              billersCode: { type: 'string', description: 'Meter number, smartcard number, or account identifier for the biller.' },
+              variation_code: { type: 'string', description: 'Plan code for DATA, CABLE and EDUCATION — obtained from the provider catalogue.' },
+            },
+          },
+          // ⚡ THE PARAMETER PATH THAT MATCHES THE DECLARED METHOD.
+          //
+          // Declaring GET while describing only a JSON body was a contract nothing could
+          // actually call — a GET has no body to put those fields in. The indexed listings
+          // that DO work publish both (the live catalogue entry we read back from
+          // /discovery/resources declares `body`, `queryParams` and `method: GET` together),
+          // and the handler now reads query params as a fallback to match. Same fields, same
+          // meanings — this is the GET-shaped way to send them, not a second API.
+          queryParams: {
+            type: 'object',
+            required: ['serviceID', 'amount'],
+            properties: {
+              serviceID: { type: 'string', description: 'Biller code, e.g. "mtn", "ikeja-electric", "dstv".' },
+              serviceCategory: { type: 'string', enum: ['AIRTIME', 'DATA', 'ELECTRICITY', 'CABLE', 'EDUCATION', 'INTERNATIONAL'], description: 'Which kind of bill is being paid.' },
+              amount: { type: 'number', description: 'Face value of the bill in Nigerian Naira (NGN).' },
+              phone: { type: 'string', description: 'Recipient phone number for airtime, data, or the delivery receipt.' },
+              billersCode: { type: 'string', description: 'Meter number, smartcard number, or account identifier for the biller.' },
+              variation_code: { type: 'string', description: 'Plan code for DATA, CABLE and EDUCATION — obtained from the provider catalogue.' },
+            },
+          },
+        },
+        output: {
+          type: 'json',
+          example: {
+            success: true,
+            status: 'SUCCESS',
+            message: 'Airtime purchase successful',
+            tx_hash: '0xe1f5043ae4250e570dcdedfd0944b1f5b230b51d78046019c6e1ad711f786e64',
+            request_id: '2026082109476tc53yp30jk3',
+            amount_naira: 1000,
+            token_used: 'USDC',
+          },
+        },
+      },
+      schema: {
+        $schema: 'https://json-schema.org/draft/2020-12/schema',
+        type: 'object',
+        properties: {
+          input: {
+            type: 'object',
+            properties: {
+              body: {
+                type: 'object',
+                required: ['serviceID', 'amount'],
+                properties: {
+                  serviceID: { type: 'string' },
+                  serviceCategory: { type: 'string' },
+                  amount: { type: 'number' },
+                  phone: { type: 'string' },
+                  billersCode: { type: 'string' },
+                  variation_code: { type: 'string' },
+                },
+              },
+              // Mirrors the `queryParams` block in `info.input` above — the schema and the
+              // info block describing DIFFERENT shapes is itself a validation failure.
+              queryParams: {
+                type: 'object',
+                required: ['serviceID', 'amount'],
+                properties: {
+                  serviceID: { type: 'string' },
+                  serviceCategory: { type: 'string' },
+                  amount: { type: 'number' },
+                  phone: { type: 'string' },
+                  billersCode: { type: 'string' },
+                  variation_code: { type: 'string' },
+                },
+              },
+              method: { type: 'string', enum: ['GET'] },
+            },
+          },
+          output: {
+            type: 'object',
+            properties: {
+              example: {
+                type: 'object',
+                properties: {
+                  success: { type: 'boolean' },
+                  status: { type: 'string' },
+                  tx_hash: { type: 'string' },
+                  request_id: { type: 'string' },
+                },
+              },
+            },
+          },
+        },
+      },
+    },
+  };
+
   // Field set is deliberately a superset of both x402 v1 and v2 PaymentRequirements:
   // `maxAmountRequired`/`resource`/`description`/`mimeType` are what thirdweb's client
   // (node_modules/thirdweb/src/x402/schemas.ts — extends the OLD x402/types package's
@@ -492,6 +637,11 @@ async function handleX402Request(req: Request) {
   // x402scan's validator checks for. Extra fields are simply ignored by whichever side
   // doesn't look for them — verified thirdweb only reads `body.accepts[]` and doesn't
   // validate unknown top-level keys.
+  //
+  // ⚡ `extensions` LIVES HERE, NOT BOLTED ON SEPARATELY AT SETTLE TIME — see the comment on
+  // `bazaarExtension` above. Every downstream requirements object (`accepts[0]` on the
+  // challenge, `settleRequirements`, `facilitatorPaymentRequirements`) is built by spreading
+  // `acceptEntry`, so putting it here once is what gets it onto all three.
   const acceptEntry = {
     scheme: 'exact',
     network: caip2Network,
@@ -504,6 +654,7 @@ async function handleX402Request(req: Request) {
     maxTimeoutSeconds: 86400,
     asset: usdc.address,
     extra: { name: tokenDomain.name, version: tokenDomain.version, primaryType: 'TransferWithAuthorization' },
+    extensions: bazaarExtension,
   };
 
   if (!paymentHeader) {
@@ -540,139 +691,9 @@ async function handleX402Request(req: Request) {
         iconUrl: 'https://www.abapays.com/logo.png',
       },
       accepts: [acceptEntry],
-      // ⚡ BAZAAR DISCOVERY — WHAT MAKES THIS ENDPOINT FINDABLE BY AGENTS.
-      //
-      // Coinbase's Bazaar is one of the catalogs agent wallets search for x402 services, and
-      // there is no submission form: CDP indexes a resource the first time a real payment
-      // SETTLES through its facilitator for that URL, and only if the 402 advertises this block.
-      // `extensions` was an empty object, so every check below failed and the route could never
-      // have been listed however much traffic it took.
-      //
-      // The shape is not guessed. It is what CDP's own validator
-      // (POST /platform/v2/x402/validate) demands — it names each missing path individually,
-      // `bazaar.info`, `bazaar.info.input.type`, `bazaar.info.input.method`, `bazaar.schema`
-      // required, `bazaar.info.output.example` advisory — and it matches the blocks live
-      // listings publish today (read back from GET /platform/v2/x402/discovery/resources).
-      //
-      // The description is written for an AGENT deciding whether this service does what its
-      // user asked, which is also how the catalog ranks quality: a bare endpoint name scores
-      // nothing. Say the country, the services, the currency and the settlement asset.
-      extensions: {
-        bazaar: {
-          info: {
-            input: {
-              type: 'http',
-              // 🔴 WAS 'POST' — WHICH IS TRUE, BUT NOT WHAT ANY DISCOVERY CRAWLER ACTUALLY USES.
-              //
-              // CDP's own /validate probes this endpoint with GET and reported a REQUIRED
-              // failure: "declares method POST but was probed with GET". This route exports
-              // BOTH `GET` and `POST` (route.ts) — both call the identical handler — so GET was
-              // never wrong to probe with; the metadata just claimed a method nothing discovers
-              // it by. That mismatch is why `valid` stayed false even after a real settlement:
-              // one required check failing keeps the resource out of the catalog regardless of
-              // how many payments have gone through.
-              method: 'GET',
-              discoverable: true,
-              body: {
-                type: 'object',
-                required: ['serviceID', 'amount'],
-                properties: {
-                  serviceID: { type: 'string', description: 'Biller code, e.g. "mtn", "ikeja-electric", "dstv".' },
-                  serviceCategory: { type: 'string', enum: ['AIRTIME', 'DATA', 'ELECTRICITY', 'CABLE', 'EDUCATION', 'INTERNATIONAL'], description: 'Which kind of bill is being paid.' },
-                  amount: { type: 'number', description: 'Face value of the bill in Nigerian Naira (NGN).' },
-                  phone: { type: 'string', description: 'Recipient phone number for airtime, data, or the delivery receipt.' },
-                  billersCode: { type: 'string', description: 'Meter number, smartcard number, or account identifier for the biller.' },
-                  variation_code: { type: 'string', description: 'Plan code for DATA, CABLE and EDUCATION — obtained from the provider catalogue.' },
-                },
-              },
-              // ⚡ THE PARAMETER PATH THAT MATCHES THE DECLARED METHOD.
-              //
-              // Declaring GET while describing only a JSON body was a contract nothing could
-              // actually call — a GET has no body to put those fields in. The indexed listings
-              // that DO work publish both (the live catalogue entry we read back from
-              // /discovery/resources declares `body`, `queryParams` and `method: GET` together),
-              // and the handler now reads query params as a fallback to match. Same fields, same
-              // meanings — this is the GET-shaped way to send them, not a second API.
-              queryParams: {
-                type: 'object',
-                required: ['serviceID', 'amount'],
-                properties: {
-                  serviceID: { type: 'string', description: 'Biller code, e.g. "mtn", "ikeja-electric", "dstv".' },
-                  serviceCategory: { type: 'string', enum: ['AIRTIME', 'DATA', 'ELECTRICITY', 'CABLE', 'EDUCATION', 'INTERNATIONAL'], description: 'Which kind of bill is being paid.' },
-                  amount: { type: 'number', description: 'Face value of the bill in Nigerian Naira (NGN).' },
-                  phone: { type: 'string', description: 'Recipient phone number for airtime, data, or the delivery receipt.' },
-                  billersCode: { type: 'string', description: 'Meter number, smartcard number, or account identifier for the biller.' },
-                  variation_code: { type: 'string', description: 'Plan code for DATA, CABLE and EDUCATION — obtained from the provider catalogue.' },
-                },
-              },
-            },
-            output: {
-              type: 'json',
-              example: {
-                success: true,
-                status: 'SUCCESS',
-                message: 'Airtime purchase successful',
-                tx_hash: '0xe1f5043ae4250e570dcdedfd0944b1f5b230b51d78046019c6e1ad711f786e64',
-                request_id: '2026082109476tc53yp30jk3',
-                amount_naira: 1000,
-                token_used: 'USDC',
-              },
-            },
-          },
-          schema: {
-            $schema: 'https://json-schema.org/draft/2020-12/schema',
-            type: 'object',
-            properties: {
-              input: {
-                type: 'object',
-                properties: {
-                  body: {
-                    type: 'object',
-                    required: ['serviceID', 'amount'],
-                    properties: {
-                      serviceID: { type: 'string' },
-                      serviceCategory: { type: 'string' },
-                      amount: { type: 'number' },
-                      phone: { type: 'string' },
-                      billersCode: { type: 'string' },
-                      variation_code: { type: 'string' },
-                    },
-                  },
-                  // Mirrors the `queryParams` block in `info.input` above — the schema and the
-                  // info block describing DIFFERENT shapes is itself a validation failure.
-                  queryParams: {
-                    type: 'object',
-                    required: ['serviceID', 'amount'],
-                    properties: {
-                      serviceID: { type: 'string' },
-                      serviceCategory: { type: 'string' },
-                      amount: { type: 'number' },
-                      phone: { type: 'string' },
-                      billersCode: { type: 'string' },
-                      variation_code: { type: 'string' },
-                    },
-                  },
-                  method: { type: 'string', enum: ['GET'] },
-                },
-              },
-              output: {
-                type: 'object',
-                properties: {
-                  example: {
-                    type: 'object',
-                    properties: {
-                      success: { type: 'boolean' },
-                      status: { type: 'string' },
-                      tx_hash: { type: 'string' },
-                      request_id: { type: 'string' },
-                    },
-                  },
-                },
-              },
-            },
-          },
-        },
-      },
+      // Same object `acceptEntry.extensions` carries into settle — see `bazaarExtension`
+      // above for what this declares and why it can no longer live only here.
+      extensions: acceptEntry.extensions,
     };
     const v1Body = { x402Version: 1, error: 'Payment required', accepts: [acceptEntry] };
     return NextResponse.json(v1Body, {
