@@ -206,6 +206,23 @@ export interface X402PayParams {
    * app that ignored the first.
    */
   onRetry?: (reason: string, nextAttempt: number) => void;
+  /**
+   * Called the moment a signature comes back from the wallet, before the settle request goes
+   * out — the one checkpoint this rail has between "waiting on the user" and "done".
+   *
+   * 🔴 WITHOUT IT, THE UI LIES FOR THE ENTIRE SETTLE WINDOW. The page sets one status before
+   * calling payWithX402 — "Approve this payment in your wallet..." — and nothing again until
+   * this function resolves or throws. But the wallet interaction ends the moment the signature
+   * lands; everything after that (POSTing X-PAYMENT, the facilitator settling the EIP-3009
+   * authorization on-chain, this route's own VTpass vend call — all inside the ONE settle
+   * request below) is the app talking to a server, not waiting on the user. A payer who has
+   * already tapped Approve keeps reading "in your wallet..." through however long settlement
+   * and vending actually take, which is precisely the gap the contract-call rail never has:
+   * that flow has its own broadcast + confirmation status in between. This callback gives x402
+   * the same checkpoint, so the page can say "sent — confirming" instead of continuing to ask
+   * for an approval that has already happened.
+   */
+  onSigned?: () => void;
 }
 
 /**
@@ -245,7 +262,7 @@ export async function payWithX402(params: X402PayParams): Promise<Record<string,
 }
 
 /** One attempt: challenge → signature → settle. Every retry starts again from the challenge. */
-async function attemptX402Payment({ url, body, client, account, expectedChainId, wrapSignature }: X402PayParams): Promise<Record<string, unknown>> {
+async function attemptX402Payment({ url, body, client, account, expectedChainId, wrapSignature, onSigned }: X402PayParams): Promise<Record<string, unknown>> {
   const post = (headers: Record<string, string>) =>
     fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json', ...headers }, body: JSON.stringify(body) });
 
@@ -366,6 +383,11 @@ async function attemptX402Payment({ url, body, client, account, expectedChainId,
     },
   });
   const signature = await (wrapSignature ? wrapSignature(signPromise) : signPromise);
+
+  // The wallet's part is over — everything from here is this app talking to a server, not
+  // waiting on the user. See the note on X402PayParams.onSigned for why this checkpoint has
+  // to exist explicitly rather than being inferred from "the signature promise resolved".
+  onSigned?.();
 
   // 3. Pay. The envelope declares v2 with the CAIP-2 network, matching what the challenge
   //    offered; our server normalises the version/network per facilitator before settling, and

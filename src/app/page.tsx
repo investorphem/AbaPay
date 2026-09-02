@@ -1949,6 +1949,16 @@ export default function Home() {
           console.warn('[x402] Facilitator refused; re-signing before falling back:', reason);
           setStatus(walletApprovalPrompt('That payment was turned down — approve it once more'));
         },
+        // 🔴 THE BUG THIS FIXES: from the moment the wallet returns a signature to the moment
+        // the server responds, the screen kept reading "Approve this payment in your wallet..."
+        // — a request the user had already answered. The contract-call rail never has this gap:
+        // it broadcasts, then shows "Confirming on blockchain... Please hold." The x402 rail had
+        // nothing between "asking" and "done", so a payer who had already tapped Approve had no
+        // way to tell their crypto had actually been sent — only that nothing seemed to be
+        // happening. onSigned fires the instant the signature lands, before the settle POST
+        // (which is also where this route's VTpass vend happens — see /api/pay/x402), so this is
+        // the one honest checkpoint the rail has to report that money is now moving.
+        onSigned: () => setStatus('Payment sent! Confirming and delivering your purchase...'),
       });
 
       // The server's duplicate-electricity check runs BEFORE the facilitator settles the x402

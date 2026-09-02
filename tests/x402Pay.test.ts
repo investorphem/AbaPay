@@ -69,6 +69,41 @@ describe('payWithX402', () => {
   });
 
   /**
+   * 🔴 THE GAP THIS CLOSES: from the moment the wallet answers to the moment the server does,
+   * the page had no way to tell the user their crypto had actually been sent — it kept showing
+   * the "approve in your wallet" prompt through the entire settle window. onSigned is the
+   * checkpoint that lets it say something truer, and it has to fire in the right place: after
+   * the signature, before the settle request goes out — not after the whole payment resolves,
+   * which would defeat the point of having a mid-flight checkpoint at all.
+   */
+  it('fires onSigned right after the wallet signs, before the settle request goes out', async () => {
+    const wallet = fakeWallet();
+    const events: string[] = [];
+    let requestsSeenAtSignTime = -1;
+    vi.stubGlobal('fetch', vi.fn(async (_url: string, init: RequestInit) => {
+      events.push((init.headers as any)?.['X-PAYMENT'] ? 'settle-request' : 'challenge-request');
+      return events.length === 1
+        ? jsonResponse({ accepts: [accept] }, 402)
+        : jsonResponse({ success: true, status: 'SUCCESS', tx_hash: '0xabc' }, 200);
+    }));
+
+    await payWithX402({
+      url: '/api/pay/x402',
+      body: {},
+      client: wallet.client,
+      account: ACCOUNT,
+      onSigned: () => {
+        events.push('signed');
+        requestsSeenAtSignTime = events.filter((e) => e.endsWith('-request')).length;
+      },
+    });
+
+    expect(events).toEqual(['challenge-request', 'signed', 'settle-request']);
+    // Signed happened after the challenge came back but strictly before the settle POST fired.
+    expect(requestsSeenAtSignTime).toBe(1);
+  });
+
+  /**
    * 🔴 THE END-TO-END PROOF OF THE ECHO. Reading `extensions` off the challenge is only half the
    * fix — it has to actually reach the X-PAYMENT header the second request carries, since that
    * is the payload a facilitator processes to decide what to catalog. Decodes the real base64
