@@ -2053,9 +2053,9 @@ export default function Home() {
   //
   // Every `setConnectError(...)` across the connect flow (declined, unreachable, no connector,
   // Valora needing a fresh session, and more) fed one banner that never cleared itself. Once one
-  // fired, it stayed exactly as written — "Verifying your wallet was cancelled..." — until the
-  // NEXT connect attempt overwrote or cleared it, which reads as the app being stuck on an old
-  // message rather than a text banner that already did its job. Same rule the `status` line
+  // fired, it stayed exactly as written — "Your network is blocking the service AbaPay uses..." —
+  // until the NEXT connect attempt overwrote or cleared it, which reads as the app being stuck on
+  // an old message rather than a text banner that already did its job. Same rule the `status` line
   // above already uses: long enough to actually read (10s — this one carries more to read than a
   // one-line status), gone on its own after that. A brand new error arriving mid-countdown
   // restarts the clock rather than racing the old timer to clear it early.
@@ -2846,12 +2846,19 @@ export default function Home() {
         const rejected = isUserRejection(e);
         if (environment === 'WEB') {
           console.warn('[wallet] ownership signature not obtained — disconnecting:', rejected ? 'declined' : (e as Error)?.message);
+          // 🔴 THE DOUBLE NOTIFICATION. handleDisconnect() already shows its own "Wallet
+          // Disconnected" toast (and clears connectError to null on the way in) — this used to
+          // immediately overwrite that with a SECOND, separate notice in the amber connectError
+          // banner, so a declined/failed verification showed the user two stacked messages for
+          // the one event. The toast already says the wallet is disconnected and to tap Connect;
+          // nothing here needs saying twice. The reason (declined vs. unresponsive) still goes to
+          // the console for debugging.
+          //
+          // ⚡ THIS DOES NOT TOUCH THE OTHER connectError CALLERS — the Connect button's own
+          // failure paths (below, including the Nigeria-network-blocked-relay message from
+          // describeConnectFailure) still set connectError and still show the banner. Those are
+          // a genuinely first notification for their event, not a second one for this one.
           handleDisconnect();
-          setConnectError(
-            rejected
-              ? 'Verifying your wallet was cancelled, so it has been disconnected. Tap Connect and approve the signature — it moves no money and approves no payment.'
-              : "Your wallet didn't confirm it belongs to you, so it has been disconnected. Tap Connect to try again.",
-          );
           return;
         }
         console.warn('[wallet] ownership signature unavailable in', environment, '— history stays hidden:', (e as Error)?.message);
@@ -4249,14 +4256,21 @@ export default function Home() {
               );
             })()}
 
-            {/* ⚡ THE EXIT BUTTON — FARCASTER AND BASE APP GET ONE TOO, NOW.
-                Both are chain-locked (chainLock='BASE') exactly like MiniPay is locked to Celo,
-                but only MiniPay ever had a way to disconnect and start over. `handleDisconnect`
-                already exists and already does the right thing for a wagmi-backed connection —
-                both Farcaster and Base App connect through it — so this is the same control
-                MiniPay gets, offered wherever chainLock says the environment is a single-chain
-                one, standing alone rather than inside a menu that has nothing else to offer. */}
-            {address && chainLock && environment !== 'MINIPAY' && (
+            {/* ⚡ THE EXIT BUTTON — EVERY NON-MINIPAY ENVIRONMENT GETS ONE, UNCONDITIONALLY.
+                This used to require `chainLock` — shown only when Farcaster/Base App were
+                correctly identified as single-chain surfaces — on the theory that plain WEB
+                already had Disconnect inside its interactive network menu, so a second button
+                there would be redundant. That made this button's reachability depend on
+                `isBaseAppBrowser()` guessing right about whatever user agent / injected-provider
+                shape the CURRENT Base App build happens to expose — one missed pattern and a
+                Base App user is back to a chain-badge menu that renders as non-interactive
+                (`menuInteractive` false because chainLock never got set) with Disconnect nested
+                one tap deeper inside it, i.e. functionally no way out. `handleDisconnect` already
+                does the right thing for any wagmi-backed connection, so there is no reason to
+                gate it behind getting environment detection exactly right. Plain WEB keeping the
+                menu's own Disconnect entry too is redundant, not wrong — a second guaranteed way
+                out is the point. */}
+            {address && environment !== 'MINIPAY' && (
               <button
                 onClick={handleDisconnect}
                 title="Disconnect"
