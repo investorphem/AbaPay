@@ -110,6 +110,21 @@ function withWalletTimeout<T>(promise: Promise<T>, ms = 90_000): Promise<T> {
  */
 const CELO_X402_TOKENS = ['USDC', 'USD₮', 'USA₮'];
 
+// ⚡ Data-service auto-detect (below) recognises a phone number's NETWORK from its prefix,
+// but a network can sell more than one VTpass data service — Glo has "glo-data" and
+// "glo-sme-data" (Best Value), 9mobile has "etisalat-data" and "9mobile-sme-data". This maps
+// the detected network to every serviceID that belongs to it, [0] being the default a fresh
+// detection lands on; the rest stay reachable via the provider picker without ever being
+// treated as "not this network" and stomped back to the default. 9mobile's second entry keeps
+// the "9mobile-" prefix VTpass actually uses instead of "etisalat-", which is why this can't
+// just be `${network}-sme-data`.
+const NETWORK_DATA_SERVICES: Record<string, string[]> = {
+  mtn: ['mtn-data'],
+  airtel: ['airtel-data'],
+  glo: ['glo-data', 'glo-sme-data'],
+  etisalat: ['etisalat-data', '9mobile-sme-data'],
+};
+
 export default function Home() {
   const { address: wagmiAddress, isConnected: isWagmiConnected, chain: wagmiChain, connector: wagmiConnector } = useAccount();
   const { connectors, connect, connectAsync, status: connectStatus } = useConnect();
@@ -3666,11 +3681,11 @@ export default function Home() {
       }
       if (activeService.id === "INTERNET" && internetProvider.includes("-data") && accountNumber.length >= 4) {
         const prefix = accountNumber.substring(0, 4);
-        let detected: string | null = null;
-        if (["0803","0806","0810","0813","0814","0816","0903","0906","0913","0916","0703","0706"].includes(prefix)) detected = "mtn-data";
-        else if (["0802","0808","0812","0902","0907","0912","0701","0708"].includes(prefix)) detected = "airtel-data";
-        else if (["0805","0807","0811","0905","0705","0915"].includes(prefix)) detected = "glo-data";
-        else if (["0809","0817","0818","0908","0909"].includes(prefix)) detected = "etisalat-data";
+        let network: string | null = null;
+        if (["0803","0806","0810","0813","0814","0816","0903","0906","0913","0916","0703","0706"].includes(prefix)) network = "mtn";
+        else if (["0802","0808","0812","0902","0907","0912","0701","0708"].includes(prefix)) network = "airtel";
+        else if (["0805","0807","0811","0905","0705","0915"].includes(prefix)) network = "glo";
+        else if (["0809","0817","0818","0908","0909"].includes(prefix)) network = "etisalat";
 
         // 🔴 THE STALE-PLAN BUG: if the number's prefix flips the network (e.g. user picked
         // MTN, chose an MTN plan, then typed a Glo number), the previously-selected plan
@@ -3678,9 +3693,19 @@ export default function Home() {
         // it. The manual provider dropdown already clears the plan on change (see handleProvider
         // change); the auto-detect never did, so the mismatched plan sailed through to a failed
         // payment. Clear the plan (and its amount) whenever auto-detect actually switches the
-        // network, forcing the user to pick a plan that belongs to the detected network.
-        if (detected && detected !== internetProvider) {
-          setInternetProvider(detected);
+        // network family, forcing the user to pick a plan that belongs to the detected network.
+        //
+        // 🔴 THE FIXED-TO-ONE-SERVICE BUG: this used to detect straight to a single hardcoded
+        // serviceID (e.g. "glo-data") and reassert it on every keystroke — so a user who
+        // deliberately switched the provider dropdown to "glo-sme-data" (Best Value) got
+        // bounced back to plain GLO Data the moment they typed another digit of the same Glo
+        // number, even though both services belong to the network they're already on. Compare
+        // by NETWORK FAMILY (NETWORK_DATA_SERVICES), not exact serviceID: only reset when the
+        // currently selected provider doesn't belong to the detected network at all, so either
+        // Glo service stays selectable without getting stomped back to the default.
+        if (network && !(NETWORK_DATA_SERVICES[network] || []).includes(internetProvider)) {
+          const defaultServiceID = NETWORK_DATA_SERVICES[network]?.[0] ?? `${network}-data`;
+          setInternetProvider(defaultServiceID);
           setSelectedInternetPlan(null);
           setNairaAmount("");
           setInternetVariations([]);
