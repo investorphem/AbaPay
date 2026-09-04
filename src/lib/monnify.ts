@@ -192,8 +192,14 @@ export interface AccountValidationRaw {
 // instead of Monnify's own (already human-readable) rejection message.
 export async function validateAccountRaw(accountNumber: string, bankCode: string, timeoutMs?: number): Promise<AccountValidationRaw> {
   try {
+    // 🔴 v1 OF THIS PATH IS DEPRECATED — Monnify now rejects it outright with "This API
+    // endpoint has been deprecated and is no longer available", which every caller here
+    // (validateAccount's ~25-bank auto-detect sweep, and the single manual verify) folded into
+    // "no match" / "could not verify". Their changelog confirms v2 is a straight path bump —
+    // same GET method, same accountNumber/bankCode query params, same response shape — nothing
+    // else in this function needed to change.
     const data = await monnifyFetch(
-      `/api/v1/disbursements/account/validate?accountNumber=${encodeURIComponent(accountNumber)}&bankCode=${encodeURIComponent(bankCode)}`,
+      `/api/v2/disbursements/account/validate?accountNumber=${encodeURIComponent(accountNumber)}&bankCode=${encodeURIComponent(bankCode)}`,
       { method: 'GET' },
       false,
       timeoutMs
