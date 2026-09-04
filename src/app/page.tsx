@@ -3525,6 +3525,19 @@ export default function Home() {
       return;
     }
 
+    // 🔴 THE RACE THIS GUARDS AGAINST: "the default token shows zero until I select another
+    // token then switch back." Connecting on a non-default chain sets `address` AND
+    // `activeChain` together, which fires this effect while `selectedToken` still holds
+    // whatever was selected before — the chain-lead-token-reset effect above ALSO reacts to
+    // the same `activeChain` change, but its `setSelectedToken` doesn't take effect until the
+    // NEXT render. So this effect fires twice in quick succession for the same connect: once
+    // for the stale pre-connect token, once for the corrected one. Both `fetchBalance()` calls
+    // run concurrently, and without a guard the LAST TO RESOLVE wins regardless of which one
+    // was still wanted — so a slower stale-token fetch could overwrite a correct balance with
+    // 0.00 (or the wrong token's figure). A later manual token switch never races, because by
+    // then only one fetch is ever in flight, which is why it "just works" on the second try.
+    let cancelled = false;
+
     async function fetchBalance() {
       if (!address || !activeChain) return;
       setIsFetchingBalance(true);
@@ -3551,20 +3564,22 @@ export default function Home() {
         }
 
         if (!tokenAddress) {
-            setWalletBalance("0.00");
-            setIsFetchingBalance(false);
+            if (!cancelled) { setWalletBalance("0.00"); setIsFetchingBalance(false); }
             return;
         }
 
         const balanceWei = await publicClient.readContract({ address: tokenAddress as `0x${string}`, abi: ERC20_ABI, functionName: 'balanceOf', args: [address] });
+        if (cancelled) return;
         setWalletBalance(parseFloat(formatUnits(balanceWei as bigint, selectedToken.decimals)).toFixed(4));
-      } catch (error) { 
+      } catch (error) {
+        if (cancelled) return;
         console.error("Balance fetch error:", error);
-        setWalletBalance("0.00"); 
+        setWalletBalance("0.00");
       }
-      setIsFetchingBalance(false);
+      if (!cancelled) setIsFetchingBalance(false);
     }
     fetchBalance();
+    return () => { cancelled = true; };
   }, [address, selectedToken, activeChain, environment]);
 
   useEffect(() => { fetchBanksManual(); }, []);
