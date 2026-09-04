@@ -33,9 +33,9 @@ export const WALLET_SESSION_MAX_AGE_MS = 12 * 60 * 60 * 1000;
  */
 export function walletSessionMessage(timestamp: string): string {
   return [
-    'AbaPay: verify wallet ownership',
+    'AbaPay: Secure Sign-In',
     '',
-    'Signing this proves you control this wallet so AbaPay can show you your own payment history.',
+    'Signing this proves you control this wallet and starts a secure, read-only session.',
     'It does NOT approve any payment, transfer, or spending permission.',
     '',
     `Time: ${timestamp}`,
