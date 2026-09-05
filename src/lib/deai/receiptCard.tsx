@@ -100,10 +100,14 @@ export async function receiptImageResponse(data: ReceiptCardData): Promise<Image
           }}
         >
           {/* header */}
+          {/* 🔴 THE "logo barely shows" COMPLAINT: this used to be 40×28 next to 26px bold
+              text — on a 960×760 card, the circular "AB" mark (arrow + swirl detail) was too
+              small to read as a logo at a glance. logo.png is 512×361 (ratio ~1.42); sized up
+              to 64×45 here keeps that exact ratio (no squish) while actually being legible. */}
           <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 14 }}>
-              <img src={logo} width={40} height={28} style={{ objectFit: 'contain' as any }} />
-              <span style={{ display: 'flex', fontSize: 26, fontWeight: 800, color: WHITE, letterSpacing: -0.5 }}>AbaPay</span>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
+              <img src={logo} width={64} height={45} style={{ objectFit: 'contain' as any }} />
+              <span style={{ display: 'flex', fontSize: 28, fontWeight: 800, color: WHITE, letterSpacing: -0.5 }}>AbaPay</span>
             </div>
             <div
               style={{
@@ -233,9 +237,9 @@ export async function renderHistoryStatementImage(rows: HistoryRow[], wallet: st
           }}
         >
           <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 14 }}>
-              <img src={logo} width={40} height={28} style={{ objectFit: 'contain' as any }} />
-              <span style={{ display: 'flex', fontSize: 26, fontWeight: 800, color: WHITE, letterSpacing: -0.5 }}>AbaPay</span>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
+              <img src={logo} width={64} height={45} style={{ objectFit: 'contain' as any }} />
+              <span style={{ display: 'flex', fontSize: 28, fontWeight: 800, color: WHITE, letterSpacing: -0.5 }}>AbaPay</span>
             </div>
             <span style={{ display: 'flex', fontSize: 14, color: MUTED, fontWeight: 600 }}>
               {wallet.slice(0, 6)}...{wallet.slice(-4)}
