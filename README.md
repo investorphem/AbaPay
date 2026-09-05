@@ -26,7 +26,7 @@ Designed for low fees, cross-border utility vending (Nigeria + every country VTp
 * **Autonomous Scheduling & Autopay Agent:** Beyond one-off chat payments, users can ask the DeAI agent to set up recurring bills (monthly/weekly/daily), a one-time future payment ("pay this in 10 minutes"), or a single request covering **multiple recipients/accounts at once** — the agent groups them by chain/token and settles each leg through the same allowance-bounded relayer, unattended, on schedule, with zero further interaction required from the user.
 * **On-Chain Attribution:** Celo transactions carry an ERC-8021 attribution tag (`src/lib/attribution.ts`) crediting the Celo Builders program; a no-op on Base.
 * **On-Chain Agent Identity (ERC-8004):** AbaPay's DeAI agent is registered as a real on-chain identity on **both Celo and Base** via the ERC-8004 "Trustless Agents" registry, so it's discoverable on 8004scan.io / AgentScan — independent of, and unrelated to, how it moves money. See [ERC-8004 agent identity](#erc-8004-agent-identity) below.
-* **MCP Server (AI Agent Payments):** AbaPay is reachable by any MCP-speaking AI client (Claude, or any other agent that supports the Model Context Protocol) as a real tool server — `describe_capabilities`, `check_balance`, `list_plans`, and `pay_bill` — over Streamable HTTP JSON-RPC at `/api/mcp`. This is a fourth channel alongside Telegram/WhatsApp/X, not a new trust boundary: it runs through the exact same allowance-bounded, kill-switch-gated, discount-aware execution pipeline as the chat channels, on **either Celo or Base** depending on what the linking wallet approved. See [MCP Server](#mcp-server-ai-agent-payments) below.
+* **MCP Server (AI Agent Payments):** AbaPay is reachable by any MCP-speaking AI client (Claude, or any other agent that supports the Model Context Protocol) as a real tool server — `describe_capabilities`, `check_balance`, `list_plans`, `pay_bill`, and recurring/one-off `schedule_bill`/`list_schedules`/`cancel_schedule` — over Streamable HTTP JSON-RPC at `/api/mcp`. This is a fourth channel alongside Telegram/WhatsApp/X, not a new trust boundary: it runs through the exact same allowance-bounded, kill-switch-gated, discount-aware execution pipeline as the chat channels, on **either Celo or Base** depending on what the linking wallet approved. See [MCP Server](#mcp-server-ai-agent-payments) below.
 * **MCP OAuth 2.1 (authorize once, not once per conversation):** the connector supports a full OAuth 2.1 authorization-code + PKCE (S256) flow with Dynamic Client Registration (`/api/oauth/register`, `/api/oauth/authorize`, `/api/oauth/token`, discovery under `/.well-known/`). A user authorizes once in a browser — proving their API key **and** PIN on AbaPay's own hand-rendered consent page — and every future conversation reconnects with a Bearer token instead of retyping an API key. **OAuth never authorizes a spend:** the PIN is still required on every single `pay_bill` call, and a Bearer token alone can only read a balance. The `api_key` tool argument remains the fallback for clients that can't do OAuth.
 * **`list_plans` — real VTpass plan codes and prices, never guessed:** `variation_code` used to be something an agent had to invent for DATA/CABLE/EDUCATION. `list_plans` returns the currently purchasable plans with their exact codes and live VTpass prices, and both the tool description and the server instructions tell the client to call it before `pay_bill` rather than guessing.
 * **x402 Settlement (main app, both chains):** Payments made directly in the web app settle via the [x402](https://x402.org) HTTP-payment protocol — Celo's own facilitator for **USDC/USD₮/USAT on Celo**, the Coinbase CDP facilitator for **USDC on Base** — so they're genuinely indexed on x402scan, not relabeled contract calls. Anything without EIP-3009 uses the on-chain `payBill` flow, including Base's sponsored-gas path. ⚠️ x402 needs an EIP-3009 `transferWithAuthorization` signature, which is structurally what a drainer asks for, so some wallet scanners flag it as risky — a known, deliberate trade for x402scan visibility; `NEXT_PUBLIC_X402_ENABLED=false` opts out. The signature-free agent-initiated flow is untouched either way. See [x402 settlement](#x402-settlement-main-app-only) below.
@@ -319,7 +319,7 @@ src/
 │       ├── user/points/          # AbaPoints balance
 │       ├── agent/                # Agent link/allowance management (Agent Hub)
 │       ├── deai/                 # Conversational AI agent
-│       ├── mcp/                  # MCP server (describe_capabilities, check_balance, list_plans, pay_bill)
+│       ├── mcp/                  # MCP server (describe_capabilities, check_balance, list_plans, pay_bill, schedule_bill, list_schedules, cancel_schedule)
 │       ├── oauth/{register,authorize,token}/  # OAuth 2.1 (DCR, consent page, token endpoint) for MCP
 │       ├── cleanup/              # Stale pre-flight intent sweeper
 │       ├── webhook/, webhook/vtpass/  # VTpass + on-chain webhooks
@@ -906,6 +906,9 @@ already backs Telegram/WhatsApp/X, not a parallel system with its own rules:
 | `check_balance` | Reads the linked wallet's live balance + approved agent limit, **per token**, on a chain | OAuth Bearer token *or* `api_key` |
 | `transaction_history` | Lists recent real transactions for the linked wallet — same data as the app's History tab | OAuth Bearer token *or* `api_key` |
 | `pay_bill` | Pays a real bill (airtime, data, electricity, cable TV, **education PIN**, or **international airtime/data**) end-to-end, on-chain | (OAuth Bearer token *or* `api_key`) **+ `pin`, always** |
+| `schedule_bill` | Sets up a recurring/one-off airtime, data, electricity, or cable payment — same automation Telegram/WhatsApp/X support | (OAuth Bearer token *or* `api_key`) **+ `pin`, always** |
+| `list_schedules` | Lists active schedules for the linked wallet | OAuth Bearer token *or* `api_key` |
+| `cancel_schedule` | Cancels one, some, or all active schedules for the linked wallet | OAuth Bearer token *or* `api_key` |
 
 `list_plans` exists because `variation_code` was previously something the agent had to invent.
 Its description, and the server-level `instructions`, both tell the client to call it before
@@ -948,6 +951,20 @@ the default and it's short on balance or on-chain allowance, the error itself ch
 another token on that same chain already has enough of both and says so by name — e.g. *"USD₮ is
 short, but USDC already has enough balance and an approved limit — retry with token: 'USDC'"* —
 rather than a dead-end message naming only the token that failed.
+
+**`schedule_bill`/`list_schedules`/`cancel_schedule` bring MCP to parity with chat's
+automations.** Telegram/WhatsApp/X have long supported recurring and one-off scheduled bills
+(the `scheduled_bills` table, run by `src/lib/scheduler.ts`'s cron); MCP previously had no way to
+set one up at all — an agent could pay a bill immediately but never later. `schedule_bill` collects
+in one call what chat gathers over a multi-turn conversation, reusing pay_bill's exact validation
+(`requiresVariation`, `checkAccountNumber`, `checkAmountLive`, the live-catalogue provider check)
+and PIN gate, since a schedule is a standing spend. It charges nothing itself: if the wallet's
+approved on-chain allowance already covers the amount, the schedule auto-pays itself each time
+it's due; otherwise it's saved notify-only and something else has to call `pay_bill` when it comes
+due. EDUCATION and INTERNATIONAL aren't schedulable, matching chat. MCP has no persistent channel
+to push a "your bill just ran" message back into later on its own, so `schedule_bill` accepts an
+optional `customer_email` for that — without one, check `list_schedules`/`transaction_history`
+yourself to see what happened.
 
 **Why this exists:** third-party agent scanners like [8004scan.io](https://8004scan.io) only run
 a health check against a declared `a2a` or `mcp` service (AbaPay's ERC-8004 card previously only

@@ -257,6 +257,75 @@ export const TOOLS = [
     // Moves real money on-chain — irreversible, and calling it twice pays twice.
     annotations: { title: 'Pay Bill', readOnlyHint: false, destructiveHint: true, idempotentHint: false, openWorldHint: true },
   },
+  {
+    // 🔴 THE GAP THIS FILLS: Telegram/WhatsApp/X (src/app/api/deai/core/route.ts) have long
+    // supported recurring/one-off scheduled bills (SCHEDULE_BILL, backed by the scheduled_bills
+    // table and src/lib/scheduler.ts's cron runner) — MCP had no equivalent at all, so an agent
+    // could pay a bill immediately but never set one up to run later. This collects in one call
+    // what chat gathers over a multi-turn conversation (an MCP tool call is stateless), reusing
+    // the exact same validation, PIN gate, and allowance/balance arithmetic pay_bill and chat's
+    // buildScheduleConfirm already use — see callScheduleBill below.
+    name: 'schedule_bill',
+    title: 'Schedule Bill',
+    description: 'Set up a recurring or future one-off bill payment — daily/weekly/monthly airtime, data, electricity, or cable — the same automation Telegram/WhatsApp/X support. Validates exactly like pay_bill (call list_plans first for DATA, or CABLE when changing package, to get a real variation_code) and ALWAYS requires the PIN, since this creates a standing spend. Nothing is charged when this tool runs — money only moves later, when the schedule actually fires, and only if the wallet still has a funded on-chain allowance at that time. If the approved agent limit already covers the amount right now, the schedule is created to auto-pay itself each time it is due; otherwise it is saved as notify-only and someone must call pay_bill manually when it comes due — the response says which. EDUCATION and INTERNATIONAL cannot be scheduled; pay those directly with pay_bill. Use list_schedules to see what is set up and cancel_schedule to remove one.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        api_key: { type: 'string', description: 'AbaPay MCP API key. NOT needed when the connector is authorized via OAuth — omit it entirely in that case.' },
+        pin: { type: 'string', description: '4-6 digit PIN set when the API key was created. Required to create a schedule, same as pay_bill.' },
+        service: { type: 'string', enum: ['AIRTIME', 'DATA', 'ELECTRICITY', 'CABLE'], description: 'Which kind of bill to schedule. EDUCATION and INTERNATIONAL are not schedulable — use pay_bill directly for those.' },
+        provider: { type: 'string', description: 'e.g. mtn, airtel, glo, 9mobile, ikeja-electric, dstv, gotv, startimes' },
+        account_number: { type: 'string', description: 'Phone number (airtime/data), meter number (electricity), or smartcard/IUC number (cable)' },
+        amount_ngn: { type: 'number', description: 'Amount in Naira to charge each time the schedule runs.' },
+        variation_code: { type: 'string', description: 'Plan/bundle/product code — required for DATA, and for CABLE when changing package (not needed to renew the current one). Get a real one from list_plans first.' },
+        meter_type: { type: 'string', enum: ['prepaid', 'postpaid'], description: 'Required for ELECTRICITY' },
+        frequency: { type: 'string', enum: ['daily', 'weekly', 'monthly', 'once'], description: 'How often this runs. "once" fires exactly one time, schedule_in_minutes from now.' },
+        day_of_week: { type: 'number', description: 'Required when frequency is "weekly" — 0 (Sunday) through 6 (Saturday).' },
+        day_of_month: { type: 'number', description: 'Required when frequency is "monthly" — 1 through 28.' },
+        schedule_in_minutes: { type: 'number', description: 'Required when frequency is "once" — minutes from now to run it a single time.' },
+        chain: { type: 'string', enum: ['CELO', 'BASE'], description: 'Defaults to the chain approved when the API key was created.' },
+        token: { type: 'string', enum: ['USD₮', 'USDC', 'USA₮'], description: 'Defaults to the token approved when the API key was created.' },
+        customer_email: { type: 'string', description: "Where to send a notification when this runs. MCP has no persistent channel to message back into a conversation — without this, you'll need to poll list_schedules or transaction_history yourself to see what happened." },
+      },
+      required: ['pin', 'service', 'account_number', 'amount_ngn', 'frequency'],
+      additionalProperties: false,
+    },
+    // Creates a standing future spend, but charges nothing itself and can be undone with
+    // cancel_schedule — not destructive/irreversible the way pay_bill is.
+    annotations: { title: 'Schedule Bill', readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true },
+  },
+  {
+    name: 'list_schedules',
+    title: 'List Schedules',
+    description: 'List active recurring/one-off bill schedules for the linked wallet — same data as the AbaPay app and Telegram/WhatsApp "show my schedules". Read-only, no PIN required. Returns each schedule\'s id — pass that to cancel_schedule to remove one.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        api_key: { type: 'string', description: 'AbaPay MCP API key. NOT needed when the connector is authorized via OAuth — omit it entirely in that case.' },
+      },
+      required: [],
+      additionalProperties: false,
+    },
+    annotations: { title: 'List Schedules', readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: true },
+  },
+  {
+    name: 'cancel_schedule',
+    title: 'Cancel Schedule',
+    description: 'Cancel one or more active schedules for the linked wallet. Call list_schedules first to get a real id. Pass id to cancel exactly one; pass provider to cancel every active schedule for that provider; omit both to cancel ALL active schedules for this wallet. No PIN required, matching chat.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        api_key: { type: 'string', description: 'AbaPay MCP API key. NOT needed when the connector is authorized via OAuth — omit it entirely in that case.' },
+        id: { type: 'string', description: 'The exact schedule id from list_schedules. Cancels only that one schedule.' },
+        provider: { type: 'string', description: 'Cancel every active schedule for this provider, e.g. "mtn". Ignored if id is also given.' },
+      },
+      required: [],
+      additionalProperties: false,
+    },
+    // Deactivates rows rather than moving money, and cancelling an already-cancelled schedule
+    // is a no-op — reversible in spirit (a new schedule_bill call recreates it) and idempotent.
+    annotations: { title: 'Cancel Schedule', readOnlyHint: false, destructiveHint: true, idempotentHint: true, openWorldHint: true },
+  },
 ];
 
 async function callDescribeCapabilities() {
@@ -310,6 +379,16 @@ async function resolveIdentity(
 }
 
 const INVALID_KEY_MSG = 'Invalid or revoked API key. Create a new one in the AbaPay app under Agent Hub → MCP.';
+
+// Which four services chat's SCHEDULE_BILL intent will schedule (core/route.ts's check at
+// the `['VEND_AIRTIME', 'VEND_DATA', 'ELECTRICITY', 'TV'].includes(...)` gate) — EDUCATION and
+// INTERNATIONAL are deliberately excluded here, same as chat.
+const SCHEDULABLE_INTENTS: Record<string, string> = {
+  AIRTIME: 'VEND_AIRTIME',
+  DATA: 'VEND_DATA',
+  ELECTRICITY: 'ELECTRICITY',
+  CABLE: 'TV',
+};
 
 async function callCheckBalance(args: any, oauthIdentity: McpIdentity | null) {
   const resolved = await resolveIdentity(args, oauthIdentity);
@@ -868,6 +947,246 @@ async function callPayBill(args: any, oauthIdentity: McpIdentity | null) {
   });
 }
 
+// ===================== SCHEDULING (MCP parity with chat) =====================
+
+async function callScheduleBill(args: any, oauthIdentity: McpIdentity | null) {
+  const apiKey = String(args?.api_key || '');
+  const pin = String(args?.pin || '');
+  const service = String(args?.service || '').toUpperCase();
+  const provider = String(args?.provider || '').toLowerCase().trim();
+  const accountNumber = String(args?.account_number || '').trim();
+  const amountNgn = Number(args?.amount_ngn);
+  const variationCode = args?.variation_code ? String(args.variation_code) : null;
+  const meterType = args?.meter_type ? String(args.meter_type) : null;
+  const frequency = String(args?.frequency || '').toLowerCase();
+  const dayOfWeek = args?.day_of_week !== undefined ? Number(args.day_of_week) : null;
+  const dayOfMonth = args?.day_of_month !== undefined ? Number(args.day_of_month) : null;
+  const scheduleInMinutes = args?.schedule_in_minutes !== undefined ? Number(args.schedule_in_minutes) : null;
+  const customerEmail = args?.customer_email ? String(args.customer_email) : null;
+  const chainOverride = args?.chain === 'BASE' || args?.chain === 'CELO' ? args.chain : null;
+  const tokenOverride = args?.token ? String(args.token) : null;
+
+  if (!apiKey && !oauthIdentity) return NEEDS_AUTH;
+  if (!/^\d{4,6}$/.test(pin)) return errorResult('pin must be 4-6 digits.');
+
+  const intent = SCHEDULABLE_INTENTS[service];
+  if (!intent) return errorResult(`service must be one of ${Object.keys(SCHEDULABLE_INTENTS).join(', ')} — EDUCATION and INTERNATIONAL can't be scheduled; pay those directly with pay_bill.`);
+  if (!provider) return errorResult('provider is required — e.g. mtn, ikeja-electric, dstv.');
+  if (!accountNumber) return errorResult('account_number is required.');
+  if (!Number.isFinite(amountNgn) || amountNgn <= 0) return errorResult('amount_ngn must be a positive number.');
+
+  // Same required-field gates pay_bill enforces (parity.ts's requiresVariation, and the
+  // ELECTRICITY meter_type check) — a schedule with a missing plan code or meter type would
+  // just fail identically on its first run, so it's caught here instead.
+  if (requiresVariation(intent, provider) && !variationCode) {
+    return errorResult(`variation_code is required for ${service} — call list_plans first and pass back a real code.`);
+  }
+  if (intent === 'ELECTRICITY' && meterType !== 'prepaid' && meterType !== 'postpaid') {
+    return errorResult('meter_type is required for ELECTRICITY and must be exactly "prepaid" or "postpaid".');
+  }
+
+  let dayOfWeekFinal: number | null = null;
+  let dayOfMonthFinal: number | null = null;
+  let runOnceAt: string | null = null;
+  if (frequency === 'once') {
+    if (!Number.isFinite(scheduleInMinutes) || (scheduleInMinutes as number) <= 0) {
+      return errorResult('schedule_in_minutes must be a positive number when frequency is "once".');
+    }
+    runOnceAt = new Date(Date.now() + (scheduleInMinutes as number) * 60_000).toISOString();
+  } else if (frequency === 'weekly') {
+    if (!Number.isInteger(dayOfWeek) || (dayOfWeek as number) < 0 || (dayOfWeek as number) > 6) {
+      return errorResult('day_of_week is required for weekly schedules — 0 (Sunday) through 6 (Saturday).');
+    }
+    dayOfWeekFinal = dayOfWeek;
+  } else if (frequency === 'monthly') {
+    if (!Number.isInteger(dayOfMonth) || (dayOfMonth as number) < 1 || (dayOfMonth as number) > 28) {
+      return errorResult('day_of_month is required for monthly schedules — 1 through 28.');
+    }
+    dayOfMonthFinal = dayOfMonth;
+  } else if (frequency !== 'daily') {
+    return errorResult('frequency must be one of daily, weekly, monthly, once.');
+  }
+
+  // 🔐 Same identity + PIN gate as pay_bill — a schedule is a standing spend, so it gets the
+  // same confirmation a one-off payment does, not the lighter check_balance/transaction_history
+  // treatment.
+  const resolved = await resolveIdentity(args, oauthIdentity);
+  if ('error' in resolved) {
+    if (resolved.error === 'missing') return NEEDS_AUTH;
+    return errorResult(INVALID_KEY_MSG);
+  }
+  const identity = resolved.identity;
+
+  const pinGate = await checkPinAllowed(identity.id);
+  if (!pinGate.allowed) return errorResult(pinGate.message || 'Locked — too many incorrect PINs.');
+  if (!verifyPin(pin, identity.pin_hash)) {
+    const fail = await recordPinFailure(identity.id, identity.wallet_address, 'MCP');
+    return errorResult(fail.message || 'Incorrect PIN.');
+  }
+  await clearPinFailures(identity.id);
+
+  const gate = await checkServiceAllowed(intent, provider);
+  if (!gate.allowed) return errorResult(gate.reason || 'This service is temporarily unavailable.');
+
+  const serviceID = resolveServiceId(intent, provider);
+  if (!serviceID) return errorResult(`Unknown provider "${provider}" for ${service}.`);
+
+  const validProviders = await providersForIntent(intent);
+  if (validProviders.length > 0 && !validProviders.some(p => p.serviceID.toLowerCase() === serviceID.toLowerCase())) {
+    return errorResult(`"${provider}" is not a ${service} provider AbaPay can currently sell. Available: ${validProviders.map(p => p.serviceID).join(', ')}.`);
+  }
+
+  const accCheck = checkAccountNumber(intent, accountNumber, provider);
+  if (!accCheck.valid) return errorResult(accCheck.error || 'Invalid account number.');
+
+  const amtCheck = await checkAmountLive(intent, amountNgn, { isFixedPlan: !!variationCode, provider: serviceID });
+  if (!amtCheck.valid) return errorResult(amtCheck.error || 'Invalid amount.');
+
+  const rules = await getServiceRules();
+  const rate = rules.exchangeRate;
+  const chain = chainOverride || identity.approved_chain || LEGACY_RECORD_CHAIN;
+  const chainTokens = tokensForChain(chain);
+  const tokenSymbol = tokenOverride && chainTokens.includes(tokenOverride) ? tokenOverride : (identity.approved_token || 'USD₮');
+
+  // 🔴 SAME TWO-STEP LOGIC chat's buildScheduleConfirm (core/route.ts) uses: the approved
+  // allowance alone decides whether this CAN auto-pay — a schedule with no funded allowance is
+  // still useful as a notify-only reminder. Balance is only checked (and can BLOCK creation)
+  // when it CAN auto-pay: a schedule that would auto-pay but is short on balance right now
+  // would just fail on its very first run, so that combination is refused up front instead.
+  const neededCrypto = amountNgn / rate;
+  const [allowance, balances] = await Promise.all([
+    getRemainingAllowance(identity.wallet_address, tokenSymbol, chain),
+    fetchCryptoBalances(identity.wallet_address, chain),
+  ]);
+  const heldToken = Number(balances[tokenSymbol] ?? 0);
+  const canAutoPay = allowance.ok && allowance.remaining >= neededCrypto;
+  if (canAutoPay && heldToken < neededCrypto) {
+    return errorResult(`This would auto-pay (your approved limit covers it), but your ${tokenSymbol} balance on ${chain} (${heldToken.toFixed(4)}) won't cover it — need about ${neededCrypto.toFixed(4)}. Top up first, then schedule it again.`);
+  }
+
+  const { error: insertErr } = await supabaseAdmin.from('scheduled_bills').insert({
+    wallet_address: identity.wallet_address.toLowerCase(),
+    service_id: serviceID,
+    service_category: service,
+    provider,
+    billers_code: accountNumber,
+    amount_ngn: amountNgn,
+    meter_type: meterType || null,
+    variation_code: variationCode,
+    blockchain: chain,
+    token_used: tokenSymbol,
+    frequency,
+    day_of_week: dayOfWeekFinal,
+    day_of_month: dayOfMonthFinal,
+    run_once_at: runOnceAt,
+    auto_execute: canAutoPay,
+    notify_channel: 'MCP',
+    notify_channel_id: null,
+    notify_email: customerEmail,
+    is_active: true,
+  });
+
+  if (insertErr) {
+    console.error('[MCP] schedule_bill insert failed:', insertErr.message);
+    return errorResult("Couldn't save that automation right now — try again shortly.");
+  }
+
+  const when = frequency === 'once'
+    ? `once, in about ${scheduleInMinutes} minute${scheduleInMinutes === 1 ? '' : 's'}`
+    : frequency === 'weekly'
+    ? `every ${['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'][dayOfWeekFinal as number]}`
+    : frequency === 'daily' ? 'every day'
+    : `on the ${dayOfMonthFinal}th of each month`;
+
+  return textResult(
+    `${frequency === 'once' ? 'Scheduled' : 'Automation set'}: ${provider.toUpperCase()} ${service} — NGN ${amountNgn.toLocaleString()} to ${accountNumber}, ${when}.\n\n` +
+    (canAutoPay
+      ? `This will auto-pay from your approved ${tokenSymbol} allowance on ${chain} — no further action needed.`
+      : `Your approved agent limit for ${tokenSymbol} on ${chain} doesn't currently cover this, so it's saved as notify-only — call pay_bill yourself when it's due.`) +
+    (customerEmail ? `\nUpdates go to ${customerEmail}.` : `\nNo notification channel was given — check back with list_schedules or transaction_history to see what happened.`)
+  );
+}
+
+async function callListSchedules(args: any, oauthIdentity: McpIdentity | null) {
+  const resolved = await resolveIdentity(args, oauthIdentity);
+  if ('error' in resolved) {
+    if (resolved.error === 'missing') return NEEDS_AUTH;
+    return errorResult(INVALID_KEY_MSG);
+  }
+  const identity = resolved.identity;
+
+  const { data, error } = await supabaseAdmin
+    .from('scheduled_bills')
+    .select('*')
+    .ilike('wallet_address', identity.wallet_address)
+    .eq('is_active', true)
+    .order('created_at', { ascending: false });
+
+  if (error) {
+    console.error('[MCP] list_schedules query failed:', error.message);
+    return errorResult('Could not load schedules right now — try again shortly.');
+  }
+  if (!data || data.length === 0) {
+    return textResult('No active schedules for this wallet.');
+  }
+
+  const ordinalDay = (n: number) => `${n}${n === 1 ? 'st' : n === 2 ? 'nd' : n === 3 ? 'rd' : 'th'}`;
+  const lines = data.map((sc: any) => {
+    const when = sc.frequency === 'once'
+      ? (sc.run_once_at ? `once, at ${new Date(sc.run_once_at).toLocaleString('en-NG', { timeZone: 'Africa/Lagos', day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' })}` : 'once')
+      : sc.frequency === 'weekly'
+      ? `every ${['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'][sc.day_of_week] || '?'}`
+      : sc.frequency === 'daily' ? 'daily'
+      : sc.day_of_month ? `on the ${ordinalDay(sc.day_of_month)} monthly` : 'monthly';
+    return `• id: "${sc.id}" — ${String(sc.provider || '').toUpperCase()} ${sc.service_category} — NGN ${Number(sc.amount_ngn).toLocaleString()} to ${sc.billers_code}, ${when} — ${sc.auto_execute ? 'auto-pays' : 'notify-only'}`;
+  });
+
+  return textResult(`${data.length} active schedule(s) — pass "id" to cancel_schedule to remove one:\n\n${lines.join('\n')}`);
+}
+
+async function callCancelSchedule(args: any, oauthIdentity: McpIdentity | null) {
+  const resolved = await resolveIdentity(args, oauthIdentity);
+  if ('error' in resolved) {
+    if (resolved.error === 'missing') return NEEDS_AUTH;
+    return errorResult(INVALID_KEY_MSG);
+  }
+  const identity = resolved.identity;
+  const id = args?.id ? String(args.id) : null;
+  const provider = args?.provider ? String(args.provider).toUpperCase() : null;
+
+  const { data: scheds, error } = await supabaseAdmin
+    .from('scheduled_bills')
+    .select('id, provider, service_category')
+    .ilike('wallet_address', identity.wallet_address)
+    .eq('is_active', true);
+
+  if (error) {
+    console.error('[MCP] cancel_schedule query failed:', error.message);
+    return errorResult('Could not load schedules right now — try again shortly.');
+  }
+  if (!scheds || scheds.length === 0) {
+    return textResult('No active schedules to cancel.');
+  }
+
+  // Same "no filter = cancel everything" parity as chat's CANCEL_SCHEDULE (core/route.ts) —
+  // documented in the tool description so a caller isn't surprised by it.
+  const target = (scheds as any[]).filter((sc) =>
+    (!id || String(sc.id) === id) && (!provider || String(sc.provider || '').toUpperCase() === provider)
+  );
+
+  if (target.length === 0) {
+    return errorResult('No active schedule matched that id/provider. Call list_schedules to see real ids.');
+  }
+
+  const { error: updErr } = await supabaseAdmin.from('scheduled_bills').update({ is_active: false }).in('id', target.map((t: any) => t.id));
+  if (updErr) {
+    console.error('[MCP] cancel_schedule update failed:', updErr.message);
+    return errorResult('Could not cancel right now — try again shortly.');
+  }
+
+  return textResult(`Cancelled ${target.length} schedule${target.length === 1 ? '' : 's'}.`);
+}
+
 // The OAuth identity is threaded through as a PARAMETER, never stashed in module scope — a
 // serverless instance handles many requests and module state is shared between them, so a
 // module-level "current identity" would be a wallet-mixing bug waiting for two concurrent
@@ -880,6 +1199,9 @@ export async function callTool(name: string, args: any, oauthIdentity: McpIdenti
     case 'check_balance': return callCheckBalance(args, oauthIdentity);
     case 'transaction_history': return callTransactionHistory(args, oauthIdentity);
     case 'pay_bill': return callPayBill(args, oauthIdentity);
+    case 'schedule_bill': return callScheduleBill(args, oauthIdentity);
+    case 'list_schedules': return callListSchedules(args, oauthIdentity);
+    case 'cancel_schedule': return callCancelSchedule(args, oauthIdentity);
     default: return null;
   }
 }

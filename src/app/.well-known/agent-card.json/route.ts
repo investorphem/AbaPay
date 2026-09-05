@@ -68,6 +68,27 @@ const SKILLS = [
     tags: ['payment', 'airtime', 'data', 'electricity', 'cable', 'education', 'international'],
     examples: ['Pay 1000 NGN MTN airtime for 08012345678'],
   },
+  {
+    id: 'schedule_bill',
+    name: 'Schedule a bill',
+    description: toolDescription('schedule_bill'),
+    tags: ['payment', 'schedule', 'recurring', 'automation'],
+    examples: ['Every Tuesday buy 200 NGN MTN airtime for 08012345678'],
+  },
+  {
+    id: 'list_schedules',
+    name: 'List schedules',
+    description: toolDescription('list_schedules'),
+    tags: ['schedule', 'recurring', 'automation'],
+    examples: ['What automations do I have set up?'],
+  },
+  {
+    id: 'cancel_schedule',
+    name: 'Cancel a schedule',
+    description: toolDescription('cancel_schedule'),
+    tags: ['schedule', 'recurring', 'automation'],
+    examples: ['Cancel my MTN airtime schedule'],
+  },
 ];
 
 export async function GET() {
