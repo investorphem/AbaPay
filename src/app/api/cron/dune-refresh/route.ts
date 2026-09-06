@@ -135,11 +135,23 @@ type Started = {
  * returned immediately as a permanent loss, so the two unlucky queries were never retried and
  * their panels simply stayed a day stale.
  *
+ * 🔴 THE "concurrent-execution rejection" CASE ABOVE WAS NEVER ACTUALLY WIRED UP. Live on
+ * 2026-09-06: `main` finished its own run with two queries still marked "still running" past
+ * the poll window (see waitForCompletion) — which still counts against Dune's account-wide
+ * concurrent-execution cap even though this route stops waiting on them. 60s later `base`
+ * tried to start and got `HTTP 402: "You've reached the limit of 3 free parallel executions
+ * running at once."` for two of its five queries. 402 was not in this list, so isRetryableStatus
+ * failed them immediately with zero backoff — the exact "returned immediately as a permanent
+ * loss" failure mode the comment above already described, just via a status code nobody had
+ * added yet. The whole point of this function is "transient capacity problem, not a real
+ * error" — a concurrent-slot rejection is that by definition, so it belongs on the same ladder
+ * as 429.
+ *
  * Only a genuine 4xx about THIS request (a deleted query, a malformed body, a bad key) is
  * hopeless on a retry; those still fail fast so a real misconfiguration stays loud.
  */
 function isRetryableStatus(status: number): boolean {
-  return status === 429 || status === 408 || status === 425 || status >= 500;
+  return status === 429 || status === 408 || status === 425 || status === 402 || status >= 500;
 }
 
 /**
