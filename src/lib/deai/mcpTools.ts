@@ -1,17 +1,16 @@
 import 'server-only';
 import { supabaseAdmin } from '@/utils/supabase';
-import { enforceRateLimit } from '@/lib/rateLimit';
-import { getServiceRules, checkServiceAllowed, checkAgentSpendAllowed, isChannelEnabled } from '@/lib/serviceRules';
+import { rateLimit } from '@/lib/rateLimit';
+import { getServiceRules, checkServiceAllowed, checkAgentSpendAllowed } from '@/lib/serviceRules';
 import { describeCapabilities, capabilityForIntent, getCapability } from '@/lib/deai/capabilities';
 import { resolveServiceId, fetchCryptoBalances, verifyAccount } from '@/lib/deai/services';
 import { getRemainingAllowance } from '@/lib/deai/relayer';
 import { LEGACY_RECORD_CHAIN, tokenSymbolsForChain } from '@/constants';
 import { providersForIntent } from '@/lib/vtpassCatalog';
 import { checkAccountNumber, checkAmountLive, requiresVariation, requiresVerifiedName } from '@/lib/parity';
-import { checkAutonomousCapacity, executeAgentPayment, type BatchItem, type AgentPaymentResult } from '@/lib/deai/batch';
+import { checkAutonomousCapacity, groupByChainToken, executeAgentPayment, type BatchItem, type AgentPaymentResult } from '@/lib/deai/batch';
 import { fetchVariations, variationServiceId } from '@/lib/deai/selection';
 import { resolveMcpIdentity, type McpIdentity } from '@/lib/deai/mcpAuth';
-import { validateAccessToken } from '@/lib/deai/mcpOAuth';
 import { checkPinAllowed, recordPinFailure, clearPinFailures, notifySpendOutOfBand } from '@/lib/deai/pinSecurity';
 import { verifyPin } from '@/utils/pinSecurity';
 import { renderReceiptImage, renderHistoryStatementImage } from '@/lib/deai/receiptCard';
@@ -326,6 +325,56 @@ export const TOOLS = [
     // is a no-op — reversible in spirit (a new schedule_bill call recreates it) and idempotent.
     annotations: { title: 'Cancel Schedule', readOnlyHint: false, destructiveHint: true, idempotentHint: true, openWorldHint: true },
   },
+  {
+    // 🔴 THE GAP THIS FILLS: chat's intent engine has supported multiple recipients in one
+    // message since intentEngine.ts's rule 14 ("send 500 to X and 1000 to Y") — MCP's pay_bill
+    // only ever took one recipient per call. Structured tool calls don't need free-text
+    // parsing to name several recipients at once, so this is a straight capability add, not a
+    // reimplementation: it reuses the exact same grouping/capacity/execution primitives
+    // (groupByChainToken, checkAutonomousCapacity, executeAgentPayment) core/route.ts's own
+    // batch handler calls. One difference makes MCP MORE capable here, not just at parity:
+    // chat's ParsedRecipient shape (intentEngine.ts) has no per-recipient variation_code field,
+    // so a chat-driven DATA batch has no way to name each recipient's plan — a structured tool
+    // call can, so this one requires it per DATA recipient instead of inheriting that gap.
+    name: 'pay_bill_batch',
+    title: 'Pay Bill Batch',
+    description: 'Pay airtime or data to multiple recipients in ONE call — the same multi-recipient batch Telegram/WhatsApp/X support ("send 500 to X and 1000 to Y"). One PIN authorizes the whole batch. Recipients are grouped by (chain, token); each group\'s capacity (balance + approved agent limit) is checked against that group\'s own subtotal — but if ANY group is short, the ENTIRE batch is refused before anything moves (all-or-nothing on capacity; paying 6 of 8 recipients because the 7th was under-funded is worse than one clear error up front). Once capacity clears, recipients are paid one at a time and the response reports each individually, since a single vend failure partway through must not be reported as if the whole batch failed. AIRTIME and DATA only — electricity, cable, education, and international are not batchable; call pay_bill for those, one at a time. For DATA, call list_plans first and give each recipient needing one its own real variation_code. EXECUTES IMMEDIATELY: no delay/schedule option, same as pay_bill — for a delayed/recurring batch, call schedule_bill once per recipient instead.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        api_key: { type: 'string', description: 'AbaPay MCP API key. NOT needed when the connector is authorized via OAuth — omit it entirely in that case.' },
+        pin: { type: 'string', description: '4-6 digit PIN set when the API key was created. Required once for the whole batch.' },
+        recipients: {
+          type: 'array',
+          minItems: 2,
+          maxItems: 20,
+          description: 'At least 2 recipients (a single recipient should just use pay_bill), at most 20 per call — split a larger batch across several calls.',
+          items: {
+            type: 'object',
+            properties: {
+              service: { type: 'string', enum: ['AIRTIME', 'DATA'], description: 'Only AIRTIME and DATA are batchable.' },
+              provider: { type: 'string', description: 'e.g. mtn, airtel, glo, 9mobile' },
+              account_number: { type: 'string', description: 'Phone number to top up' },
+              amount_ngn: { type: 'number', description: 'Amount in Naira for this recipient' },
+              variation_code: { type: 'string', description: 'Required for DATA — call list_plans first and pass a real code for this recipient\'s plan.' },
+              chain: { type: 'string', enum: ['CELO', 'BASE'], description: 'Overrides the batch-level chain for this recipient only.' },
+              token: { type: 'string', enum: ['USD₮', 'USDC', 'USA₮'], description: 'Overrides the batch-level token for this recipient only.' },
+            },
+            required: ['service', 'provider', 'account_number', 'amount_ngn'],
+            additionalProperties: false,
+          },
+        },
+        chain: { type: 'string', enum: ['CELO', 'BASE'], description: 'Default chain for recipients that don\'t set their own. Falls back to the chain approved when the API key was created.' },
+        token: { type: 'string', enum: ['USD₮', 'USDC', 'USA₮'], description: 'Default token for recipients that don\'t set their own. Falls back to the token approved when the API key was created.' },
+        customer_email: { type: 'string', description: 'Optional — used for receipts if known, applies to the whole batch.' },
+      },
+      required: ['pin', 'recipients'],
+      additionalProperties: false,
+    },
+    // Moves real money on-chain for multiple recipients — irreversible, and calling it twice
+    // pays everyone twice.
+    annotations: { title: 'Pay Bill Batch', readOnlyHint: false, destructiveHint: true, idempotentHint: false, openWorldHint: true },
+  },
 ];
 
 async function callDescribeCapabilities() {
@@ -379,6 +428,27 @@ async function resolveIdentity(
 }
 
 const INVALID_KEY_MSG = 'Invalid or revoked API key. Create a new one in the AbaPay app under Agent Hub → MCP.';
+
+// 🔒 PER-IDENTITY RATE LIMIT ON SPEND ACTIONS — defense in depth beyond what already exists:
+// /api/mcp/route.ts applies a blanket per-IP limit (enforceRateLimit(req, 'mcp', 60, 60)) across
+// EVERY tool including free catalogue lookups, and checkPinAllowed's escalating lockout only
+// triggers on a WRONG pin. Neither stops a caller who already holds the correct PIN (or a
+// leaked api_key/OAuth token) from firing pay_bill/schedule_bill/pay_bill_batch as fast as the
+// network allows, and the IP limit alone rotates trivially behind a botnet. This is keyed by the
+// identity row's own id — not the wallet address or IP — so it follows the specific credential
+// that was actually used, exactly the thing worth slowing down if it leaks.
+//
+// 🔴 THE GAP THIS CLOSES: `enforceRateLimit` (src/lib/rateLimit.ts) was imported into this file
+// from the very first version of the MCP tool layer and never once called — callTool() has no
+// `req` to key an IP-based check off, so the import sat dead. rateLimit()'s lower-level, key-only
+// form has no such requirement.
+async function checkSpendRateLimit(identity: McpIdentity, action: string, limit: number, windowSeconds: number) {
+  const result = await rateLimit(`mcp-${action}:${identity.id}`, limit, windowSeconds);
+  if (!result.allowed) {
+    return errorResult(`Too many ${action.replace(/_/g, ' ')} calls in a short time — try again in about ${result.retryAfterSeconds}s.`);
+  }
+  return null;
+}
 
 // Which four services chat's SCHEDULE_BILL intent will schedule (core/route.ts's check at
 // the `['VEND_AIRTIME', 'VEND_DATA', 'ELECTRICITY', 'TV'].includes(...)` gate) — EDUCATION and
@@ -819,6 +889,9 @@ async function callPayBill(args: any, oauthIdentity: McpIdentity | null) {
   }
   await clearPinFailures(identity.id);
 
+  const rateLimited = await checkSpendRateLimit(identity, 'pay_bill', 10, 60);
+  if (rateLimited) return rateLimited;
+
   if (isInternational) {
     return callPayBillInternational(args, identity, {
       accountNumber, customerName, customerEmail, chainOverride, tokenOverride,
@@ -1025,6 +1098,9 @@ async function callScheduleBill(args: any, oauthIdentity: McpIdentity | null) {
   }
   await clearPinFailures(identity.id);
 
+  const rateLimited = await checkSpendRateLimit(identity, 'schedule_bill', 5, 60);
+  if (rateLimited) return rateLimited;
+
   const gate = await checkServiceAllowed(intent, provider);
   if (!gate.allowed) return errorResult(gate.reason || 'This service is temporarily unavailable.');
 
@@ -1187,6 +1263,194 @@ async function callCancelSchedule(args: any, oauthIdentity: McpIdentity | null) 
   return textResult(`Cancelled ${target.length} schedule${target.length === 1 ? '' : 's'}.`);
 }
 
+// Only these two services are batchable — same restriction chat's batch handler enforces
+// (core/route.ts: `batchIntent !== 'VEND_AIRTIME' && batchIntent !== 'VEND_DATA'`).
+const BATCHABLE_INTENTS: Record<string, string> = { AIRTIME: 'VEND_AIRTIME', DATA: 'VEND_DATA' };
+
+interface ValidatedBatchRecipient {
+  index: number;
+  intent: string;
+  service: string;
+  provider: string;
+  accountNumber: string;
+  amountNgn: number;
+  variationCode: string | null;
+  // Raw overrides only — resolved against identity.approved_chain/approved_token once the
+  // identity is known (see the resolution pass right after the PIN gate below). Resolving a
+  // chain/token default here, before identity exists, would silently ignore the API key's own
+  // approved_chain/approved_token exactly the way pay_bill and schedule_bill never do.
+  chainOverride: string | null;
+  tokenOverride: string | null;
+  chain: string;
+  tokenSymbol: string;
+  serviceID: string;
+}
+
+async function callPayBillBatch(args: any, oauthIdentity: McpIdentity | null) {
+  const apiKey = String(args?.api_key || '');
+  const pin = String(args?.pin || '');
+  const rawRecipients = Array.isArray(args?.recipients) ? args.recipients : null;
+  const batchChainOverride = args?.chain === 'BASE' || args?.chain === 'CELO' ? args.chain : null;
+  const batchTokenOverride = args?.token ? String(args.token) : null;
+  const customerEmail = args?.customer_email ? String(args.customer_email) : null;
+
+  if (!apiKey && !oauthIdentity) return NEEDS_AUTH;
+  if (!/^\d{4,6}$/.test(pin)) return errorResult('pin must be 4-6 digits.');
+  if (!rawRecipients || rawRecipients.length < 2) return errorResult('recipients must be an array of at least 2 — for a single recipient, use pay_bill instead.');
+  if (rawRecipients.length > 20) return errorResult('recipients is capped at 20 per call — split a larger batch across several calls.');
+
+  // Validate EVERY recipient before touching identity/PIN — same "all-or-nothing on obvious
+  // mistakes" principle as pay_bill's own field checks, just applied per item. A batch that's
+  // half-valid is worse than a clear "fix recipient 3 and resend".
+  const validated: ValidatedBatchRecipient[] = [];
+  for (let i = 0; i < rawRecipients.length; i++) {
+    const r = rawRecipients[i];
+    const service = String(r?.service || '').toUpperCase();
+    const intent = BATCHABLE_INTENTS[service];
+    if (!intent) return errorResult(`recipient ${i + 1}: service must be AIRTIME or DATA — electricity, cable, education, and international are not batchable. Use pay_bill for those.`);
+
+    const provider = String(r?.provider || '').toLowerCase().trim();
+    if (!provider) return errorResult(`recipient ${i + 1}: provider is required.`);
+    const accountNumber = String(r?.account_number || '').trim();
+    if (!accountNumber) return errorResult(`recipient ${i + 1}: account_number is required.`);
+    const amountNgn = Number(r?.amount_ngn);
+    if (!Number.isFinite(amountNgn) || amountNgn <= 0) return errorResult(`recipient ${i + 1}: amount_ngn must be a positive number.`);
+    const variationCode = r?.variation_code ? String(r.variation_code) : null;
+    if (requiresVariation(intent, provider) && !variationCode) {
+      return errorResult(`recipient ${i + 1}: variation_code is required for DATA — call list_plans first and pass back a real code.`);
+    }
+
+    const serviceID = resolveServiceId(intent, provider);
+    if (!serviceID) return errorResult(`recipient ${i + 1}: unknown provider "${provider}".`);
+    const validProviders = await providersForIntent(intent);
+    if (validProviders.length > 0 && !validProviders.some((p) => p.serviceID.toLowerCase() === serviceID.toLowerCase())) {
+      return errorResult(`recipient ${i + 1}: "${provider}" is not a ${service} provider AbaPay can currently sell. Available: ${validProviders.map((p) => p.serviceID).join(', ')}.`);
+    }
+    const accCheck = checkAccountNumber(intent, accountNumber, provider);
+    if (!accCheck.valid) return errorResult(`recipient ${i + 1}: ${accCheck.error || 'invalid account number.'}`);
+    const amtCheck = await checkAmountLive(intent, amountNgn, { isFixedPlan: !!variationCode, provider: serviceID });
+    if (!amtCheck.valid) return errorResult(`recipient ${i + 1}: ${amtCheck.error || 'invalid amount.'}`);
+
+    const chainOverride = (r?.chain === 'BASE' || r?.chain === 'CELO' ? r.chain : null) || batchChainOverride;
+    const tokenOverride = (r?.token ? String(r.token) : null) || batchTokenOverride;
+
+    validated.push({
+      index: i, intent, service, provider, accountNumber, amountNgn, variationCode, serviceID,
+      chainOverride, tokenOverride, chain: '', tokenSymbol: '', // resolved below once identity is known
+    });
+  }
+
+  // 🔐 Same identity + PIN gate as pay_bill — a batch is a standing multi-recipient spend, so
+  // it gets the same confirmation a single payment does.
+  const resolved = await resolveIdentity(args, oauthIdentity);
+  if ('error' in resolved) {
+    if (resolved.error === 'missing') return NEEDS_AUTH;
+    return errorResult(INVALID_KEY_MSG);
+  }
+  const identity = resolved.identity;
+
+  const pinGate = await checkPinAllowed(identity.id);
+  if (!pinGate.allowed) return errorResult(pinGate.message || 'Locked — too many incorrect PINs.');
+  if (!verifyPin(pin, identity.pin_hash)) {
+    const fail = await recordPinFailure(identity.id, identity.wallet_address, 'MCP');
+    return errorResult(fail.message || 'Incorrect PIN.');
+  }
+  await clearPinFailures(identity.id);
+
+  const rateLimited = await checkSpendRateLimit(identity, 'pay_bill_batch', 5, 60);
+  if (rateLimited) return rateLimited;
+
+  // Now that the identity is known, resolve each recipient's actual chain/token — same
+  // fallback order pay_bill uses (explicit override || the API key's approved default ||
+  // LEGACY_RECORD_CHAIN), unavailable during the pre-identity validation pass above.
+  for (const v of validated) {
+    v.chain = v.chainOverride || identity.approved_chain || LEGACY_RECORD_CHAIN;
+    const chainTokens = tokensForChain(v.chain);
+    v.tokenSymbol = v.tokenOverride && chainTokens.includes(v.tokenOverride) ? v.tokenOverride : (identity.approved_token || 'USD₮');
+  }
+
+  // ⚡ OPERATOR GATE on the TOTAL — the per-tx cap alone would let a batch slip past a daily
+  // cap by splitting it across recipients. Same principle as core/route.ts's batchGate.
+  const totalNgn = validated.reduce((s, v) => s + v.amountNgn, 0);
+  const spendGate = await checkAgentSpendAllowed(supabaseAdmin, identity.wallet_address, totalNgn);
+  if (!spendGate.allowed) return errorResult(spendGate.reason || 'Agent spending is currently disabled for this account.');
+
+  // Per-service-allowed gate, deduped so a 20-recipient batch with 2 providers doesn't run the
+  // same check 20 times.
+  const seenGates = new Set<string>();
+  for (const v of validated) {
+    const gateKey = `${v.intent}|${v.provider}`;
+    if (seenGates.has(gateKey)) continue;
+    seenGates.add(gateKey);
+    const gate = await checkServiceAllowed(v.intent, v.provider);
+    if (!gate.allowed) return errorResult(`${v.provider.toUpperCase()}: ${gate.reason || 'temporarily unavailable.'}`);
+  }
+
+  const rules = await getServiceRules();
+  const rate = rules.exchangeRate;
+
+  // Capacity per (chain, token) group against that group's own subtotal — mirrors
+  // core/route.ts's batch handler exactly. ALL groups must clear before ANYTHING executes.
+  const items: BatchItem[] = validated.map((v) => ({
+    serviceCategory: v.service, serviceID: v.serviceID, provider: v.provider,
+    billersCode: v.accountNumber, amountNgn: v.amountNgn, chain: v.chain, tokenSymbol: v.tokenSymbol,
+    variationCode: v.variationCode || undefined,
+  }));
+  const groups = groupByChainToken(items);
+  for (const [key, groupItems] of groups) {
+    const [gChain, gToken] = key.split('|');
+    const gTotal = groupItems.reduce((s, it) => s + it.amountNgn, 0);
+    const capacity = await checkAutonomousCapacity(identity.wallet_address, gChain, gToken, gTotal, rate);
+    if (!capacity.ok) return errorResult(`${gToken} on ${gChain}: ${capacity.reason}`);
+  }
+
+  // Execute sequentially, exactly like core/route.ts's batch handler — these relay through a
+  // shared on-chain path per recipient, and running them one at a time (not in parallel) avoids
+  // nonce/relayer contention between recipients in the same call.
+  const results: { v: ValidatedBatchRecipient; result: AgentPaymentResult }[] = [];
+  for (const v of validated) {
+    const item: BatchItem = {
+      serviceCategory: v.service, serviceID: v.serviceID, provider: v.provider,
+      billersCode: v.accountNumber, amountNgn: v.amountNgn, chain: v.chain, tokenSymbol: v.tokenSymbol,
+      variationCode: v.variationCode || undefined,
+    };
+    const result = await executeAgentPayment({
+      userWallet: identity.wallet_address, item, exchangeRate: rate, sourceChannel: 'MCP',
+      email: customerEmail, variationCode: v.variationCode,
+    });
+    results.push({ v, result });
+  }
+
+  const okCount = results.filter((r) => r.result.success).length;
+  const totalCharged = results.filter((r) => r.result.success).reduce((s, r) => s + r.v.amountNgn, 0);
+
+  // One aggregate out-of-band alert for the whole batch rather than one per recipient — the
+  // owner learns money moved without N separate pings for N small payments. Never blocks the
+  // result on alerting, same as pay_bill's finalizePayBillResult.
+  if (okCount > 0) {
+    try {
+      await notifySpendOutOfBand(identity.wallet_address, {
+        amountNgn: totalCharged, amountCrypto: (totalCharged / rate).toFixed(6), token: 'mixed tokens',
+        service: `BATCH (${okCount}/${validated.length} recipients)`, account: `${okCount} recipients`,
+        channel: 'MCP', txHash: '', remaining: 'see check_balance for per-token limits',
+      });
+    } catch { /* never block a result on alerting */ }
+  }
+
+  const lines = results.map(({ v, result }, i) => {
+    const label = `${i + 1}. ${v.provider.toUpperCase()} ${v.service} — NGN ${v.amountNgn.toLocaleString()} to ${v.accountNumber}`;
+    if (result.success && !result.vendFailed) return `${label} — OK${result.txHash ? ` (${result.txHash.slice(0, 10)}...)` : ''}`;
+    if (result.pending) return `${label} — sent, still confirming`;
+    return `${label} — FAILED: ${result.message}`;
+  });
+
+  const summary = okCount === validated.length
+    ? `All ${validated.length} payments sent — NGN ${totalCharged.toLocaleString()} total.`
+    : `${okCount} of ${validated.length} payments went through — NGN ${totalCharged.toLocaleString()} charged.`;
+
+  return textResult(`${summary}\n\n${lines.join('\n')}`);
+}
+
 // The OAuth identity is threaded through as a PARAMETER, never stashed in module scope — a
 // serverless instance handles many requests and module state is shared between them, so a
 // module-level "current identity" would be a wallet-mixing bug waiting for two concurrent
@@ -1202,6 +1466,7 @@ export async function callTool(name: string, args: any, oauthIdentity: McpIdenti
     case 'schedule_bill': return callScheduleBill(args, oauthIdentity);
     case 'list_schedules': return callListSchedules(args, oauthIdentity);
     case 'cancel_schedule': return callCancelSchedule(args, oauthIdentity);
+    case 'pay_bill_batch': return callPayBillBatch(args, oauthIdentity);
     default: return null;
   }
 }
