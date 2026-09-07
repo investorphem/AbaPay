@@ -26,7 +26,7 @@ Designed for low fees, cross-border utility vending (Nigeria + every country VTp
 * **Autonomous Scheduling & Autopay Agent:** Beyond one-off chat payments, users can ask the DeAI agent to set up recurring bills (monthly/weekly/daily), a one-time future payment ("pay this in 10 minutes"), or a single request covering **multiple recipients/accounts at once** — the agent groups them by chain/token and settles each leg through the same allowance-bounded relayer, unattended, on schedule, with zero further interaction required from the user.
 * **On-Chain Attribution:** Celo transactions carry an ERC-8021 attribution tag (`src/lib/attribution.ts`) crediting the Celo Builders program; a no-op on Base.
 * **On-Chain Agent Identity (ERC-8004):** AbaPay's DeAI agent is registered as a real on-chain identity on **both Celo and Base** via the ERC-8004 "Trustless Agents" registry, so it's discoverable on 8004scan.io / AgentScan — independent of, and unrelated to, how it moves money. See [ERC-8004 agent identity](#erc-8004-agent-identity) below.
-* **MCP Server (AI Agent Payments):** AbaPay is reachable by any MCP-speaking AI client (Claude, or any other agent that supports the Model Context Protocol) as a real tool server — `describe_capabilities`, `check_balance`, `list_plans`, `pay_bill`, and recurring/one-off `schedule_bill`/`list_schedules`/`cancel_schedule` — over Streamable HTTP JSON-RPC at `/api/mcp`. This is a fourth channel alongside Telegram/WhatsApp/X, not a new trust boundary: it runs through the exact same allowance-bounded, kill-switch-gated, discount-aware execution pipeline as the chat channels, on **either Celo or Base** depending on what the linking wallet approved. See [MCP Server](#mcp-server-ai-agent-payments) below.
+* **MCP Server (AI Agent Payments):** AbaPay is reachable by any MCP-speaking AI client (Claude, or any other agent that supports the Model Context Protocol) as a real tool server — `describe_capabilities`, `check_balance`, `list_plans`, `pay_bill`, multi-recipient `pay_bill_batch`, and recurring/one-off `schedule_bill`/`list_schedules`/`cancel_schedule` — over Streamable HTTP JSON-RPC at `/api/mcp`. This is a fourth channel alongside Telegram/WhatsApp/X, not a new trust boundary: it runs through the exact same allowance-bounded, kill-switch-gated, discount-aware execution pipeline as the chat channels, on **either Celo or Base** depending on what the linking wallet approved. See [MCP Server](#mcp-server-ai-agent-payments) below.
 * **MCP OAuth 2.1 (authorize once, not once per conversation):** the connector supports a full OAuth 2.1 authorization-code + PKCE (S256) flow with Dynamic Client Registration (`/api/oauth/register`, `/api/oauth/authorize`, `/api/oauth/token`, discovery under `/.well-known/`). A user authorizes once in a browser — proving their API key **and** PIN on AbaPay's own hand-rendered consent page — and every future conversation reconnects with a Bearer token instead of retyping an API key. **OAuth never authorizes a spend:** the PIN is still required on every single `pay_bill` call, and a Bearer token alone can only read a balance. The `api_key` tool argument remains the fallback for clients that can't do OAuth.
 * **`list_plans` — real VTpass plan codes and prices, never guessed:** `variation_code` used to be something an agent had to invent for DATA/CABLE/EDUCATION. `list_plans` returns the currently purchasable plans with their exact codes and live VTpass prices, and both the tool description and the server instructions tell the client to call it before `pay_bill` rather than guessing.
 * **x402 Settlement (main app, both chains):** Payments made directly in the web app settle via the [x402](https://x402.org) HTTP-payment protocol — Celo's own facilitator for **USDC/USD₮/USAT on Celo**, the Coinbase CDP facilitator for **USDC on Base** — so they're genuinely indexed on x402scan, not relabeled contract calls. Anything without EIP-3009 uses the on-chain `payBill` flow, including Base's sponsored-gas path. ⚠️ x402 needs an EIP-3009 `transferWithAuthorization` signature, which is structurally what a drainer asks for, so some wallet scanners flag it as risky — a known, deliberate trade for x402scan visibility; `NEXT_PUBLIC_X402_ENABLED=false` opts out. The signature-free agent-initiated flow is untouched either way. See [x402 settlement](#x402-settlement-main-app-only) below.
@@ -319,7 +319,7 @@ src/
 │       ├── user/points/          # AbaPoints balance
 │       ├── agent/                # Agent link/allowance management (Agent Hub)
 │       ├── deai/                 # Conversational AI agent
-│       ├── mcp/                  # MCP server (describe_capabilities, check_balance, list_plans, pay_bill, schedule_bill, list_schedules, cancel_schedule)
+│       ├── mcp/                  # MCP server (describe_capabilities, check_balance, list_plans, pay_bill, pay_bill_batch, schedule_bill, list_schedules, cancel_schedule)
 │       ├── oauth/{register,authorize,token}/  # OAuth 2.1 (DCR, consent page, token endpoint) for MCP
 │       ├── cleanup/              # Stale pre-flight intent sweeper
 │       ├── webhook/, webhook/vtpass/  # VTpass + on-chain webhooks
@@ -906,6 +906,7 @@ already backs Telegram/WhatsApp/X, not a parallel system with its own rules:
 | `check_balance` | Reads the linked wallet's live balance + approved agent limit, **per token**, on a chain | OAuth Bearer token *or* `api_key` |
 | `transaction_history` | Lists recent real transactions for the linked wallet — same data as the app's History tab | OAuth Bearer token *or* `api_key` |
 | `pay_bill` | Pays a real bill (airtime, data, electricity, cable TV, **education PIN**, or **international airtime/data**) end-to-end, on-chain | (OAuth Bearer token *or* `api_key`) **+ `pin`, always** |
+| `pay_bill_batch` | Pays airtime/data to 2-20 recipients in one call, one PIN for the whole batch | (OAuth Bearer token *or* `api_key`) **+ `pin`, always** |
 | `schedule_bill` | Sets up a recurring/one-off airtime, data, electricity, or cable payment — same automation Telegram/WhatsApp/X support | (OAuth Bearer token *or* `api_key`) **+ `pin`, always** |
 | `list_schedules` | Lists active schedules for the linked wallet | OAuth Bearer token *or* `api_key` |
 | `cancel_schedule` | Cancels one, some, or all active schedules for the linked wallet | OAuth Bearer token *or* `api_key` |
@@ -952,6 +953,21 @@ another token on that same chain already has enough of both and says so by name 
 short, but USDC already has enough balance and an approved limit — retry with token: 'USDC'"* —
 rather than a dead-end message naming only the token that failed.
 
+**`pay_bill_batch` — multiple recipients in one call, matching chat's batch payments.**
+Chat's intent engine has parsed "send 500 to X and 1000 to Y" into multiple recipients since
+`intentEngine.ts`'s rule 14; MCP's `pay_bill` only ever took one. `pay_bill_batch` reuses the
+exact same primitives chat's own batch handler calls (`groupByChainToken`, `checkAutonomousCapacity`,
+`executeAgentPayment` — all in `src/lib/deai/batch.ts`): recipients are grouped by `(chain, token)`
+and each group's capacity is checked against its own subtotal, but if **any** group comes up
+short the whole batch is refused before anything moves. Once capacity clears, recipients are
+paid one at a time (never in parallel, to avoid relayer nonce contention) and the response
+reports each individually — a vend failure partway through is never reported as if the whole
+batch failed. One difference makes this MORE capable than chat, not just at parity: chat's
+`ParsedRecipient` shape has no per-recipient `variation_code` field, so a chat-driven DATA batch
+has no way to name each recipient's plan — `pay_bill_batch`'s structured schema does, so it
+requires one per DATA recipient instead of inheriting that gap. AIRTIME and DATA only, capped at
+20 recipients per call.
+
 **`schedule_bill`/`list_schedules`/`cancel_schedule` bring MCP to parity with chat's
 automations.** Telegram/WhatsApp/X have long supported recurring and one-off scheduled bills
 (the `scheduled_bills` table, run by `src/lib/scheduler.ts`'s cron); MCP previously had no way to
@@ -980,6 +996,15 @@ batch flow: `checkPinAllowed`/`verifyPin`/`recordPinFailure` (same escalating lo
 `executeAgentPayment` (on-chain allowance check, the shared discount engine, and vend), and
 `notifySpendOutOfBand` (email + every other linked channel is told the instant money moves, so a
 leaked API key is caught exactly like a stolen chat session would be).
+
+**Rate limiting is defense in depth, layered on top of the above, not a substitute for it.**
+`/api/mcp` applies a blanket per-IP limit across every tool call. On top of that, `pay_bill`,
+`schedule_bill`, and `pay_bill_batch` each apply their own per-identity limit (keyed by the
+`agent_links` row id, not the IP) once the PIN has been checked — the escalating PIN lockout
+only ever fires on a *wrong* PIN, so on its own it does nothing to slow down a run of *correct*
+calls from a leaked API key or OAuth token. Neither limit is the real backstop (the on-chain
+allowance is, same as everywhere else in this doc) — they just make a leaked credential slower
+to drain before its owner sees the out-of-band alert and revokes it.
 
 **Chain-agnostic — Celo or Base, whichever the linking wallet approved.** An MCP key inherits the
 `approved_chain`/`approved_token` recorded when it was created (same fields Telegram/WhatsApp/X

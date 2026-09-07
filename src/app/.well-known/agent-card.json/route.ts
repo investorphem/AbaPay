@@ -69,6 +69,13 @@ const SKILLS = [
     examples: ['Pay 1000 NGN MTN airtime for 08012345678'],
   },
   {
+    id: 'pay_bill_batch',
+    name: 'Pay multiple bills at once',
+    description: toolDescription('pay_bill_batch'),
+    tags: ['payment', 'airtime', 'data', 'batch'],
+    examples: ['Send 500 NGN airtime to 08011111111 and 1000 NGN to 08033333333'],
+  },
+  {
     id: 'schedule_bill',
     name: 'Schedule a bill',
     description: toolDescription('schedule_bill'),
