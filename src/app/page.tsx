@@ -808,6 +808,21 @@ export default function Home() {
     return { cryptoToCharge: crypto.toFixed(4), currentFee: fee };
   }, [calculatedNairaAmount, exchangeRate, activeService, activeTab, discountNgn]);
 
+  // 🔴 THE BUG THIS FIXES: insufficient balance was only ever discovered inside the Pay
+  // click handler (hasEnoughBalanceOnChain, called mid-flow after the button is already
+  // pressed) — a user typing an amount bigger than their wallet holds got no signal at all
+  // until they'd already tapped Pay and waited through "Verifying permissions...". This
+  // mirrors the existing min/max amount warning below it (same red-alert card, same
+  // "show as soon as it's true" placement) using the already-cached `walletBalance` state —
+  // no new RPC call per keystroke. It's advisory only: the async, freshly-read check inside
+  // the Pay handler remains the one that actually blocks a stale/wrong balance from paying.
+  const insufficientBalance = useMemo(() => {
+    const needed = parseFloat(cryptoToCharge);
+    const held = parseFloat(walletBalance);
+    if (!needed || needed <= 0 || isNaN(held)) return false;
+    return held < needed;
+  }, [cryptoToCharge, walletBalance]);
+
   const walletFiatDisplay = useMemo(() => {
     const bal = parseFloat(walletBalance);
     if (isNaN(bal)) return "0.00";
@@ -1548,6 +1563,20 @@ export default function Home() {
       // ⚡ STRICT FIREWALL: ISOLATED APPROVAL BLOCK
       // Skipped entirely when we're routing through the sponsored paymaster batch below —
       // in that case the approve call (if needed) travels inside the same sponsored sendCalls.
+      //
+      // 🔴 THE BUG THIS FIXES: this used to approve a flat parseUnits("100000", decimals) — a
+      // buffer meant to cover several FUTURE payments without asking the wallet to sign a fresh
+      // approve() every single time — regardless of what this one payment actually costs. A
+      // user paying a ₦500 airtime top-up (a few cents of stablecoin) was shown a wallet prompt
+      // asking to approve spending up to 100,000 of the token, which reads exactly like the
+      // "infinite approval" anti-pattern security tooling warns about: if the AbaPay contract
+      // were ever compromised, it could drain up to the full APPROVED amount, not just what this
+      // transaction needed. Approving exactly `valueInWei` limits the blast radius to this one
+      // payment — the standard least-privilege ERC20 approval. The real cost is UX, not
+      // security: a wallet that can't batch calls (see usingBasePaymaster below — only
+      // smart-account wallets can) will ask for a fresh approve() on every future payment
+      // instead of coasting on a buffer. That trade was made deliberately in favor of the
+      // smaller attack surface.
       // ==========================================
       if (!usingBasePaymaster && currentAllowance < valueInWei) {
           setStatus("Awaiting token approval...");
@@ -1557,7 +1586,7 @@ export default function Home() {
                   address: tokenAddress as `0x${string}`,
                   abi: ERC20_ABI,
                   functionName: 'approve',
-                  args: [ABAPAY_CONTRACT, parseUnits("100000", selectedToken.decimals)],
+                  args: [ABAPAY_CONTRACT, valueInWei],
                   ...txConfig,
                   dataSuffix: celoAttributionSuffix(activeChain), // Celo attribution only; no-op on Base
               }));
@@ -1650,6 +1679,12 @@ export default function Home() {
       // ==========================================
       // ⚡ SPONSORED PATH: Base + paymaster-capable wallet
       // Batches (approve if needed) + payBill into a single sponsored EIP-5792 call.
+      //
+      // Approves exactly `valueInWei` here too, not a buffer — unlike the standalone path
+      // above, this one has no UX cost to weigh against it: approve+payBill are ALWAYS batched
+      // into one signature on this path regardless of what the allowance already covers, so a
+      // future payment gets its own fresh (exact) approve call in the same single signature
+      // anyway. Inflating this one would only widen the blast radius for nothing in return.
       // ==========================================
       if (usingBasePaymaster) {
           let callsId: string | undefined;
@@ -1659,7 +1694,7 @@ export default function Home() {
               if (currentAllowance < valueInWei) {
                   calls.push({
                       to: tokenAddress as `0x${string}`,
-                      data: encodeFunctionData({ abi: ERC20_ABI, functionName: 'approve', args: [ABAPAY_CONTRACT, parseUnits("100000", selectedToken.decimals)] }),
+                      data: encodeFunctionData({ abi: ERC20_ABI, functionName: 'approve', args: [ABAPAY_CONTRACT, valueInWei] }),
                   });
               }
               calls.push({ to: ABAPAY_CONTRACT as `0x${string}`, data: attributedData });
@@ -3832,6 +3867,23 @@ export default function Home() {
                  </div>
               )}
 
+              {/* 🔴 Same signal the amount field already shows while typing (see
+                  `insufficientBalance`'s own comment) — repeated here because this modal, not
+                  the field above it, is the actual last screen before the wallet is prompted.
+                  A user who scrolled straight to Confirm without re-checking the field still
+                  sees this before tapping the button below, not after. */}
+              {insufficientBalance && (
+                 <div className="bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800/50 p-4 rounded-2xl mb-6 flex items-start gap-3 animate-in slide-in-from-top-2 transition-colors">
+                    <AlertTriangle className="text-red-500 dark:text-red-400 shrink-0 mt-0.5" size={20} />
+                    <div>
+                       <p className="text-sm font-black text-red-800 dark:text-red-300 tracking-tight">Insufficient Balance</p>
+                       <p className="text-xs font-bold text-red-600 dark:text-red-400 leading-snug mt-1">
+                          This needs {cryptoToCharge} {selectedToken.symbol}, but your wallet holds {walletBalance}. Top up before paying, or this will fail.
+                       </p>
+                    </div>
+                 </div>
+              )}
+
               <div className="text-center mb-8">
                  <p className="text-[10px] font-black text-slate-400 dark:text-slate-500 uppercase tracking-widest mb-2">Total Payable</p>
 
@@ -4645,6 +4697,14 @@ export default function Home() {
                             <AlertTriangle size={16} className="text-red-500 dark:text-red-400 shrink-0" />
                             <p className="text-xs font-black text-red-600 dark:text-red-400">
                                 {parseFloat(nairaAmount) < dynamicMinAmount ? `Amount is below the minimum of ₦${dynamicMinAmount.toLocaleString()}` : `Amount exceeds the maximum of ₦${dynamicMaxAmount.toLocaleString()}`}
+                            </p>
+                        </div>
+                    )}
+                    {nairaAmount && insufficientBalance && (
+                        <div className="bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800/50 p-3 rounded-xl mt-2 flex items-center gap-2 animate-in fade-in transition-colors">
+                            <AlertTriangle size={16} className="text-red-500 dark:text-red-400 shrink-0" />
+                            <p className="text-xs font-black text-red-600 dark:text-red-400">
+                                Insufficient balance — this needs {cryptoToCharge} {selectedToken.symbol}, but your wallet holds {walletBalance}. Top up before paying.
                             </p>
                         </div>
                     )}
@@ -5510,6 +5570,14 @@ export default function Home() {
                                 <AlertTriangle size={16} className="text-red-500 dark:text-red-400 shrink-0" />
                                 <p className="text-xs font-black text-red-600 dark:text-red-400">
                                     {parseFloat(nairaAmount) < currentMinDisplay ? `Amount is below the minimum of ₦${currentMinDisplay.toLocaleString()}` : `Amount exceeds the maximum of ₦${dynamicMaxAmount.toLocaleString()}`}
+                                </p>
+                            </div>
+                        )}
+                        {nairaAmount && insufficientBalance && (
+                            <div className="bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800/50 p-3 rounded-xl mt-2 flex items-center gap-2 animate-in fade-in transition-colors">
+                                <AlertTriangle size={16} className="text-red-500 dark:text-red-400 shrink-0" />
+                                <p className="text-xs font-black text-red-600 dark:text-red-400">
+                                    Insufficient balance — this needs {cryptoToCharge} {selectedToken.symbol}, but your wallet holds {walletBalance}. Top up before paying.
                                 </p>
                             </div>
                         )}
