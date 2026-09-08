@@ -83,14 +83,6 @@ export async function POST(req: Request) {
   try {
     switch (method) {
       case 'initialize':
-        // 🔴 TEMPORARY DIAGNOSTIC (round 2) — every server-side piece (initialize capabilities,
-        // tools/list's _meta.ui, resources/read's HTML) has been hand-verified correct against
-        // production, twice now, yet the card still isn't confirmed rendering after this
-        // deploy. Round 1 of this same diagnostic (since removed) proved the earlier gap was a
-        // stale client connection; this round targets what's left unverified — whether the
-        // client is asking for the io.modelcontextprotocol/ui extension AT ALL this time, and
-        // whether it ever calls resources/read afterward. Remove once resolved.
-        console.log('[MCP][DIAG2] initialize — extensions:', JSON.stringify(params?.capabilities?.extensions), 'clientInfo:', JSON.stringify(params?.clientInfo));
         return rpcResult(id, {
           protocolVersion: params?.protocolVersion || PROTOCOL_VERSION,
           // `resources: {}` because pay_bill/pay_bill_batch/transaction_history now reference a
@@ -100,25 +92,26 @@ export async function POST(req: Request) {
           // calls resources/read and the tool behaves exactly as before (text ± PNG image),
           // per the spec's own graceful-degradation rule — no client capability check needed.
           //
-          // 🔴 `tools: { listChanged: true }` — CONFIRMED LIVE BUG THIS ADDRESSES: shipping the
-          // interactive card here did nothing for an already-connected client until the AbaPay
-          // connector was manually disconnected and reconnected — verified against production
-          // logs: three real tools/call requests hit /api/mcp in the same window a user tried a
-          // fresh conversation, and NONE of them was a fresh `initialize` — the client was
-          // reusing a connection (and its cached tools/list) established before this tool
-          // metadata existed. Declaring listChanged + actually sending
-          // notifications/tools/list_changed over the GET SSE stream below (see GET, and its
-          // own comment) is the spec-correct fix — a client that holds that stream open gets
-          // told to re-fetch tools/list without the user touching Settings at all.
+          // 🔴 `tools: { listChanged: true }` — CONFIRMED LIVE BUG THIS ADDRESSES: an
+          // already-connected client kept using a stale cached tools/list (from before this
+          // tool metadata existed) until the connector was manually disconnected and
+          // reconnected — verified against production logs (real tools/call traffic with zero
+          // fresh `initialize` calls in the same window). Declaring listChanged + actually
+          // sending notifications/tools/list_changed over the GET SSE stream below (see GET) is
+          // the spec-correct fix — a client holding that stream open gets told to re-fetch
+          // tools/list without anyone touching Settings.
           //
           // ⚠️ NOT A GUARANTEED FIX BY ITSELF: Anthropic's own MCP connector tracker has open,
           // acknowledged reports of a remote connector's tool list staying stale even across a
           // manual reconnect (anthropics/claude-ai-mcp#137, #476) — a caching issue on the
-          // client/platform side this server cannot control. This is still the right thing to
-          // implement (Claude Code already honors listChanged over a stream; other MCP clients
-          // do too), but until that platform bug is fixed, "Refresh tools list" from the
-          // connector's own ⋮ menu in Claude.ai remains the fastest manual fallback — lighter
-          // than a full disconnect/reconnect, no re-authorization needed.
+          // client/platform side this server cannot control. Separately, a "card not showing"
+          // report can also just mean the MODEL chose not to re-call the tool at all for a
+          // repeated-looking question (verified live: Claude answered from its own conversation
+          // memory instead of calling check_balance/transaction_history — zero requests reached
+          // this server that turn) — no server-side fix changes that; asking for fresh/live data
+          // explicitly, or starting a new conversation, does. "Refresh tools list" from the
+          // connector's own ⋮ menu in Claude.ai is the fastest manual fallback for genuine
+          // staleness — lighter than a full disconnect/reconnect, no re-authorization needed.
           capabilities: { tools: { listChanged: true }, resources: {} },
           serverInfo: SERVER_INFO,
           instructions: "AbaPay: check a linked wallet's stablecoin balance, browse recent transaction history, pay a real bill (one recipient or many at once), or schedule one for later — Nigerian services (airtime, data, electricity, cable) or international airtime/data across 170+ countries — settled on-chain. Call describe_capabilities first. For DATA, CABLE, or EDUCATION, call list_plans before pay_bill/pay_bill_batch/schedule_bill and use one of its real returned codes as variation_code. For service: INTERNATIONAL, call list_international_options first (drills down country -> product type -> operator -> plan) and pass back its exact country/product_type_id/operator_id/variation_code — never guess any of these (INTERNATIONAL cannot be scheduled or batched; pay_bill only). A successful pay_bill returns a rich receipt (image card plus a shareable receipt link) alongside the confirmation text. Use transaction_history to answer 'what did I pay recently' without the human needing to open the app. When the human names 2+ recipients for airtime or data in one request, use pay_bill_batch (one PIN for the whole batch, up to 20 recipients) instead of calling pay_bill repeatedly. Authentication: OAuth 2.1 is supported and preferred — authorize once in the browser and this connection is remembered, so no api_key argument is ever needed again. The api_key created in the AbaPay app under Agent Hub -> MCP remains the fallback for clients that cannot do OAuth. Either way, pay_bill, pay_bill_batch, and schedule_bill ALWAYS require the PIN set when the key was created — OAuth does not remove it. Ask the human for their PIN on every single payment/batch/schedule creation — every single call, never reused from earlier in the conversation. pay_bill and pay_bill_batch execute IMMEDIATELY with no delay of their own — if the human asks to pay 'in N minutes', 'later', 'tomorrow', or on a recurring basis (e.g. 'every Tuesday'), do not call them now; use schedule_bill instead (it charges nothing itself — money only moves later, when the schedule fires and only if the wallet still has a funded allowance then; for multiple recipients, call schedule_bill once per recipient). Use list_schedules/cancel_schedule to view or remove standing schedules. Every call that moves or commits money (pay_bill, pay_bill_batch, schedule_bill) is rate-limited per credential on top of the PIN requirement — a 'too many calls' error means slow down and retry shortly, not that anything is broken.",
@@ -136,12 +129,10 @@ export async function POST(req: Request) {
       // point to them via `_meta.ui.resourceUri`; listed anyway for hosts that prefetch from
       // here rather than waiting for a tool call, and for basic discoverability.
       case 'resources/list':
-        console.log('[MCP][DIAG2] resources/list called');
         return rpcResult(id, { resources: [MCP_UI_CARD_RESOURCE] });
 
       case 'resources/read': {
         const uri = params?.uri;
-        console.log('[MCP][DIAG2] resources/read called for uri:', uri);
         if (uri !== MCP_UI_CARD_URI) {
           return rpcError(id, -32002, `Resource not found: ${uri}`);
         }
@@ -154,13 +145,6 @@ export async function POST(req: Request) {
         const toolName = params?.name;
         if (!toolName || !TOOLS.some((t) => t.name === toolName)) {
           return rpcError(id, -32602, `Unknown tool: ${toolName}`);
-        }
-        // 🔴 TEMPORARY DIAGNOSTIC (round 2) — see the note on 'initialize'. Confirms this
-        // specific request actually reached tools/call for a card-enabled tool, and with what
-        // arguments — a re-call carrying `offset`/`chain`/`id` is the View itself paging or
-        // refreshing; one without is the model's own first call.
-        if (['pay_bill', 'pay_bill_batch', 'transaction_history', 'check_balance', 'list_schedules', 'cancel_schedule'].includes(toolName)) {
-          console.log('[MCP][DIAG2] tools/call', toolName, JSON.stringify(params?.arguments));
         }
         // 🔴 OPERATOR EMERGENCY BRAKE — same per-channel pause as WhatsApp/Telegram/X (see
         // isChannelEnabled in serviceRules.ts). A normal in-band tool error, not a transport
