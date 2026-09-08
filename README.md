@@ -944,19 +944,43 @@ blockchain observer correlate a payment to the customer's verified name/address,
 the purchased code/PIN either. `transaction_history` gets the same rich treatment — a statement
 card image alongside the plain-text list — for browsing past activity without opening the app.
 
-**`pay_bill`, `pay_bill_batch`, and `transaction_history` also render as a real interactive card
-via MCP Apps (SEP-1865)** — an open MCP extension (`io.modelcontextprotocol/ui`, shipped as the
-protocol's first official extension 2026-01-26), not a first-party-only mechanism. The flat PNG
-above is a fixed image with Satori's font-subsetting limits (₦/₮ have to be worked around — see
-`receiptCard.tsx`'s own comment on that); the interactive card (`src/lib/deai/mcpUiTemplates.ts`)
-is real HTML/CSS/JS rendered by the host in a sandboxed iframe, fed the same data as
-`structuredContent` on the tool result over the standard `ui/notifications/tool-result` message —
-real ₦/₮ glyphs, theme-aware (reads the host's CSS variables for light/dark), with a "View
-receipt" link wired through `ui/open-link`. Declared via `_meta.ui.resourceUri` on the three
-tools and served through two new `/api/mcp` methods, `resources/list`/`resources/read`
-(`src/app/api/mcp/route.ts`) — additive only: a host that never negotiates the extension just
-never calls `resources/read`, and the tool behaves exactly as before (text + PNG image), per the
-spec's own graceful-degradation rule.
+**`pay_bill`, `pay_bill_batch`, `transaction_history`, `check_balance`, and `list_schedules` also
+render as a real interactive card via MCP Apps (SEP-1865)** — an open MCP extension
+(`io.modelcontextprotocol/ui`, shipped as the protocol's first official extension 2026-01-26),
+not a first-party-only mechanism. The flat PNG above is a fixed image with Satori's
+font-subsetting limits (₦/₮ have to be worked around — see `receiptCard.tsx`'s own comment on
+that); the interactive card (`src/lib/deai/mcpUiTemplates.ts`) is real HTML/CSS/JS rendered by
+the host in a sandboxed iframe, fed the tool's `structuredContent` over
+`ui/notifications/tool-result` — real ₦/₮ glyphs, theme-aware (reads the host's CSS variables for
+light/dark), with a "View receipt" link wired through `ui/open-link`. Declared via
+`_meta.ui.resourceUri` on those five tools and served through two new `/api/mcp` methods,
+`resources/list`/`resources/read` (`src/app/api/mcp/route.ts`) — additive only: a host that never
+negotiates the extension just never calls `resources/read`, and every tool behaves exactly as
+before (text ± PNG image), per the spec's own graceful-degradation rule.
+
+**The card calls tools back, not just displays them.** `transaction_history`'s card pages through
+history with Prev/Next (re-calling the tool with a shifted `offset` — `transaction_history` now
+accepts one), `check_balance`'s card has a Refresh button, and `list_schedules`' card has a Cancel
+button per schedule — all using the spec's "Interactive Updates" pattern (the View sending
+`tools/call` back through the host and getting a normal result straight back, not via a
+notification). Deliberately **not** extended to `pay_bill`/`pay_bill_batch`/`schedule_bill`: those
+need a PIN, and typing a spending PIN into a sandboxed third-party iframe is a weaker trust
+boundary than typing it directly into the chat, which is the boundary the rest of this doc is
+built around protecting. `cancel_schedule` needs no PIN already (same as calling it from chat),
+which is why it's the one write action the card exposes.
+
+**Already-connected clients pick up new/changed tools without a manual reconnect** — mostly.
+`initialize` now declares `tools: { listChanged: true }`, and `GET /api/mcp` with
+`Accept: text/event-stream` opens a real SSE stream (previously a hard 405) that pushes
+`notifications/tools/list_changed` the moment a client starts listening, prompting a fresh
+`tools/list`. This was added after confirming, against production logs, that an already-connected
+client does NOT re-run `initialize` just because a new chat starts — it reuses one persistent
+connection to the connector indefinitely. ⚠️ Not a guaranteed fix by itself: Anthropic's own MCP
+connector tracker has open, acknowledged reports of a remote connector's tool list staying stale
+even across a manual reconnect (`anthropics/claude-ai-mcp#137`, `#476`) — a client/platform-side
+caching issue outside this server's control. Until that's fixed platform-side, "Refresh tools
+list" from the connector's own ⋮ menu in Claude.ai is the fastest manual fallback — lighter than a
+full disconnect/reconnect, no re-authorization needed.
 
 Both accept optional `chain`/`token` overrides — they default to whatever was approved when the
 API key was created, but a caller isn't stuck with that default if it comes up short. `check_balance`
