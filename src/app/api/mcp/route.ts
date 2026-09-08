@@ -83,6 +83,14 @@ export async function POST(req: Request) {
   try {
     switch (method) {
       case 'initialize':
+        // 🔴 TEMPORARY DIAGNOSTIC — remove once the MCP Apps rendering gap is resolved. The
+        // interactive card (mcpUiTemplates.ts) never appears in a real client despite
+        // resources/list, resources/read, and tools/list's _meta.ui all verified correct by
+        // hand against production. The one thing that can't be checked from outside is what
+        // the CLIENT actually declares here — specifically whether `capabilities.extensions`
+        // includes `io.modelcontextprotocol/ui` at all. This logs the real request so the next
+        // live attempt shows up in Vercel's runtime logs instead of staying a guess.
+        console.log('[MCP][DIAG] initialize request:', JSON.stringify({ protocolVersion: params?.protocolVersion, capabilities: params?.capabilities, clientInfo: params?.clientInfo }));
         return rpcResult(id, {
           protocolVersion: params?.protocolVersion || PROTOCOL_VERSION,
           // `resources: {}` because pay_bill/pay_bill_batch/transaction_history now reference a
@@ -108,10 +116,18 @@ export async function POST(req: Request) {
       // point to them via `_meta.ui.resourceUri`; listed anyway for hosts that prefetch from
       // here rather than waiting for a tool call, and for basic discoverability.
       case 'resources/list':
+        // 🔴 TEMPORARY DIAGNOSTIC — see the identical note on 'initialize'. If this line never
+        // appears in the logs for a real attempt, the client never even looked for a resource
+        // list, regardless of what it declared during initialize.
+        console.log('[MCP][DIAG] resources/list called');
         return rpcResult(id, { resources: [MCP_UI_CARD_RESOURCE] });
 
       case 'resources/read': {
         const uri = params?.uri;
+        // 🔴 TEMPORARY DIAGNOSTIC — see the identical note on 'initialize'. This is the single
+        // most telling line: if it's absent from a real attempt's logs, the client never tried
+        // to fetch the card template at all, no matter what tools/list or initialize showed it.
+        console.log('[MCP][DIAG] resources/read called for uri:', uri);
         if (uri !== MCP_UI_CARD_URI) {
           return rpcError(id, -32002, `Resource not found: ${uri}`);
         }
