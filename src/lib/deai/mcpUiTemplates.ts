@@ -15,9 +15,21 @@ import { LOGO_DATA_URL } from './logoDataUrl';
 // just a first-party Anthropic-partnered connector — ship a real HTML/CSS/JS view, rendered
 // by the host in a sandboxed iframe, fed live data over the same JSON-RPC channel every other
 // MCP message already uses. This is that view: one generic template, driven entirely by the
-// `structuredContent` a tool result attaches (see attachUiContent in mcpTools.ts) — never by
+// `structuredContent` a tool result attaches (see withCard in mcpTools.ts) — never by
 // anything baked in at build time, so it can render pay_bill's receipt, transaction_history's
-// statement, and pay_bill_batch's summary from the exact same file.
+// paginated statement, check_balance's per-token balances, list_schedules' automations, and
+// pay_bill_batch's summary from the exact same file.
+//
+// 🔴 THE CARD CAN CALL TOOLS BACK — not just display data. transaction_history's Prev/Next,
+// check_balance's Refresh, and list_schedules' Cancel buttons all use the spec's own
+// "Interactive Updates" pattern (a View sending `tools/call` back through the host, same as
+// any other MCP message) — see callServerTool() below. Deliberately NOT extended to
+// pay_bill/pay_bill_batch/schedule_bill: those need a PIN, and typing a spending PIN into a
+// sandboxed third-party iframe is a different, weaker trust boundary than the human typing it
+// directly into Claude's own message box, which is the one this whole codebase is built around
+// protecting (escalating lockout, out-of-band spend alerts, rate limiting — see mcpTools.ts).
+// cancel_schedule needs no PIN, matching its existing MCP/chat security level, which is why
+// it's the one write action this card exposes.
 //
 // The `content` array the MCP tool call still returns (text, and the existing PNG image for
 // clients that never negotiate this extension) is UNCHANGED — this is additive. A host that
@@ -34,14 +46,16 @@ export const MCP_UI_CARD_RESOURCE = {
   mimeType: 'text/html;profile=mcp-app',
 };
 
-// One template, three views (`structuredContent.view`): 'receipt' | 'history' | 'batch'.
-// Vanilla HTML/CSS/JS, no build step and no external resources — CSP for this resource is
-// therefore left at the spec's restrictive default (no `ui.csp` declared), and the logo is
-// inlined as the same base64 PNG constant receiptCard.tsx already uses rather than a fetched
-// asset, so nothing here needs a `resourceDomains` allowance either.
+// One template, five views (`structuredContent.view`): 'receipt' | 'history' | 'balance' |
+// 'schedules' | 'batch'. Vanilla HTML/CSS/JS, no build step and no external resources — CSP
+// for this resource is therefore left at the spec's restrictive default (no `ui.csp`
+// declared), and the logo is inlined as the same base64 PNG constant receiptCard.tsx already
+// uses rather than a fetched asset, so nothing here needs a `resourceDomains` allowance either.
 //
-// Kept in one string constant, not a function — nothing here is build-time-computed; all real
-// data arrives later over ui/notifications/tool-result.
+// Kept in one string constant, not a function — nothing here is build-time-computed; real data
+// arrives either via ui/notifications/tool-result (the call that spawned this view) or as the
+// direct response to a view-initiated tools/call (Prev/Next/Refresh/Cancel — see
+// callServerTool() below), never anything baked in here.
 export const MCP_UI_CARD_HTML = `<!DOCTYPE html>
 <html>
 <head>
@@ -116,6 +130,16 @@ export const MCP_UI_CARD_HTML = `<!DOCTYPE html>
   .hist-amount { font-weight: 800; font-size: 13px; }
   .hist-status { font-size: 10px; font-weight: 800; text-transform: uppercase; letter-spacing: 0.05em; margin-top: 1px; }
   .loading { padding: 18px 0; text-align: center; color: var(--color-text-secondary, var(--ab-muted)); font-size: 13px; }
+  .pager { display: flex; align-items: center; justify-content: space-between; margin-top: 10px; padding-top: 10px; border-top: 1px solid var(--color-border-primary, var(--ab-border)); }
+  .pager-label { font-size: 11px; color: var(--color-text-secondary, var(--ab-muted)); font-weight: 700; }
+  .link-btn:disabled { opacity: 0.35; cursor: default; text-decoration: none; }
+  .cancel-btn { font-size: 11px; font-weight: 800; color: var(--ab-red); background: none; border: 1px solid var(--ab-red); border-radius: 999px; padding: 4px 10px; cursor: pointer; }
+  .cancel-btn:disabled { opacity: 0.4; cursor: default; }
+  .toast {
+    position: fixed; left: 12px; right: 12px; bottom: 12px; background: var(--ab-red); color: #fff;
+    padding: 10px 14px; border-radius: 10px; font-size: 12px; font-weight: 700; z-index: 999;
+    box-shadow: var(--shadow-md, 0 4px 12px rgba(0,0,0,0.2));
+  }
 </style>
 </head>
 <body>
@@ -169,6 +193,21 @@ export const MCP_UI_CARD_HTML = `<!DOCTYPE html>
 
   function openLink(url) { if (url) send('ui/open-link', { url: url }).catch(function () {}); }
 
+  // "Interactive Updates" (spec) — the View calling a real MCP tool through the host, exactly
+  // like the agent would, and getting a normal CallToolResult straight back (not via the
+  // ui/notifications/tool-result path, which is for host-initiated calls only).
+  function callServerTool(name, toolArgs) {
+    return send('tools/call', { name: name, arguments: toolArgs || {} });
+  }
+
+  function showToast(msg) {
+    var t = document.createElement('div');
+    t.className = 'toast';
+    t.textContent = msg;
+    document.body.appendChild(t);
+    setTimeout(function () { t.remove(); }, 3500);
+  }
+
   function esc(s) {
     return String(s === null || s === undefined ? '' : s).replace(/[&<>"']/g, function (c) {
       return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c];
@@ -217,13 +256,20 @@ export const MCP_UI_CARD_HTML = `<!DOCTYPE html>
       '<span class="detail-value' + (accent ? ' accent' : '') + '">' + esc(value) + '</span></div>';
   }
 
+  // Called both for the initial render and for every Prev/Next click — sc.limit/sc.offset
+  // come straight from the tool result each time (server-computed, see callTransactionHistory
+  // in mcpTools.ts), so the buttons never need locally-tracked paging state of their own.
   function renderHistory(sc) {
     var html = '<div class="row"><div class="brand"><img src="' + LOGO + '" alt="AbaPay"/><span>AbaPay</span></div>' +
       '<div class="chip">' + esc((sc.wallet || '').slice(0, 6) + '...' + (sc.wallet || '').slice(-4)) + '</div></div>';
     html += '<div class="amount-label" style="margin-top:16px">Recent Activity</div>';
     var rows = sc.rows || [];
-    if (rows.length === 0) {
+    var limit = sc.limit || 10;
+    var offset = sc.offset || 0;
+    if (rows.length === 0 && offset === 0) {
       html += '<div class="loading">No transactions yet.</div>';
+    } else if (rows.length === 0) {
+      html += '<div class="loading">No more transactions.</div>';
     } else {
       html += '<div style="margin-top:6px">';
       for (var i = 0; i < rows.length; i++) {
@@ -233,6 +279,53 @@ export const MCP_UI_CARD_HTML = `<!DOCTYPE html>
           '<span class="hist-meta">' + esc(r.date) + ' &middot; ' + esc(r.accountNumber) + '</span></div>' +
           '<div class="hist-right"><span class="hist-amount">' + esc(r.displayAmountNgn) + '</span>' +
           '<span class="hist-status" style="color:' + color + '">' + esc(r.status) + '</span></div></div>';
+      }
+      html += '</div>';
+    }
+    var prevArgs = esc(JSON.stringify({ limit: limit, offset: Math.max(0, offset - limit) }));
+    var nextArgs = esc(JSON.stringify({ limit: limit, offset: offset + limit }));
+    html += '<div class="pager">' +
+      '<button class="link-btn" data-call="transaction_history" data-args="' + prevArgs + '"' + (offset <= 0 ? ' disabled' : '') + '>&larr; Prev</button>' +
+      '<span class="pager-label">' + (rows.length ? (offset + 1) + '–' + (offset + rows.length) : '—') + '</span>' +
+      '<button class="link-btn" data-call="transaction_history" data-args="' + nextArgs + '"' + (!sc.hasMore ? ' disabled' : '') + '>Next &rarr;</button>' +
+      '</div>';
+    return html;
+  }
+
+  function renderBalance(sc) {
+    var html = '<div class="row"><div class="brand"><img src="' + LOGO + '" alt="AbaPay"/><span>AbaPay</span></div>' +
+      '<div class="chip">' + esc(sc.chain || '') + '</div></div>';
+    html += '<div class="amount-label" style="margin-top:16px">Wallet</div>' +
+      '<div class="amount-sub">' + esc(sc.wallet) + '</div>';
+    html += '<div class="details">';
+    var toks = sc.tokens || [];
+    for (var i = 0; i < toks.length; i++) {
+      var t = toks[i];
+      var label = t.symbol + (t.symbol === sc.defaultToken ? ' (default)' : '');
+      var value = t.balance + ' · limit ' + (t.limit === null || t.limit === undefined ? 'unavailable' : t.limit);
+      html += detailRow(label, value);
+    }
+    html += '</div>';
+    var refreshArgs = esc(JSON.stringify({ chain: sc.chain }));
+    html += '<div class="footer"><span></span><button class="link-btn" data-call="check_balance" data-args="' + refreshArgs + '">Refresh</button></div>';
+    return html;
+  }
+
+  function renderSchedules(sc) {
+    var html = '<div class="row"><div class="brand"><img src="' + LOGO + '" alt="AbaPay"/><span>AbaPay</span></div>' +
+      '<div class="chip">' + esc((sc.schedules || []).length + ' active') + '</div></div>';
+    html += '<div class="amount-label" style="margin-top:16px">Automations</div>';
+    var list = sc.schedules || [];
+    if (list.length === 0) {
+      html += '<div class="loading">No active schedules.</div>';
+    } else {
+      html += '<div style="margin-top:6px">';
+      for (var i = 0; i < list.length; i++) {
+        var s = list[i];
+        var cancelArgs = esc(JSON.stringify({ id: s.id }));
+        html += '<div class="hist-row"><div class="hist-left"><span class="hist-service">' + esc(s.provider) + ' ' + esc(s.service) + '</span>' +
+          '<span class="hist-meta">' + esc(s.accountNumber) + ' &middot; ' + esc(s.when) + ' &middot; ' + (s.autoExecute ? 'auto-pays' : 'notify-only') + '</span></div>' +
+          '<button class="cancel-btn" data-call="cancel_schedule" data-args="' + cancelArgs + '" data-mode="refresh-schedules">Cancel</button></div>';
       }
       html += '</div>';
     }
@@ -270,11 +363,57 @@ export const MCP_UI_CARD_HTML = `<!DOCTYPE html>
     if (sc.view === 'receipt') root.innerHTML = renderReceipt(sc);
     else if (sc.view === 'history') root.innerHTML = renderHistory(sc);
     else if (sc.view === 'batch') root.innerHTML = renderBatch(sc);
+    else if (sc.view === 'balance') root.innerHTML = renderBalance(sc);
+    else if (sc.view === 'schedules') root.innerHTML = renderSchedules(sc);
     else root.innerHTML = '<div class="loading">Unrecognized card type.</div>';
 
-    var buttons = root.querySelectorAll('[data-open]');
-    for (var i = 0; i < buttons.length; i++) {
-      (function (el) { el.addEventListener('click', function () { openLink(el.getAttribute('data-open')); }); })(buttons[i]);
+    wireActions(root);
+    reportSize();
+  }
+
+  // Delegated once per render rather than once per button — root.innerHTML is fully replaced
+  // on every render() call, so any listeners attached to elements inside it are already gone;
+  // re-wiring here (not at load time) is what makes the re-rendered Prev/Next/Refresh/Cancel
+  // buttons work after every call, not just the first paint.
+  function wireActions(root) {
+    var openBtns = root.querySelectorAll('[data-open]');
+    for (var i = 0; i < openBtns.length; i++) {
+      (function (el) { el.addEventListener('click', function () { openLink(el.getAttribute('data-open')); }); })(openBtns[i]);
+    }
+
+    var callBtns = root.querySelectorAll('[data-call]');
+    for (var j = 0; j < callBtns.length; j++) {
+      (function (el) {
+        el.addEventListener('click', function () {
+          if (el.disabled) return;
+          var toolName = el.getAttribute('data-call');
+          var mode = el.getAttribute('data-mode') || 'rerender';
+          var toolArgs = {};
+          try { toolArgs = JSON.parse(el.getAttribute('data-args') || '{}'); } catch (e) { /* malformed — call with no args */ }
+
+          var originalLabel = el.textContent;
+          el.disabled = true;
+          el.textContent = '…';
+
+          callServerTool(toolName, toolArgs).then(function (result) {
+            if (result && result.isError) {
+              var msg = (result.content && result.content[0] && result.content[0].text) || 'That failed.';
+              showToast(msg);
+              el.disabled = false;
+              el.textContent = originalLabel;
+              return;
+            }
+            if (mode === 'refresh-schedules') {
+              return callServerTool('list_schedules', {}).then(function (fresh) { render(fresh); });
+            }
+            render(result);
+          }).catch(function () {
+            showToast('Could not reach AbaPay — try again.');
+            el.disabled = false;
+            el.textContent = originalLabel;
+          });
+        });
+      })(callBtns[j]);
     }
   }
 

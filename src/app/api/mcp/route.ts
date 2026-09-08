@@ -83,14 +83,6 @@ export async function POST(req: Request) {
   try {
     switch (method) {
       case 'initialize':
-        // 🔴 TEMPORARY DIAGNOSTIC — remove once the MCP Apps rendering gap is resolved. The
-        // interactive card (mcpUiTemplates.ts) never appears in a real client despite
-        // resources/list, resources/read, and tools/list's _meta.ui all verified correct by
-        // hand against production. The one thing that can't be checked from outside is what
-        // the CLIENT actually declares here — specifically whether `capabilities.extensions`
-        // includes `io.modelcontextprotocol/ui` at all. This logs the real request so the next
-        // live attempt shows up in Vercel's runtime logs instead of staying a guess.
-        console.log('[MCP][DIAG] initialize request:', JSON.stringify({ protocolVersion: params?.protocolVersion, capabilities: params?.capabilities, clientInfo: params?.clientInfo }));
         return rpcResult(id, {
           protocolVersion: params?.protocolVersion || PROTOCOL_VERSION,
           // `resources: {}` because pay_bill/pay_bill_batch/transaction_history now reference a
@@ -99,7 +91,27 @@ export async function POST(req: Request) {
           // host that never negotiates the `io.modelcontextprotocol/ui` extension just never
           // calls resources/read and the tool behaves exactly as before (text ± PNG image),
           // per the spec's own graceful-degradation rule — no client capability check needed.
-          capabilities: { tools: {}, resources: {} },
+          //
+          // 🔴 `tools: { listChanged: true }` — CONFIRMED LIVE BUG THIS ADDRESSES: shipping the
+          // interactive card here did nothing for an already-connected client until the AbaPay
+          // connector was manually disconnected and reconnected — verified against production
+          // logs: three real tools/call requests hit /api/mcp in the same window a user tried a
+          // fresh conversation, and NONE of them was a fresh `initialize` — the client was
+          // reusing a connection (and its cached tools/list) established before this tool
+          // metadata existed. Declaring listChanged + actually sending
+          // notifications/tools/list_changed over the GET SSE stream below (see GET, and its
+          // own comment) is the spec-correct fix — a client that holds that stream open gets
+          // told to re-fetch tools/list without the user touching Settings at all.
+          //
+          // ⚠️ NOT A GUARANTEED FIX BY ITSELF: Anthropic's own MCP connector tracker has open,
+          // acknowledged reports of a remote connector's tool list staying stale even across a
+          // manual reconnect (anthropics/claude-ai-mcp#137, #476) — a caching issue on the
+          // client/platform side this server cannot control. This is still the right thing to
+          // implement (Claude Code already honors listChanged over a stream; other MCP clients
+          // do too), but until that platform bug is fixed, "Refresh tools list" from the
+          // connector's own ⋮ menu in Claude.ai remains the fastest manual fallback — lighter
+          // than a full disconnect/reconnect, no re-authorization needed.
+          capabilities: { tools: { listChanged: true }, resources: {} },
           serverInfo: SERVER_INFO,
           instructions: "AbaPay: check a linked wallet's stablecoin balance, browse recent transaction history, pay a real bill (one recipient or many at once), or schedule one for later — Nigerian services (airtime, data, electricity, cable) or international airtime/data across 170+ countries — settled on-chain. Call describe_capabilities first. For DATA, CABLE, or EDUCATION, call list_plans before pay_bill/pay_bill_batch/schedule_bill and use one of its real returned codes as variation_code. For service: INTERNATIONAL, call list_international_options first (drills down country -> product type -> operator -> plan) and pass back its exact country/product_type_id/operator_id/variation_code — never guess any of these (INTERNATIONAL cannot be scheduled or batched; pay_bill only). A successful pay_bill returns a rich receipt (image card plus a shareable receipt link) alongside the confirmation text. Use transaction_history to answer 'what did I pay recently' without the human needing to open the app. When the human names 2+ recipients for airtime or data in one request, use pay_bill_batch (one PIN for the whole batch, up to 20 recipients) instead of calling pay_bill repeatedly. Authentication: OAuth 2.1 is supported and preferred — authorize once in the browser and this connection is remembered, so no api_key argument is ever needed again. The api_key created in the AbaPay app under Agent Hub -> MCP remains the fallback for clients that cannot do OAuth. Either way, pay_bill, pay_bill_batch, and schedule_bill ALWAYS require the PIN set when the key was created — OAuth does not remove it. Ask the human for their PIN on every single payment/batch/schedule creation — every single call, never reused from earlier in the conversation. pay_bill and pay_bill_batch execute IMMEDIATELY with no delay of their own — if the human asks to pay 'in N minutes', 'later', 'tomorrow', or on a recurring basis (e.g. 'every Tuesday'), do not call them now; use schedule_bill instead (it charges nothing itself — money only moves later, when the schedule fires and only if the wallet still has a funded allowance then; for multiple recipients, call schedule_bill once per recipient). Use list_schedules/cancel_schedule to view or remove standing schedules. Every call that moves or commits money (pay_bill, pay_bill_batch, schedule_bill) is rate-limited per credential on top of the PIN requirement — a 'too many calls' error means slow down and retry shortly, not that anything is broken.",
         });
@@ -116,18 +128,10 @@ export async function POST(req: Request) {
       // point to them via `_meta.ui.resourceUri`; listed anyway for hosts that prefetch from
       // here rather than waiting for a tool call, and for basic discoverability.
       case 'resources/list':
-        // 🔴 TEMPORARY DIAGNOSTIC — see the identical note on 'initialize'. If this line never
-        // appears in the logs for a real attempt, the client never even looked for a resource
-        // list, regardless of what it declared during initialize.
-        console.log('[MCP][DIAG] resources/list called');
         return rpcResult(id, { resources: [MCP_UI_CARD_RESOURCE] });
 
       case 'resources/read': {
         const uri = params?.uri;
-        // 🔴 TEMPORARY DIAGNOSTIC — see the identical note on 'initialize'. This is the single
-        // most telling line: if it's absent from a real attempt's logs, the client never tried
-        // to fetch the card template at all, no matter what tools/list or initialize showed it.
-        console.log('[MCP][DIAG] resources/read called for uri:', uri);
         if (uri !== MCP_UI_CARD_URI) {
           return rpcError(id, -32002, `Resource not found: ${uri}`);
         }
@@ -170,20 +174,63 @@ export async function POST(req: Request) {
   }
 }
 
-// GET opens a server-push SSE stream in the Streamable HTTP spec — we never push anything
-// outside of a request/response, so 405 is the spec-compliant reply to a REAL MCP client
-// asking for one (identifiable by `Accept: text/event-stream`, exactly as the spec says a
-// client requesting the stream must send). A bare GET without that header is something else
-// probing liveness — e.g. a scanner's generic health-check — and 405 there just reads as
-// "broken endpoint" to a prober that never intended to open a stream in the first place, so
-// it gets a plain 200 describing the server instead.
+// 🔴 THE BUG THIS FIXES: shipping a new tool (or new tool metadata, like MCP Apps' `_meta.ui`)
+// did nothing for a client that had already connected before the deploy — see the long
+// comment on 'initialize'`s `listChanged` capability for how that was confirmed live. GET now
+// actually opens the SSE half of Streamable HTTP instead of refusing it, and pushes
+// notifications/tools/list_changed the moment a client starts listening — a client holding
+// this stream open when a deploy ships gets told to re-fetch tools/list without anyone
+// touching Settings. A bare GET without `Accept: text/event-stream` is something else (a
+// scanner's liveness probe) and still gets the plain JSON summary below, unchanged.
+export const maxDuration = 300;
+
+const SSE_HEARTBEAT_MS = 20_000;
+
 export async function GET(req: Request) {
   const wantsStream = (req.headers.get('accept') || '').includes('text/event-stream');
   if (wantsStream) {
-    return NextResponse.json(
-      { error: 'This MCP server does not support the GET/SSE stream half of Streamable HTTP — use POST.' },
-      { status: 405, headers: { Allow: 'POST' } }
-    );
+    const encoder = new TextEncoder();
+    let heartbeat: ReturnType<typeof setInterval> | undefined;
+
+    const stream = new ReadableStream({
+      start(controller) {
+        const send = (payload: unknown) => {
+          try {
+            controller.enqueue(encoder.encode(`event: message\ndata: ${JSON.stringify(payload)}\n\n`));
+          } catch { /* controller already closed — nothing to do */ }
+        };
+
+        // Sent unconditionally on every new connection, not just after a real change — this
+        // server is stateless serverless, with no way to know whether THIS client's cached
+        // tools/list actually predates the last deploy. A client that re-fetches and gets
+        // identical data back is harmless; a client that never re-fetches is the whole bug.
+        send({ jsonrpc: '2.0', method: 'notifications/tools/list_changed' });
+
+        // SSE connections behind a proxy/CDN get silently dropped if nothing crosses the wire
+        // for a while — a comment-only ping (no `data:` line, so it's not a JSON-RPC message
+        // and MUST be ignored by any spec-compliant parser) keeps it alive up to maxDuration.
+        heartbeat = setInterval(() => {
+          try { controller.enqueue(encoder.encode(': ping\n\n')); } catch { /* closed */ }
+        }, SSE_HEARTBEAT_MS);
+
+        req.signal.addEventListener('abort', () => {
+          if (heartbeat) clearInterval(heartbeat);
+          try { controller.close(); } catch { /* already closed */ }
+        });
+      },
+      cancel() {
+        if (heartbeat) clearInterval(heartbeat);
+      },
+    });
+
+    return new Response(stream, {
+      status: 200,
+      headers: {
+        'Content-Type': 'text/event-stream',
+        'Cache-Control': 'no-cache, no-transform',
+        Connection: 'keep-alive',
+      },
+    });
   }
   return NextResponse.json({
     name: SERVER_INFO.name,

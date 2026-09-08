@@ -160,6 +160,8 @@ export const TOOLS = [
     },
     // Reads on-chain state — never writes, never spends.
     annotations: { title: 'Check Balance', readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: true },
+    // See the identical note on transaction_history above.
+    _meta: { ui: { resourceUri: MCP_UI_CARD_URI } },
   },
   {
     // 🔴 THE BUG THIS FIXES: pay_bill has REQUIRED variation_code for DATA/EDUCATION (and CABLE
@@ -215,12 +217,13 @@ export const TOOLS = [
     // as check_balance: read-only, no PIN, works with the linked wallet's own records only.
     name: 'transaction_history',
     title: 'Transaction History',
-    description: "List recent real transactions for the linked wallet — same data as the AbaPay app's History tab (service, provider, amount, status, tx hash). Read-only, no PIN required.",
+    description: "List recent real transactions for the linked wallet — same data as the AbaPay app's History tab (service, provider, amount, status, tx hash). Read-only, no PIN required. The interactive card's own Next/Previous buttons page through results by re-calling this tool with a different offset — pass offset yourself only when asked for something like \"the next page\" or \"transactions before that\" in plain text.",
     inputSchema: {
       type: 'object',
       properties: {
         api_key: { type: 'string', description: 'AbaPay MCP API key. NOT needed when the connector is authorized via OAuth — omit it entirely in that case.' },
         limit: { type: 'number', description: 'How many recent transactions to return. Defaults to 10, max 25.' },
+        offset: { type: 'number', description: 'How many of the most recent transactions to skip before listing — 0 (default) starts at the newest. Used for paging: offset=10 with the default limit gets the next 10 after the first page.' },
       },
       required: [],
       additionalProperties: false,
@@ -322,6 +325,11 @@ export const TOOLS = [
       additionalProperties: false,
     },
     annotations: { title: 'List Schedules', readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: true },
+    // See the identical note on transaction_history above. Each row's Cancel button in the
+    // card calls cancel_schedule directly (an app-visible tool that needs no PIN, same as
+    // calling it from chat) — never pay_bill/schedule_bill, which stay text-only; see the
+    // "no PIN entry inside the card" note on cancel_schedule's own _meta below.
+    _meta: { ui: { resourceUri: MCP_UI_CARD_URI } },
   },
   {
     name: 'cancel_schedule',
@@ -511,7 +519,17 @@ async function callCheckBalance(args: any, oauthIdentity: McpIdentity | null) {
       return `  ${sym}: balance ${bal}, approved limit ${lim}`;
     }),
   ];
-  return textResult(lines.join('\n'));
+  return withCard(textResult(lines.join('\n')), {
+    view: 'balance',
+    wallet: identity.wallet_address,
+    chain,
+    defaultToken: identity.approved_token || 'USD₮',
+    tokens: tokens.map((sym, i) => ({
+      symbol: sym,
+      balance: balances[sym] ?? '0.0000',
+      limit: allowances[i].ok ? allowances[i].remaining.toFixed(4) : null,
+    })),
+  });
 }
 
 async function callTransactionHistory(args: any, oauthIdentity: McpIdentity | null) {
@@ -524,23 +542,32 @@ async function callTransactionHistory(args: any, oauthIdentity: McpIdentity | nu
 
   const limitRaw = Number(args?.limit);
   const limit = Number.isFinite(limitRaw) && limitRaw > 0 ? Math.min(Math.floor(limitRaw), 25) : 10;
+  const offsetRaw = Number(args?.offset);
+  const offset = Number.isFinite(offsetRaw) && offsetRaw > 0 ? Math.floor(offsetRaw) : 0;
 
   // Excludes preflight rows (never-broadcast intents, same convention as cleanupPreflights.ts)
-  // — those aren't real transactions a user would recognize as "something I did".
+  // — those aren't real transactions a user would recognize as "something I did". `.range`
+  // instead of `.limit` so the interactive card's Next/Previous buttons (mcpUiTemplates.ts) can
+  // page through history by re-calling this tool with a shifted `offset` — one extra row
+  // requested past `limit` (below) is how `hasMore` is known without a separate COUNT query.
   const { data, error } = await supabaseAdmin
     .from('transactions')
     .select('*')
     .ilike('wallet_address', identity.wallet_address)
     .not('tx_hash', 'like', 'preflight_%')
     .order('created_at', { ascending: false })
-    .limit(limit);
+    .range(offset, offset + limit); // limit+1 rows requested — see hasMore below
 
   if (error) {
     console.error('[MCP] transaction_history query failed:', error.message);
     return errorResult('Could not load transaction history right now — try again shortly.');
   }
+  const hasMore = (data?.length ?? 0) > limit;
+  if (data && data.length > limit) data.length = limit; // drop the lookahead row before rendering
   if (!data || data.length === 0) {
-    return textResult('No transactions found for this wallet yet.');
+    return offset > 0
+      ? withCard(textResult('No more transactions.'), { view: 'history', wallet: identity.wallet_address, rows: [], offset, limit, hasMore: false })
+      : textResult('No transactions found for this wallet yet.');
   }
 
   const lines = data.map((tx: any, i: number) => {
@@ -564,7 +591,7 @@ async function callTransactionHistory(args: any, oauthIdentity: McpIdentity | nu
     const png = await renderHistoryStatementImage(rows, identity.wallet_address);
     // Real ₦ glyph for the interactive card — see the identical note in finalizePayBillResult.
     const cardRows = rows.map((r) => ({ ...r, displayAmountNgn: r.displayAmountNgn.replace(/^NGN /, '₦') }));
-    return withCard(imageAndTextResult(png, text), { view: 'history', wallet: identity.wallet_address, rows: cardRows });
+    return withCard(imageAndTextResult(png, text), { view: 'history', wallet: identity.wallet_address, rows: cardRows, offset, limit, hasMore });
   } catch (imgErr) {
     console.error('[MCP] Failed to render history image:', imgErr);
     return textResult(text);
@@ -1257,7 +1284,25 @@ async function callListSchedules(args: any, oauthIdentity: McpIdentity | null) {
     return `• id: "${sc.id}" — ${String(sc.provider || '').toUpperCase()} ${sc.service_category} — NGN ${Number(sc.amount_ngn).toLocaleString()} to ${sc.billers_code}, ${when} — ${sc.auto_execute ? 'auto-pays' : 'notify-only'}`;
   });
 
-  return textResult(`${data.length} active schedule(s) — pass "id" to cancel_schedule to remove one:\n\n${lines.join('\n')}`);
+  const text = `${data.length} active schedule(s) — pass "id" to cancel_schedule to remove one:\n\n${lines.join('\n')}`;
+  const cardSchedules = data.map((sc: any) => {
+    const when = sc.frequency === 'once'
+      ? (sc.run_once_at ? `once, at ${new Date(sc.run_once_at).toLocaleString('en-NG', { timeZone: 'Africa/Lagos', day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' })}` : 'once')
+      : sc.frequency === 'weekly'
+      ? `every ${['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'][sc.day_of_week] || '?'}`
+      : sc.frequency === 'daily' ? 'daily'
+      : sc.day_of_month ? `on the ${ordinalDay(sc.day_of_month)} monthly` : 'monthly';
+    return {
+      id: sc.id,
+      provider: String(sc.provider || '').toUpperCase(),
+      service: sc.service_category,
+      displayAmountNgn: `₦${Number(sc.amount_ngn).toLocaleString()}`,
+      accountNumber: sc.billers_code,
+      when,
+      autoExecute: !!sc.auto_execute,
+    };
+  });
+  return withCard(textResult(text), { view: 'schedules', schedules: cardSchedules });
 }
 
 async function callCancelSchedule(args: any, oauthIdentity: McpIdentity | null) {
