@@ -1,0 +1,308 @@
+import 'server-only';
+import { LOGO_DATA_URL } from './logoDataUrl';
+
+// ⚡ MCP APPS (SEP-1865) — AbaPay's interactive receipt/history card.
+//
+// 🔴 WHY THIS EXISTS: the MCP `image` content block (receiptCard.tsx) is a flat PNG baked
+// server-side with next/og's Satori renderer — real, but limited: Satori's bundled font is a
+// subset that drops ₦/₮ (see receiptCard.tsx's own comment on that), it can't be interactive
+// (no "copy tx hash", no live link), and whether it even renders at all depends entirely on
+// whether the specific MCP client chooses to display inline images from a tool result — a
+// client behavior AbaPay's server has no visibility into and cannot fix from here.
+//
+// MCP Apps is the actual, OPEN answer: an official MCP extension (shipped as the protocol's
+// first extension 2026-01-26, folded into the 2026-07-28 spec) that lets any server — not
+// just a first-party Anthropic-partnered connector — ship a real HTML/CSS/JS view, rendered
+// by the host in a sandboxed iframe, fed live data over the same JSON-RPC channel every other
+// MCP message already uses. This is that view: one generic template, driven entirely by the
+// `structuredContent` a tool result attaches (see attachUiContent in mcpTools.ts) — never by
+// anything baked in at build time, so it can render pay_bill's receipt, transaction_history's
+// statement, and pay_bill_batch's summary from the exact same file.
+//
+// The `content` array the MCP tool call still returns (text, and the existing PNG image for
+// clients that never negotiate this extension) is UNCHANGED — this is additive. A host that
+// doesn't understand `_meta.ui.resourceUri` just ignores it and falls back to that content,
+// exactly as the spec requires ("Tools MUST return meaningful content array even when UI is
+// available").
+
+export const MCP_UI_CARD_URI = 'ui://abapay/card';
+
+export const MCP_UI_CARD_RESOURCE = {
+  uri: MCP_UI_CARD_URI,
+  name: 'AbaPay Card',
+  description: 'Interactive receipt / transaction history / batch summary card',
+  mimeType: 'text/html;profile=mcp-app',
+};
+
+// One template, three views (`structuredContent.view`): 'receipt' | 'history' | 'batch'.
+// Vanilla HTML/CSS/JS, no build step and no external resources — CSP for this resource is
+// therefore left at the spec's restrictive default (no `ui.csp` declared), and the logo is
+// inlined as the same base64 PNG constant receiptCard.tsx already uses rather than a fetched
+// asset, so nothing here needs a `resourceDomains` allowance either.
+//
+// Kept in one string constant, not a function — nothing here is build-time-computed; all real
+// data arrives later over ui/notifications/tool-result.
+export const MCP_UI_CARD_HTML = `<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>AbaPay</title>
+<style>
+  :root {
+    color-scheme: light dark;
+    --ab-bg: light-dark(#f8fafc, #0b0b0e);
+    --ab-card: light-dark(#ffffff, #15151a);
+    --ab-border: light-dark(rgba(15,23,42,0.10), rgba(148,163,184,0.16));
+    --ab-muted: light-dark(#64748b, #94a3b8);
+    --ab-text: light-dark(#0f172a, #f8fafc);
+    --ab-emerald: #10b981;
+    --ab-red: #f87171;
+    --ab-blue: light-dark(#2563eb, #60a5fa);
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; padding: 0; }
+  body {
+    font-family: var(--font-sans, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif);
+    background: var(--color-background-primary, var(--ab-bg));
+    color: var(--color-text-primary, var(--ab-text));
+    padding: 14px;
+  }
+  .card {
+    background: var(--color-background-secondary, var(--ab-card));
+    border: var(--border-width-regular, 1px) solid var(--color-border-primary, var(--ab-border));
+    border-radius: var(--border-radius-lg, 18px);
+    padding: 18px;
+  }
+  .row { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+  .brand { display: flex; align-items: center; gap: 10px; }
+  .brand img { width: 26px; height: 18px; object-fit: contain; }
+  .brand span { font-weight: 700; font-size: var(--font-heading-xs-size, 15px); letter-spacing: -0.2px; }
+  .chip {
+    font-size: 11px; font-weight: 700; letter-spacing: 0.06em; text-transform: uppercase;
+    color: var(--color-text-secondary, var(--ab-muted));
+    border: 1px solid var(--color-border-primary, var(--ab-border));
+    border-radius: 999px; padding: 3px 10px;
+  }
+  .status-row { display: flex; align-items: center; gap: 10px; margin-top: 18px; }
+  .status-dot {
+    width: 26px; height: 26px; border-radius: 999px; display: flex; align-items: center;
+    justify-content: center; flex-shrink: 0;
+  }
+  .status-text { font-weight: 800; font-size: 15px; }
+  .amount-label {
+    font-size: 11px; font-weight: 700; letter-spacing: 0.06em; text-transform: uppercase;
+    color: var(--color-text-secondary, var(--ab-muted)); margin-top: 16px;
+  }
+  .amount-value { font-size: 30px; font-weight: 800; margin-top: 2px; line-height: 1.15; }
+  .amount-sub { font-size: 13px; color: var(--color-text-secondary, var(--ab-muted)); margin-top: 2px; }
+  .details { margin-top: 16px; padding-top: 14px; border-top: 1px solid var(--color-border-primary, var(--ab-border)); display: flex; flex-direction: column; gap: 8px; }
+  .detail-row { display: flex; justify-content: space-between; gap: 12px; font-size: 13px; }
+  .detail-label { color: var(--color-text-secondary, var(--ab-muted)); font-weight: 600; }
+  .detail-value { font-weight: 700; text-align: right; }
+  .detail-value.accent { color: var(--ab-emerald); }
+  .footer { margin-top: 14px; padding-top: 12px; border-top: 1px solid var(--color-border-primary, var(--ab-border)); display: flex; justify-content: space-between; align-items: center; gap: 8px; }
+  .footer span { font-size: 11px; color: var(--color-text-secondary, var(--ab-muted)); }
+  .link-btn {
+    font-size: 12px; font-weight: 700; color: var(--ab-blue); background: none; border: none;
+    padding: 0; cursor: pointer; text-decoration: underline;
+  }
+  .hist-row { display: flex; justify-content: space-between; align-items: center; padding: 10px 0; border-top: 1px solid var(--color-border-primary, var(--ab-border)); }
+  .hist-row:first-child { border-top: none; }
+  .hist-left { display: flex; flex-direction: column; }
+  .hist-service { font-weight: 700; font-size: 13px; }
+  .hist-meta { font-size: 11px; color: var(--color-text-secondary, var(--ab-muted)); margin-top: 1px; }
+  .hist-right { display: flex; flex-direction: column; align-items: flex-end; }
+  .hist-amount { font-weight: 800; font-size: 13px; }
+  .hist-status { font-size: 10px; font-weight: 800; text-transform: uppercase; letter-spacing: 0.05em; margin-top: 1px; }
+  .loading { padding: 18px 0; text-align: center; color: var(--color-text-secondary, var(--ab-muted)); font-size: 13px; }
+</style>
+</head>
+<body>
+<div id="root" class="card"><div class="loading">Loading AbaPay…</div></div>
+<script>
+(function () {
+  var LOGO = ${JSON.stringify(LOGO_DATA_URL)};
+  var nextId = 1;
+  var pending = {};
+
+  function send(method, params) {
+    var id = nextId++;
+    window.parent.postMessage({ jsonrpc: '2.0', id: id, method: method, params: params }, '*');
+    return new Promise(function (resolve, reject) { pending[id] = { resolve: resolve, reject: reject }; });
+  }
+  function notify(method, params) {
+    window.parent.postMessage({ jsonrpc: '2.0', method: method, params: params }, '*');
+  }
+  window.addEventListener('message', function (event) {
+    var data = event.data;
+    if (!data || data.jsonrpc !== '2.0') return;
+    if (data.id !== undefined && pending[data.id]) {
+      var p = pending[data.id]; delete pending[data.id];
+      if (data.error) p.reject(new Error(data.error.message)); else p.resolve(data.result);
+      return;
+    }
+    if (data.method === 'ui/notifications/host-context-changed') applyHostContext(data.params);
+    if (data.method === 'ui/notifications/tool-result') render(data.params);
+    if (data.method === 'ui/notifications/tool-cancelled') {
+      var root = document.getElementById('root');
+      if (root) root.innerHTML = '<div class="loading">Cancelled.</div>';
+    }
+  });
+
+  function applyHostContext(ctx) {
+    if (!ctx) return;
+    try {
+      if (ctx.theme) document.documentElement.style.colorScheme = ctx.theme;
+      var vars = ctx.styles && ctx.styles.variables;
+      if (vars) {
+        for (var k in vars) { if (vars[k]) document.documentElement.style.setProperty(k, vars[k]); }
+      }
+      var fonts = ctx.styles && ctx.styles.css && ctx.styles.css.fonts;
+      if (fonts) {
+        var styleTag = document.createElement('style');
+        styleTag.textContent = fonts;
+        document.head.appendChild(styleTag);
+      }
+    } catch (e) { /* never let theming break the card */ }
+  }
+
+  function openLink(url) { if (url) send('ui/open-link', { url: url }).catch(function () {}); }
+
+  function esc(s) {
+    return String(s === null || s === undefined ? '' : s).replace(/[&<>"']/g, function (c) {
+      return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c];
+    });
+  }
+
+  function statusVisual(status) {
+    if (status === 'SUCCESS') return { color: 'var(--ab-emerald)', label: 'Payment Successful', glyph: 'check' };
+    if (status === 'PENDING') return { color: 'var(--ab-blue)', label: 'Still Confirming', glyph: 'dots' };
+    return { color: 'var(--ab-red)', label: 'Payment Failed', glyph: 'bang' };
+  }
+
+  function statusGlyphSvg(color) {
+    return '<div class="status-dot" style="background:' + color + '">' +
+      '<div style="width:10px;height:6px;margin-top:-1px;border-left:2px solid #0b0b0e;border-bottom:2px solid #0b0b0e;transform:rotate(-45deg)"></div>' +
+      '</div>';
+  }
+
+  function renderReceipt(sc) {
+    var v = statusVisual(sc.status);
+    var html = '<div class="row"><div class="brand"><img src="' + LOGO + '" alt="AbaPay"/><span>AbaPay</span></div>' +
+      '<div class="chip">' + esc(sc.chain || '') + '</div></div>';
+    html += '<div class="status-row">' + statusGlyphSvg(v.color) +
+      '<span class="status-text" style="color:' + v.color + '">' + esc(v.label) + '</span></div>';
+    html += '<div class="amount-label">Amount Paid</div>' +
+      '<div class="amount-value">' + esc(sc.displayAmountNgn) + '</div>' +
+      '<div class="amount-sub">' + esc(sc.cryptoCharged) + '</div>';
+    html += '<div class="details">';
+    html += detailRow('Service', sc.serviceLabel);
+    html += detailRow(/electric/i.test(sc.serviceLabel || '') ? 'Meter Number' : 'Account', sc.accountNumber);
+    if (sc.customerName) html += detailRow('Name', sc.customerName);
+    if (sc.customerAddress) html += detailRow('Address', sc.customerAddress);
+    if (sc.purchasedCode) html += detailRow(/electric/i.test(sc.serviceLabel || '') ? 'Token' : 'PIN', sc.purchasedCode, true);
+    if (sc.units) html += detailRow('Units', sc.units);
+    if (sc.referenceId) html += detailRow('Reference', sc.referenceId);
+    html += '</div>';
+    var txShort = sc.txHash ? (sc.txHash.slice(0, 10) + '...' + sc.txHash.slice(-8)) : '';
+    html += '<div class="footer"><span>' + esc(txShort) + '</span>';
+    if (sc.receiptUrl) html += '<button class="link-btn" data-open="' + esc(sc.receiptUrl) + '">View receipt</button>';
+    html += '</div>';
+    return html;
+  }
+
+  function detailRow(label, value, accent) {
+    return '<div class="detail-row"><span class="detail-label">' + esc(label) + '</span>' +
+      '<span class="detail-value' + (accent ? ' accent' : '') + '">' + esc(value) + '</span></div>';
+  }
+
+  function renderHistory(sc) {
+    var html = '<div class="row"><div class="brand"><img src="' + LOGO + '" alt="AbaPay"/><span>AbaPay</span></div>' +
+      '<div class="chip">' + esc((sc.wallet || '').slice(0, 6) + '...' + (sc.wallet || '').slice(-4)) + '</div></div>';
+    html += '<div class="amount-label" style="margin-top:16px">Recent Activity</div>';
+    var rows = sc.rows || [];
+    if (rows.length === 0) {
+      html += '<div class="loading">No transactions yet.</div>';
+    } else {
+      html += '<div style="margin-top:6px">';
+      for (var i = 0; i < rows.length; i++) {
+        var r = rows[i];
+        var color = r.status === 'SUCCESS' ? 'var(--ab-emerald)' : (r.status === 'REFUNDED' ? 'var(--ab-blue)' : 'var(--ab-red)');
+        html += '<div class="hist-row"><div class="hist-left"><span class="hist-service">' + esc(r.serviceLabel) + '</span>' +
+          '<span class="hist-meta">' + esc(r.date) + ' &middot; ' + esc(r.accountNumber) + '</span></div>' +
+          '<div class="hist-right"><span class="hist-amount">' + esc(r.displayAmountNgn) + '</span>' +
+          '<span class="hist-status" style="color:' + color + '">' + esc(r.status) + '</span></div></div>';
+      }
+      html += '</div>';
+    }
+    return html;
+  }
+
+  function renderBatch(sc) {
+    var html = '<div class="row"><div class="brand"><img src="' + LOGO + '" alt="AbaPay"/><span>AbaPay</span></div>' +
+      '<div class="chip">' + esc(sc.okCount + '/' + sc.totalCount) + '</div></div>';
+    html += '<div class="amount-label" style="margin-top:16px">Batch Total</div>' +
+      '<div class="amount-value">' + esc(sc.totalDisplay || ('NGN ' + Number(sc.totalNgn || 0).toLocaleString())) + '</div>';
+    var recips = sc.recipients || [];
+    html += '<div style="margin-top:6px">';
+    for (var i = 0; i < recips.length; i++) {
+      var r = recips[i];
+      var color = r.status === 'OK' ? 'var(--ab-emerald)' : (r.status === 'PENDING' ? 'var(--ab-blue)' : 'var(--ab-red)');
+      html += '<div class="hist-row"><div class="hist-left"><span class="hist-service">' + esc(r.provider) + ' ' + esc(r.service) + '</span>' +
+        '<span class="hist-meta">' + esc(r.accountNumber) + '</span></div>' +
+        '<div class="hist-right"><span class="hist-amount">' + esc(r.displayAmountNgn) + '</span>' +
+        '<span class="hist-status" style="color:' + color + '">' + esc(r.status) + '</span></div></div>';
+    }
+    html += '</div>';
+    return html;
+  }
+
+  function render(result) {
+    var root = document.getElementById('root');
+    if (!root) return;
+    var sc = result && result.structuredContent;
+    if (!sc) {
+      var fallback = (result && result.content && result.content[0] && result.content[0].text) || 'No data.';
+      root.innerHTML = '<div class="loading">' + esc(fallback) + '</div>';
+      return;
+    }
+    if (sc.view === 'receipt') root.innerHTML = renderReceipt(sc);
+    else if (sc.view === 'history') root.innerHTML = renderHistory(sc);
+    else if (sc.view === 'batch') root.innerHTML = renderBatch(sc);
+    else root.innerHTML = '<div class="loading">Unrecognized card type.</div>';
+
+    var buttons = root.querySelectorAll('[data-open]');
+    for (var i = 0; i < buttons.length; i++) {
+      (function (el) { el.addEventListener('click', function () { openLink(el.getAttribute('data-open')); }); })(buttons[i]);
+    }
+  }
+
+  var lastSize = '';
+  function reportSize() {
+    var w = document.body.scrollWidth, h = document.body.scrollHeight;
+    var key = w + 'x' + h;
+    if (key === lastSize) return;
+    lastSize = key;
+    notify('ui/notifications/size-changed', { width: w, height: h });
+  }
+  if (typeof ResizeObserver !== 'undefined') {
+    new ResizeObserver(reportSize).observe(document.body);
+  } else {
+    setInterval(reportSize, 500);
+  }
+
+  send('ui/initialize', {
+    capabilities: {},
+    clientInfo: { name: 'abapay-card', version: '1.0.0' },
+    protocolVersion: '2026-01-26',
+    appCapabilities: { availableDisplayModes: ['inline'] },
+  }).then(function (result) {
+    applyHostContext(result && result.hostContext);
+    notify('ui/notifications/initialized', {});
+    reportSize();
+  }).catch(function () { /* host predates ui/initialize support — nothing to do */ });
+})();
+</script>
+</body>
+</html>`;

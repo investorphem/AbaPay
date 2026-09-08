@@ -17,6 +17,7 @@ import { renderReceiptImage, renderHistoryStatementImage } from '@/lib/deai/rece
 import { explorerBaseFor } from '@/lib/chain';
 import { resolveCountry, fetchCountries, fetchProducts, fetchOperators, fetchIntlVariations } from '@/lib/deai/international';
 import { checkIntlMinimum } from '@/lib/parity';
+import { MCP_UI_CARD_URI } from '@/lib/deai/mcpUiTemplates';
 
 // ⚡ AGENT TOOL LAYER — the tools themselves (definitions + implementations), extracted from
 // src/app/api/mcp/route.ts so more than one transport can reach them. It is deliberately
@@ -120,6 +121,15 @@ function imageAndTextResult(pngBuffer: Buffer, text: string) {
   };
 }
 
+// MCP Apps (SEP-1865) — attaches the data a host renders through the interactive card
+// (mcpUiTemplates.ts) alongside whatever `content` (text ± PNG image) the result already had.
+// `structuredContent` is a sibling of `content`, never a replacement for it: a host that
+// hasn't negotiated the `io.modelcontextprotocol/ui` extension ignores this field entirely and
+// falls back to `content` exactly as before — see the tool's own `_meta.ui` comment.
+function withCard(result: { content: unknown[]; isError?: boolean }, structuredContent: Record<string, unknown>) {
+  return { ...result, structuredContent };
+}
+
 // Which stablecoins exist on a given chain, in the same order the web app shows them —
 // tokenSymbolsForChain in @/constants. This used to be a local copy of the filter (as did the
 // chat agent's, the Agent Hub's and the Pay tab's), which is how four surfaces could end up
@@ -216,6 +226,10 @@ export const TOOLS = [
       additionalProperties: false,
     },
     annotations: { title: 'Transaction History', readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: true },
+    // MCP Apps (SEP-1865) — a host that negotiates io.modelcontextprotocol/ui renders this
+    // tool's result as the interactive card (mcpUiTemplates.ts) instead of plain text; a host
+    // that doesn't just ignores this field and gets the existing text + PNG image unchanged.
+    _meta: { ui: { resourceUri: MCP_UI_CARD_URI } },
   },
   {
     name: 'pay_bill',
@@ -255,6 +269,8 @@ export const TOOLS = [
     },
     // Moves real money on-chain — irreversible, and calling it twice pays twice.
     annotations: { title: 'Pay Bill', readOnlyHint: false, destructiveHint: true, idempotentHint: false, openWorldHint: true },
+    // See the identical note on transaction_history above.
+    _meta: { ui: { resourceUri: MCP_UI_CARD_URI } },
   },
   {
     // 🔴 THE GAP THIS FILLS: Telegram/WhatsApp/X (src/app/api/deai/core/route.ts) have long
@@ -374,6 +390,8 @@ export const TOOLS = [
     // Moves real money on-chain for multiple recipients — irreversible, and calling it twice
     // pays everyone twice.
     annotations: { title: 'Pay Bill Batch', readOnlyHint: false, destructiveHint: true, idempotentHint: false, openWorldHint: true },
+    // See the identical note on transaction_history above.
+    _meta: { ui: { resourceUri: MCP_UI_CARD_URI } },
   },
 ];
 
@@ -544,7 +562,9 @@ async function callTransactionHistory(args: any, oauthIdentity: McpIdentity | nu
       status: String(tx.status || ''),
     }));
     const png = await renderHistoryStatementImage(rows, identity.wallet_address);
-    return imageAndTextResult(png, text);
+    // Real ₦ glyph for the interactive card — see the identical note in finalizePayBillResult.
+    const cardRows = rows.map((r) => ({ ...r, displayAmountNgn: r.displayAmountNgn.replace(/^NGN /, '₦') }));
+    return withCard(imageAndTextResult(png, text), { view: 'history', wallet: identity.wallet_address, rows: cardRows });
   } catch (imgErr) {
     console.error('[MCP] Failed to render history image:', imgErr);
     return textResult(text);
@@ -663,6 +683,7 @@ async function finalizePayBillResult(params: {
       const receiptUrl = row?.request_id
         ? `${process.env.NEXT_PUBLIC_APP_URL || 'https://abapays.com'}/receipt/${row.request_id}`
         : null;
+      const cryptoCharged = `${Number(row?.amount_usdt ?? capacity.neededCrypto).toFixed(6)} ${tokenSymbol}`;
       const png = await renderReceiptImage({
         status: 'SUCCESS',
         serviceLabel,
@@ -670,14 +691,33 @@ async function finalizePayBillResult(params: {
         customerName: row?.customer_name || customerName || null,
         customerAddress: row?.customer_address || customerAddress || null,
         displayAmountNgn: `NGN ${amountNgn.toLocaleString()}`,
-        cryptoCharged: `${Number(row?.amount_usdt ?? capacity.neededCrypto).toFixed(6)} ${tokenSymbol}`,
+        cryptoCharged,
         purchasedCode: row?.purchased_code || null,
         units: row?.units || null,
         referenceId: row?.request_id || null,
         txHash: result.txHash,
         chain,
       });
-      return imageAndTextResult(png, receiptUrl ? `${baseText}\nReceipt: ${receiptUrl}` : baseText);
+      const finalText = receiptUrl ? `${baseText}\nReceipt: ${receiptUrl}` : baseText;
+      // 🔴 THE ₦/₮ WORKAROUND ABOVE IS PNG-ONLY: real HTML has no Satori font-subsetting
+      // problem, so the interactive card gets the real glyphs instead of the "NGN " prefix
+      // the image is stuck with — see mcpUiTemplates.ts's own header comment.
+      return withCard(imageAndTextResult(png, finalText), {
+        view: 'receipt',
+        status: 'SUCCESS',
+        serviceLabel,
+        accountNumber,
+        customerName: row?.customer_name || customerName || null,
+        customerAddress: row?.customer_address || customerAddress || null,
+        displayAmountNgn: `₦${amountNgn.toLocaleString()}`,
+        cryptoCharged,
+        purchasedCode: row?.purchased_code || null,
+        units: row?.units || null,
+        referenceId: row?.request_id || null,
+        txHash: result.txHash,
+        chain,
+        receiptUrl,
+      });
     } catch (imgErr) {
       console.error('[MCP] Failed to render receipt image:', imgErr);
     }
@@ -1448,7 +1488,21 @@ async function callPayBillBatch(args: any, oauthIdentity: McpIdentity | null) {
     ? `All ${validated.length} payments sent — NGN ${totalCharged.toLocaleString()} total.`
     : `${okCount} of ${validated.length} payments went through — NGN ${totalCharged.toLocaleString()} charged.`;
 
-  return textResult(`${summary}\n\n${lines.join('\n')}`);
+  return withCard(textResult(`${summary}\n\n${lines.join('\n')}`), {
+    view: 'batch',
+    okCount,
+    totalCount: validated.length,
+    totalNgn: totalCharged,
+    totalDisplay: `₦${totalCharged.toLocaleString()}`,
+    recipients: results.map(({ v, result }) => ({
+      provider: v.provider.toUpperCase(),
+      service: v.service,
+      accountNumber: v.accountNumber,
+      displayAmountNgn: `₦${v.amountNgn.toLocaleString()}`,
+      status: result.success && !result.vendFailed ? 'OK' : result.pending ? 'PENDING' : 'FAILED',
+      txHash: result.txHash || null,
+    })),
+  });
 }
 
 // The OAuth identity is threaded through as a PARAMETER, never stashed in module scope — a

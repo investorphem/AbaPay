@@ -14,6 +14,7 @@ import {
   callTool,
   errorResult,
 } from '@/lib/deai/mcpTools';
+import { MCP_UI_CARD_URI, MCP_UI_CARD_RESOURCE, MCP_UI_CARD_HTML } from '@/lib/deai/mcpUiTemplates';
 
 // ⚡ MCP SERVER — lets an AI agent (Claude, or any MCP-speaking client) check a balance or
 // pay a bill on behalf of a wallet that has explicitly linked and PIN-protected an API key
@@ -84,7 +85,13 @@ export async function POST(req: Request) {
       case 'initialize':
         return rpcResult(id, {
           protocolVersion: params?.protocolVersion || PROTOCOL_VERSION,
-          capabilities: { tools: {} },
+          // `resources: {}` because pay_bill/pay_bill_batch/transaction_history now reference a
+          // `ui://` resource via `_meta.ui.resourceUri` (see mcpTools.ts) — MCP Apps (SEP-1865),
+          // an open extension, not a first-party-only mechanism. Declared unconditionally: a
+          // host that never negotiates the `io.modelcontextprotocol/ui` extension just never
+          // calls resources/read and the tool behaves exactly as before (text ± PNG image),
+          // per the spec's own graceful-degradation rule — no client capability check needed.
+          capabilities: { tools: {}, resources: {} },
           serverInfo: SERVER_INFO,
           instructions: "AbaPay: check a linked wallet's stablecoin balance, browse recent transaction history, pay a real bill (one recipient or many at once), or schedule one for later — Nigerian services (airtime, data, electricity, cable) or international airtime/data across 170+ countries — settled on-chain. Call describe_capabilities first. For DATA, CABLE, or EDUCATION, call list_plans before pay_bill/pay_bill_batch/schedule_bill and use one of its real returned codes as variation_code. For service: INTERNATIONAL, call list_international_options first (drills down country -> product type -> operator -> plan) and pass back its exact country/product_type_id/operator_id/variation_code — never guess any of these (INTERNATIONAL cannot be scheduled or batched; pay_bill only). A successful pay_bill returns a rich receipt (image card plus a shareable receipt link) alongside the confirmation text. Use transaction_history to answer 'what did I pay recently' without the human needing to open the app. When the human names 2+ recipients for airtime or data in one request, use pay_bill_batch (one PIN for the whole batch, up to 20 recipients) instead of calling pay_bill repeatedly. Authentication: OAuth 2.1 is supported and preferred — authorize once in the browser and this connection is remembered, so no api_key argument is ever needed again. The api_key created in the AbaPay app under Agent Hub -> MCP remains the fallback for clients that cannot do OAuth. Either way, pay_bill, pay_bill_batch, and schedule_bill ALWAYS require the PIN set when the key was created — OAuth does not remove it. Ask the human for their PIN on every single payment/batch/schedule creation — every single call, never reused from earlier in the conversation. pay_bill and pay_bill_batch execute IMMEDIATELY with no delay of their own — if the human asks to pay 'in N minutes', 'later', 'tomorrow', or on a recurring basis (e.g. 'every Tuesday'), do not call them now; use schedule_bill instead (it charges nothing itself — money only moves later, when the schedule fires and only if the wallet still has a funded allowance then; for multiple recipients, call schedule_bill once per recipient). Use list_schedules/cancel_schedule to view or remove standing schedules. Every call that moves or commits money (pay_bill, pay_bill_batch, schedule_bill) is rate-limited per credential on top of the PIN requirement — a 'too many calls' error means slow down and retry shortly, not that anything is broken.",
         });
@@ -94,6 +101,24 @@ export async function POST(req: Request) {
 
       case 'tools/list':
         return rpcResult(id, { tools: TOOLS });
+
+      // MCP Apps (SEP-1865) resource handlers. Only one resource exists — the shared card
+      // template — so `resources/list` is a fixed one-item array rather than anything paged.
+      // Per spec, servers "MAY omit UI-only resources from resources/list" since tools already
+      // point to them via `_meta.ui.resourceUri`; listed anyway for hosts that prefetch from
+      // here rather than waiting for a tool call, and for basic discoverability.
+      case 'resources/list':
+        return rpcResult(id, { resources: [MCP_UI_CARD_RESOURCE] });
+
+      case 'resources/read': {
+        const uri = params?.uri;
+        if (uri !== MCP_UI_CARD_URI) {
+          return rpcError(id, -32002, `Resource not found: ${uri}`);
+        }
+        return rpcResult(id, {
+          contents: [{ uri: MCP_UI_CARD_URI, mimeType: 'text/html;profile=mcp-app', text: MCP_UI_CARD_HTML }],
+        });
+      }
 
       case 'tools/call': {
         const toolName = params?.name;
