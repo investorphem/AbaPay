@@ -944,19 +944,42 @@ blockchain observer correlate a payment to the customer's verified name/address,
 the purchased code/PIN either. `transaction_history` gets the same rich treatment — a statement
 card image alongside the plain-text list — for browsing past activity without opening the app.
 
-**`pay_bill`, `pay_bill_batch`, `transaction_history`, `check_balance`, and `list_schedules` also
-render as a real interactive card via MCP Apps (SEP-1865)** — an open MCP extension
-(`io.modelcontextprotocol/ui`, shipped as the protocol's first official extension 2026-01-26),
-not a first-party-only mechanism. The flat PNG above is a fixed image with Satori's
+**`pay_bill`, `pay_bill_batch`, `transaction_history`, `check_balance`, `list_schedules`, and
+`describe_capabilities` also render as a real interactive card via MCP Apps (SEP-1865)** — an open
+MCP extension (`io.modelcontextprotocol/ui`, shipped as the protocol's first official extension
+2026-01-26), not a first-party-only mechanism. The flat PNG above is a fixed image with Satori's
 font-subsetting limits (₦/₮ have to be worked around — see `receiptCard.tsx`'s own comment on
 that); the interactive card (`src/lib/deai/mcpUiTemplates.ts`) is real HTML/CSS/JS rendered by
 the host in a sandboxed iframe, fed the tool's `structuredContent` over
 `ui/notifications/tool-result` — real ₦/₮ glyphs, theme-aware (reads the host's CSS variables for
 light/dark), with a "View receipt" link wired through `ui/open-link`. Declared via
-`_meta.ui.resourceUri` on those five tools and served through two new `/api/mcp` methods,
+`_meta.ui.resourceUri` on those six tools and served through two new `/api/mcp` methods,
 `resources/list`/`resources/read` (`src/app/api/mcp/route.ts`) — additive only: a host that never
 negotiates the extension just never calls `resources/read`, and every tool behaves exactly as
 before (text ± PNG image), per the spec's own graceful-degradation rule.
+
+**The receipt card covers every real outcome of `pay_bill`, not just full success.** It used to
+build the card (PNG + interactive view) only when `pay_bill` fully succeeded, so a payment that
+went on-chain but was still confirming, or one where the on-chain charge succeeded but VTpass
+failed to vend the code/PIN, fell back to plain text with no card at all — the exact case a user
+most needs the visual status for. `finalizePayBillResult` now builds the full receipt (image +
+`structuredContent`) for **any** outcome that produced a real `txHash` — `SUCCESS`, `PENDING`
+(still confirming on-chain), or `FAILED_VENDING` (charged, refund pending) — each with its own
+status colour, label, and icon on the card; only a payment that never reached the chain falls back
+to text-only.
+
+**The card is now a genuinely premium surface, and it's where "everything AbaPay offers" lives.**
+Every view (`receipt`, `history`, `balance`, `schedules`, `batch`, `capabilities`) shares one
+gradient hairline border and drop shadow, real inline SVG icons (a distinct one per status —
+success/pending/failed-vending/failed — and per service — airtime/data/electricity/cable/
+education/bank/international), and a fade-in transition that retriggers on every re-render, so
+paging through history or hitting Refresh/Cancel doesn't feel like a static swap. `describe_capabilities`'s
+card (the new `capabilities` view, via `getCapabilitiesForCard()` in `src/lib/deai/capabilities.ts`)
+lists every AbaPay service with its example phrasing, whether it's usable right here over MCP vs.
+app-only, and a live Paused/Available badge sourced from the same kill-switch state chat reads —
+the closest thing to a full menu that can be shown safely without a PIN field inside a
+third-party-rendered iframe (see the trust-boundary note below on why forms with a PIN aren't on
+the card).
 
 **The card calls tools back, not just displays them.** `transaction_history`'s card pages through
 history with Prev/Next (re-calling the tool with a shifted `offset` — `transaction_history` now

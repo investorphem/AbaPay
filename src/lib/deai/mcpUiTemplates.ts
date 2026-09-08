@@ -46,8 +46,9 @@ export const MCP_UI_CARD_RESOURCE = {
   mimeType: 'text/html;profile=mcp-app',
 };
 
-// One template, five views (`structuredContent.view`): 'receipt' | 'history' | 'balance' |
-// 'schedules' | 'batch'. Vanilla HTML/CSS/JS, no build step and no external resources — CSP
+// One template, six views (`structuredContent.view`): 'receipt' | 'history' | 'balance' |
+// 'schedules' | 'capabilities' | 'batch'. Vanilla HTML/CSS/JS, no build step and no external
+// resources — CSP
 // for this resource is therefore left at the spec's restrictive default (no `ui.csp`
 // declared), and the logo is inlined as the same base64 PNG constant receiptCard.tsx already
 // uses rather than a fetched asset, so nothing here needs a `resourceDomains` allowance either.
@@ -73,6 +74,8 @@ export const MCP_UI_CARD_HTML = `<!DOCTYPE html>
     --ab-emerald: #10b981;
     --ab-red: #f87171;
     --ab-blue: light-dark(#2563eb, #60a5fa);
+    --ab-amber: light-dark(#d97706, #fbbf24);
+    --ab-gold: #c9a02b;
   }
   * { box-sizing: border-box; }
   html, body { margin: 0; padding: 0; }
@@ -87,7 +90,19 @@ export const MCP_UI_CARD_HTML = `<!DOCTYPE html>
     border: var(--border-width-regular, 1px) solid var(--color-border-primary, var(--ab-border));
     border-radius: var(--border-radius-lg, 18px);
     padding: 18px;
+    box-shadow: var(--shadow-lg, 0 10px 30px -10px rgba(0,0,0,0.25));
+    position: relative;
+    overflow: hidden;
   }
+  /* A thin brand-gradient hairline along the top edge — the one deliberate "premium" flourish,
+     restrained enough to work in both themes and never fight the host's own styling. */
+  .card::before {
+    content: ''; position: absolute; top: 0; left: 0; right: 0; height: 3px;
+    background: linear-gradient(90deg, var(--ab-emerald), var(--ab-gold));
+  }
+  .fade-in { animation: ab-fade 0.22s ease-out; }
+  @keyframes ab-fade { from { opacity: 0; transform: translateY(2px); } to { opacity: 1; transform: none; } }
+  .svc-icon { flex-shrink: 0; opacity: 0.75; }
   .row { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
   .brand { display: flex; align-items: center; gap: 10px; }
   .brand img { width: 26px; height: 18px; object-fit: contain; }
@@ -124,7 +139,12 @@ export const MCP_UI_CARD_HTML = `<!DOCTYPE html>
   .hist-row { display: flex; justify-content: space-between; align-items: center; padding: 10px 0; border-top: 1px solid var(--color-border-primary, var(--ab-border)); }
   .hist-row:first-child { border-top: none; }
   .hist-left { display: flex; flex-direction: column; }
-  .hist-service { font-weight: 700; font-size: 13px; }
+  .hist-service { font-weight: 700; font-size: 13px; display: flex; align-items: center; gap: 6px; }
+  .cap-row { padding: 10px 0; border-top: 1px solid var(--color-border-primary, var(--ab-border)); }
+  .cap-row:first-child { border-top: none; }
+  .cap-title { display: flex; align-items: center; gap: 8px; font-weight: 700; font-size: 13px; }
+  .cap-example { font-size: 11px; color: var(--color-text-secondary, var(--ab-muted)); margin-top: 2px; font-style: italic; }
+  .cap-badge { font-size: 9px; font-weight: 800; text-transform: uppercase; letter-spacing: 0.04em; border-radius: 999px; padding: 2px 8px; }
   .hist-meta { font-size: 11px; color: var(--color-text-secondary, var(--ab-muted)); margin-top: 1px; }
   .hist-right { display: flex; flex-direction: column; align-items: flex-end; }
   .hist-amount { font-weight: 800; font-size: 13px; }
@@ -214,23 +234,53 @@ export const MCP_UI_CARD_HTML = `<!DOCTYPE html>
     });
   }
 
+  // Real transaction outcomes, not just success — see finalizePayBillResult's own comment on
+  // why PENDING/FAILED_VENDING now reach this card at all. FAILED_VENDING gets its own label
+  // deliberately distinct from a hard failure: the PAYMENT went through, only delivery didn't,
+  // and a refund is already in motion — calling that "Payment Failed" would read as "you lost
+  // your money," which isn't true and isn't what result.message says either.
   function statusVisual(status) {
-    if (status === 'SUCCESS') return { color: 'var(--ab-emerald)', label: 'Payment Successful', glyph: 'check' };
-    if (status === 'PENDING') return { color: 'var(--ab-blue)', label: 'Still Confirming', glyph: 'dots' };
-    return { color: 'var(--ab-red)', label: 'Payment Failed', glyph: 'bang' };
+    if (status === 'SUCCESS') return { color: 'var(--ab-emerald)', label: 'Payment Successful', icon: 'check' };
+    if (status === 'PENDING') return { color: 'var(--ab-blue)', label: 'Still Confirming', icon: 'clock' };
+    if (status === 'FAILED_VENDING') return { color: 'var(--ab-amber)', label: 'Delivery Failed — Refund Pending', icon: 'refund' };
+    return { color: 'var(--ab-red)', label: 'Payment Failed', icon: 'alert' };
   }
 
-  function statusGlyphSvg(color) {
-    return '<div class="status-dot" style="background:' + color + '">' +
-      '<div style="width:10px;height:6px;margin-top:-1px;border-left:2px solid #0b0b0e;border-bottom:2px solid #0b0b0e;transform:rotate(-45deg)"></div>' +
-      '</div>';
+  // Real inline SVG glyphs (stroke, currentColor) instead of a CSS-border hack — crisper at
+  // every size and themeable through the same status color the label already uses.
+  function statusIconSvg(icon, color) {
+    var paths = {
+      check: '<path d="M5 12l4 4 10-10"/>',
+      clock: '<circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 3"/>',
+      alert: '<path d="M12 3l10 18H2z"/><path d="M12 10v4"/><circle cx="12" cy="17" r="0.5" fill="currentColor" stroke="none"/>',
+      refund: '<path d="M4 12a8 8 0 1 0 3-6.2"/><path d="M4 4v4h4"/>',
+    };
+    return '<div class="status-dot" style="background:' + color + '22;color:' + color + '">' +
+      '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">' +
+      (paths[icon] || paths.check) + '</svg></div>';
+  }
+
+  // Small per-service glyphs for the "everything AbaPay offers" views (history, schedules,
+  // capabilities) — same currentColor/stroke treatment as the status icons above, so a card
+  // full of rows reads as one coherent icon set rather than mismatched styles.
+  function serviceIconSvg(label) {
+    var s = String(label || '').toUpperCase();
+    var path =
+      /ELECTRIC/.test(s) ? '<path d="M13 2 4 14h6l-1 8 9-12h-6z"/>' :
+      /DATA/.test(s) ? '<path d="M5 12a7 9 0 0 1 14 0"/><path d="M8.5 15a3.5 4.5 0 0 1 7 0"/><circle cx="12" cy="19" r="1" fill="currentColor" stroke="none"/>' :
+      /CABLE|TV/.test(s) ? '<rect x="3" y="6" width="18" height="13" rx="2"/><path d="M8 3l4 3 4-3"/>' :
+      /EDUCATION|WAEC|JAMB/.test(s) ? '<path d="M2 9l10-5 10 5-10 5z"/><path d="M6 11v5c0 1.5 3 3 6 3s6-1.5 6-3v-5"/>' :
+      /BANK|GTBANK|OPAY|TRANSFER/.test(s) ? '<path d="M3 10l9-6 9 6"/><path d="M5 10v9h14v-9"/><path d="M10 19v-6h4v6"/>' :
+      /INTERNATIONAL/.test(s) ? '<circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3a14 14 0 0 1 0 18 14 14 0 0 1 0-18z"/>' :
+      '<rect x="6" y="2" width="12" height="20" rx="2"/><path d="M10 18h4"/>'; // default: phone/airtime
+    return '<svg class="svc-icon" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">' + path + '</svg>';
   }
 
   function renderReceipt(sc) {
     var v = statusVisual(sc.status);
     var html = '<div class="row"><div class="brand"><img src="' + LOGO + '" alt="AbaPay"/><span>AbaPay</span></div>' +
       '<div class="chip">' + esc(sc.chain || '') + '</div></div>';
-    html += '<div class="status-row">' + statusGlyphSvg(v.color) +
+    html += '<div class="status-row">' + statusIconSvg(v.icon, v.color) +
       '<span class="status-text" style="color:' + v.color + '">' + esc(v.label) + '</span></div>';
     html += '<div class="amount-label">Amount Paid</div>' +
       '<div class="amount-value">' + esc(sc.displayAmountNgn) + '</div>' +
@@ -275,7 +325,7 @@ export const MCP_UI_CARD_HTML = `<!DOCTYPE html>
       for (var i = 0; i < rows.length; i++) {
         var r = rows[i];
         var color = r.status === 'SUCCESS' ? 'var(--ab-emerald)' : (r.status === 'REFUNDED' ? 'var(--ab-blue)' : 'var(--ab-red)');
-        html += '<div class="hist-row"><div class="hist-left"><span class="hist-service">' + esc(r.serviceLabel) + '</span>' +
+        html += '<div class="hist-row"><div class="hist-left"><span class="hist-service">' + serviceIconSvg(r.serviceLabel) + esc(r.serviceLabel) + '</span>' +
           '<span class="hist-meta">' + esc(r.date) + ' &middot; ' + esc(r.accountNumber) + '</span></div>' +
           '<div class="hist-right"><span class="hist-amount">' + esc(r.displayAmountNgn) + '</span>' +
           '<span class="hist-status" style="color:' + color + '">' + esc(r.status) + '</span></div></div>';
@@ -323,13 +373,49 @@ export const MCP_UI_CARD_HTML = `<!DOCTYPE html>
       for (var i = 0; i < list.length; i++) {
         var s = list[i];
         var cancelArgs = esc(JSON.stringify({ id: s.id }));
-        html += '<div class="hist-row"><div class="hist-left"><span class="hist-service">' + esc(s.provider) + ' ' + esc(s.service) + '</span>' +
+        html += '<div class="hist-row"><div class="hist-left"><span class="hist-service">' + serviceIconSvg(s.service) + esc(s.provider) + ' ' + esc(s.service) + '</span>' +
           '<span class="hist-meta">' + esc(s.accountNumber) + ' &middot; ' + esc(s.when) + ' &middot; ' + (s.autoExecute ? 'auto-pays' : 'notify-only') + '</span></div>' +
           '<button class="cancel-btn" data-call="cancel_schedule" data-args="' + cancelArgs + '" data-mode="refresh-schedules">Cancel</button></div>';
       }
       html += '</div>';
     }
     return html;
+  }
+
+  // "Everything AbaPay offers, on the card" — the services overview, sourced from the exact
+  // same CAPABILITIES list (and live kill-switch state) describe_capabilities' own text answer
+  // uses (see getCapabilitiesForCard in capabilities.ts), so this can never quietly say
+  // something's available when the text/chat answer would say it's paused, or vice versa.
+  function renderCapabilities(sc) {
+    var html = '<div class="row"><div class="brand"><img src="' + LOGO + '" alt="AbaPay"/><span>AbaPay</span></div>' +
+      '<div class="chip">Services</div></div>';
+    var entries = sc.entries || [];
+    var here = entries.filter(function (e) { return e.supportedInChat; });
+    var appOnly = entries.filter(function (e) { return !e.supportedInChat; });
+
+    html += '<div class="amount-label" style="margin-top:16px">Right here, over MCP</div>';
+    for (var i = 0; i < here.length; i++) {
+      html += capRow(here[i], false);
+    }
+    if (appOnly.length) {
+      html += '<div class="amount-label" style="margin-top:16px">In the AbaPay app only</div>';
+      for (var j = 0; j < appOnly.length; j++) {
+        html += capRow(appOnly[j], true);
+      }
+    }
+    return html;
+  }
+
+  function capRow(e, appOnly) {
+    var badge = e.paused
+      ? '<span class="cap-badge" style="background:var(--ab-red)22;color:var(--ab-red)">Paused</span>'
+      : appOnly
+      ? '<span class="cap-badge" style="background:var(--color-background-tertiary, var(--ab-border));color:var(--color-text-secondary, var(--ab-muted))">App only</span>'
+      : '<span class="cap-badge" style="background:var(--ab-emerald)22;color:var(--ab-emerald)">Available</span>';
+    return '<div class="cap-row"><div class="row"><span class="cap-title">' + serviceIconSvg(e.id) + esc(e.label) + '</span>' + badge + '</div>' +
+      (e.example ? '<div class="cap-example">"' + esc(e.example) + '"</div>' : '') +
+      (e.notes ? '<div class="cap-example" style="font-style:normal">' + esc(e.notes) + '</div>' : '') +
+      '</div>';
   }
 
   function renderBatch(sc) {
@@ -342,7 +428,7 @@ export const MCP_UI_CARD_HTML = `<!DOCTYPE html>
     for (var i = 0; i < recips.length; i++) {
       var r = recips[i];
       var color = r.status === 'OK' ? 'var(--ab-emerald)' : (r.status === 'PENDING' ? 'var(--ab-blue)' : 'var(--ab-red)');
-      html += '<div class="hist-row"><div class="hist-left"><span class="hist-service">' + esc(r.provider) + ' ' + esc(r.service) + '</span>' +
+      html += '<div class="hist-row"><div class="hist-left"><span class="hist-service">' + serviceIconSvg(r.service) + esc(r.provider) + ' ' + esc(r.service) + '</span>' +
         '<span class="hist-meta">' + esc(r.accountNumber) + '</span></div>' +
         '<div class="hist-right"><span class="hist-amount">' + esc(r.displayAmountNgn) + '</span>' +
         '<span class="hist-status" style="color:' + color + '">' + esc(r.status) + '</span></div></div>';
@@ -355,18 +441,23 @@ export const MCP_UI_CARD_HTML = `<!DOCTYPE html>
     var root = document.getElementById('root');
     if (!root) return;
     var sc = result && result.structuredContent;
+    var inner;
     if (!sc) {
       var fallback = (result && result.content && result.content[0] && result.content[0].text) || 'No data.';
-      root.innerHTML = '<div class="loading">' + esc(fallback) + '</div>';
-      return;
-    }
-    if (sc.view === 'receipt') root.innerHTML = renderReceipt(sc);
-    else if (sc.view === 'history') root.innerHTML = renderHistory(sc);
-    else if (sc.view === 'batch') root.innerHTML = renderBatch(sc);
-    else if (sc.view === 'balance') root.innerHTML = renderBalance(sc);
-    else if (sc.view === 'schedules') root.innerHTML = renderSchedules(sc);
-    else root.innerHTML = '<div class="loading">Unrecognized card type.</div>';
+      inner = '<div class="loading">' + esc(fallback) + '</div>';
+    } else if (sc.view === 'receipt') inner = renderReceipt(sc);
+    else if (sc.view === 'history') inner = renderHistory(sc);
+    else if (sc.view === 'batch') inner = renderBatch(sc);
+    else if (sc.view === 'balance') inner = renderBalance(sc);
+    else if (sc.view === 'schedules') inner = renderSchedules(sc);
+    else if (sc.view === 'capabilities') inner = renderCapabilities(sc);
+    else inner = '<div class="loading">Unrecognized card type.</div>';
 
+    // Wrapped in a freshly-inserted element (not the persistent #root itself) so the fade-in
+    // keyframe actually replays on every re-render — Prev/Next, Refresh, Cancel — not just the
+    // very first paint; a CSS animation class doesn't retrigger on an element that already
+    // existed, only on one that's newly inserted into the DOM.
+    root.innerHTML = '<div class="fade-in">' + inner + '</div>';
     wireActions(root);
     reportSize();
   }

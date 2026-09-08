@@ -2,7 +2,7 @@ import 'server-only';
 import { supabaseAdmin } from '@/utils/supabase';
 import { rateLimit } from '@/lib/rateLimit';
 import { getServiceRules, checkServiceAllowed, checkAgentSpendAllowed } from '@/lib/serviceRules';
-import { describeCapabilities, capabilityForIntent, getCapability } from '@/lib/deai/capabilities';
+import { describeCapabilities, capabilityForIntent, getCapability, getCapabilitiesForCard } from '@/lib/deai/capabilities';
 import { resolveServiceId, fetchCryptoBalances, verifyAccount } from '@/lib/deai/services';
 import { getRemainingAllowance } from '@/lib/deai/relayer';
 import { LEGACY_RECORD_CHAIN, tokenSymbolsForChain } from '@/constants';
@@ -144,6 +144,8 @@ export const TOOLS = [
     inputSchema: { type: 'object', properties: {}, additionalProperties: false },
     // Static text, no wallet/network access, safe to call repeatedly.
     annotations: { title: 'Describe Capabilities', readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
+    // See the identical note on transaction_history above.
+    _meta: { ui: { resourceUri: MCP_UI_CARD_URI } },
   },
   {
     name: 'check_balance',
@@ -404,7 +406,8 @@ export const TOOLS = [
 ];
 
 async function callDescribeCapabilities() {
-  return textResult(await describeCapabilities('MCP'));
+  const [text, entries] = await Promise.all([describeCapabilities('MCP'), getCapabilitiesForCard()]);
+  return withCard(textResult(text), { view: 'capabilities', entries });
 }
 
 // No auth required — this is a read-only catalog lookup, same trust level as
@@ -699,11 +702,19 @@ async function finalizePayBillResult(params: {
 
   const baseText = `${result.message}${result.txHash ? `\nTx: ${result.txHash}` : ''}`;
 
-  // Only a genuinely completed, delivered payment gets the premium receipt card — a
-  // pending/still-confirming result has no purchased_code/units yet, and a failed vend
-  // already carries its own refund messaging in result.message. Never let a rendering
-  // hiccup here hide a payment that actually succeeded — fall back to plain text.
-  if (result.success && !result.vendFailed && !result.pending && result.txHash) {
+  // 🔴 THE BUG THIS FIXES: this used to build the receipt card (PNG image AND the interactive
+  // MCP Apps card) ONLY for a fully completed, delivered SUCCESS — a still-confirming PENDING
+  // payment or a paid-but-delivery-failed FAILED_VENDING result (money already moved either
+  // way) fell through to plain text, even though renderReceiptImage has ALWAYS accepted
+  // 'PENDING'/'FAILED_VENDING' as real statuses. A caller "performing a transaction" and
+  // landing on either of those outcomes saw no card at all — reported live. Any outcome with a
+  // real txHash now gets the same full treatment, varying only the status shown and withholding
+  // purchasedCode/units (VTpass hasn't handed them over yet on these two paths). Only a
+  // pre-broadcast failure — nothing ever reached the chain, nothing to show a receipt FOR —
+  // stays plain text; never let a rendering hiccup here hide a payment that actually moved.
+  if (result.txHash) {
+    const status: 'SUCCESS' | 'PENDING' | 'FAILED_VENDING' =
+      result.pending ? 'PENDING' : result.vendFailed ? 'FAILED_VENDING' : 'SUCCESS';
     try {
       const { data: txRow } = await supabaseAdmin.from('transactions').select('*').eq('tx_hash', result.txHash).maybeSingle();
       const row = txRow as any;
@@ -711,16 +722,18 @@ async function finalizePayBillResult(params: {
         ? `${process.env.NEXT_PUBLIC_APP_URL || 'https://abapays.com'}/receipt/${row.request_id}`
         : null;
       const cryptoCharged = `${Number(row?.amount_usdt ?? capacity.neededCrypto).toFixed(6)} ${tokenSymbol}`;
+      const purchasedCode = status === 'SUCCESS' ? (row?.purchased_code || null) : null;
+      const units = status === 'SUCCESS' ? (row?.units || null) : null;
       const png = await renderReceiptImage({
-        status: 'SUCCESS',
+        status,
         serviceLabel,
         accountNumber,
         customerName: row?.customer_name || customerName || null,
         customerAddress: row?.customer_address || customerAddress || null,
         displayAmountNgn: `NGN ${amountNgn.toLocaleString()}`,
         cryptoCharged,
-        purchasedCode: row?.purchased_code || null,
-        units: row?.units || null,
+        purchasedCode,
+        units,
         referenceId: row?.request_id || null,
         txHash: result.txHash,
         chain,
@@ -731,15 +744,15 @@ async function finalizePayBillResult(params: {
       // the image is stuck with — see mcpUiTemplates.ts's own header comment.
       return withCard(imageAndTextResult(png, finalText), {
         view: 'receipt',
-        status: 'SUCCESS',
+        status,
         serviceLabel,
         accountNumber,
         customerName: row?.customer_name || customerName || null,
         customerAddress: row?.customer_address || customerAddress || null,
         displayAmountNgn: `₦${amountNgn.toLocaleString()}`,
         cryptoCharged,
-        purchasedCode: row?.purchased_code || null,
-        units: row?.units || null,
+        purchasedCode,
+        units,
         referenceId: row?.request_id || null,
         txHash: result.txHash,
         chain,
