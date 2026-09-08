@@ -83,6 +83,14 @@ export async function POST(req: Request) {
   try {
     switch (method) {
       case 'initialize':
+        // 🔴 TEMPORARY DIAGNOSTIC (round 2) — every server-side piece (initialize capabilities,
+        // tools/list's _meta.ui, resources/read's HTML) has been hand-verified correct against
+        // production, twice now, yet the card still isn't confirmed rendering after this
+        // deploy. Round 1 of this same diagnostic (since removed) proved the earlier gap was a
+        // stale client connection; this round targets what's left unverified — whether the
+        // client is asking for the io.modelcontextprotocol/ui extension AT ALL this time, and
+        // whether it ever calls resources/read afterward. Remove once resolved.
+        console.log('[MCP][DIAG2] initialize — extensions:', JSON.stringify(params?.capabilities?.extensions), 'clientInfo:', JSON.stringify(params?.clientInfo));
         return rpcResult(id, {
           protocolVersion: params?.protocolVersion || PROTOCOL_VERSION,
           // `resources: {}` because pay_bill/pay_bill_batch/transaction_history now reference a
@@ -128,10 +136,12 @@ export async function POST(req: Request) {
       // point to them via `_meta.ui.resourceUri`; listed anyway for hosts that prefetch from
       // here rather than waiting for a tool call, and for basic discoverability.
       case 'resources/list':
+        console.log('[MCP][DIAG2] resources/list called');
         return rpcResult(id, { resources: [MCP_UI_CARD_RESOURCE] });
 
       case 'resources/read': {
         const uri = params?.uri;
+        console.log('[MCP][DIAG2] resources/read called for uri:', uri);
         if (uri !== MCP_UI_CARD_URI) {
           return rpcError(id, -32002, `Resource not found: ${uri}`);
         }
@@ -144,6 +154,13 @@ export async function POST(req: Request) {
         const toolName = params?.name;
         if (!toolName || !TOOLS.some((t) => t.name === toolName)) {
           return rpcError(id, -32602, `Unknown tool: ${toolName}`);
+        }
+        // 🔴 TEMPORARY DIAGNOSTIC (round 2) — see the note on 'initialize'. Confirms this
+        // specific request actually reached tools/call for a card-enabled tool, and with what
+        // arguments — a re-call carrying `offset`/`chain`/`id` is the View itself paging or
+        // refreshing; one without is the model's own first call.
+        if (['pay_bill', 'pay_bill_batch', 'transaction_history', 'check_balance', 'list_schedules', 'cancel_schedule'].includes(toolName)) {
+          console.log('[MCP][DIAG2] tools/call', toolName, JSON.stringify(params?.arguments));
         }
         // 🔴 OPERATOR EMERGENCY BRAKE — same per-channel pause as WhatsApp/Telegram/X (see
         // isChannelEnabled in serviceRules.ts). A normal in-band tool error, not a transport
