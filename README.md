@@ -944,6 +944,20 @@ blockchain observer correlate a payment to the customer's verified name/address,
 the purchased code/PIN either. `transaction_history` gets the same rich treatment — a statement
 card image alongside the plain-text list — for browsing past activity without opening the app.
 
+**`pay_bill`, `pay_bill_batch`, and `transaction_history` also render as a real interactive card
+via MCP Apps (SEP-1865)** — an open MCP extension (`io.modelcontextprotocol/ui`, shipped as the
+protocol's first official extension 2026-01-26), not a first-party-only mechanism. The flat PNG
+above is a fixed image with Satori's font-subsetting limits (₦/₮ have to be worked around — see
+`receiptCard.tsx`'s own comment on that); the interactive card (`src/lib/deai/mcpUiTemplates.ts`)
+is real HTML/CSS/JS rendered by the host in a sandboxed iframe, fed the same data as
+`structuredContent` on the tool result over the standard `ui/notifications/tool-result` message —
+real ₦/₮ glyphs, theme-aware (reads the host's CSS variables for light/dark), with a "View
+receipt" link wired through `ui/open-link`. Declared via `_meta.ui.resourceUri` on the three
+tools and served through two new `/api/mcp` methods, `resources/list`/`resources/read`
+(`src/app/api/mcp/route.ts`) — additive only: a host that never negotiates the extension just
+never calls `resources/read`, and the tool behaves exactly as before (text + PNG image), per the
+spec's own graceful-degradation rule.
+
 Both accept optional `chain`/`token` overrides — they default to whatever was approved when the
 API key was created, but a caller isn't stuck with that default if it comes up short. `check_balance`
 returns balance + approved limit for **every** stablecoin on the chain (not just the default one),
