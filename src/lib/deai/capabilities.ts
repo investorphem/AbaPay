@@ -408,9 +408,14 @@ export async function describeCapabilities(channel: 'CHAT' | 'MCP' = 'CHAT'): Pr
   // instruction with no clarifying question asked first. pay_bill itself has no queue/delay
   // parameter — every call executes immediately, on every channel.
   if (channel === 'MCP') {
+    // 🔴 THE BUG THIS FIXES: this claimed there was no way to delay/schedule a payment on this
+    // connection — true when it was written, false since schedule_bill/list_schedules/
+    // cancel_schedule shipped. pay_bill/pay_bill_batch themselves still have no delay parameter
+    // and still execute immediately — that half was never wrong — but "don't default to paying
+    // now" needed a real alternative to point at instead of only the app/other channels.
     lines.push(
       '',
-      '⚠️ *Every payment here executes immediately* — there is no tool on this connection to delay, queue, or schedule one. If asked to pay "in 40 minutes" or "tomorrow", don\'t default to paying now: ask the human to confirm paying immediately, or tell them recurring/delayed automations are only settable from the AbaPay app or by messaging the AbaPay agent on Telegram/WhatsApp/X.'
+      '⚠️ *pay_bill and pay_bill_batch execute immediately* — neither has a delay/queue parameter. If asked to pay "in 40 minutes", "tomorrow", or on a recurring basis, don\'t default to paying now: call schedule_bill instead (one-off or recurring; AIRTIME/DATA/ELECTRICITY/CABLE only — not EDUCATION/INTERNATIONAL, and not batchable, so a multi-recipient delayed request needs one schedule_bill call per recipient). Use list_schedules/cancel_schedule to view or remove standing automations.'
     );
   } else {
     lines.push(
@@ -426,4 +431,33 @@ export async function describeCapabilities(channel: 'CHAT' | 'MCP' = 'CHAT'): Pr
   }
 
   return lines.join('\n');
+}
+
+export interface CapabilityCardEntry {
+  id: Capability;
+  label: string;
+  example: string;
+  supportedInChat: boolean;
+  paused: boolean;
+  notes: string | null;
+}
+
+// Structured twin of describeCapabilities() above, for the MCP Apps card (see
+// mcpTools.ts's callDescribeCapabilities and mcpUiTemplates.ts's 'capabilities' view) — same
+// CAPABILITIES list and the exact same per-service kill-switch check describeCapabilities
+// itself uses, so the card and the text answer can never quietly disagree about what's paused.
+export async function getCapabilitiesForCard(): Promise<CapabilityCardEntry[]> {
+  const rules = await getServiceRules();
+  return CAPABILITIES.map((c) => {
+    const keys = c.supportedInChat ? killSwitchKeysFor(INTENT_FOR_CAPABILITY[c.id]) : null;
+    const paused = !!(keys && rules.killSwitches[keys.master] === false);
+    return {
+      id: c.id,
+      label: c.label,
+      example: c.example,
+      supportedInChat: c.supportedInChat,
+      paused,
+      notes: c.notes || null,
+    };
+  });
 }
