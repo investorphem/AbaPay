@@ -34,7 +34,16 @@ import { MCP_UI_CARD_URI } from '@/lib/deai/mcpUiTemplates';
 // no matter which protocol the agent speaks. Adding a transport must never widen what an agent
 // is allowed to do — only change how it asks.
 
-export const PROTOCOL_VERSION = '2025-06-18';
+// 🔴 STALE UNTIL NOW — this was still 2025-06-18, before MCP Apps (SEP-1865) even existed as
+// a draft. Only matters as a FALLBACK: route.ts's initialize handler echoes back whatever
+// protocolVersion the CLIENT requests, so a real client asking for a current version was never
+// actually held to this. Bumped to 2026-07-28, the spec's GA revision (the one that folds in
+// MCP Apps formally — see mcpUiTemplates.ts's header comment), so a client that omits
+// protocolVersion entirely gets a current answer instead of a 14-month-stale one. Reported by
+// another server operator hitting the same staleness (anthropics/claude-ai-mcp#61): in their
+// case it was intermittently causing a 405 on the tool-call path itself, separate from — and
+// not a fix for — the actual MCP Apps rendering gap tracked in that issue, which is host-side.
+export const PROTOCOL_VERSION = '2026-07-28';
 export const SERVER_INFO = { name: 'abapay', version: '1.0.0' };
 
 export const APP_URL = process.env.NEXT_PUBLIC_APP_URL || 'https://abapays.com';
