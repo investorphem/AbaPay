@@ -66,11 +66,19 @@ const MAIN_DASHBOARD: Dashboard = {
   label: 'AbaPay — Unified Payments (Celo + Base)',
   sourceTable: 'dune.abapay.result_abapay_unified_payments',
   // ⚠️ Exactly the queries WITH A PANEL on the dashboard, which is not the same as every
-  // query that exists. 8178727 (Volume & Tx by Rail) is still deployed and still works,
-  // but it was taken off the dashboard, so executing it would spend credits updating
-  // something nobody can see. Add a query here only when it has a widget.
+  // query that exists. Add a query here only when it has a widget.
+  //
+  // 🔴 8178727 (Agent vs Direct vs x402 Rail) was taken OFF this list once, then put back
+  // ON 2026-09-11 — it used to just be a 'CONTRACT_CALL' vs 'X402' split, which couldn't
+  // answer "how much of this is agent-initiated" at all (that distinction needs the
+  // contract's AgentPayment event, which the root query, 8178700, didn't decode). Both
+  // are fixed now: the root query detects the agent rail the same way dune/base-chain/
+  // and dune/celo-chain/ already do, and this query has a real panel again — placed
+  // first among the charts, this dashboard's version of the same "the rail split is the
+  // headline metric" decision made for Celo's dashboard.
   panelQueries: [
     8178726, // KPI Summary (all-time) — 4 counters + the summary table
+    8178727, // Agent vs Direct vs x402 Rail — placed first on the dashboard, deliberately
     8178728, // Volume & Tx by Chain
     8178729, // Volume & Tx by Token (chain-scoped)
     8178732, // DAU and WAU
