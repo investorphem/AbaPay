@@ -518,17 +518,30 @@ async function callCheckBalance(args: any, oauthIdentity: McpIdentity | null) {
   // Every token on this chain, not just the one the API key defaults to — pay_bill accepts a
   // token override (see its description), so the agent needs the full picture up front to
   // know a fallback is even worth trying, rather than discovering it only after a failure.
+  //
+  // 🔴 REAL MARKDOWN, NOT WHATSAPP'S. This text is MCP/A2A-only (see callTool's dispatch) —
+  // chat channels build their own strings in src/app/api/deai/core/route.ts with WhatsApp's
+  // single-asterisk *bold*, which is a different convention this content array entry never
+  // shares an audience with. A GFM table renders correctly wherever this text is shown as
+  // markdown, and reads cleanly even somewhere that shows it as plain text (a table degrades
+  // to readable pipe-delimited rows, unlike, say, an image would). This is also the content
+  // an agent that never gets the interactive card to render (see mcpUiTemplates.ts's and this
+  // file's own notes on the Claude Web MCP Apps rendering gap, anthropics/claude-ai-mcp#61)
+  // is left with as the ENTIRE presentation — it should stand on its own, not read like a
+  // fallback.
+  const shortWallet = `${identity.wallet_address.slice(0, 6)}…${identity.wallet_address.slice(-4)}`;
   const lines = [
-    `Wallet: ${identity.wallet_address}`,
-    `Chain: ${chain}`,
-    `Default token for pay_bill (set when this API key was created): ${identity.approved_token || 'USD₮'}`,
+    `**Wallet:** \`${shortWallet}\` on **${chain}**`,
+    `**Default token for pay_bill:** ${identity.approved_token || 'USD₮'} _(set when this API key was created)_`,
     '',
-    'Per-token balance and approved agent spending limit:',
+    '| Token | Balance | Approved agent limit |',
+    '|---|---|---|',
     ...tokens.map((sym, i) => {
       const bal = balances[sym] ?? '0.0000';
       const a = allowances[i];
       const lim = a.ok ? a.remaining.toFixed(4) : 'unavailable';
-      return `  ${sym}: balance ${bal}, approved limit ${lim}`;
+      const isDefault = sym === (identity.approved_token || 'USD₮');
+      return `| ${sym}${isDefault ? ' ⭐' : ''} | ${bal} | ${lim} |`;
     }),
   ];
   return withCard(textResult(lines.join('\n')), {
@@ -723,8 +736,8 @@ async function finalizePayBillResult(params: {
   // down) is used here deliberately: it's already the same pre-discount estimate the
   // out-of-band spend alert above sends the wallet owner — "good enough for a was-this-you
   // alert" per that comment applies equally to a plain-text confirmation line.
-  const amountSummary = `₦${amountNgn.toLocaleString()} (${capacity.neededCrypto.toFixed(6)} ${tokenSymbol} on ${chain})`;
-  const baseText = `${result.message}\n${amountSummary}${result.txHash ? `\nTx: ${result.txHash}` : ''}`;
+  const amountSummary = `**₦${amountNgn.toLocaleString()}** (${capacity.neededCrypto.toFixed(6)} ${tokenSymbol} on ${chain})`;
+  const baseText = `${result.message}\n${amountSummary}${result.txHash ? `\nTx: \`${result.txHash}\`` : ''}`;
 
   // 🔴 THE BUG THIS FIXES: this used to build the receipt card (PNG image AND the interactive
   // MCP Apps card) ONLY for a fully completed, delivered SUCCESS — a still-confirming PENDING
