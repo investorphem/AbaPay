@@ -1,6 +1,7 @@
 import 'server-only';
 import { NextResponse } from 'next/server';
 import baseChainQueryIds from '@/lib/dune/base-query-ids.json';
+import celoChainQueryIds from '@/lib/dune/celo-query-ids.json';
 import { verifyCronRequest } from '@/utils/cronAuth';
 
 // ⚡ DUNE DASHBOARD REFRESH — re-runs the AbaPay analytics queries so the public dashboards
@@ -93,9 +94,26 @@ const BASE_CHAIN_DASHBOARD: Dashboard | null =
       }
     : null;
 
+// ─── The Celo-only dashboard ─────────────────────────────────────────────────────
+//
+// Same pattern as Base's, one chain over: `scripts/dune-celo-setup.mjs` deploys the SQL in
+// `dune/celo-chain/` and records what Dune assigned in celo-query-ids.json. Unlike Base's
+// dashboard, `12_by_rail.sql` (agent vs direct vs x402) is NOT retired here — it's the
+// headline metric for this one, so it has a panel and is in dependentQueryIds. See
+// dune/celo-chain/README.md.
+const CELO_CHAIN_DASHBOARD: Dashboard | null =
+  typeof celoChainQueryIds.rootQueryId === 'number'
+    ? {
+        label: 'AbaPay on Celo (Celo mainnet only)',
+        sourceTable: 'dune.abapay.result_abapay_celo_events',
+        panelQueries: celoChainQueryIds.dependentQueryIds as number[],
+      }
+    : null;
+
 const DASHBOARDS: Record<string, Dashboard | null> = {
   main: MAIN_DASHBOARD,
   base: BASE_CHAIN_DASHBOARD,
+  celo: CELO_CHAIN_DASHBOARD,
 };
 
 // 🔴 UNRESOLVED — DO NOT TRUST EITHER VALUE BELOW WITHOUT CHECKING THE DUNE ACCOUNT FIRST.
@@ -285,7 +303,7 @@ async function handle(req: Request) {
 
   const params = new URL(req.url).searchParams;
 
-  // ?dashboard=main (default, back-compatible with the pre-existing crons) | base
+  // ?dashboard=main (default, back-compatible with the pre-existing crons) | base | celo
   const dashboardKey = params.get('dashboard') || 'main';
   if (!(dashboardKey in DASHBOARDS)) {
     return NextResponse.json(

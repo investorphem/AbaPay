@@ -1,0 +1,16 @@
+{
+  "_comment": "GENERATED — maps each file under dune/celo-chain/ to its Dune query id. /api/cron/dune-refresh imports dependentQueryIds to know what to re-run daily. That list is only the queries WITH A PANEL on the dashboard: 14_by_service and 15_by_contract are hidden on Dune (is_temp) and appear in `queries` below but never in dependentQueryIds. 12_by_rail is NOT retired here (unlike the Base dashboard) — it is the headline metric for this dashboard, so it stays live. Safe to hand-edit only when the queries were created manually on dune.com; otherwise regenerate via scripts/dune-celo-setup.mjs.",
+  "rootQueryId": 8683489,
+  "dependentQueryIds": [8683611, 8683610, 8683613, 8683609, 8683614, 8683612],
+  "queries": {
+    "00_events.sql": 8683489,
+    "10_kpi_summary.sql": 8683609,
+    "11_daily_volume.sql": 8683610,
+    "12_by_rail.sql": 8683611,
+    "13_by_token.sql": 8683612,
+    "14_by_service.sql": 8683617,
+    "15_by_contract.sql": 8683618,
+    "16_dau_wau.sql": 8683613,
+    "17_new_vs_returning.sql": 8683614
+  }
+}

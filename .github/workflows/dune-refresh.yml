@@ -91,15 +91,15 @@ jobs:
       # raw chain tables, so the whole thing costs about a credit and takes a few seconds
       # — the route spaces the calls out internally to stay under Dune's rate limiter.
       #
-      # ⚠️ Both dashboards are refreshed even if the first one fails, so a Base-side
-      # problem cannot silently cost the combined dashboard its daily run. The failure is
-      # recorded and re-raised after the loop.
+      # ⚠️ All three dashboards are refreshed even if an earlier one fails, so a problem on
+      # one chain cannot silently cost the others their daily run. The failure is recorded
+      # and re-raised after the loop.
       - name: Refresh dashboards
         run: |
           set -uo pipefail
           failed=""
           first=1
-          for dashboard in main base; do
+          for dashboard in main base celo; do
             # 🔴 THE TWO DASHBOARDS MUST NOT RUN BACK-TO-BACK. They used to, and the second
             # one paid for it: on 2026-08-15 `main` spent ~54s of a 7.5s workload climbing its
             # retry ladder (i.e. being rate-limited) and scraped through, then `base` started

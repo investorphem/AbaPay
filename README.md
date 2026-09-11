@@ -686,28 +686,37 @@ pick them up.
 ```
 DUNE_API_KEY=your_dune_api_key        # Required by /api/cron/dune-refresh
 ```
-There are **two** public dashboards on the `abapay` Dune team, and `/api/cron/dune-refresh`
-re-runs both:
+There are **three** public dashboards on the `abapay` Dune team, and `/api/cron/dune-refresh`
+re-runs all of them:
 
 | `?dashboard=` | What it covers | Queries |
 |---|---|---|
 | `main` (default) | The original combined dashboard — Celo **and** Base, split by chain | 7 |
 | `base` | **Base mainnet only**, both AbaPay deployments and both settlement rails (contract calls **and x402**) — [dune.com/abapay/abapay-on-base](https://dune.com/abapay/abapay-on-base) | 9 |
+| `celo` | **Celo mainnet only**, both AbaPay deployments (V3 → V4) and all three settlement rails (direct wallet, agent/relayer, **and x402**) — [dune.com/abapay/abapay-on-celo](https://dune.com/abapay/abapay-on-celo) | 9 |
 
-The Base-only dashboard exists because on the combined one every Base figure is a *slice* of a
-Celo+Base total, so per-chain user counts, DAU and new-vs-returning are all mixed. The Base
-dashboard is scoped to Base at the source, and it tracks **both** Base contracts —
-`0xC0A4dAA04DEd9c54D1239507B5A5E645761ef488` (AbaPayV4, current) and
-`0xF3AeFF0c326B1277A2D8623b7694aEB5E6A565e5` (the original AbaPay V1) — so the history doesn't
-restart at the redeploy. Its SQL is version-controlled in [`dune/base-chain/`](dune/base-chain/)
-and deployed with `node scripts/dune-base-setup.mjs`; see that directory's README.
+The per-chain dashboards exist because on the combined one every per-chain figure is a *slice*
+of a Celo+Base total, so per-chain user counts, DAU and new-vs-returning are all mixed. Each is
+scoped to its own chain at the source, and each tracks **both** contract deployments on that
+chain so history doesn't restart at a redeploy:
+
+- Base: `0xC0A4dAA04DEd9c54D1239507B5A5E645761ef488` (AbaPayV4, current) and
+  `0xF3AeFF0c326B1277A2D8623b7694aEB5E6A565e5` (the original AbaPay V1). SQL in
+  [`dune/base-chain/`](dune/base-chain/), deployed with `node scripts/dune-base-setup.mjs`.
+- Celo: `0x5df8aE2B963165b735B18Ca86B1ea448d2AA032C` (AbaPayV4, current) and
+  `0x42Fa463798Ed129a9B5Ee51721CB6db1bfCBe3b9` (AbaPayV3, original). SQL in
+  [`dune/celo-chain/`](dune/celo-chain/), deployed with `node scripts/dune-celo-setup.mjs`. Its
+  agent-vs-direct-vs-x402 rail split (`12_by_rail.sql`) is deliberately kept as the dashboard's
+  headline chart, unlike Base's equivalent — see that directory's README for why.
+
+See each directory's own README for the full detail.
 
 **Automatic daily refresh — two mechanisms, both required:**
 
 | Layer | What keeps it fresh | When |
 |---|---|---|
-| **Data** — one materialized view per dashboard (`dune.abapay.result_abapay_unified_payments`, `dune.abapay.result_abapay_base_events`) | Dune's own matview cron | 02:00 UTC daily |
-| **Panels** — the 10 queries that have charts (5 per dashboard) | [`.github/workflows/dune-refresh.yml`](.github/workflows/dune-refresh.yml) → `/api/cron/dune-refresh` | 03:15 UTC daily |
+| **Data** — one materialized view per dashboard (`dune.abapay.result_abapay_unified_payments`, `dune.abapay.result_abapay_base_events`, `dune.abapay.result_abapay_celo_events`) | Dune's own matview cron | 02:00 UTC daily |
+| **Panels** — the queries that have charts across all three dashboards | [`.github/workflows/dune-refresh.yml`](.github/workflows/dune-refresh.yml) → `/api/cron/dune-refresh` | 03:15 UTC daily |
 
 The workflow needs two repository secrets, `APP_URL` and `CRON_SECRET`.
 
