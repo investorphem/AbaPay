@@ -700,7 +700,22 @@ async function finalizePayBillResult(params: {
 
   if (!result.success && !result.pending) return errorResult(result.message);
 
-  const baseText = `${result.message}${result.txHash ? `\nTx: ${result.txHash}` : ''}`;
+  // 🔴 THE BUG THIS FIXES: result.message alone is a bare 'Paid' / 'Sent, still confirming...'
+  // / a refund-pending sentence — none of them say HOW MUCH, in WHAT stablecoin, or on WHICH
+  // chain. For a client that renders neither the structuredContent card nor the PNG (this
+  // whole file's other running concern — see mcpUiTemplates.ts), that plain-text content array
+  // entry is the ONLY thing the agent ever sees, and it used to carry zero payment amount
+  // information at all — an agent (and the human reading its summary) had no way to confirm
+  // what was actually charged without a card render succeeding. Every pay_bill/pay_bill_batch
+  // outcome that reaches here already moved money (see the txHash-gated block below and its own
+  // comment), so the amount belongs in the text unconditionally, not just on the card.
+  //
+  // capacity.neededCrypto (not the more precise DB-sourced `cryptoCharged` computed further
+  // down) is used here deliberately: it's already the same pre-discount estimate the
+  // out-of-band spend alert above sends the wallet owner — "good enough for a was-this-you
+  // alert" per that comment applies equally to a plain-text confirmation line.
+  const amountSummary = `₦${amountNgn.toLocaleString()} (${capacity.neededCrypto.toFixed(6)} ${tokenSymbol} on ${chain})`;
+  const baseText = `${result.message}\n${amountSummary}${result.txHash ? `\nTx: ${result.txHash}` : ''}`;
 
   // 🔴 THE BUG THIS FIXES: this used to build the receipt card (PNG image AND the interactive
   // MCP Apps card) ONLY for a fully completed, delivered SUCCESS — a still-confirming PENDING
@@ -1535,8 +1550,12 @@ async function callPayBillBatch(args: any, oauthIdentity: McpIdentity | null) {
     } catch { /* never block a result on alerting */ }
   }
 
+  // 🔴 SAME GAP AS finalizePayBillResult'S baseText, PER RECIPIENT: a batch can genuinely mix
+  // chain/token across recipients (see groupByChainToken above), and the plain-text line — the
+  // only thing a card-less client ever sees — used to show only the NGN amount, never which
+  // stablecoin or chain actually moved for that recipient.
   const lines = results.map(({ v, result }, i) => {
-    const label = `${i + 1}. ${v.provider.toUpperCase()} ${v.service} — NGN ${v.amountNgn.toLocaleString()} to ${v.accountNumber}`;
+    const label = `${i + 1}. ${v.provider.toUpperCase()} ${v.service} — NGN ${v.amountNgn.toLocaleString()} (${v.tokenSymbol} on ${v.chain}) to ${v.accountNumber}`;
     if (result.success && !result.vendFailed) return `${label} — OK${result.txHash ? ` (${result.txHash.slice(0, 10)}...)` : ''}`;
     if (result.pending) return `${label} — sent, still confirming`;
     return `${label} — FAILED: ${result.message}`;

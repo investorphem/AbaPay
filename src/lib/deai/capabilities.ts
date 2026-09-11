@@ -3,6 +3,7 @@ import { getServiceRules, killSwitchKeysFor, minAmountFor } from '@/lib/serviceR
 import { maxAmountFor } from '@/lib/parity';
 import { verifyAccount, fetchDataVariations, resolveServiceId } from '@/lib/deai/services';
 import { resolveCountry, fetchCountries } from '@/lib/deai/international';
+import { tokenSymbolsForChain } from '@/constants';
 
 // ⚡ CAPABILITY & FEASIBILITY ENGINE
 //
@@ -408,6 +409,17 @@ export async function describeCapabilities(channel: 'CHAT' | 'MCP' = 'CHAT'): Pr
   // instruction with no clarifying question asked first. pay_bill itself has no queue/delay
   // parameter — every call executes immediately, on every channel.
   if (channel === 'MCP') {
+    // 🔴 THE GAP THIS CLOSES: an agent that calls describe_capabilities first — exactly what
+    // it's told to do — learned nothing here about which chains or stablecoins AbaPay actually
+    // moves. That information only ever existed scattered across other tools' JSON Schema
+    // enums (check_balance/pay_bill/schedule_bill's chain/token fields) or a live check_balance
+    // response — nothing wrong with either, but the one tool explicitly positioned as "call
+    // this first" said nothing about it at all. tokenSymbolsForChain is the same source of
+    // truth those enums and the Pay tab/Agent Hub already use, so this can't drift from them.
+    lines.push(
+      '',
+      `💰 *Chains & stablecoins:* CELO (${tokenSymbolsForChain('CELO').join(', ')}) and BASE (${tokenSymbolsForChain('BASE').join(', ')}). Every payment settles in whichever stablecoin, on whichever chain, the linked wallet approved when its allowance was set — check_balance shows the live balance and remaining limit per token, per chain.`
+    );
     // 🔴 THE BUG THIS FIXES: this claimed there was no way to delay/schedule a payment on this
     // connection — true when it was written, false since schedule_bill/list_schedules/
     // cancel_schedule shipped. pay_bill/pay_bill_batch themselves still have no delay parameter
