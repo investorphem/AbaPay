@@ -98,10 +98,17 @@ const DASHBOARDS: Record<string, Dashboard | null> = {
   base: BASE_CHAIN_DASHBOARD,
 };
 
-// `small` is not a cost saving, it is the only engine this plan has: medium/large return
-// "Performance medium is not supported for this dataset". Every query here reads a matview,
-// so `small` is ample — none of them go near the engine's 2-minute ceiling.
-const PERFORMANCE = 'small';
+// 🔴 THIS WAS `'small'` UNTIL THE 2026-09-10 SCHEDULED RUN STARTED FAILING BOTH
+// DASHBOARDS 0/5 WITH `HTTP 400: "This performance tier is not available with your
+// subscription."` — a different, harder failure than the `medium`/`large` rejection the
+// comment used to describe here ("Performance medium is not supported for this dataset").
+// Dune tightened what the Community plan (community_fluid_engine_v2) can use `small` for
+// sometime between the 2026-09-09 success and the 2026-09-10 failure; nothing on this end
+// changed. Verified live via the Dune MCP server: `performance: 'free'` against these exact
+// query ids succeeds today (~0.02–0.09 credits each, consistent with "reads a matview").
+// If this starts 400ing again, that's the next place to check — Dune's own plan/pricing
+// page, not this route's logic.
+const PERFORMANCE = 'free';
 
 /**
  * Gap between consecutive /execute calls.
