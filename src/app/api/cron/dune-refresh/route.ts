@@ -98,16 +98,26 @@ const DASHBOARDS: Record<string, Dashboard | null> = {
   base: BASE_CHAIN_DASHBOARD,
 };
 
-// 🔴 THIS WAS `'small'` UNTIL THE 2026-09-10 SCHEDULED RUN STARTED FAILING BOTH
-// DASHBOARDS 0/5 WITH `HTTP 400: "This performance tier is not available with your
-// subscription."` — a different, harder failure than the `medium`/`large` rejection the
-// comment used to describe here ("Performance medium is not supported for this dataset").
-// Dune tightened what the Community plan (community_fluid_engine_v2) can use `small` for
-// sometime between the 2026-09-09 success and the 2026-09-10 failure; nothing on this end
-// changed. Verified live via the Dune MCP server: `performance: 'free'` against these exact
-// query ids succeeds today (~0.02–0.09 credits each, consistent with "reads a matview").
-// If this starts 400ing again, that's the next place to check — Dune's own plan/pricing
-// page, not this route's logic.
+// 🔴 UNRESOLVED — DO NOT TRUST EITHER VALUE BELOW WITHOUT CHECKING THE DUNE ACCOUNT FIRST.
+//
+// This was `'small'` from when the route was written until the 2026-09-10 scheduled run
+// started failing both dashboards 0/5 with `HTTP 400: "This performance tier is not
+// available with your subscription."` — last good run was 2026-09-09, nothing on this end
+// changed in between.
+//
+// It was changed to `'free'` on the assumption that was the fix — WRONG. A manual
+// workflow_dispatch after that change deployed to production got the IDENTICAL 400 for
+// `'free'` too. The one piece of "verification" behind that change was run through a
+// different Dune session/API key than DUNE_API_KEY (this route's actual credential) — an
+// account/plan mismatch, not real evidence about what THIS account can use. Do not repeat
+// that mistake: any future fix here needs to be checked against DUNE_API_KEY's own account,
+// not a different Dune login.
+//
+// Current best guess is that the `abapay` Dune team's plan no longer permits any
+// API-triggered execution tier at all (not just `small`) — check dune.com → the abapay
+// team → Settings → Billing/Plan for what changed, then set this to whatever that says is
+// actually available, and confirm with a real workflow_dispatch run before assuming it's
+// fixed.
 const PERFORMANCE = 'free';
 
 /**
