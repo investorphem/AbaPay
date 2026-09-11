@@ -1,0 +1,17 @@
+{
+  "$schema": "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
+  "name": "io.github.investorphem/abapay",
+  "title": "AbaPay",
+  "description": "Non-custodial stablecoin bill-pay rails on Celo & Base for AI agents, settled on-chain via MCP.",
+  "repository": {
+    "url": "https://github.com/investorphem/AbaPay",
+    "source": "github"
+  },
+  "version": "1.0.0",
+  "remotes": [
+    {
+      "type": "streamable-http",
+      "url": "https://www.abapays.com/api/mcp"
+    }
+  ]
+}
