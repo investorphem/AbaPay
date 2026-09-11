@@ -181,6 +181,45 @@ otherwise), plus a ~0.3% per-transaction cut on top, and routes funds through it
 wallet before forwarding them on rather than paying the destination directly. Celo's
 facilitator has none of those drawbacks for a Celo-only app.
 
+### 5b. x402 Settlement — Base, via Coinbase's CDP facilitator (also what feeds the Bazaar catalog)
+
+```
+CDP_API_KEY_ID=...                          # Server-side: Coinbase Developer Platform API key ID
+CDP_API_KEY_SECRET=...                      # Server-side: the matching secret
+NEXT_PUBLIC_ABAPAY_BASE_ADDRESS=0x...       # Already set in §3 — this is x402's payTo on Base too
+NEXT_PUBLIC_BASE_X402_ENABLED=              # Opt-in like NEXT_PUBLIC_X402_ENABLED, Base-only
+```
+
+A completely separate rail from Celo's facilitator above — different host
+(`api.cdp.coinbase.com`), different auth (a short-lived Bearer JWT signed from the CDP key
+pair, not an `X-API-Key`), different x402 version. `chainConfigFor('BASE')` in
+`src/app/api/pay/x402/route.ts` stays dormant — `/api/pay/x402` behaves exactly as if Base
+x402 doesn't exist — until **both** `CDP_API_KEY_ID` and `CDP_API_KEY_SECRET` are set. Base
+x402 only ever supports USDC (Base USDT has no EIP-3009 `transferWithAuthorization`).
+
+1. Create a CDP API key at [portal.cdp.coinbase.com](https://portal.cdp.coinbase.com) →
+   **API Keys** (Secret API Key, not a wallet key).
+2. Set `CDP_API_KEY_ID` / `CDP_API_KEY_SECRET` from that key.
+3. Confirm `NEXT_PUBLIC_ABAPAY_BASE_ADDRESS` (§3) is the real deployed Base vault — this is the
+   `payTo` the CDP facilitator settles into.
+
+**This is also the only rail that can get AbaPay listed in Coinbase's x402 Bazaar** (the
+catalog `discover_services`-style agent tools query, alongside pay.sh — see `discover_services`
+in whatever agent wallet is checking). The Bazaar indexes a resource the first time a real
+payment **settles through CDP's facilitator** for that URL — there's no manual submission
+form. `/api/pay/x402` already declares the `extensions.bazaar` block CDP's `/validate` expects
+on every challenge (see the `bazaarExtension` comment in `route.ts`), and the client
+(`src/lib/x402Pay.ts`) already echoes that block back on settlement, which is the specific
+thing that silently blocks cataloging when missing. So: with CDP creds configured, one real
+settled Base payment through this endpoint is what triggers indexing — confirm it landed by
+reading back `GET https://api.cdp.coinbase.com/platform/v2/x402/discovery/resources` and
+checking for `abapays.com`. Celo-side settlements (the default rail) are genuinely visible on
+x402scan but do **not** feed the Bazaar — that catalog is CDP/Base-specific.
+
+Separately, **pay.sh** is a second catalog some agent wallets read from; nothing in this repo
+integrates with it specifically, and its own docs/onboarding (not covered here) would need
+checking for how a service gets added there.
+
 ---
 
 ## 6. Supabase (Database)

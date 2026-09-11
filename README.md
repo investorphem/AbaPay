@@ -1582,6 +1582,15 @@ AbaPay is operated by **Masonode Technologies Limited**, a company registered wi
 
 ---
 
+## 📄 License
+
+Code in this repository is [MIT licensed](LICENSE) — free to use, fork, and build on, including
+for independent agents/apps integrating AbaPay's MCP/x402 rails. This covers the code only; it
+does not license the AbaPay name/brand or make any claim about the legal terms of using the
+live abapays.com service, which are set separately by [`/terms`](https://www.abapays.com/terms).
+
+---
+
 ## 👨‍💻 Maintainer
 
 Built and maintained by **Oluwafemi Olagoke** ([@investorphem](https://github.com/investorphem)).
