@@ -691,7 +691,7 @@ re-runs all of them:
 
 | `?dashboard=` | What it covers | Queries |
 |---|---|---|
-| `main` (default) | The original combined dashboard — Celo **and** Base, split by chain | 7 |
+| `main` (default) | The original combined dashboard — Celo **and** Base, split by chain — [dune.com/abapay/abapay-ecosystem-traction](https://dune.com/abapay/abapay-ecosystem-traction) | 6 |
 | `base` | **Base mainnet only**, both AbaPay deployments and both settlement rails (contract calls **and x402**) — [dune.com/abapay/abapay-on-base](https://dune.com/abapay/abapay-on-base) | 9 |
 | `celo` | **Celo mainnet only**, both AbaPay deployments (V3 → V4) and all three settlement rails (direct wallet, agent/relayer, **and x402**) — [dune.com/abapay/abapay-on-celo](https://dune.com/abapay/abapay-on-celo) | 9 |
 
