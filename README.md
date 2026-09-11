@@ -898,6 +898,10 @@ tools — over **Streamable HTTP** (JSON-RPC 2.0: `initialize`, `tools/list`, `t
 extra dependency required. It's a **fourth channel into the same execution engine** that
 already backs Telegram/WhatsApp/X, not a parallel system with its own rules:
 
+> Building an agent that integrates AbaPay itself, with no human ever opening abapays.com?
+> See **[docs/AGENT_INTEGRATION.md](docs/AGENT_INTEGRATION.md)** — the x402 zero-setup path,
+> and the fully headless (wallet-signature-only) way to self-serve an MCP API key.
+
 | Tool | What it does | Needs |
 |---|---|---|
 | `describe_capabilities` | Human-readable menu of what AbaPay can pay and what's currently paused | Nothing — public |
@@ -1579,6 +1583,15 @@ gone; `/docs` is the single docs + FAQ surface.
 ## 🏢 Legal Entity
 
 AbaPay is operated by **Masonode Technologies Limited**, a company registered with the Corporate Affairs Commission (CAC) of the Federal Republic of Nigeria under **RC 9524980**.
+
+---
+
+## 📄 License
+
+Code in this repository is [MIT licensed](LICENSE) — free to use, fork, and build on, including
+for independent agents/apps integrating AbaPay's MCP/x402 rails. This covers the code only; it
+does not license the AbaPay name/brand or make any claim about the legal terms of using the
+live abapays.com service, which are set separately by [`/terms`](https://www.abapays.com/terms).
 
 ---
 
