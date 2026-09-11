@@ -1,0 +1,53 @@
+name: Publish to MCP Registry
+
+# ⚡ LISTS ABAPAY IN THE OFFICIAL MCP REGISTRY (registry.modelcontextprotocol.io) --
+# backed by Anthropic, GitHub, PulseMCP and Microsoft, and the source PulseMCP itself
+# reads from. This is a distribution channel with zero crypto-specific gatekeeping:
+# any MCP client that searches the registry can find AbaPay, independent of the
+# Coinbase x402 Bazaar / Aigora / 8004scan listings, which all require an agent to
+# already be looking in a crypto-specific place.
+#
+# AbaPay's MCP server is REMOTE (Streamable HTTP at /api/mcp), not an npm package, so
+# this workflow skips the "publish to npm" step the registry's own quickstart shows
+# for local/stdio servers entirely -- server.json's `remotes` entry is the whole
+# listing (see docs.modelcontextprotocol.io "Publishing Remote Servers").
+#
+# 🔴 GITHUB OIDC AUTH -- NO SECRETS TO MANAGE. `id-token: write` lets `mcp-publisher`
+# prove this workflow run belongs to github.com/investorphem/AbaPay without a stored
+# token of any kind, which is also why the namespace in server.json MUST be
+# `io.github.investorphem/*` -- OIDC auth can only ever claim a namespace matching the
+# authenticated GitHub identity, never an arbitrary one.
+#
+# Triggered on version tags. First publish: `git tag v1.0.0 && git push origin v1.0.0`.
+# Nothing enforces that the tag matches server.json's own `version` field -- bump
+# that by hand before tagging a later release, the same discipline any other
+# versioned release needs.
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    permissions:
+      id-token: write # required for OIDC auth -- no secret needed
+      contents: read
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v5
+
+      - name: Install mcp-publisher
+        run: |
+          curl -L "https://github.com/modelcontextprotocol/registry/releases/latest/download/mcp-publisher_$(uname -s | tr '[:upper:]' '[:lower:]')_$(uname -m | sed 's/x86_64/amd64/;s/aarch64/arm64/').tar.gz" | tar xz mcp-publisher
+
+      - name: Validate server.json
+        run: ./mcp-publisher validate
+
+      - name: Authenticate to MCP Registry
+        run: ./mcp-publisher login github-oidc
+
+      - name: Publish server to MCP Registry
+        run: ./mcp-publisher publish
