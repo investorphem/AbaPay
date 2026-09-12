@@ -108,8 +108,7 @@ const FOOTER_GROUPS: { title: string; links: { label: string; href: string; icon
 // Social/community — kept separate from FOOTER_GROUPS above because these are icon-only
 // buttons (matching AppFooter's own X/Telegram treatment) rather than labeled directory rows.
 // lucide-react ships no brand mark for X or LinkedIn in this version (same gap as the missing
-// "Github" icon elsewhere in this file) — X reuses AppFooter's inline path; LinkedIn isn't
-// listed here at all rather than guessing a URL for a page that may not exist.
+// "Github" icon elsewhere in this file) — both are inlined SVGs; X reuses AppFooter's own path.
 const SOCIALS = [
   {
     label: "X",
@@ -121,6 +120,15 @@ const SOCIALS = [
     ),
   },
   { label: "Telegram", href: "https://t.me/AbaPays", node: <Send size={16} className="ml-[-1px]" /> },
+  {
+    label: "LinkedIn",
+    href: "https://www.linkedin.com/company/masonode/",
+    node: (
+      <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="currentColor">
+        <path d="M20.447 20.452h-3.554v-5.569c0-1.328-.027-3.037-1.852-3.037-1.853 0-2.136 1.445-2.136 2.939v5.667H9.351V9h3.414v1.561h.046c.477-.9 1.637-1.85 3.37-1.85 3.601 0 4.267 2.37 4.267 5.455v6.286zM5.337 7.433a2.062 2.062 0 1 1 0-4.124 2.062 2.062 0 0 1 0 4.124zM7.114 20.452H3.558V9h3.556v11.452z"></path>
+      </svg>
+    ),
+  },
 ];
 
 const DASHBOARDS = [
