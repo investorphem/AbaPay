@@ -18,6 +18,16 @@ import { NextResponse, type NextRequest } from 'next/server';
 // an email. Rewriting the whole host to the same single page means there is no path on this
 // subdomain that falls through to the AbaPay app underneath, which is the one thing this
 // middleware exists to prevent.
+//
+// ⚡ THE SAME MOVE FOR agents.abapays.com / rails.abapays.com — see src/app/agents/page.tsx for
+// why that page exists at all. Unlike app.abapays.com above, this is NOT a single static page
+// standing in for the whole host: /api (MCP, x402, the REST surface), /docs, /terms, /privacy
+// and /receipt are all legitimately useful to a developer landing on the agent domain and stay
+// exactly as they are. Only the bare root gets swapped, from the 5700-line consumer bill-pay
+// homepage to the infrastructure pitch — so a reviewer whose first URL is the agent domain
+// sees the rails pitch as its homepage instead of having to go find a link to it.
+const AGENT_HOSTS = new Set(['agents.abapays.com', 'rails.abapays.com']);
+
 export function middleware(req: NextRequest) {
   const host = req.headers.get('host') || '';
   // Strip a port if present (local dev / preview URLs) before comparing.
@@ -26,6 +36,12 @@ export function middleware(req: NextRequest) {
   if (hostname === 'app.abapays.com' && !req.nextUrl.pathname.startsWith('/masonode')) {
     const url = req.nextUrl.clone();
     url.pathname = '/masonode';
+    return NextResponse.rewrite(url);
+  }
+
+  if (AGENT_HOSTS.has(hostname) && req.nextUrl.pathname === '/') {
+    const url = req.nextUrl.clone();
+    url.pathname = '/agents';
     return NextResponse.rewrite(url);
   }
 

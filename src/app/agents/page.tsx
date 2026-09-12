@@ -1,4 +1,3 @@
-import Link from "next/link";
 import type { Metadata } from "next";
 import AppFooter from "@/components/AppFooter";
 import {
@@ -81,9 +80,12 @@ export default function AgentsPage() {
 
         {/* HEADER */}
         <div className="flex items-center justify-between mb-8">
-          <Link href="/" className="flex items-center gap-2 text-slate-500 dark:text-slate-400 hover:text-emerald-600 dark:hover:text-emerald-400 transition-colors bg-white dark:bg-[#111114] p-2 rounded-xl border border-slate-100 dark:border-slate-800/60">
+          {/* Absolute, not relative: on agents.abapays.com, a relative "/" is rewritten by
+              middleware.ts right back to this same page — this needs to actually leave the
+              agent host and land on the consumer app's real homepage. */}
+          <a href="https://abapays.com/" className="flex items-center gap-2 text-slate-500 dark:text-slate-400 hover:text-emerald-600 dark:hover:text-emerald-400 transition-colors bg-white dark:bg-[#111114] p-2 rounded-xl border border-slate-100 dark:border-slate-800/60">
             <ArrowLeft size={18} />
-          </Link>
+          </a>
           <div className="flex items-center gap-2 text-xs font-bold uppercase tracking-widest text-emerald-600 dark:text-emerald-400">
             <span className="w-1.5 h-1.5 rounded-full bg-emerald-500" /> For agents & developers
           </div>
@@ -98,7 +100,7 @@ export default function AgentsPage() {
             Non-custodial stablecoin settlement infrastructure on Celo and Base — built so an agent, not a human, is the one calling it. Any MCP client or x402-aware agent can reach these rails without AbaPay ever knowing it exists in advance.
           </p>
           <p className="text-sm text-slate-400 dark:text-slate-500 mt-4">
-            Building a consumer bill-pay experience instead? <Link href="/" className="underline hover:text-emerald-500">Use the app →</Link>
+            Building a consumer bill-pay experience instead? <a href="https://abapays.com/" className="underline hover:text-emerald-500">Use the app →</a>
           </p>
         </section>
 
