@@ -10,6 +10,12 @@ anywhere" — everything here already exists and ships today; this file just wri
 one place, as its own reproducible example, separate from the human-facing app walkthrough in
 [`README.md`](../README.md) and [`/docs`](../src/app/docs/page.tsx).
 
+**Want to just run it?** [`examples/agent-quickstart.mjs`](../examples/agent-quickstart.mjs) is
+every step below as one script — `PRIVATE_KEY=0x... node examples/agent-quickstart.mjs` mints
+an API key, sets an on-chain allowance, and calls `check_balance`, against production. Its
+wallet-signature auth and MCP call are verified live (see the file's own header); this prose
+walkthrough is for when you want to understand each step, not just run it.
+
 There are two separate rails. Pick based on what kind of agent you are.
 
 ---
