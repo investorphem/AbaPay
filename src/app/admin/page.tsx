@@ -773,6 +773,12 @@ export default function AdminDashboard() {
     if (tx.error_code === 'REVERTED') {
       return alert("This transaction reverted on-chain — the crypto never reached the vault, so there is nothing to refund. Refunding it would incorrectly send real vault funds out.");
     }
+    // Same guard, different cause: AGENT_PREFLIGHT_FAILED means the agent's payment never
+    // even broadcast — no crypto ever left the wallet. Kept as a row purely so the failed
+    // attempt is visible; there is still nothing to refund.
+    if (tx.error_code === 'AGENT_PREFLIGHT_FAILED') {
+      return alert("This agent payment never broadcast on-chain — nothing was ever charged, so there is nothing to refund.");
+    }
 
     // 🔴 DOUBLE-REFUND GUARD — the row already carries a refund transaction.
     //
@@ -1460,6 +1466,7 @@ export default function AdminDashboard() {
                     <option value="FAILED_VTPASS_CRASH">Failed (Network Crash)</option>
                     <option value="FAILED_VERIFICATION">Failed (Verification)</option>
                     <option value="FAILED_FUNDS_MISMATCH">Failed (Rate Mismatch)</option>
+                    <option value="FAILED_PAYMENT">Failed (Agent — never broadcast)</option>
                     <option value="REFUNDED">Refunded</option>
                   </select>
 
@@ -1492,7 +1499,15 @@ export default function AdminDashboard() {
 
                           <td className="py-4 px-2 min-w-[120px]">
                             <p className="text-white font-medium text-xs mb-1">{new Date(tx.created_at).toLocaleString()}</p>
-                            <a href={`https://${isMainnet ? '' : 'sepolia.'}${isBaseTx ? 'basescan.org' : 'celoscan.io'}/tx/${tx.tx_hash}`} target="_blank" className={`text-[9px] ${isBaseTx ? 'text-blue-400' : 'text-emerald-400'} hover:underline flex items-center gap-1 mt-1 font-mono tracking-wider`}>Hash: {tx.tx_hash.slice(0, 8)}... <ExternalLink size={8} /></a>
+                            {/* ⚡ A row that never broadcast (see FAILED_PAYMENT below) still carries its
+                                synthetic `preflight_<wallet>_<ts>_<rand>` placeholder as tx_hash — that
+                                was never a real transaction, so linking it to an explorer would 404 and
+                                read as "this WAS on-chain, go look" for something that never was. */}
+                            {tx.tx_hash?.startsWith('preflight_') ? (
+                              <p className="text-[9px] text-slate-600 italic mt-1">Never broadcast on-chain</p>
+                            ) : (
+                              <a href={`https://${isMainnet ? '' : 'sepolia.'}${isBaseTx ? 'basescan.org' : 'celoscan.io'}/tx/${tx.tx_hash}`} target="_blank" className={`text-[9px] ${isBaseTx ? 'text-blue-400' : 'text-emerald-400'} hover:underline flex items-center gap-1 mt-1 font-mono tracking-wider`}>Hash: {tx.tx_hash.slice(0, 8)}... <ExternalLink size={8} /></a>
+                            )}
                           </td>
 
                           <td className="py-4 px-2 min-w-[150px]">
@@ -1611,7 +1626,10 @@ export default function AdminDashboard() {
                                   payment that was never actually received. Refund must only ever be
                                   offered for a failure where funds DID land on-chain and the VEND
                                   (VTpass/Monnify) is what failed afterward. */}
-                              {tx.status?.startsWith('FAILED') && tx.error_code !== 'REVERTED' && (
+                              {/* AGENT_PREFLIGHT_FAILED is the same class of danger as REVERTED above:
+                                  the payment never broadcast, so no crypto ever left the agent's
+                                  wallet or reached the vault. Same exclusion, same reason. */}
+                              {tx.status?.startsWith('FAILED') && tx.error_code !== 'REVERTED' && tx.error_code !== 'AGENT_PREFLIGHT_FAILED' && (
                                 <button
                                   onClick={() => handleRefund(tx)}
                                   disabled={processingRefundId === tx.id}
@@ -2030,6 +2048,13 @@ function describeFailure(tx: any): { icon: string; label: string; text: string }
       return { icon: '⚠️', label: 'x402 settlement', text: reason || code };
     case 'PREFLIGHT_UNCONFIRMED':
       return { icon: '⏳', label: 'Expired', text: reason || 'Never confirmed on-chain in time.' };
+    case 'AGENT_PREFLIGHT_FAILED':
+      // Distinct from PREFLIGHT_UNCONFIRMED above: that one is a human abandoning a wallet
+      // popup (timed out after 20 min). This is an agent's payment that failed to broadcast
+      // AT ALL — the relayer rejected it or threw, immediately, synchronously. Nothing was
+      // ever charged, so there's nothing to refund; this exists purely so the attempt is
+      // visible instead of vanishing (agents don't complain the way a human would).
+      return { icon: '🤖', label: 'Agent — never broadcast', text: reason || 'Payment never reached the chain.' };
     case 'MANUAL_ADMIN_REFUND':
       return { icon: '📝', label: 'Admin note', text: reason || 'Manually refunded.' };
     case 'STUCK_ALERTED':

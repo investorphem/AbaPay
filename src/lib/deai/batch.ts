@@ -6,6 +6,7 @@ import { executeVend, getStrictRequestId } from '@/lib/vend';
 import { getActiveDiscountForService, computeDiscountNgn } from '@/lib/discounts';
 import { isMainnetEnv } from '@/lib/chain';
 import { isDuplicateElectricity } from '@/lib/parity';
+import { sendTelegramAlert } from '@/lib/telegram';
 
 // ⚡ MULTI-RECIPIENT (BATCH) PAYMENTS — shared between the in-app chat (/api/deai/chat) and
 // the social channels (/api/deai/core). The intent engine emits `recipients` whenever a user
@@ -231,15 +232,38 @@ export async function executeAgentPayment(params: {
       return { success: false, pending: true, txHash: res.txHash, message: 'Sent, still confirming — do not retry this one.' };
     }
 
-    // Never broadcast — nothing charged. Clean up the pre-flight row.
+    // 🔴 Never broadcast — nothing charged, so there's nothing for the refund pipeline to
+    // do (enqueueRefund correctly refuses any tx_hash starting with `preflight_`). But an
+    // agent is a machine: it doesn't notice a failed call and complain the way a human
+    // would, so if this row is simply deleted the operator never learns the attempt
+    // happened at all. Keep it, marked FAILED_PAYMENT, so it shows up in the admin ledger
+    // exactly like any other failure — just with no on-chain tx behind it.
     if (preflightTxHash) {
-      await supabase.from('transactions').delete().eq('tx_hash', preflightTxHash);
+      const failMessage = String(res.message || 'Payment failed').slice(0, 500);
+      await supabase.from('transactions').update({
+        status: 'FAILED_PAYMENT', error_code: 'AGENT_PREFLIGHT_FAILED', api_response: failMessage,
+      }).eq('tx_hash', preflightTxHash);
+      try {
+        await sendTelegramAlert(
+          `🤖 *AGENT PAYMENT NEVER BROADCAST*\n📲 *Source:* ${sourceChannel}\n👤 *Wallet:* ${userWallet}\n🛒 *Product:* ${item.provider || ''} ${item.serviceCategory}\n💰 *Amount:* ₦${item.amountNgn.toLocaleString()}\n🚨 *Reason:* ${failMessage}\n\nNothing charged — no refund needed. Row kept for reference.`,
+        );
+      } catch { /* best-effort */ }
       preflightTxHash = null;
     }
     return { success: false, message: res.message || 'Payment failed' };
   } catch (err: any) {
     if (preflightTxHash) {
-      try { await supabase.from('transactions').delete().eq('tx_hash', preflightTxHash); } catch { /* best-effort */ }
+      const failMessage = String(err?.message || 'Payment failed unexpectedly.').slice(0, 500);
+      try {
+        await supabase.from('transactions').update({
+          status: 'FAILED_PAYMENT', error_code: 'AGENT_PREFLIGHT_FAILED', api_response: failMessage,
+        }).eq('tx_hash', preflightTxHash);
+      } catch { /* best-effort */ }
+      try {
+        await sendTelegramAlert(
+          `🤖 *AGENT PAYMENT ERRORED*\n📲 *Source:* ${sourceChannel}\n👤 *Wallet:* ${userWallet}\n🛒 *Product:* ${item.provider || ''} ${item.serviceCategory}\n💰 *Amount:* ₦${item.amountNgn.toLocaleString()}\n🚨 *Error:* ${failMessage}\n\nNothing charged — no refund needed. Row kept for reference.`,
+        );
+      } catch { /* best-effort */ }
     }
     console.error('[Batch] payment errored:', err?.message);
     return { success: false, message: 'Payment failed unexpectedly.' };
