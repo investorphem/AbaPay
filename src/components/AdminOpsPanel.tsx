@@ -107,8 +107,25 @@ export function AdminOpsPanel({ adminHeaders, onExecuteRefund }: Props) {
     setBusyId(null);
   };
 
+  // 🔴 THE BUG THIS FIXES: every source_channel not explicitly listed here — MCP, A2A, and
+  // any future one — silently fell through to '🌐 Web', which is exactly wrong for the two
+  // that matter most for "is this an agent doing this": an MCP or A2A failed vend showed up
+  // in this queue looking identical to a human clicking Pay in the app. The underlying data
+  // was always correct (mcpTools.ts/batch.ts already pass sourceChannel: 'MCP' through to the
+  // transactions row and this same refund_queue row — see enqueueRefund's own Telegram alert,
+  // which already generalizes any non-WEB/non-SCHEDULE value as "💬 {channel} Agent" and never
+  // had this bug); only this dashboard's display fell behind. Named explicitly rather than
+  // just widening the fallback, so a genuinely new channel is still visually distinct from
+  // "MCP" specifically the day it's added, not lumped into one more generic bucket.
   const channelIcon = (c: string) =>
-    c === 'TELEGRAM' ? '💬 Telegram' : c === 'WHATSAPP' ? '💬 WhatsApp' : c === 'X' ? '💬 X' : c === 'SCHEDULE' ? '🤖 Schedule' : '🌐 Web';
+    c === 'TELEGRAM' ? '💬 Telegram'
+    : c === 'WHATSAPP' ? '💬 WhatsApp'
+    : c === 'X' ? '💬 X'
+    : c === 'SCHEDULE' ? '🤖 Schedule'
+    : c === 'MCP' ? '🤖 MCP Agent'
+    : c === 'A2A' ? '🤖 A2A Agent'
+    : c === 'WEB' ? '🌐 Web'
+    : `🤖 ${c}`;
 
   return (
     <div className="space-y-4">
