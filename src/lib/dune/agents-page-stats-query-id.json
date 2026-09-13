@@ -1,0 +1,4 @@
+{
+  "_comment": "The single query behind agents.abapays.com's live hero numbers — see dune/agents-page-stats/00_summary.sql. Created manually via the Dune MCP connector (is_temp: false, so it persists like any query created on dune.com), not by a setup script, because there's only ever this one query — no root/dependent split to generate.",
+  "queryId": 8690659
+}

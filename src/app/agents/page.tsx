@@ -6,6 +6,7 @@ import {
   FileText, Building2, Mail, Send,
 } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
+import { getAgentStats } from "@/lib/dune/agentStats";
 
 // ⚡ A SEPARATE FRONT DOOR, DELIBERATELY — not a new backend, not a new domain, not a copy
 // of anything. Same execution engine, same contracts, same MCP server, same x402 endpoint
@@ -137,7 +138,15 @@ const DASHBOARDS = [
   { name: "AbaPay on Base", desc: "Base mainnet only", href: "https://dune.com/abapay/abapay-on-base" },
 ];
 
-export default function AgentsPage() {
+export default async function AgentsPage() {
+  const stats = await getAgentStats();
+  const HERO_STATS = [
+    { v: `$${Math.round(stats.volumeUsd).toLocaleString()}`, l: "Total volume" },
+    { v: `${stats.agentNativePct.toFixed(1)}%`, l: "Agent-native rail" },
+    { v: stats.uniqueWallets.toLocaleString(), l: "Unique wallets" },
+    { v: stats.transactions.toLocaleString(), l: "Transactions" },
+  ];
+
   return (
     <main className="min-h-screen bg-slate-50 dark:bg-black text-slate-900 dark:text-slate-100 font-sans p-4 sm:p-8 flex flex-col items-center pb-20 transition-colors">
       <div className="w-full max-w-4xl">
@@ -168,14 +177,10 @@ export default function AgentsPage() {
           </p>
         </section>
 
-        {/* LIVE NUMBERS */}
+        {/* LIVE NUMBERS — read from Dune at request time, not hardcoded. See
+            src/lib/dune/agentStats.ts for how this stays current and what it falls back to. */}
         <section className="grid grid-cols-2 sm:grid-cols-4 gap-px bg-slate-100 dark:bg-slate-800/60 rounded-[2rem] overflow-hidden border border-slate-100 dark:border-slate-800/60 mb-6">
-          {[
-            { v: "$34,519", l: "Total volume" },
-            { v: "79.5%", l: "Agent-native rail" },
-            { v: "408", l: "Unique wallets" },
-            { v: "23,130", l: "Transactions" },
-          ].map((s) => (
+          {HERO_STATS.map((s) => (
             <div key={s.l} className="bg-white dark:bg-[#111114] p-5 sm:p-6">
               <div className="text-2xl sm:text-3xl font-black text-slate-900 dark:text-white tracking-tight">{s.v}</div>
               <div className="text-[11px] font-bold uppercase tracking-wider text-slate-400 dark:text-slate-500 mt-1">{s.l}</div>
@@ -183,7 +188,7 @@ export default function AgentsPage() {
           ))}
         </section>
         <p className="text-xs text-slate-400 dark:text-slate-500 mb-10 px-2">
-          Celo + Base combined, on-chain, as of 2026-09-11 — see the live dashboards below for current figures. "Agent-native" is x402 plus agent-relayer volume together.
+          Celo + Base combined, on-chain, refreshed daily — see the live dashboards below to drill in. &quot;Agent-native&quot; is x402 plus agent-relayer volume together.
         </p>
 
         {/* THE RAILS */}

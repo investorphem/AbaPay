@@ -2,6 +2,7 @@ import 'server-only';
 import { NextResponse } from 'next/server';
 import baseChainQueryIds from '@/lib/dune/base-query-ids.json';
 import celoChainQueryIds from '@/lib/dune/celo-query-ids.json';
+import agentsStatsQueryId from '@/lib/dune/agents-page-stats-query-id.json';
 import { verifyCronRequest } from '@/utils/cronAuth';
 
 // ⚡ DUNE DASHBOARD REFRESH — re-runs the AbaPay analytics queries so the public dashboards
@@ -203,7 +204,7 @@ function isRetryableStatus(status: number): boolean {
  * The ladder is longer and wider than before because the old one demonstrably was not enough:
  * two `main` queries needed the whole of it on the run above and only just made it.
  */
-async function execute(apiKey: string, queryId: number): Promise<Started> {
+async function execute(apiKey: string, queryId: number, performance: string = PERFORMANCE): Promise<Started> {
   const backoffs = [2000, 5000, 12_000, 25_000];
   for (let attempt = 0; ; attempt++) {
     let res: Response;
@@ -211,7 +212,7 @@ async function execute(apiKey: string, queryId: number): Promise<Started> {
       res = await fetch(`${DUNE_API}/query/${queryId}/execute`, {
         method: 'POST',
         headers: { 'X-DUNE-API-KEY': apiKey, 'Content-Type': 'application/json' },
-        body: JSON.stringify({ performance: PERFORMANCE }),
+        body: JSON.stringify({ performance }),
       });
     } catch (err) {
       // A dropped connection is worth one more go for the same reason a 429 is.
@@ -269,10 +270,10 @@ const EXECUTION_POLL_INTERVAL_MS = 3000;
  * It is also the only way to distinguish the two on the Base dashboard, whose queries were
  * being reported as started while their panels did not move.
  */
-async function waitForCompletion(apiKey: string, s: Started): Promise<Started> {
+async function waitForCompletion(apiKey: string, s: Started, timeoutMs: number = EXECUTION_POLL_TIMEOUT_MS): Promise<Started> {
   if (!s.executionId) return { ...s, completed: false };
 
-  const deadline = Date.now() + EXECUTION_POLL_TIMEOUT_MS;
+  const deadline = Date.now() + timeoutMs;
   while (Date.now() < deadline) {
     try {
       const res = await fetch(`${DUNE_API}/execution/${s.executionId}/status`, {
@@ -311,8 +312,46 @@ async function handle(req: Request) {
 
   const params = new URL(req.url).searchParams;
 
-  // ?dashboard=main (default, back-compatible with the pre-existing crons) | base | celo
+  // ?dashboard=main (default, back-compatible with the pre-existing crons) | base | celo | agents-stats
   const dashboardKey = params.get('dashboard') || 'main';
+
+  // ─── agents-stats: NOT a dashboard, deliberately kept out of the generic flow below ──────
+  //
+  // This refreshes dune/agents-page-stats/00_summary.sql (query 8690659) — the single query
+  // behind agents.abapays.com's hero numbers (src/lib/dune/agentStats.ts). It doesn't fit the
+  // Dashboard shape above: one query, no panel, no sourceTable, and — the reason it isn't
+  // just added to panelQueries on one of the existing dashboards — it needs `medium`, not the
+  // shared `PERFORMANCE` constant everything else in this file uses.
+  //
+  // 🔴 WHY `medium` HERE WHEN THE COMMENT ABOVE SAYS THIS ACCOUNT'S PLAN REJECTED IT: this
+  // query doesn't read a raw chain dataset — it UNIONs two other queries' cached results
+  // (query_8284395, query_8683489), which is cheap regardless of row count. Confirmed
+  // `medium` completes this in well under a minute; confirmed separately that `free` genuinely
+  // times out at Dune's own 2-minute cap for this specific query, so `free` is not a fallback,
+  // it's a guaranteed failure. BUT — same trap as the `PERFORMANCE` constant below: that
+  // confirmation was via this session's own Dune MCP connector, NOT verified against this
+  // route's actual `DUNE_API_KEY`. If this branch starts failing with `HTTP 400` about the
+  // performance tier, that's the account/plan mismatch, not a bug in this code — check
+  // dune.com → the abapay team → Settings → Billing/Plan, same as the note below.
+  //
+  // Failure here is deliberately NOT fatal to the workflow (see dune-refresh.yml) — this is
+  // one extra number on one page, not the dashboards this route exists for. A stale result
+  // just means agentStats.ts keeps serving the last successful execution.
+  if (dashboardKey === 'agents-stats') {
+    const queryId = agentsStatsQueryId.queryId;
+    let s = await execute(apiKey, queryId, 'medium');
+    s = await waitForCompletion(apiKey, s, 90_000);
+    if (!s.completed) {
+      // One retry, same rationale as the generic path's phase 3.
+      s = await execute(apiKey, queryId, 'medium');
+      s = await waitForCompletion(apiKey, s, 90_000);
+    }
+    return NextResponse.json(
+      { ok: !!s.completed, dashboard: 'agents-stats', queries: [s] },
+      { status: s.completed ? 200 : 502 },
+    );
+  }
+
   if (!(dashboardKey in DASHBOARDS)) {
     return NextResponse.json(
       { error: `Unknown dashboard "${dashboardKey}".`, known: Object.keys(DASHBOARDS) },
