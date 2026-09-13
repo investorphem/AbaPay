@@ -130,9 +130,10 @@ const STACK: { title: string; tag: string; body: string; primary: { label: strin
   },
   {
     title: "SDK",
-    tag: "ROADMAP",
-    body: "A thin TypeScript client wrapping x402 signing and the MCP tool catalog — not shipped yet.",
-    primary: { label: "Why, below", href: "#roadmap" },
+    tag: "TYPESCRIPT",
+    body: "abapay-sdk wraps x402 signing and the MCP tool catalog into two functions. Source and tests are on GitHub now; the npm package follows shortly.",
+    primary: { label: "Install & usage", href: "#sdk" },
+    verify: { label: "Source", href: "https://github.com/investorphem/AbaPay/tree/main/sdk" },
   },
   {
     title: "Identity",
@@ -213,6 +214,7 @@ function Nav() {
     { label: "x402", href: "#x402" },
     { label: "A2A", href: "#a2a" },
     { label: "MCP", href: "#mcp" },
+    { label: "SDK", href: "#sdk" },
     { label: "Roadmap", href: "#roadmap" },
   ];
   return (
@@ -448,6 +450,32 @@ export default async function AgentsPage() {
           </div>
         </section>
 
+        {/* SDK */}
+        <SectionLabel id="sdk">abapay-sdk — two functions, not a protocol to learn</SectionLabel>
+        <section className="bg-white dark:bg-[#111114] border border-slate-100 dark:border-slate-800/60 rounded-[2rem] p-6 sm:p-8 mb-14">
+          <p className="text-sm text-slate-600 dark:text-slate-300 leading-relaxed mb-5 max-w-2xl">
+            A thin TypeScript client over the two paths above — <code className="text-slate-500">payBillViaX402</code> for the zero-setup flow, <code className="text-slate-500">AbaPayAgent</code> for the linked-wallet catalog. Signs with whatever <a href="https://viem.sh" target="_blank" rel="noopener noreferrer" className="underline hover:text-emerald-500">viem</a> account your agent already has; nothing hidden — the source is the same wire format documented above.
+          </p>
+          <div className="bg-[#0b0d0f] rounded-2xl border border-slate-800 overflow-hidden font-mono text-[11px] mb-4">
+            <pre className="p-4 text-slate-300 overflow-x-auto whitespace-pre">{`import { privateKeyToAccount } from "viem/accounts";
+import { payBillViaX402 } from "abapay-sdk";
+
+const account = privateKeyToAccount(process.env.PRIVATE_KEY);
+
+const result = await payBillViaX402({
+  signer: account,
+  bill: {
+    serviceID: "mtn", serviceCategory: "AIRTIME",
+    network: "MTN", billersCode: "08012345678",
+    nairaAmount: 1000, token: "USDT",
+  },
+});`}</pre>
+          </div>
+          <p className="text-xs text-slate-400 dark:text-slate-500">
+            Source, tests, and the full README: <a href="https://github.com/investorphem/AbaPay/tree/main/sdk" className="underline hover:text-emerald-500">github.com/investorphem/AbaPay/tree/main/sdk</a>. The <code className="text-slate-500">abapay-sdk</code> npm package is next — until it&apos;s live, clone the repo and import directly from <code className="text-slate-500">sdk/src</code>.
+          </p>
+        </section>
+
         {/* STACK */}
         <SectionLabel id="stack">The stack</SectionLabel>
         <section className="grid sm:grid-cols-2 lg:grid-cols-3 gap-4 mb-14">
@@ -476,9 +504,9 @@ export default async function AgentsPage() {
               <div className="bg-slate-50 dark:bg-white/5 w-10 h-10 rounded-xl flex items-center justify-center mb-3 border border-slate-100 dark:border-slate-800/60">
                 <Rocket className="text-slate-400" size={18} />
               </div>
-              <h3 className="font-black text-slate-900 dark:text-white mb-1.5">Official SDK</h3>
+              <h3 className="font-black text-slate-900 dark:text-white mb-1.5">Python SDK</h3>
               <p className="text-sm text-slate-500 dark:text-slate-400 leading-relaxed">
-                A thin TypeScript client wrapping x402 signing and the MCP tool catalog in one package, so an agent framework calls one function instead of hand-rolling EIP-3009 signing and HTTP. Not published yet — this is a proposal, not a claim.
+                The TypeScript SDK ships today (see above) — a Python port is the natural next one, given how much agent tooling (LangChain, CrewAI, AutoGen) is Python-first. Not started yet — this is a proposal, not a claim.
               </p>
             </div>
             <div>

@@ -39,6 +39,7 @@
     "cache",
     "typechain-types",
     "hardhat.config.ts",
-    "vitest.config.ts"
+    "vitest.config.ts",
+    "sdk"
   ]
 }

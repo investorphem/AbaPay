@@ -1,0 +1,57 @@
+{
+  "name": "abapay-sdk",
+  "version": "0.1.0",
+  "description": "Pay real-world bills (airtime, data, electricity, cable) from an agent's own Celo wallet — zero-setup x402, or a linked-wallet client for the fuller MCP tool catalog.",
+  "type": "module",
+  "main": "./dist/index.cjs",
+  "module": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js",
+      "require": "./dist/index.cjs"
+    }
+  },
+  "files": [
+    "dist"
+  ],
+  "sideEffects": false,
+  "license": "MIT",
+  "homepage": "https://agents.abapays.com",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/investorphem/AbaPay.git",
+    "directory": "sdk"
+  },
+  "bugs": "https://github.com/investorphem/AbaPay/issues",
+  "keywords": [
+    "abapay",
+    "celo",
+    "x402",
+    "a2a",
+    "mcp",
+    "agent-payments",
+    "stablecoin",
+    "eip-3009"
+  ],
+  "engines": {
+    "node": ">=18"
+  },
+  "peerDependencies": {
+    "viem": "^2.0.0"
+  },
+  "devDependencies": {
+    "typescript": "^5",
+    "tsup": "^8.3.5",
+    "viem": "^2.47.6",
+    "vitest": "^2.1.8"
+  },
+  "scripts": {
+    "build": "tsup",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "prepublishOnly": "npm run typecheck && npm run test && npm run build"
+  }
+}
