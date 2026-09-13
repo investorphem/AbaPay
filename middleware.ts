@@ -19,14 +19,21 @@ import { NextResponse, type NextRequest } from 'next/server';
 // subdomain that falls through to the AbaPay app underneath, which is the one thing this
 // middleware exists to prevent.
 //
-// ⚡ THE SAME MOVE FOR agents.abapays.com / rails.abapays.com — see src/app/agents/page.tsx for
-// why that page exists at all. Unlike app.abapays.com above, this is NOT a single static page
-// standing in for the whole host: /api (MCP, x402, the REST surface), /docs, /terms, /privacy
-// and /receipt are all legitimately useful to a developer landing on the agent domain and stay
-// exactly as they are. Only the bare root gets swapped, from the 5700-line consumer bill-pay
-// homepage to the infrastructure pitch — so a reviewer whose first URL is the agent domain
-// sees the rails pitch as its homepage instead of having to go find a link to it.
+// ⚡ THE SAME MOVE FOR agents.abapays.com / rails.abapays.com — see src/app/agents/ for why
+// this exists at all. Unlike app.abapays.com above, this is NOT a single static page standing
+// in for the whole host: it's a real multi-page site (src/app/agents/{x402,a2a,mcp,sdk,
+// channels,about}/page.tsx, all sharing src/app/agents/layout.tsx) with its OWN clean URL
+// space on this host — agents.abapays.com/x402, not agents.abapays.com/agents/x402.
+//
+// So every path gets prefixed with /agents EXCEPT: paths already under /agents (avoid double-
+// prefixing when someone follows a stray abapays.com/agents/... link onto this host), /api
+// (MCP, x402, the REST surface — real endpoints, must resolve exactly as-is), /.well-known
+// (the Agent Card, OAuth discovery), and anything that looks like a static file (has a dot in
+// its last segment — favicon.ico, logo.png, robots.txt, an opengraph-image route) since those
+// are served from their real path regardless of which "page" is asking for them.
 const AGENT_HOSTS = new Set(['agents.abapays.com', 'rails.abapays.com']);
+const AGENT_HOST_SKIP = /^\/(api|\.well-known|agents)(\/|$)/;
+const LOOKS_LIKE_STATIC_FILE = /\.[a-zA-Z0-9]+$/;
 
 export function middleware(req: NextRequest) {
   const host = req.headers.get('host') || '';
@@ -39,10 +46,13 @@ export function middleware(req: NextRequest) {
     return NextResponse.rewrite(url);
   }
 
-  if (AGENT_HOSTS.has(hostname) && req.nextUrl.pathname === '/') {
-    const url = req.nextUrl.clone();
-    url.pathname = '/agents';
-    return NextResponse.rewrite(url);
+  if (AGENT_HOSTS.has(hostname)) {
+    const { pathname } = req.nextUrl;
+    if (!AGENT_HOST_SKIP.test(pathname) && !LOOKS_LIKE_STATIC_FILE.test(pathname)) {
+      const url = req.nextUrl.clone();
+      url.pathname = pathname === '/' ? '/agents' : `/agents${pathname}`;
+      return NextResponse.rewrite(url);
+    }
   }
 
   return NextResponse.next();
