@@ -287,7 +287,7 @@ export default async function AgentsPage() {
               <div className="pl-3 border-l-2 border-red-500/40 text-slate-400">
                 <span className="text-red-400 font-bold">402</span> Payment Required
                 <div className="text-slate-500 mt-1">
-                  accepts: [&#123; network: &quot;{CELO_NETWORK}&quot;, asset: &quot;USD₮&quot;, payTo: &quot;{CELO_VAULT.slice(0, 8)}…&quot; &#125;]
+                  accepts: [&#123; network: &quot;{CELO_NETWORK}&quot;, asset: &quot;USDT&quot;, payTo: &quot;{CELO_VAULT.slice(0, 8)}…&quot; &#125;]
                 </div>
               </div>
               <div>
@@ -392,7 +392,7 @@ export default async function AgentsPage() {
     "asset": "${CELO_USDT}",
     "payTo": "${CELO_VAULT}",
     "maxTimeoutSeconds": 86400,
-    "extra": { "name": "USD₮", "primaryType": "TransferWithAuthorization" }
+    "extra": { "name": "Tether USD", "primaryType": "TransferWithAuthorization" }
   }]
 }`}</pre>
           </div>
