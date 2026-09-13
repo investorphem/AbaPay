@@ -1,43 +1,64 @@
 import type { Metadata } from "next";
-import AppFooter from "@/components/AppFooter";
 import {
-  ArrowLeft, Bot, Zap, ShieldCheck, CalendarClock, Layers,
-  Link2, Globe, Fingerprint, FolderGit2, BookOpen, Terminal, ExternalLink,
-  FileText, Building2, Mail, Send,
+  Bot, Zap, ShieldCheck, CalendarClock, Layers, Link2, Fingerprint, FolderGit2,
+  BookOpen, Terminal, ExternalLink, FileText, Building2, Mail, Send, Rocket,
+  Network, KeyRound, Ban, CheckCircle2, Workflow,
 } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 import { getAgentStats } from "@/lib/dune/agentStats";
 
-// ⚡ A SEPARATE FRONT DOOR, DELIBERATELY — not a new backend, not a new domain, not a copy
-// of anything. Same execution engine, same contracts, same MCP server, same x402 endpoint
-// that already exist. What didn't exist was a page whose FIRST AND ONLY subject is the
-// rails themselves — every other surface (`/`, `/docs`) leads with the consumer bill-pay
-// story and mentions MCP/x402 partway down. A reviewer evaluating "is this reusable agent
-// infrastructure or a consumer app with an agent bolted on" was always going to read `/`
-// first, and `/` is unambiguously the consumer app.
+// ⚡ A SEPARATE FRONT DOOR, DELIBERATELY — not a new backend, not a new domain, not a copy of
+// anything. Same execution engine, same contracts, same MCP server, same x402 endpoint that
+// already exist — this is agents.abapays.com's actual homepage (see middleware.ts's
+// AGENT_HOSTS rewrite), not a subpage of the consumer app.
 //
-// Nothing here is invented for this page. Every number, link and claim traces to something
-// already shipped and already documented elsewhere in this repo — see
-// docs/AGENT_INTEGRATION.md for the mechanics, dune/*/README.md for where the figures below
-// come from, and README.md's own MCP/x402 sections for the rest. This page's only job is to
-// put that material first, on its own URL, instead of requiring someone to already know
-// AbaPay is infrastructure before they'd think to look for it here.
+// STANDALONE ON PURPOSE. Earlier drafts of this page kept a header back-arrow and a hero line
+// pointing at abapays.com — reasonable for a page reachable at abapays.com/agents, wrong for a
+// page that IS its own domain's homepage. A visitor here should never be made to feel like
+// they wandered into a corner of the consumer app; the only route back to it lives in the
+// footer, one small line, exactly where a stray visitor would look and nobody else would.
+//
+// CELO-ONLY, DELIBERATELY. AbaPay's contracts also run on Base, and that's real, documented
+// elsewhere (README.md, the main dashboards) — but this page's audience is Celo agent
+// infrastructure specifically, and a page trying to be both reads as neither. Every number,
+// address and endpoint below is Celo mainnet only.
+//
+// EXTERNAL LINKS ARE VERIFICATION, NOT CONTENT. The previous version of this page was mostly
+// a list of links to GitHub/registries/dashboards. The actual mechanics — the x402 challenge
+// shape, the A2A skill list, the MCP connection snippet — now live ON this page, in the
+// sections below; external links remain only for a developer to independently verify a claim
+// (the source code, the on-chain identity, the live ledger), never as the only way to read it.
+//
+// Nothing here is invented. Every field name, address and network id traces to
+// src/app/api/pay/x402/route.ts, src/app/.well-known/agent-card.json/route.ts, and
+// public/openapi.json — see docs/AGENT_INTEGRATION.md for the fuller mechanics and
+// dune/celo-chain/README.md for where the live figures come from.
 export const metadata: Metadata = {
-  title: "AbaPay Rails — Agent Payment Infrastructure",
+  title: "AbaPay Rails — Celo Agent Payment Infrastructure",
   description:
-    "Non-custodial stablecoin settlement rails on Celo and Base, built for agents: MCP tools, x402 settlement, escrow, scheduled spend, batch payments, and agent-to-agent payments.",
+    "Non-custodial stablecoin settlement rails for agents on Celo mainnet: zero-setup x402 payments, agent-to-agent (A2A), MCP tools, escrow, and scheduled spend.",
 };
 
 const RAILS = [
+  {
+    icon: Zap,
+    title: "x402 settlement",
+    body: "Zero setup, agent-to-agent by design: no account, no API key, no PIN. A wallet gets a 402 challenge, signs, retries, settles. Already the majority of on-chain volume on Celo.",
+  },
+  {
+    icon: Link2,
+    title: "Agent-to-agent (A2A)",
+    body: "A machine-readable Agent Card and a JSON-RPC endpoint any peer agent can call directly — no browser, no human in the loop.",
+  },
   {
     icon: Terminal,
     title: "MCP tools",
     body: "10 tools over Streamable HTTP JSON-RPC — check_balance, pay_bill, schedule_bill, pay_bill_batch and more. The same protocol Claude and any MCP client speak.",
   },
   {
-    icon: Zap,
-    title: "x402 settlement",
-    body: "Zero-setup, agent-to-agent by design: no account, no API key. A wallet gets a 402 challenge, signs, retries, settles. Already the majority of on-chain volume.",
+    icon: Layers,
+    title: "REST API",
+    body: "A plain OpenAPI 3.1 surface for any HTTP client that isn't MCP or A2A — same rails, same settlement, no protocol required.",
   },
   {
     icon: ShieldCheck,
@@ -49,34 +70,79 @@ const RAILS = [
     title: "Scheduled & batch spend",
     body: "schedule_bill for recurring or delayed payments; pay_bill_batch for up to 20 recipients under one PIN. Both bounded by the same on-chain allowance as everything else.",
   },
+];
+
+// ⚡ THE TWO WAYS IN — genuinely different trust models, and conflating them is the single
+// most common confusion a developer hits reading agent-payment docs. Said plainly, once, here.
+const PATHS = [
   {
-    icon: Link2,
-    title: "Agent-to-agent payments",
-    body: "Headless onboarding end to end: a wallet signature plus two on-chain calls. No browser, no human account-creation step, ever.",
+    tag: "ZERO SETUP",
+    title: "x402",
+    forWhom: "An agent that already holds a Celo wallet and wants to pay, right now, with nothing set up in advance.",
+    needs: ["No account", "No API key", "No PIN", "No visit to abapays.com"],
+    anchor: "#x402",
   },
   {
-    icon: Globe,
-    title: "Celo interoperability",
-    body: "Celo-first, not a Base port with Celo added on — redeployed V3→V4, three native stablecoins (USD₮/USDC/USA₮), on-chain rails other Celo agent tooling can build on top of.",
+    tag: "LINKED WALLET",
+    title: "MCP / A2A",
+    forWhom: "An agent that links a wallet once (an on-chain spending allowance, not a deposit) and wants the fuller tool catalog — history, schedules, batch payments.",
+    needs: ["One-time wallet-signature link", "PIN on every payment call", "Full 10-tool catalog"],
+    anchor: "#a2a",
   },
 ];
 
-const LINKS = [
-  { label: "Agent Integration Guide", desc: "Headless onboarding, exact request/response shapes", href: "https://github.com/investorphem/AbaPay/blob/main/docs/AGENT_INTEGRATION.md", icon: BookOpen },
-  { label: "Quickstart script", desc: "The whole flow as one runnable file", href: "https://github.com/investorphem/AbaPay/blob/main/examples/agent-quickstart.mjs", icon: Terminal },
-  { label: "OpenAPI reference", desc: "Machine-readable REST surface", href: "https://www.abapays.com/openapi.json", icon: Layers },
-  { label: "GitHub repository", desc: "Public, MIT licensed", href: "https://github.com/investorphem/AbaPay", icon: FolderGit2 },
-  { label: "MCP Registry listing", desc: "io.github.investorphem/abapay", href: "https://registry.modelcontextprotocol.io/v0.1/servers?search=io.github.investorphem/abapay", icon: Bot },
-  { label: "ERC-8004 identity", desc: "Agent #9760 on Celo, verified", href: "https://8004scan.io/agents/celo/9760", icon: Fingerprint },
+// The Agent Card's real skill list — see src/app/.well-known/agent-card.json/route.ts, the
+// actual served document. Kept as data here so it can never drift from that file's SKILLS
+// array without someone noticing the diff.
+const A2A_SKILLS = [
+  "describe_capabilities", "check_balance", "list_plans", "list_international_options",
+  "transaction_history", "pay_bill", "pay_bill_batch", "schedule_bill",
+  "list_schedules", "cancel_schedule",
 ];
 
-// ⚡ THE RESOURCE FOOTER — the point of this whole page is to be a standalone front door
-// (see the file-level comment above and middleware.ts's agent-host rewrite). A front door
-// that dead-ends without a proper directory of everything a developer or a company doing
-// diligence would look for — source code, the registries that vouch for this identity,
-// legal/contact — isn't standalone, it's just a hero banner. Every link below already exists
-// elsewhere in this repo or its live deployment; nothing here is new surface area, only a
-// single, categorized place a diligence pass can start from and reach all of it.
+const STACK: { title: string; tag: string; body: string; primary: { label: string; href: string }; verify?: { label: string; href: string } }[] = [
+  {
+    title: "x402",
+    tag: "ZERO SETUP",
+    body: "Challenge/response payment over plain HTTP. No credential of any kind.",
+    primary: { label: "How it works", href: "#x402" },
+    verify: { label: "Source", href: "https://github.com/investorphem/AbaPay/blob/main/src/app/api/pay/x402/route.ts" },
+  },
+  {
+    title: "A2A",
+    tag: "PEER PROTOCOL",
+    body: "Agent Card discovery + JSON-RPC task server for peer agents.",
+    primary: { label: "Skills & endpoint", href: "#a2a" },
+    verify: { label: "Agent Card", href: "https://abapays.com/.well-known/agent-card.json" },
+  },
+  {
+    title: "MCP",
+    tag: "LOCAL + REMOTE",
+    body: "Streamable HTTP JSON-RPC, OAuth 2.1 or API key. The same protocol Claude speaks.",
+    primary: { label: "Connect", href: "#mcp" },
+    verify: { label: "Registry listing", href: "https://registry.modelcontextprotocol.io/v0.1/servers?search=io.github.investorphem/abapay" },
+  },
+  {
+    title: "REST API",
+    tag: "PLAIN HTTP",
+    body: "OpenAPI 3.1, snake_case fields, no protocol wrapper required.",
+    primary: { label: "OpenAPI spec", href: "https://abapays.com/openapi.json" },
+  },
+  {
+    title: "SDK",
+    tag: "ROADMAP",
+    body: "A thin TypeScript client wrapping x402 signing and the MCP tool catalog — not shipped yet.",
+    primary: { label: "Why, below", href: "#roadmap" },
+  },
+  {
+    title: "Identity",
+    tag: "ON-CHAIN",
+    body: "ERC-8004 registration on Celo — a verifiable identity other agents' tooling can check.",
+    primary: { label: "About", href: "#stack" },
+    verify: { label: "8004scan", href: "https://8004scan.io/agents/celo/9760" },
+  },
+];
+
 const FOOTER_GROUPS: { title: string; links: { label: string; href: string; icon: LucideIcon }[] }[] = [
   {
     title: "Developers",
@@ -93,6 +159,7 @@ const FOOTER_GROUPS: { title: string; links: { label: string; href: string; icon
       { label: "GitHub repository", href: "https://github.com/investorphem/AbaPay", icon: FolderGit2 },
       { label: "MCP Registry listing", href: "https://registry.modelcontextprotocol.io/v0.1/servers?search=io.github.investorphem/abapay", icon: Bot },
       { label: "ERC-8004 identity", href: "https://8004scan.io/agents/celo/9760", icon: Fingerprint },
+      { label: "Agent Card", href: "https://abapays.com/.well-known/agent-card.json", icon: Network },
     ],
   },
   {
@@ -106,10 +173,6 @@ const FOOTER_GROUPS: { title: string; links: { label: string; href: string; icon
   },
 ];
 
-// Social/community — kept separate from FOOTER_GROUPS above because these are icon-only
-// buttons (matching AppFooter's own X/Telegram treatment) rather than labeled directory rows.
-// lucide-react ships no brand mark for X or LinkedIn in this version (same gap as the missing
-// "Github" icon elsewhere in this file) — both are inlined SVGs; X reuses AppFooter's own path.
 const SOCIALS = [
   {
     label: "X",
@@ -132,11 +195,44 @@ const SOCIALS = [
   },
 ];
 
-const DASHBOARDS = [
-  { name: "Ecosystem Traction", desc: "Combined Celo + Base, agent-vs-direct-vs-x402 rail split", href: "https://dune.com/abapay/abapay-ecosystem-traction" },
-  { name: "AbaPay on Celo", desc: "Celo mainnet only", href: "https://dune.com/abapay/abapay-on-celo" },
-  { name: "AbaPay on Base", desc: "Base mainnet only", href: "https://dune.com/abapay/abapay-on-base" },
-];
+// ⚡ THE x402 REQUEST/RESPONSE BELOW — every field name, address and network id is real,
+// copied from src/app/api/pay/x402/route.ts's actual challenge construction (`acceptEntry`,
+// the v1/v2 challenge bodies) and public/openapi.json's Celo `x-payment-info.protocols`
+// entries. The dollar amount and tx hash are illustrative (a real amount is computed
+// server-side from the live NGN rate at request time — see the route's own comment on why);
+// everything else — scheme, network, asset addresses, payTo, the settle flow — is exactly
+// what a real call gets back.
+const CELO_NETWORK = "eip155:42220";
+const CELO_USDC = "0xcebA9300f2b948710d2653dD7B07f33A8B32118C";
+const CELO_USDT = "0x48065fbBE25f71C9282ddf5e1cD6D6A887483D5e";
+const CELO_VAULT = "0x5df8aE2B963165b735B18Ca86B1ea448d2AA032C";
+
+function Nav() {
+  const links = [
+    { label: "Stack", href: "#stack" },
+    { label: "x402", href: "#x402" },
+    { label: "A2A", href: "#a2a" },
+    { label: "MCP", href: "#mcp" },
+    { label: "Roadmap", href: "#roadmap" },
+  ];
+  return (
+    <nav className="hidden sm:flex items-center gap-6">
+      {links.map((l) => (
+        <a key={l.label} href={l.href} className="text-xs font-bold uppercase tracking-widest text-slate-500 dark:text-slate-400 hover:text-emerald-600 dark:hover:text-emerald-400 transition-colors">
+          {l.label}
+        </a>
+      ))}
+    </nav>
+  );
+}
+
+function SectionLabel({ children, id }: { children: React.ReactNode; id?: string }) {
+  return (
+    <h2 id={id} className="text-xl font-black tracking-tight text-slate-900 dark:text-white mb-4 px-2 scroll-mt-24">
+      {children}
+    </h2>
+  );
+}
 
 export default async function AgentsPage() {
   const stats = await getAgentStats();
@@ -148,36 +244,85 @@ export default async function AgentsPage() {
   ];
 
   return (
-    <main className="min-h-screen bg-slate-50 dark:bg-black text-slate-900 dark:text-slate-100 font-sans p-4 sm:p-8 flex flex-col items-center pb-20 transition-colors">
-      <div className="w-full max-w-4xl">
+    <main className="min-h-screen bg-slate-50 dark:bg-black text-slate-900 dark:text-slate-100 font-sans transition-colors">
+      <div className="max-w-4xl mx-auto p-4 sm:p-8 pb-20">
 
-        {/* HEADER */}
+        {/* HEADER — wordmark + in-page nav, no tie back to the consumer app. See file-level
+            comment: the one link back to abapays.com lives in the footer, not here. */}
         <div className="flex items-center justify-between mb-8">
-          {/* Absolute, not relative: on agents.abapays.com, a relative "/" is rewritten by
-              middleware.ts right back to this same page — this needs to actually leave the
-              agent host and land on the consumer app's real homepage. */}
-          <a href="https://abapays.com/" className="flex items-center gap-2 text-slate-500 dark:text-slate-400 hover:text-emerald-600 dark:hover:text-emerald-400 transition-colors bg-white dark:bg-[#111114] p-2 rounded-xl border border-slate-100 dark:border-slate-800/60">
-            <ArrowLeft size={18} />
-          </a>
-          <div className="flex items-center gap-2 text-xs font-bold uppercase tracking-widest text-emerald-600 dark:text-emerald-400">
-            <span className="w-1.5 h-1.5 rounded-full bg-emerald-500" /> For agents & developers
+          <div className="flex items-center gap-2 font-black tracking-tight text-lg text-slate-900 dark:text-white">
+            AbaPay <span className="text-emerald-500">Rails</span>
+          </div>
+          <Nav />
+          <div className="flex items-center gap-1.5 text-[10px] font-black uppercase tracking-widest text-emerald-600 dark:text-emerald-400 bg-emerald-50 dark:bg-emerald-900/20 border border-emerald-100 dark:border-emerald-800/50 px-2.5 py-1 rounded-full">
+            <span className="w-1.5 h-1.5 rounded-full bg-emerald-500" /> Celo mainnet
           </div>
         </div>
 
         {/* HERO */}
-        <section className="bg-white dark:bg-[#111114] border border-slate-100 dark:border-slate-800/60 rounded-[2.5rem] p-8 sm:p-12 shadow-sm mb-6">
-          <h1 className="text-3xl sm:text-4xl font-black tracking-tight text-slate-900 dark:text-white mb-4">
-            AbaPay Rails
-          </h1>
-          <p className="text-lg text-slate-600 dark:text-slate-300 leading-relaxed font-medium max-w-2xl">
-            Non-custodial stablecoin settlement infrastructure on Celo and Base — built so an agent, not a human, is the one calling it. Any MCP client or x402-aware agent can reach these rails without AbaPay ever knowing it exists in advance.
-          </p>
-          <p className="text-sm text-slate-400 dark:text-slate-500 mt-4">
-            Building a consumer bill-pay experience instead? <a href="https://abapays.com/" className="underline hover:text-emerald-500">Use the app →</a>
-          </p>
+        <section className="bg-white dark:bg-[#111114] border border-slate-100 dark:border-slate-800/60 rounded-[2.5rem] p-8 sm:p-12 shadow-sm mb-6 grid lg:grid-cols-2 gap-8 items-center">
+          <div>
+            <h1 className="text-3xl sm:text-4xl font-black tracking-tight text-slate-900 dark:text-white mb-4 text-balance">
+              Give your agent a bill to pay.
+            </h1>
+            <p className="text-lg text-slate-600 dark:text-slate-300 leading-relaxed font-medium">
+              Non-custodial stablecoin settlement on Celo, built agent-first: x402 for zero-setup payments, A2A and MCP for the fuller tool catalog. Any Celo wallet can pay a real-world bill without AbaPay ever knowing it exists in advance.
+            </p>
+          </div>
+
+          {/* THE LIVE DEMO PANEL — a real request/response shape, not a mockup of an
+              imaginary API. See the CELO_NETWORK/CELO_USDC/CELO_VAULT constants above for
+              where every value comes from. */}
+          <div className="bg-[#0b0d0f] rounded-[1.75rem] border border-slate-800 overflow-hidden font-mono text-[11px] leading-relaxed">
+            <div className="flex items-center justify-between px-4 py-2.5 border-b border-slate-800 bg-white/[0.02]">
+              <span className="text-slate-400 tracking-wider">x402 · agent-to-agent</span>
+              <span className="flex items-center gap-1.5 text-emerald-400 font-bold text-[10px] uppercase tracking-widest">
+                <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" /> Live rail
+              </span>
+            </div>
+            <div className="p-4 space-y-3 overflow-x-auto">
+              <div>
+                <span className="text-slate-500">$</span> <span className="text-slate-200">POST /api/pay/x402</span>
+              </div>
+              <div className="pl-3 border-l-2 border-red-500/40 text-slate-400">
+                <span className="text-red-400 font-bold">402</span> Payment Required
+                <div className="text-slate-500 mt-1">
+                  accepts: [&#123; network: &quot;{CELO_NETWORK}&quot;, asset: &quot;USDT&quot;, payTo: &quot;{CELO_VAULT.slice(0, 8)}…&quot; &#125;]
+                </div>
+              </div>
+              <div>
+                <span className="text-slate-500">$</span> <span className="text-slate-200">sign transferWithAuthorization(...)</span> <span className="text-slate-600">— agent&apos;s own wallet</span>
+              </div>
+              <div>
+                <span className="text-slate-500">$</span> <span className="text-slate-200">POST /api/pay/x402</span> <span className="text-slate-600">-H X-PAYMENT: &lt;signed&gt;</span>
+              </div>
+              <div className="pl-3 border-l-2 border-emerald-500/40 text-slate-400">
+                <span className="text-emerald-400 font-bold">200</span> OK
+                <div className="text-slate-500 mt-1">settled on Celo · bill vended</div>
+              </div>
+            </div>
+          </div>
         </section>
 
-        {/* LIVE NUMBERS — read from Dune at request time, not hardcoded. See
+        {/* THE TWO WAYS IN */}
+        <section className="grid sm:grid-cols-2 gap-4 mb-6">
+          {PATHS.map((p) => (
+            <a key={p.title} href={p.anchor} className="block bg-white dark:bg-[#111114] border border-slate-100 dark:border-slate-800/60 rounded-[1.75rem] p-6 hover:border-emerald-200 dark:hover:border-emerald-800/60 transition-colors">
+              <span className="text-[10px] font-black uppercase tracking-widest text-emerald-600 dark:text-emerald-400">{p.tag}</span>
+              <h3 className="text-xl font-black text-slate-900 dark:text-white mt-1 mb-2">{p.title}</h3>
+              <p className="text-sm text-slate-500 dark:text-slate-400 leading-relaxed mb-3">{p.forWhom}</p>
+              <ul className="space-y-1">
+                {p.needs.map((n) => (
+                  <li key={n} className="text-xs text-slate-500 dark:text-slate-500 flex items-center gap-2">
+                    <CheckCircle2 size={12} className="text-emerald-500 flex-shrink-0" /> {n}
+                  </li>
+                ))}
+              </ul>
+            </a>
+          ))}
+        </section>
+
+        {/* LIVE NUMBERS — Celo mainnet only, read from Dune at request time. See
             src/lib/dune/agentStats.ts for how this stays current and what it falls back to. */}
         <section className="grid grid-cols-2 sm:grid-cols-4 gap-px bg-slate-100 dark:bg-slate-800/60 rounded-[2rem] overflow-hidden border border-slate-100 dark:border-slate-800/60 mb-6">
           {HERO_STATS.map((s) => (
@@ -188,12 +333,12 @@ export default async function AgentsPage() {
           ))}
         </section>
         <p className="text-xs text-slate-400 dark:text-slate-500 mb-10 px-2">
-          Celo + Base combined, on-chain, refreshed daily — see the live dashboards below to drill in. &quot;Agent-native&quot; is x402 plus agent-relayer volume together.
+          Celo mainnet only, refreshed daily. &quot;Agent-native&quot; is x402 plus agent-relayer volume, as a share of total volume. <a href="https://dune.com/abapay/abapay-on-celo" target="_blank" rel="noopener noreferrer" className="underline hover:text-emerald-500">Verify on Dune →</a>
         </p>
 
         {/* THE RAILS */}
-        <h2 className="text-xl font-black tracking-tight text-slate-900 dark:text-white mb-4 px-2">The rails</h2>
-        <section className="grid sm:grid-cols-2 gap-4 mb-10">
+        <SectionLabel>The rails</SectionLabel>
+        <section className="grid sm:grid-cols-2 gap-4 mb-14">
           {RAILS.map((r) => (
             <div key={r.title} className="bg-white dark:bg-[#111114] border border-slate-100 dark:border-slate-800/60 rounded-[1.75rem] p-6">
               <div className="bg-emerald-50 dark:bg-emerald-900/20 w-11 h-11 rounded-xl flex items-center justify-center mb-4 border border-emerald-100 dark:border-emerald-800/50">
@@ -205,40 +350,153 @@ export default async function AgentsPage() {
           ))}
         </section>
 
-        {/* INTEGRATE */}
-        <h2 className="text-xl font-black tracking-tight text-slate-900 dark:text-white mb-4 px-2">Integrate</h2>
-        <section className="bg-white dark:bg-[#111114] border border-slate-100 dark:border-slate-800/60 rounded-[2rem] divide-y divide-slate-100 dark:divide-slate-800/60 mb-10 overflow-hidden">
-          {LINKS.map((l) => (
-            <a key={l.label} href={l.href} target="_blank" rel="noopener noreferrer" className="flex items-center justify-between gap-4 p-5 hover:bg-slate-50 dark:hover:bg-white/[0.02] transition-colors group">
-              <div className="flex items-center gap-4 min-w-0">
-                <div className="bg-slate-50 dark:bg-white/5 w-9 h-9 rounded-lg flex items-center justify-center flex-shrink-0 border border-slate-100 dark:border-slate-800/60">
-                  <l.icon className="text-slate-400 dark:text-slate-500" size={16} />
-                </div>
-                <div className="min-w-0">
-                  <div className="font-bold text-sm text-slate-900 dark:text-white">{l.label}</div>
-                  <div className="text-xs text-slate-400 dark:text-slate-500 truncate">{l.desc}</div>
-                </div>
+        {/* x402 — THE FLAGSHIP FLOW */}
+        <SectionLabel id="x402">Zero-setup agent-to-agent · x402</SectionLabel>
+        <section className="bg-white dark:bg-[#111114] border border-slate-100 dark:border-slate-800/60 rounded-[2rem] p-6 sm:p-8 mb-6">
+          <p className="text-sm text-slate-600 dark:text-slate-300 leading-relaxed mb-6 max-w-2xl">
+            An independent agent — say, a Cowrie-style FX agent holding a Celo wallet — never needs to know AbaPay exists in advance. The whole exchange happens over plain HTTP, challenge and response:
+          </p>
+          <ol className="space-y-3 mb-6">
+            {[
+              "Holds or uses a Celo wallet.",
+              "Calls AbaPay's quote / pay_bill endpoint directly.",
+              "Gets 402 Payment Required back, with the exact price and asset.",
+              "Signs an EIP-3009 transferWithAuthorization with that same wallet — nothing else.",
+              "Retries the request with the signed authorization attached.",
+              "AbaPay settles on Celo via Celo's own x402 facilitator and vends the bill.",
+            ].map((step, i) => (
+              <li key={step} className="flex items-start gap-3 text-sm text-slate-700 dark:text-slate-300">
+                <span className="w-5 h-5 rounded-full bg-emerald-50 dark:bg-emerald-900/20 border border-emerald-100 dark:border-emerald-800/50 text-emerald-600 dark:text-emerald-400 text-[10px] font-black flex items-center justify-center flex-shrink-0 mt-0.5">{i + 1}</span>
+                {step}
+              </li>
+            ))}
+          </ol>
+
+          <div className="bg-red-50 dark:bg-red-900/10 border border-red-100 dark:border-red-900/30 rounded-2xl p-5 mb-6">
+            <p className="text-xs font-black uppercase tracking-widest text-red-500 dark:text-red-400 mb-2 flex items-center gap-1.5"><Ban size={13} /> Never required for this path</p>
+            <div className="flex flex-wrap gap-2">
+              {["abapays.com account", "Agent Hub", "API key", "PIN", "Wallet-signature link"].map((x) => (
+                <span key={x} className="text-xs font-medium text-slate-600 dark:text-slate-400 bg-white dark:bg-[#111114] border border-slate-200 dark:border-slate-800 rounded-full px-3 py-1">{x}</span>
+              ))}
+            </div>
+          </div>
+
+          <div className="bg-[#0b0d0f] rounded-2xl border border-slate-800 overflow-hidden font-mono text-[11px] leading-relaxed">
+            <div className="px-4 py-2.5 border-b border-slate-800 bg-white/[0.02] text-slate-400">POST /api/pay/x402 → 402 response (real field names)</div>
+            <pre className="p-4 text-slate-300 overflow-x-auto whitespace-pre">{`{
+  "x402Version": 2,
+  "error": "Payment required",
+  "accepts": [{
+    "scheme": "exact",
+    "network": "${CELO_NETWORK}",
+    "asset": "${CELO_USDT}",
+    "payTo": "${CELO_VAULT}",
+    "maxTimeoutSeconds": 86400,
+    "extra": { "name": "Tether USD", "primaryType": "TransferWithAuthorization" }
+  }]
+}`}</pre>
+          </div>
+          <p className="text-xs text-slate-400 dark:text-slate-500 mt-3">
+            Both USDC (<code className="text-slate-500">{CELO_USDC.slice(0, 10)}…</code>) and USD₮ settle via Celo&apos;s own x402 facilitator — each implements EIP-3009. Full field reference: <a href="https://abapays.com/openapi.json" className="underline hover:text-emerald-500">openapi.json</a>.
+          </p>
+        </section>
+
+        {/* A2A */}
+        <SectionLabel id="a2a">Agents talking to agents · A2A</SectionLabel>
+        <section className="bg-white dark:bg-[#111114] border border-slate-100 dark:border-slate-800/60 rounded-[2rem] p-6 sm:p-8 mb-6">
+          <p className="text-sm text-slate-600 dark:text-slate-300 leading-relaxed mb-6 max-w-2xl">
+            A peer agent discovers AbaPay via its Agent Card, then sends structured tool calls over A2A JSON-RPC — no browser, no human account-creation step.
+          </p>
+          <div className="grid sm:grid-cols-2 gap-4 mb-6">
+            <div className="bg-slate-50 dark:bg-white/5 rounded-xl p-4 border border-slate-100 dark:border-slate-800/60">
+              <div className="text-[10px] font-black uppercase tracking-widest text-slate-400 dark:text-slate-500 mb-1">Agent Card</div>
+              <a href="https://abapays.com/.well-known/agent-card.json" className="text-xs font-mono text-emerald-600 dark:text-emerald-400 hover:underline break-all">abapays.com/.well-known/agent-card.json</a>
+            </div>
+            <div className="bg-slate-50 dark:bg-white/5 rounded-xl p-4 border border-slate-100 dark:border-slate-800/60">
+              <div className="text-[10px] font-black uppercase tracking-widest text-slate-400 dark:text-slate-500 mb-1">JSON-RPC endpoint</div>
+              <span className="text-xs font-mono text-slate-600 dark:text-slate-400 break-all">abapays.com/api/a2a</span>
+            </div>
+          </div>
+          <div className="mb-6">
+            <div className="text-[10px] font-black uppercase tracking-widest text-slate-400 dark:text-slate-500 mb-2">Skills (10)</div>
+            <div className="flex flex-wrap gap-2">
+              {A2A_SKILLS.map((s) => (
+                <code key={s} className="text-xs bg-slate-50 dark:bg-white/5 border border-slate-100 dark:border-slate-800/60 text-slate-600 dark:text-slate-400 rounded-lg px-2.5 py-1">{s}</code>
+              ))}
+            </div>
+          </div>
+          <div className="bg-amber-50 dark:bg-amber-900/10 border border-amber-100 dark:border-amber-900/30 rounded-xl p-4 flex items-start gap-2.5">
+            <KeyRound size={15} className="text-amber-600 dark:text-amber-400 flex-shrink-0 mt-0.5" />
+            <p className="text-xs text-amber-800 dark:text-amber-300 leading-relaxed">
+              Unlike x402 above, A2A payment skills require an authenticated bearer (OAuth 2.1 token or an Agent Hub API key) plus the wallet PIN on every single payment call — a deliberate extra check for a linked-account path with the fuller tool catalog behind it.
+            </p>
+          </div>
+        </section>
+
+        {/* MCP */}
+        <SectionLabel id="mcp">MCP — the same protocol Claude speaks</SectionLabel>
+        <section className="bg-white dark:bg-[#111114] border border-slate-100 dark:border-slate-800/60 rounded-[2rem] p-6 sm:p-8 mb-14">
+          <p className="text-sm text-slate-600 dark:text-slate-300 leading-relaxed mb-5 max-w-2xl">
+            10 tools over Streamable HTTP JSON-RPC — check_balance, pay_bill, schedule_bill, pay_bill_batch and more. OAuth 2.1 is supported and preferred; an Agent Hub API key remains the fallback for clients that can&apos;t do OAuth.
+          </p>
+          <div className="bg-[#0b0d0f] rounded-2xl border border-slate-800 overflow-hidden font-mono text-[11px]">
+            <pre className="p-4 text-slate-300 overflow-x-auto whitespace-pre">{`{
+  "mcpServers": {
+    "abapay": { "url": "https://www.abapays.com/api/mcp" }
+  }
+}`}</pre>
+          </div>
+        </section>
+
+        {/* STACK */}
+        <SectionLabel id="stack">The stack</SectionLabel>
+        <section className="grid sm:grid-cols-2 lg:grid-cols-3 gap-4 mb-14">
+          {STACK.map((s) => (
+            <div key={s.title} className="bg-white dark:bg-[#111114] border border-slate-100 dark:border-slate-800/60 rounded-[1.5rem] p-5 flex flex-col">
+              <span className="text-[9px] font-black uppercase tracking-widest text-emerald-600 dark:text-emerald-400 mb-2">{s.tag}</span>
+              <h3 className="font-black text-slate-900 dark:text-white mb-1.5">{s.title}</h3>
+              <p className="text-xs text-slate-500 dark:text-slate-400 leading-relaxed mb-4 flex-1">{s.body}</p>
+              <div className="flex items-center gap-3 text-xs font-bold">
+                <a href={s.primary.href} className="text-emerald-600 dark:text-emerald-400 hover:underline">{s.primary.label} →</a>
+                {s.verify && (
+                  <a href={s.verify.href} target="_blank" rel="noopener noreferrer" className="text-slate-400 dark:text-slate-500 hover:text-slate-600 dark:hover:text-slate-300 flex items-center gap-1">
+                    {s.verify.label} <ExternalLink size={10} />
+                  </a>
+                )}
               </div>
-              <ExternalLink className="text-slate-300 dark:text-slate-600 group-hover:text-emerald-500 transition-colors flex-shrink-0" size={16} />
-            </a>
+            </div>
           ))}
         </section>
 
-        {/* DASHBOARDS */}
-        <h2 className="text-xl font-black tracking-tight text-slate-900 dark:text-white mb-4 px-2">Live on-chain activity</h2>
-        <section className="grid sm:grid-cols-3 gap-4 mb-16">
-          {DASHBOARDS.map((d) => (
-            <a key={d.name} href={d.href} target="_blank" rel="noopener noreferrer" className="bg-white dark:bg-[#111114] border border-slate-100 dark:border-slate-800/60 rounded-[1.5rem] p-5 hover:border-emerald-200 dark:hover:border-emerald-800/60 transition-colors">
-              <div className="font-black text-sm text-slate-900 dark:text-white mb-1">{d.name}</div>
-              <div className="text-xs text-slate-400 dark:text-slate-500">{d.desc}</div>
-            </a>
-          ))}
+        {/* ROADMAP — clearly labeled as not-yet-shipped, never blended in with the sections above */}
+        <SectionLabel id="roadmap">Coming next</SectionLabel>
+        <section className="bg-white dark:bg-[#111114] border border-dashed border-slate-200 dark:border-slate-700 rounded-[2rem] p-6 sm:p-8 mb-14">
+          <div className="grid sm:grid-cols-2 gap-6">
+            <div>
+              <div className="bg-slate-50 dark:bg-white/5 w-10 h-10 rounded-xl flex items-center justify-center mb-3 border border-slate-100 dark:border-slate-800/60">
+                <Rocket className="text-slate-400" size={18} />
+              </div>
+              <h3 className="font-black text-slate-900 dark:text-white mb-1.5">Official SDK</h3>
+              <p className="text-sm text-slate-500 dark:text-slate-400 leading-relaxed">
+                A thin TypeScript client wrapping x402 signing and the MCP tool catalog in one package, so an agent framework calls one function instead of hand-rolling EIP-3009 signing and HTTP. Not published yet — this is a proposal, not a claim.
+              </p>
+            </div>
+            <div>
+              <div className="bg-slate-50 dark:bg-white/5 w-10 h-10 rounded-xl flex items-center justify-center mb-3 border border-slate-100 dark:border-slate-800/60">
+                <Workflow className="text-slate-400" size={18} />
+              </div>
+              <h3 className="font-black text-slate-900 dark:text-white mb-1.5">Wider agent-registry discovery</h3>
+              <p className="text-sm text-slate-500 dark:text-slate-400 leading-relaxed">
+                Already listed in the official MCP Registry and on-chain via ERC-8004; a fuller OASF-style listing is the natural next registry to add for cross-framework discoverability.
+              </p>
+            </div>
+          </div>
         </section>
 
-        {/* ⚡ RESOURCE FOOTER — see FOOTER_GROUPS above for why this exists as its own thing
-            rather than folding into AppFooter: everything a developer or a company's diligence
-            pass needs, in one categorized directory, on the page that's now this domain's
-            homepage. */}
+        {/* ⚡ SINGLE FOOTER — this page previously rendered its own resource footer AND the
+            shared AppFooter beneath it, which duplicated Docs/Terms/Privacy and the social
+            row. One footer now; the shared consumer-app AppFooter component is not used on
+            this page at all, by design — this page owns its own, standalone. */}
         <footer className="border-t border-slate-200 dark:border-slate-800/60 pt-10">
           <div className="grid sm:grid-cols-3 gap-8 mb-10">
             {FOOTER_GROUPS.map((group) => (
@@ -282,11 +540,13 @@ export default async function AgentsPage() {
               ))}
             </div>
           </div>
+
+          {/* The one deliberate, de-emphasized link back — see file-level comment. */}
+          <p className="text-center text-xs text-slate-400 dark:text-slate-600 mt-8">
+            Building a consumer bill-pay experience instead? <a href="https://abapays.com/" className="underline hover:text-emerald-500">abapays.com</a>
+          </p>
         </footer>
 
-      </div>
-      <div className="w-full max-w-4xl">
-        <AppFooter />
       </div>
     </main>
   );

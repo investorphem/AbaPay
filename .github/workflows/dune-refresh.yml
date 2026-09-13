@@ -1,8 +1,8 @@
 name: Dune dashboard refresh
 
-# ⚡ Re-runs the public Dune dashboards (main, base, celo) every day so none goes stale, plus
-# the single query behind agents.abapays.com's live hero numbers (best-effort, see its own
-# step below — unlike the three dashboards, its failure does not fail this workflow).
+# ⚡ Re-runs the public Dune dashboards (main, base, celo) every day so none goes stale. This
+# also keeps agents.abapays.com's live hero numbers current — they read the `celo` dashboard's
+# own KPI/rail queries directly (src/lib/dune/agentStats.ts), so no separate step is needed.
 #
 # 🔴 WHAT THIS IS AND IS NOT RESPONSIBLE FOR. A Dune dashboard has two independent
 # freshness mechanisms and this workflow only drives one of them:
@@ -150,26 +150,3 @@ jobs:
             echo "::error::Dashboards that did not fully refresh:$failed"
             exit 1
           fi
-
-      # ⚡ SEPARATE STEP, DELIBERATELY — this refreshes dune/agents-page-stats/00_summary.sql,
-      # the one query behind agents.abapays.com's hero numbers (src/lib/dune/agentStats.ts). It
-      # runs at `medium` performance rather than the `free` tier the three dashboards above use
-      # (see the "agents-stats" branch in src/app/api/cron/dune-refresh/route.ts for why), which
-      # is UNVERIFIED against this account's real plan — see that same comment. If this step
-      # goes red, it means exactly one thing: that page's numbers are a day staler than usual
-      # (agentStats.ts falls back to the last successful execution, not an error). It must never
-      # take the three dashboards above down with it, so `continue-on-error: true` — a real
-      # dashboard going stale is worth failing the workflow over; one extra number on one page
-      # is not.
-      - name: Refresh agents.abapays.com live stats
-        continue-on-error: true
-        run: |
-          code=$(curl -sS --max-time 200 -o /tmp/agents-stats.json -w '%{http_code}' -X POST \
-            -H "Authorization: Bearer $CRON_SECRET" \
-            "$APP_URL/api/cron/dune-refresh?dashboard=agents-stats" || echo 000)
-          cat /tmp/agents-stats.json; echo
-          if [ "$code" != "200" ]; then
-            echo "::warning::agents-stats refresh failed (HTTP $code) — agents.abapays.com will keep serving its last successful result, not an error. See the JSON above."
-            exit 1
-          fi
-          echo "agents-stats: refreshed."
