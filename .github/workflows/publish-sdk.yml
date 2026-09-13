@@ -1,0 +1,63 @@
+name: Publish abapay-sdk
+
+# ⚡ PUBLISHES sdk/ TO NPM — a separate release cycle from the main app (which has no npm
+# package of its own; its "v*" tags trigger publish-mcp-registry.yml instead). Uses its own
+# tag prefix, "sdk-v*", specifically so the two workflows never both fire off the same tag.
+#
+# 🔴 REQUIRES AN NPM_TOKEN REPOSITORY SECRET — unlike publish-mcp-registry.yml's GitHub-OIDC
+# auth (no secret needed there because that registry trusts a GitHub Actions identity
+# directly), npm's registry needs a real token: npmjs.com → your account → Access Tokens →
+# Generate New Token → "Automation" (works in CI without 2FA prompts) → add it here as
+# Settings → Secrets and variables → Actions → New repository secret → NPM_TOKEN.
+# npm does support OIDC "trusted publishing" now, but only after a package's first version
+# already exists on the registry and a human configures the trusted-publisher relationship in
+# its settings — so even that path starts with one token-based publish. This workflow always
+# uses the token; switching the already-published package over to trusted publishing later is
+# a separate, optional hardening step, not something this workflow needs to anticipate.
+#
+# First release: bump sdk/package.json's "version", commit, then
+#   git tag sdk-v0.1.0 && git push origin sdk-v0.1.0
+# Nothing enforces that the tag matches package.json's version — keep them in sync by hand,
+# the same discipline any other versioned release needs.
+
+on:
+  push:
+    tags: ["sdk-v*"]
+  workflow_dispatch:
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+
+    defaults:
+      run:
+        working-directory: sdk
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v5
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          registry-url: "https://registry.npmjs.org"
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Typecheck
+        run: npm run typecheck
+
+      - name: Test
+        run: npm test
+
+      - name: Build
+        run: npm run build
+
+      - name: Publish to npm
+        run: npm publish --access public
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
