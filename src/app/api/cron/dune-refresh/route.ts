@@ -2,7 +2,6 @@ import 'server-only';
 import { NextResponse } from 'next/server';
 import baseChainQueryIds from '@/lib/dune/base-query-ids.json';
 import celoChainQueryIds from '@/lib/dune/celo-query-ids.json';
-import agentsStatsQueryId from '@/lib/dune/agents-page-stats-query-id.json';
 import { verifyCronRequest } from '@/utils/cronAuth';
 
 // ⚡ DUNE DASHBOARD REFRESH — re-runs the AbaPay analytics queries so the public dashboards
@@ -312,46 +311,15 @@ async function handle(req: Request) {
 
   const params = new URL(req.url).searchParams;
 
-  // ?dashboard=main (default, back-compatible with the pre-existing crons) | base | celo | agents-stats
+  // ⚡ agents.abapays.com's hero numbers (src/lib/dune/agentStats.ts) deliberately need NO
+  // entry here — they read dune/celo-chain/10_kpi_summary.sql and 12_by_rail.sql directly,
+  // which this route already refreshes daily as part of the `celo` dashboard below. An
+  // earlier version of agentStats.ts combined Celo+Base via its own dedicated query and its
+  // own refresh branch here; going Celo-only (see src/app/agents/page.tsx) removed the need
+  // for both — one less moving part, one less untested performance-tier assumption.
+
+  // ?dashboard=main (default, back-compatible with the pre-existing crons) | base | celo
   const dashboardKey = params.get('dashboard') || 'main';
-
-  // ─── agents-stats: NOT a dashboard, deliberately kept out of the generic flow below ──────
-  //
-  // This refreshes dune/agents-page-stats/00_summary.sql (query 8690659) — the single query
-  // behind agents.abapays.com's hero numbers (src/lib/dune/agentStats.ts). It doesn't fit the
-  // Dashboard shape above: one query, no panel, no sourceTable, and — the reason it isn't
-  // just added to panelQueries on one of the existing dashboards — it needs `medium`, not the
-  // shared `PERFORMANCE` constant everything else in this file uses.
-  //
-  // 🔴 WHY `medium` HERE WHEN THE COMMENT ABOVE SAYS THIS ACCOUNT'S PLAN REJECTED IT: this
-  // query doesn't read a raw chain dataset — it UNIONs two other queries' cached results
-  // (query_8284395, query_8683489), which is cheap regardless of row count. Confirmed
-  // `medium` completes this in well under a minute; confirmed separately that `free` genuinely
-  // times out at Dune's own 2-minute cap for this specific query, so `free` is not a fallback,
-  // it's a guaranteed failure. BUT — same trap as the `PERFORMANCE` constant below: that
-  // confirmation was via this session's own Dune MCP connector, NOT verified against this
-  // route's actual `DUNE_API_KEY`. If this branch starts failing with `HTTP 400` about the
-  // performance tier, that's the account/plan mismatch, not a bug in this code — check
-  // dune.com → the abapay team → Settings → Billing/Plan, same as the note below.
-  //
-  // Failure here is deliberately NOT fatal to the workflow (see dune-refresh.yml) — this is
-  // one extra number on one page, not the dashboards this route exists for. A stale result
-  // just means agentStats.ts keeps serving the last successful execution.
-  if (dashboardKey === 'agents-stats') {
-    const queryId = agentsStatsQueryId.queryId;
-    let s = await execute(apiKey, queryId, 'medium');
-    s = await waitForCompletion(apiKey, s, 90_000);
-    if (!s.completed) {
-      // One retry, same rationale as the generic path's phase 3.
-      s = await execute(apiKey, queryId, 'medium');
-      s = await waitForCompletion(apiKey, s, 90_000);
-    }
-    return NextResponse.json(
-      { ok: !!s.completed, dashboard: 'agents-stats', queries: [s] },
-      { status: s.completed ? 200 : 502 },
-    );
-  }
-
   if (!(dashboardKey in DASHBOARDS)) {
     return NextResponse.json(
       { error: `Unknown dashboard "${dashboardKey}".`, known: Object.keys(DASHBOARDS) },
