@@ -99,7 +99,7 @@ const STACK: { title: string; tag: string; body: string; icon: LucideIcon; href:
     icon: Link2,
     body: "Agent Card discovery + JSON-RPC task server for peer agents.",
     href: "/agents/a2a",
-    verify: { label: "Agent Card", href: "https://abapays.com/.well-known/agent-card.json" },
+    verify: { label: "Agent Card", href: "/.well-known/agent-card.json" },
   },
   {
     title: "MCP",

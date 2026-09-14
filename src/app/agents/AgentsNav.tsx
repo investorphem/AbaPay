@@ -1,7 +1,9 @@
 "use client";
 
+import { useState, useRef, useEffect } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
+import { ChevronDown, FolderGit2 } from "lucide-react";
 
 // ⚡ REAL PAGES, REAL LINKS — the previous version of this nav pointed at #anchors on one long
 // page. Clicking "A2A" now genuinely navigates to /agents/a2a, same as clicking "A2A" on
@@ -17,6 +19,72 @@ const LINKS = [
   { label: "Channels", href: "/agents/channels" },
   { label: "About", href: "/agents/about" },
 ];
+
+// ⚡ THE "DEVELOPERS" MENU — everything here is a real page under /agents/developers/*, not a
+// link off this site. Each row still carries a small GitHub icon (github: below) as a
+// secondary "view the real source" affordance — a way OUT to verify, never the primary way IN.
+const DEVELOPER_LINKS = [
+  { label: "Overview", href: "/agents/developers", github: "https://github.com/investorphem/AbaPay/blob/main/docs/AGENT_INTEGRATION.md" },
+  { label: "Integration guide", href: "/agents/developers/guide", github: "https://github.com/investorphem/AbaPay/blob/main/docs/AGENT_INTEGRATION.md" },
+  { label: "Quickstart script", href: "/agents/developers/quickstart", github: "https://github.com/investorphem/AbaPay/blob/main/examples/agent-quickstart.mjs" },
+  { label: "Docs & FAQ", href: "/docs", github: null },
+];
+
+function DevelopersMenu() {
+  const pathname = usePathname();
+  const [open, setOpen] = useState(false);
+  const ref = useRef<HTMLDivElement>(null);
+  const active = pathname?.startsWith("/agents/developers") || pathname === "/docs";
+
+  useEffect(() => {
+    function onClick(e: MouseEvent) {
+      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false);
+    }
+    document.addEventListener("mousedown", onClick);
+    return () => document.removeEventListener("mousedown", onClick);
+  }, []);
+
+  return (
+    <div ref={ref} className="relative flex-shrink-0">
+      <button
+        onClick={() => setOpen((v) => !v)}
+        aria-expanded={open}
+        className={`flex items-center gap-1 text-xs font-bold uppercase tracking-widest whitespace-nowrap transition-colors ${
+          active ? "text-emerald-600 dark:text-emerald-400" : "text-slate-500 dark:text-slate-400 hover:text-emerald-600 dark:hover:text-emerald-400"
+        }`}
+      >
+        Developers <ChevronDown size={13} className={`transition-transform ${open ? "rotate-180" : ""}`} />
+      </button>
+      {open && (
+        <div className="absolute right-0 sm:left-0 top-full mt-3 w-64 bg-white dark:bg-[#111114] border border-slate-100 dark:border-slate-800/60 rounded-2xl shadow-lg py-2 z-20">
+          {DEVELOPER_LINKS.map((l) => (
+            <div key={l.label} className="flex items-center justify-between gap-2 px-2">
+              <Link
+                href={l.href}
+                onClick={() => setOpen(false)}
+                className="flex-1 px-2 py-2 rounded-lg text-sm font-bold text-slate-700 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-white/[0.03] hover:text-emerald-600 dark:hover:text-emerald-400 transition-colors"
+              >
+                {l.label}
+              </Link>
+              {l.github && (
+                <a
+                  href={l.github}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  title="View source on GitHub"
+                  aria-label={`View "${l.label}" source on GitHub`}
+                  className="p-1.5 text-slate-300 dark:text-slate-600 hover:text-slate-600 dark:hover:text-slate-300 flex-shrink-0"
+                >
+                  <FolderGit2 size={14} />
+                </a>
+              )}
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
 
 export default function AgentsNav() {
   const pathname = usePathname();
@@ -41,6 +109,7 @@ export default function AgentsNav() {
           </Link>
         );
       })}
+      <DevelopersMenu />
     </nav>
   );
 }

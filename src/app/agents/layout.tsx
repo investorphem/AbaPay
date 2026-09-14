@@ -1,4 +1,5 @@
 import Link from "next/link";
+import Image from "next/image";
 import AgentsNav from "./AgentsNav";
 import AgentsFooter from "./AgentsFooter";
 import ThemeToggle from "./ThemeToggle";
@@ -14,6 +15,7 @@ export default function AgentsLayout({ children }: { children: React.ReactNode }
 
         <div className="flex items-center justify-between gap-4 mb-8">
           <Link href="/agents" className="flex items-center gap-2 font-black tracking-tight text-lg text-slate-900 dark:text-white flex-shrink-0">
+            <Image src="/logo.png" alt="" width={28} height={28} className="object-contain" priority />
             AbaPay <span className="text-emerald-500">Rails</span>
           </Link>
           <AgentsNav />
