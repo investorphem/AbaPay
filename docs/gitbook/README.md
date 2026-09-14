@@ -1,5 +1,9 @@
 # Introduction
 
+> 🔗 **[agents.abapays.com](https://agents.abapays.com)** — the live, interactive site this
+> handbook documents. Every protocol, endpoint and contract address below is also demoed
+> there with a real signing flow.
+
 AbaPay is non-custodial stablecoin settlement infrastructure for real-world bills — airtime,
 mobile data, electricity, cable, education — reachable by any agent that can hold a Celo
 wallet or speak MCP. This handbook is the developer reference for building against it.
