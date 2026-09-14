@@ -5,7 +5,7 @@ site:
     - type: space
       key: handbook
       title: AbaPay Rails Handbook
-      path: ""
+      path: handbook
       default: true
       content:
         directory: ./
