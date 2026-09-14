@@ -16,8 +16,8 @@ an API key, sets an on-chain allowance, and calls `check_balance`, against produ
 wallet-signature auth and MCP call are verified live (see the file's own header); this prose
 walkthrough is for when you want to understand each step, not just run it.
 
-**Using TypeScript already?** [`sdk/`](../sdk) (`abapay-sdk` on npm, pending its first publish
-— clone the repo and import from `sdk/src` until then) wraps both paths below into two
+**Using TypeScript already?** `npm install abapay-sdk viem` ([source](../sdk),
+[npm](https://www.npmjs.com/package/abapay-sdk)) wraps both paths below into two
 functions: `payBillViaX402` and the `AbaPayAgent` class. Everything past this point is what
 those two functions do internally, not a separate protocol — read on if you want to understand
 or reimplement the wire format yourself.

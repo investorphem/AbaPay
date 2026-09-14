@@ -115,7 +115,7 @@ const STACK: { title: string; tag: string; body: string; icon: LucideIcon; href:
     icon: Rocket,
     body: "abapay-sdk wraps x402 signing and the MCP catalog into two functions.",
     href: "/agents/sdk",
-    verify: { label: "Source", href: "https://github.com/investorphem/AbaPay/tree/main/sdk" },
+    verify: { label: "npm", href: "https://www.npmjs.com/package/abapay-sdk" },
   },
   {
     title: "Channels",
