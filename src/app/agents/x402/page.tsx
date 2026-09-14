@@ -95,7 +95,7 @@ export default function X402Page() {
 }`}</pre>
         </div>
         <p className="text-xs text-slate-400 dark:text-slate-500 mt-4">
-          Both USDC (<code className="text-slate-500">{CELO_USDC.slice(0, 10)}…</code>) and USD₮ settle via Celo&apos;s own x402 facilitator — each implements EIP-3009. Full field reference: <a href="https://abapays.com/openapi.json" className="underline hover:text-emerald-500">openapi.json</a>.
+          Both USDC (<code className="text-slate-500">{CELO_USDC.slice(0, 10)}…</code>) and USD₮ settle via Celo&apos;s own x402 facilitator — each implements EIP-3009. Full field reference: <a href="/openapi.json" className="underline hover:text-emerald-500">openapi.json</a>.
         </p>
       </section>
 

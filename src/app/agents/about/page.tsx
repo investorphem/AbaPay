@@ -48,7 +48,7 @@ export default function AboutPage() {
         <h2 className="font-black text-slate-900 dark:text-white mb-3">Where to reach us</h2>
         <ul className="text-sm text-slate-600 dark:text-slate-300 space-y-1.5">
           <li>Support: <a href="mailto:support@abapays.com" className="underline hover:text-emerald-500">support@abapays.com</a></li>
-          <li>Legal: <a href="https://abapays.com/terms" className="underline hover:text-emerald-500">Terms</a> · <a href="https://abapays.com/privacy" className="underline hover:text-emerald-500">Privacy</a></li>
+          <li>Legal: <a href="/terms" className="underline hover:text-emerald-500">Terms</a> · <a href="/privacy" className="underline hover:text-emerald-500">Privacy</a></li>
           <li>Source: <a href="https://github.com/investorphem/AbaPay" className="underline hover:text-emerald-500">github.com/investorphem/AbaPay</a> (MIT)</li>
         </ul>
       </section>

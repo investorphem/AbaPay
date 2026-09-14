@@ -34,7 +34,7 @@ export default function A2APage() {
       <section className="grid sm:grid-cols-2 gap-4 mb-6">
         <div className="bg-white dark:bg-[#111114] border border-slate-100 dark:border-slate-800/60 rounded-2xl p-5">
           <div className="text-[10px] font-black uppercase tracking-widest text-slate-400 dark:text-slate-500 mb-1">Agent Card</div>
-          <a href="https://abapays.com/.well-known/agent-card.json" className="text-xs font-mono text-emerald-600 dark:text-emerald-400 hover:underline break-all">abapays.com/.well-known/agent-card.json</a>
+          <a href="/.well-known/agent-card.json" className="text-xs font-mono text-emerald-600 dark:text-emerald-400 hover:underline break-all">abapays.com/.well-known/agent-card.json</a>
         </div>
         <div className="bg-white dark:bg-[#111114] border border-slate-100 dark:border-slate-800/60 rounded-2xl p-5">
           <div className="text-[10px] font-black uppercase tracking-widest text-slate-400 dark:text-slate-500 mb-1">JSON-RPC endpoint</div>

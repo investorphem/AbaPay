@@ -9,14 +9,22 @@ import type { LucideIcon } from "lucide-react";
 // component's predecessor had: this page's own resource footer sat directly above the shared
 // consumer-app AppFooter). AppFooter itself is still never used anywhere under /agents/* —
 // this page owns its own, standalone.
-const FOOTER_GROUPS: { title: string; links: { label: string; href: string; icon: LucideIcon }[] }[] = [
+//
+// ⚡ "Developers" ROWS ARE IN-SITE PAGES, NOT GITHUB LINKS. Each optionally carries a small
+// `github` URL rendered as a secondary icon next to it — see how the row is drawn below. The
+// primary click target is always the real page; GitHub is only ever the "verify the source"
+// escape hatch, matching how /agents/developers itself is built.
+const FOOTER_GROUPS: {
+  title: string;
+  links: { label: string; href: string; icon: LucideIcon; github?: string }[];
+}[] = [
   {
     title: "Developers",
     links: [
-      { label: "Agent Integration Guide", href: "https://github.com/investorphem/AbaPay/blob/main/docs/AGENT_INTEGRATION.md", icon: BookOpen },
-      { label: "Quickstart script", href: "https://github.com/investorphem/AbaPay/blob/main/examples/agent-quickstart.mjs", icon: Terminal },
-      { label: "OpenAPI reference", href: "https://abapays.com/openapi.json", icon: Layers },
-      { label: "Docs & FAQ", href: "https://abapays.com/docs", icon: FileText },
+      { label: "Integration Guide", href: "/agents/developers/guide", icon: BookOpen, github: "https://github.com/investorphem/AbaPay/blob/main/docs/AGENT_INTEGRATION.md" },
+      { label: "Quickstart script", href: "/agents/developers/quickstart", icon: Terminal, github: "https://github.com/investorphem/AbaPay/blob/main/examples/agent-quickstart.mjs" },
+      { label: "OpenAPI reference", href: "/openapi.json", icon: Layers },
+      { label: "Docs & FAQ", href: "/docs", icon: FileText },
     ],
   },
   {
@@ -25,15 +33,15 @@ const FOOTER_GROUPS: { title: string; links: { label: string; href: string; icon
       { label: "GitHub repository", href: "https://github.com/investorphem/AbaPay", icon: FolderGit2 },
       { label: "MCP Registry listing", href: "https://registry.modelcontextprotocol.io/v0.1/servers?search=io.github.investorphem/abapay", icon: Bot },
       { label: "ERC-8004 identity", href: "https://8004scan.io/agents/celo/9760", icon: Fingerprint },
-      { label: "Agent Card", href: "https://abapays.com/.well-known/agent-card.json", icon: Network },
+      { label: "Agent Card", href: "/.well-known/agent-card.json", icon: Network },
     ],
   },
   {
     title: "Company",
     links: [
-      { label: "About Masonode Technologies", href: "https://abapays.com/masonode", icon: Building2 },
-      { label: "Terms", href: "https://abapays.com/terms", icon: FileText },
-      { label: "Privacy", href: "https://abapays.com/privacy", icon: ShieldCheck },
+      { label: "About", href: "/agents/about", icon: Building2 },
+      { label: "Terms", href: "/terms", icon: FileText },
+      { label: "Privacy", href: "/privacy", icon: ShieldCheck },
       { label: "Support", href: "mailto:support@abapays.com", icon: Mail },
     ],
   },
@@ -69,19 +77,27 @@ export default function AgentsFooter() {
           <div key={group.title}>
             <h3 className="text-[11px] font-black uppercase tracking-widest text-slate-400 dark:text-slate-500 mb-3 px-1">{group.title}</h3>
             <ul className="space-y-0.5">
-              {group.links.map((l) => (
-                <li key={l.label}>
-                  <a
-                    href={l.href}
-                    target={l.href.startsWith("mailto:") ? undefined : "_blank"}
-                    rel={l.href.startsWith("mailto:") ? undefined : "noopener noreferrer"}
-                    className="flex items-center gap-2.5 py-2 px-1 rounded-lg text-sm text-slate-600 dark:text-slate-400 hover:text-emerald-600 dark:hover:text-emerald-400 hover:bg-slate-50 dark:hover:bg-white/[0.02] transition-colors"
-                  >
-                    <l.icon size={14} className="flex-shrink-0 text-slate-400 dark:text-slate-600" />
-                    <span className="truncate">{l.label}</span>
-                  </a>
-                </li>
-              ))}
+              {group.links.map((l) => {
+                const isExternal = l.href.startsWith("http");
+                return (
+                  <li key={l.label} className="flex items-center gap-1">
+                    <a
+                      href={l.href}
+                      target={isExternal ? "_blank" : undefined}
+                      rel={isExternal ? "noopener noreferrer" : undefined}
+                      className="flex-1 min-w-0 flex items-center gap-2.5 py-2 px-1 rounded-lg text-sm text-slate-600 dark:text-slate-400 hover:text-emerald-600 dark:hover:text-emerald-400 hover:bg-slate-50 dark:hover:bg-white/[0.02] transition-colors"
+                    >
+                      <l.icon size={14} className="flex-shrink-0 text-slate-400 dark:text-slate-600" />
+                      <span className="truncate">{l.label}</span>
+                    </a>
+                    {l.github && (
+                      <a href={l.github} target="_blank" rel="noopener noreferrer" title="View source on GitHub" className="p-1.5 text-slate-300 dark:text-slate-600 hover:text-slate-600 dark:hover:text-slate-300 flex-shrink-0">
+                        <FolderGit2 size={13} />
+                      </a>
+                    )}
+                  </li>
+                );
+              })}
             </ul>
           </div>
         ))}

@@ -28,11 +28,14 @@ import { NextResponse, type NextRequest } from 'next/server';
 // So every path gets prefixed with /agents EXCEPT: paths already under /agents (avoid double-
 // prefixing when someone follows a stray abapays.com/agents/... link onto this host), /api
 // (MCP, x402, the REST surface — real endpoints, must resolve exactly as-is), /.well-known
-// (the Agent Card, OAuth discovery), and anything that looks like a static file (has a dot in
-// its last segment — favicon.ico, logo.png, robots.txt, an opengraph-image route) since those
-// are served from their real path regardless of which "page" is asking for them.
+// (the Agent Card, OAuth discovery), /docs /terms /privacy /receipt (real shared pages a
+// developer landing on this domain legitimately wants — and, just as importantly, letting them
+// resolve AS-IS means a relative link to them from an /agents/* page stays on this host instead
+// of bouncing to abapays.com), and anything that looks like a static file (has a dot in its
+// last segment — favicon.ico, logo.png, robots.txt, an opengraph-image route) since those are
+// served from their real path regardless of which "page" is asking for them.
 const AGENT_HOSTS = new Set(['agents.abapays.com', 'rails.abapays.com']);
-const AGENT_HOST_SKIP = /^\/(api|\.well-known|agents)(\/|$)/;
+const AGENT_HOST_SKIP = /^\/(api|\.well-known|agents|docs|terms|privacy|receipt)(\/|$)/;
 const LOOKS_LIKE_STATIC_FILE = /\.[a-zA-Z0-9]+$/;
 
 export function middleware(req: NextRequest) {
