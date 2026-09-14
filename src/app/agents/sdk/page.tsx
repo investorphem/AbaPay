@@ -1,6 +1,6 @@
 import type { Metadata } from "next";
 import Link from "next/link";
-import { ArrowLeft } from "lucide-react";
+import { ArrowLeft, PackageCheck } from "lucide-react";
 
 export const metadata: Metadata = {
   title: "abapay-sdk — TypeScript Client",
@@ -22,9 +22,20 @@ export default function SDKPage() {
         </p>
       </div>
 
-      <div className="bg-amber-50 dark:bg-amber-900/10 border border-amber-100 dark:border-amber-900/30 rounded-2xl p-4 mb-6 text-sm text-amber-800 dark:text-amber-300">
-        Not yet on npm — the package is built, tested, and reviewable on GitHub today; publishing needs one setup step only AbaPay&apos;s maintainer can do. Until then, clone the repo and import from <code className="text-amber-900 dark:text-amber-200">sdk/src</code> directly.
-      </div>
+      <a
+        href="https://www.npmjs.com/package/abapay-sdk"
+        target="_blank"
+        rel="noopener noreferrer"
+        className="flex items-center justify-between gap-3 bg-emerald-50 dark:bg-emerald-900/10 border border-emerald-100 dark:border-emerald-900/30 rounded-2xl p-4 mb-6 hover:border-emerald-200 dark:hover:border-emerald-800/50 transition-colors"
+      >
+        <div className="flex items-center gap-3">
+          <PackageCheck size={18} className="text-emerald-600 dark:text-emerald-400 flex-shrink-0" />
+          <span className="text-sm text-emerald-800 dark:text-emerald-300">
+            Live on npm — <code className="text-emerald-900 dark:text-emerald-200">npm install abapay-sdk viem</code>
+          </span>
+        </div>
+        <span className="text-xs font-bold text-emerald-600 dark:text-emerald-400 flex-shrink-0">npmjs.com →</span>
+      </a>
 
       <section className="bg-white dark:bg-[#111114] border border-slate-100 dark:border-slate-800/60 rounded-[2rem] p-6 sm:p-8 mb-6">
         <h2 className="font-black text-slate-900 dark:text-white mb-1.5">Zero setup: payBillViaX402</h2>
