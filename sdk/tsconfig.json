@@ -1,7 +1,12 @@
 {
   "compilerOptions": {
     "target": "ES2022",
-    "lib": ["ES2022"],
+    // DOM for fetch/Response/TextEncoder/btoa/crypto.getRandomValues — this package is
+    // isomorphic (browser, edge, Node 18+ all implement these natively; see x402.ts's own
+    // runtime-agnostic base64 helper), so it typechecks against the web-standard globals, not
+    // Node-specific ones. @types/node (devDependency below) adds the one Node-only global
+    // actually referenced (Buffer, feature-detected at runtime, never required).
+    "lib": ["ES2022", "DOM"],
     "module": "ESNext",
     "moduleResolution": "Bundler",
     "strict": true,
