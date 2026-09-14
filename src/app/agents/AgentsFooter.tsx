@@ -1,6 +1,5 @@
 import {
-  Bot, ShieldCheck, Layers, Fingerprint, FolderGit2, BookOpen, Terminal,
-  FileText, Building2, Mail, Send, Network,
+  Bot, ShieldCheck, Fingerprint, FolderGit2, FileText, Building2, Mail, Send, Network,
 } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 
@@ -10,23 +9,14 @@ import type { LucideIcon } from "lucide-react";
 // consumer-app AppFooter). AppFooter itself is still never used anywhere under /agents/* —
 // this page owns its own, standalone.
 //
-// ⚡ "Developers" ROWS ARE IN-SITE PAGES, NOT GITHUB LINKS. Each optionally carries a small
-// `github` URL rendered as a secondary icon next to it — see how the row is drawn below. The
-// primary click target is always the real page; GitHub is only ever the "verify the source"
-// escape hatch, matching how /agents/developers itself is built.
+// ⚡ NO "Developers" COLUMN HERE, DELIBERATELY — AgentsNav's header dropdown already covers
+// Overview / Integration Guide / Quickstart / Docs & FAQ. Repeating that list down here was
+// the exact kind of duplication a footer is supposed to avoid; the two remaining columns
+// (Verify, Company) don't overlap with the header at all, so they stay.
 const FOOTER_GROUPS: {
   title: string;
   links: { label: string; href: string; icon: LucideIcon; github?: string }[];
 }[] = [
-  {
-    title: "Developers",
-    links: [
-      { label: "Integration Guide", href: "/agents/developers/guide", icon: BookOpen, github: "https://github.com/investorphem/AbaPay/blob/main/docs/AGENT_INTEGRATION.md" },
-      { label: "Quickstart script", href: "/agents/developers/quickstart", icon: Terminal, github: "https://github.com/investorphem/AbaPay/blob/main/examples/agent-quickstart.mjs" },
-      { label: "OpenAPI reference", href: "/openapi.json", icon: Layers },
-      { label: "Docs & FAQ", href: "/docs", icon: FileText },
-    ],
-  },
   {
     title: "Verify",
     links: [
@@ -34,6 +24,7 @@ const FOOTER_GROUPS: {
       { label: "MCP Registry listing", href: "https://registry.modelcontextprotocol.io/v0.1/servers?search=io.github.investorphem/abapay", icon: Bot },
       { label: "ERC-8004 identity", href: "https://8004scan.io/agents/celo/9760", icon: Fingerprint },
       { label: "Agent Card", href: "/.well-known/agent-card.json", icon: Network },
+      { label: "OpenAPI reference", href: "/openapi.json", icon: FileText },
     ],
   },
   {
@@ -72,7 +63,7 @@ const SOCIALS = [
 export default function AgentsFooter() {
   return (
     <footer className="border-t border-slate-200 dark:border-slate-800/60 pt-10 mt-14">
-      <div className="grid sm:grid-cols-3 gap-8 mb-10">
+      <div className="grid sm:grid-cols-2 gap-8 mb-10">
         {FOOTER_GROUPS.map((group) => (
           <div key={group.title}>
             <h3 className="text-[11px] font-black uppercase tracking-widest text-slate-400 dark:text-slate-500 mb-3 px-1">{group.title}</h3>

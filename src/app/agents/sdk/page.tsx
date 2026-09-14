@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import Link from "next/link";
 import { ArrowLeft, PackageCheck } from "lucide-react";
+import CopyBlock from "../CopyBlock";
 
 export const metadata: Metadata = {
   title: "abapay-sdk — TypeScript Client",
@@ -40,8 +41,8 @@ export default function SDKPage() {
       <section className="bg-white dark:bg-[#111114] border border-slate-100 dark:border-slate-800/60 rounded-[2rem] p-6 sm:p-8 mb-6">
         <h2 className="font-black text-slate-900 dark:text-white mb-1.5">Zero setup: payBillViaX402</h2>
         <p className="text-sm text-slate-500 dark:text-slate-400 mb-4">Fetches the 402 challenge, signs it, retries, returns the settlement.</p>
-        <div className="bg-[#0b0d0f] rounded-2xl border border-slate-800 overflow-hidden font-mono text-[11px] leading-relaxed">
-          <pre className="p-4 text-slate-300 overflow-x-auto whitespace-pre">{`import { privateKeyToAccount } from "viem/accounts";
+        <CopyBlock
+          code={`import { privateKeyToAccount } from "viem/accounts";
 import { payBillViaX402 } from "abapay-sdk";
 
 const account = privateKeyToAccount(process.env.PRIVATE_KEY);
@@ -55,28 +56,28 @@ const result = await payBillViaX402({
   },
 });
 
-console.log(result.status, result.tx_hash);`}</pre>
-        </div>
+console.log(result.status, result.tx_hash);`}
+        />
       </section>
 
       <section className="bg-white dark:bg-[#111114] border border-slate-100 dark:border-slate-800/60 rounded-[2rem] p-6 sm:p-8 mb-6">
         <h2 className="font-black text-slate-900 dark:text-white mb-1.5">Linked wallet: AbaPayAgent</h2>
         <p className="text-sm text-slate-500 dark:text-slate-400 mb-4">Links once, sets the PIN in that same call, then reuses the api_key for the full tool catalog.</p>
-        <div className="bg-[#0b0d0f] rounded-2xl border border-slate-800 overflow-hidden font-mono text-[11px] leading-relaxed">
-          <pre className="p-4 text-slate-300 overflow-x-auto whitespace-pre">{`import { privateKeyToAccount } from "viem/accounts";
+        <CopyBlock
+          code={`import { privateKeyToAccount } from "viem/accounts";
 import { AbaPayAgent } from "abapay-sdk";
 
 const account = privateKeyToAccount(process.env.PRIVATE_KEY);
 
-// One-time — no browser, PIN chosen right here.
+// One-time -- no browser, PIN chosen right here.
 const agent = await AbaPayAgent.link({ signer: account, pin: "1234" });
 
 console.log(await agent.checkBalance());
 await agent.payBill({
   pin: "1234", service: "AIRTIME", provider: "mtn",
   account_number: "08012345678", amount_ngn: 1000,
-});`}</pre>
-        </div>
+});`}
+        />
       </section>
 
       <section className="bg-white dark:bg-[#111114] border border-slate-100 dark:border-slate-800/60 rounded-[2rem] p-6 sm:p-8">

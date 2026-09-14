@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import Link from "next/link";
 import { Ban, ArrowLeft } from "lucide-react";
+import CopyBlock from "../CopyBlock";
 
 export const metadata: Metadata = {
   title: "x402 — Zero-Setup Agent Payments",
@@ -62,18 +63,21 @@ export default function X402Page() {
 
       <section className="bg-white dark:bg-[#111114] border border-slate-100 dark:border-slate-800/60 rounded-[2rem] p-6 sm:p-8 mb-6">
         <h2 className="font-black text-slate-900 dark:text-white mb-4">Request &amp; response</h2>
-        <div className="bg-[#0b0d0f] rounded-2xl border border-slate-800 overflow-hidden font-mono text-[11px] leading-relaxed mb-4">
-          <div className="px-4 py-2.5 border-b border-slate-800 bg-white/[0.02] text-slate-400">POST /api/pay/x402 — no X-PAYMENT header yet</div>
-          <pre className="p-4 text-slate-300 overflow-x-auto whitespace-pre">{`{
+        <div className="mb-4">
+          <CopyBlock
+            label="POST /api/pay/x402 — no X-PAYMENT header yet"
+            code={`{
   "serviceID": "mtn", "serviceCategory": "AIRTIME",
   "network": "MTN", "billersCode": "08012345678",
   "nairaAmount": 1000, "token": "USDT",
   "blockchain": "CELO", "wallet_address": "0xYourAgentWallet..."
-}`}</pre>
+}`}
+          />
         </div>
-        <div className="bg-[#0b0d0f] rounded-2xl border border-slate-800 overflow-hidden font-mono text-[11px] leading-relaxed mb-4">
-          <div className="px-4 py-2.5 border-b border-slate-800 bg-white/[0.02] text-slate-400">← 402 Payment Required (real field names)</div>
-          <pre className="p-4 text-slate-300 overflow-x-auto whitespace-pre">{`{
+        <div className="mb-4">
+          <CopyBlock
+            label="← 402 Payment Required (real field names)"
+            code={`{
   "x402Version": 1,
   "error": "Payment required",
   "accepts": [{
@@ -84,16 +88,17 @@ export default function X402Page() {
     "maxTimeoutSeconds": 86400,
     "extra": { "name": "Tether USD", "version": "1", "primaryType": "TransferWithAuthorization" }
   }]
-}`}</pre>
+}`}
+          />
         </div>
-        <div className="bg-[#0b0d0f] rounded-2xl border border-slate-800 overflow-hidden font-mono text-[11px] leading-relaxed">
-          <div className="px-4 py-2.5 border-b border-slate-800 bg-white/[0.02] text-slate-400">POST /api/pay/x402 -H X-PAYMENT: &lt;base64 signed authorization&gt; → 200 OK</div>
-          <pre className="p-4 text-slate-300 overflow-x-auto whitespace-pre">{`{
+        <CopyBlock
+          label="POST /api/pay/x402 -H X-PAYMENT: <base64 signed authorization> → 200 OK"
+          code={`{
   "success": true, "status": "SUCCESS",
   "tx_hash": "0x91a3...4f2c", "request_id": "req_...",
   "purchased_code": null, "units": null
-}`}</pre>
-        </div>
+}`}
+        />
         <p className="text-xs text-slate-400 dark:text-slate-500 mt-4">
           Both USDC (<code className="text-slate-500">{CELO_USDC.slice(0, 10)}…</code>) and USD₮ settle via Celo&apos;s own x402 facilitator — each implements EIP-3009. Full field reference: <a href="/openapi.json" className="underline hover:text-emerald-500">openapi.json</a>.
         </p>

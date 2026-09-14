@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import Link from "next/link";
 import { KeyRound, ArrowLeft, CheckCircle2 } from "lucide-react";
+import CopyBlock from "../CopyBlock";
 
 export const metadata: Metadata = {
   title: "A2A — Agents Talking to Agents",
@@ -74,9 +75,9 @@ export default function A2APage() {
             </div>
           </div>
         </div>
-        <div className="bg-[#0b0d0f] rounded-2xl border border-slate-800 overflow-hidden font-mono text-[11px] leading-relaxed">
-          <div className="px-4 py-2.5 border-b border-slate-800 bg-white/[0.02] text-slate-400">POST /api/agent/link — real fields, verified live 2026-09-11</div>
-          <pre className="p-4 text-slate-300 overflow-x-auto whitespace-pre">{`headers: {
+        <CopyBlock
+          label="POST /api/agent/link — real fields, verified live 2026-09-11"
+          code={`headers: {
   "x-wallet-address": "0xYourAgentWallet...",
   "x-wallet-signature": "<personal_sign over the request>",
   "x-wallet-timestamp": "1234567890"
@@ -84,11 +85,11 @@ export default function A2APage() {
 body: {
   "wallet_address": "0xYourAgentWallet...",
   "channel": "MCP",
-  "pin": "1234",              // ← you choose it, right here
+  "pin": "1234",
   "approved_chain": "CELO"
 }
-→ { "success": true, "api_key": "aba_mcp_..." }`}</pre>
-        </div>
+-> { "success": true, "api_key": "aba_mcp_..." }`}
+        />
         <p className="text-xs text-slate-400 dark:text-slate-500 mt-4">
           Full runnable version: <a href="https://github.com/investorphem/AbaPay/blob/main/examples/agent-quickstart.mjs" className="underline hover:text-emerald-500">examples/agent-quickstart.mjs</a>. Or skip the wire format entirely: <Link href="/agents/sdk" className="underline hover:text-emerald-500">AbaPayAgent.link()</Link> in the SDK does this in one line.
         </p>
