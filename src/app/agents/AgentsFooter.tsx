@@ -1,5 +1,5 @@
 import {
-  Bot, ShieldCheck, Fingerprint, FolderGit2, FileText, Building2, Mail, Send, Network,
+  Bot, ShieldCheck, Fingerprint, FolderGit2, FileText, Building2, Mail, Send, Network, BookOpen,
 } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 
@@ -25,6 +25,7 @@ const FOOTER_GROUPS: {
       { label: "ERC-8004 identity", href: "https://8004scan.io/agents/celo/9760", icon: Fingerprint },
       { label: "Agent Card", href: "/.well-known/agent-card.json", icon: Network },
       { label: "OpenAPI reference", href: "/openapi.json", icon: FileText },
+      { label: "Full Handbook", href: "https://docs.abapays.com", icon: BookOpen },
     ],
   },
   {

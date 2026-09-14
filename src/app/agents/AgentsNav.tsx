@@ -29,6 +29,10 @@ const DEVELOPER_LINKS = [
   { label: "Integration guide", href: "/agents/developers/guide", github: "https://github.com/investorphem/AbaPay/blob/main/docs/AGENT_INTEGRATION.md" },
   { label: "Quickstart script", href: "/agents/developers/quickstart", github: "https://github.com/investorphem/AbaPay/blob/main/examples/agent-quickstart.mjs" },
   { label: "Docs & FAQ", href: "/docs", github: null },
+  // ⚡ The one deliberate exit off this domain in this menu — the 12-chapter handbook lives
+  // on its own GitBook-hosted site (synced from docs/gitbook/ in this repo), not as a subpage
+  // here. github points at that same source folder, same pattern as every other row.
+  { label: "Full Handbook", href: "https://docs.abapays.com", github: "https://github.com/investorphem/AbaPay/tree/main/docs/gitbook", external: true },
 ];
 
 function DevelopersMenu() {
@@ -60,13 +64,25 @@ function DevelopersMenu() {
         <div className="absolute right-0 sm:left-0 top-full mt-3 w-64 bg-white dark:bg-[#111114] border border-slate-100 dark:border-slate-800/60 rounded-2xl shadow-lg py-2 z-20">
           {DEVELOPER_LINKS.map((l) => (
             <div key={l.label} className="flex items-center justify-between gap-2 px-2">
-              <Link
-                href={l.href}
-                onClick={() => setOpen(false)}
-                className="flex-1 px-2 py-2 rounded-lg text-sm font-bold text-slate-700 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-white/[0.03] hover:text-emerald-600 dark:hover:text-emerald-400 transition-colors"
-              >
-                {l.label}
-              </Link>
+              {l.external ? (
+                <a
+                  href={l.href}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  onClick={() => setOpen(false)}
+                  className="flex-1 px-2 py-2 rounded-lg text-sm font-bold text-slate-700 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-white/[0.03] hover:text-emerald-600 dark:hover:text-emerald-400 transition-colors"
+                >
+                  {l.label}
+                </a>
+              ) : (
+                <Link
+                  href={l.href}
+                  onClick={() => setOpen(false)}
+                  className="flex-1 px-2 py-2 rounded-lg text-sm font-bold text-slate-700 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-white/[0.03] hover:text-emerald-600 dark:hover:text-emerald-400 transition-colors"
+                >
+                  {l.label}
+                </Link>
+              )}
               {l.github && (
                 <a
                   href={l.github}
