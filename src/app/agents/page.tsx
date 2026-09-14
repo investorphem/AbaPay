@@ -110,6 +110,14 @@ const STACK: { title: string; tag: string; body: string; icon: LucideIcon; href:
     verify: { label: "Registry listing", href: "https://registry.modelcontextprotocol.io/v0.1/servers?search=io.github.investorphem/abapay" },
   },
   {
+    title: "API",
+    tag: "PLAIN HTTP",
+    icon: Layers,
+    body: "OpenAPI 3.1 reference for the same settlement endpoint — no protocol wrapper required.",
+    href: "/agents/api",
+    verify: { label: "openapi.json", href: "/openapi.json" },
+  },
+  {
     title: "SDK",
     tag: "TYPESCRIPT",
     icon: Rocket,

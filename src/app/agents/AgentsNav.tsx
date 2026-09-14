@@ -15,6 +15,7 @@ const LINKS = [
   { label: "x402", href: "/agents/x402" },
   { label: "A2A", href: "/agents/a2a" },
   { label: "MCP", href: "/agents/mcp" },
+  { label: "API", href: "/agents/api" },
   { label: "SDK", href: "/agents/sdk" },
   { label: "Channels", href: "/agents/channels" },
   { label: "About", href: "/agents/about" },

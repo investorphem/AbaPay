@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import Link from "next/link";
 import { ArrowLeft, FolderGit2, ShieldCheck, Ban, RefreshCw } from "lucide-react";
+import CopyBlock from "../../CopyBlock";
 
 export const metadata: Metadata = {
   title: "Integration Guide — AbaPay Rails",
@@ -42,6 +43,30 @@ export default function GuidePage() {
           <li className="flex gap-2"><span className="text-emerald-500 flex-shrink-0">•</span> Tokens move directly from the payer&apos;s wallet to the settlement contract in the same transaction that decrements the allowance — no intermediate AbaPay-controlled balance for them to sit in.</li>
           <li className="flex gap-2"><span className="text-emerald-500 flex-shrink-0">•</span> Setting a spending allowance can only ever be called by the wallet setting its own allowance — no owner/admin path exists for AbaPay&apos;s backend to grant itself more room on anyone&apos;s account.</li>
         </ul>
+        <p className="text-xs text-slate-400 dark:text-slate-500 mb-3">The actual checks, verbatim from <code className="text-slate-500">contracts/AbaPayV4.sol</code>:</p>
+        <CopyBlock
+          code={`function payBillFor(address user, address tokenAddress, ..., uint256 amount)
+    external onlyRelayer whenNotPaused nonReentrant
+{
+    uint256 perTxCap = maxAgentPaymentPerTx[tokenAddress];
+    if (amount > perTxCap) revert ExceedsMaxAgentPayment(amount, perTxCap);
+
+    uint256 remaining = spendingAllowance[user][tokenAddress];
+    if (amount > remaining) revert ExceedsSpendingAllowance(amount, remaining);
+
+    // EFFECTS BEFORE INTERACTIONS: burn the allowance first, so a reentrant
+    // token cannot spend the same allowance twice.
+    spendingAllowance[user][tokenAddress] = remaining - amount;
+
+    uint256 received = _pull(tokenAddress, user, amount);
+    emit PaymentReceived(user, tokenAddress, serviceType, accountNumber, received);
+}
+
+function setSpendingAllowance(address tokenAddress, uint256 amount) external {
+    // msg.sender only -- no owner/relayer path raises anyone else's allowance.
+    spendingAllowance[msg.sender][tokenAddress] = amount;
+}`}
+        />
         <p className="text-xs text-slate-400 dark:text-slate-500 mt-4">
           This matches the framing already published at <a href="/terms" className="underline hover:text-emerald-500">/terms</a>: AbaPay operates as a non-custodial software protocol / technology interface, not a custodian, with no access to any wallet&apos;s private keys. (/terms also covers AML monitoring and is explicitly not represented as lawyer-reviewed — read it directly for anything you need to rely on legally.)
         </p>
@@ -78,6 +103,19 @@ export default function GuidePage() {
           <li className="flex gap-2"><span className="text-emerald-500 flex-shrink-0">•</span> <strong className="text-slate-900 dark:text-white">Per-credential rate limiting</strong> — every money-moving call is rate-limited per API key, on top of the PIN requirement.</li>
           <li className="flex gap-2"><span className="text-emerald-500 flex-shrink-0">•</span> <strong className="text-slate-900 dark:text-white">PIN lockout</strong> — escalating lockout on repeated failed PIN attempts.</li>
         </ul>
+        <p className="text-xs text-slate-400 dark:text-slate-500 mb-3">The two contract-level switches, verbatim:</p>
+        <CopyBlock
+          code={`/// Instantly disables the agent-initiated path system-wide, on-chain --
+/// independent of anything the backend does. A compromised backend
+/// cannot re-enable itself.
+function setRelayer(address newRelayer) external onlyOwner {
+    relayer = newRelayer;
+}
+
+/// payBillFor reverts while paused. Refunds deliberately stay callable
+/// so anyone already charged can still be made whole.
+function pause() external onlyOwner { _pause(); }`}
+        />
         <p className="text-xs text-slate-400 dark:text-slate-500 mt-4 max-w-2xl">
           None of these live only in the web app — they&apos;re enforced by the same code path (or the contract itself) regardless of which channel or credential is calling in, MCP and A2A included.
         </p>

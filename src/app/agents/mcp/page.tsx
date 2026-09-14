@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import Link from "next/link";
 import { ArrowLeft } from "lucide-react";
+import CopyBlock from "../CopyBlock";
 
 export const metadata: Metadata = {
   title: "MCP — AbaPay Tool Server",
@@ -37,13 +38,13 @@ export default function MCPPage() {
 
       <section className="bg-white dark:bg-[#111114] border border-slate-100 dark:border-slate-800/60 rounded-[2rem] p-6 sm:p-8 mb-6">
         <h2 className="font-black text-slate-900 dark:text-white mb-4">Connect</h2>
-        <div className="bg-[#0b0d0f] rounded-2xl border border-slate-800 overflow-hidden font-mono text-[11px]">
-          <pre className="p-4 text-slate-300 overflow-x-auto whitespace-pre">{`{
+        <CopyBlock
+          code={`{
   "mcpServers": {
     "abapay": { "url": "https://www.abapays.com/api/mcp" }
   }
-}`}</pre>
-        </div>
+}`}
+        />
         <p className="text-xs text-slate-400 dark:text-slate-500 mt-3">
           Claude Desktop / Code: Settings → Connectors → Add custom connector → paste the URL above.
         </p>
