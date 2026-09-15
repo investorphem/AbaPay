@@ -1,17 +1,21 @@
 # TypeScript SDK
 
-> `abapay-sdk`
+{% hint style="info" %}
+**`abapay-sdk`** — two functions, matching the two protocol-driven paths in this handbook.
+{% endhint %}
 
-Two functions, matching the two protocol-driven paths in this handbook. Signs with whatever
-[viem](https://viem.sh) account your agent already has — nothing hidden, the source is the
-same wire format documented in [x402](x402.md) and [A2A](a2a.md).
+Signs with whatever [viem](https://viem.sh) account your agent already has — nothing hidden,
+the source is the same wire format documented in [x402](x402.md) and [A2A](a2a.md).
 
+{% hint style="success" %}
 **Live on npm** — `npm install abapay-sdk viem`
+{% endhint %}
 
 ## Zero setup: payBillViaX402
 
 Fetches the 402 challenge, signs it, retries, returns the settlement.
 
+{% code title="pay-via-x402.ts" %}
 ```ts
 import { privateKeyToAccount } from "viem/accounts";
 import { payBillViaX402 } from "abapay-sdk";
@@ -29,12 +33,14 @@ const result = await payBillViaX402({
 
 console.log(result.status, result.tx_hash);
 ```
+{% endcode %}
 
 ## Linked wallet: AbaPayAgent
 
 Links once, sets the PIN in that same call, then reuses the api_key for the full tool
 catalog.
 
+{% code title="linked-agent.ts" %}
 ```ts
 import { privateKeyToAccount } from "viem/accounts";
 import { AbaPayAgent } from "abapay-sdk";
@@ -50,6 +56,7 @@ await agent.payBill({
   account_number: "08012345678", amount_ngn: 1000,
 });
 ```
+{% endcode %}
 
 ## Correctness, not just types
 

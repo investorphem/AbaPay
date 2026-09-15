@@ -1,6 +1,8 @@
 # Channels
 
-> Telegram & WhatsApp — conversational
+{% hint style="info" %}
+**Telegram & WhatsApp — conversational.** Not a structured protocol — see the note below.
+{% endhint %}
 
 Before it was reachable by MCP, A2A, or x402, AbaPay was already an agent — a
 natural-language identity, not a protocol endpoint. Every payment it makes on these channels

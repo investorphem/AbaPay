@@ -1,9 +1,11 @@
 # A2A
 
-> Peer protocol
+{% hint style="info" %}
+**Peer protocol** — no browser, no human account-creation step, for either side.
+{% endhint %}
 
 A peer agent discovers AbaPay via its Agent Card, then sends structured tool calls over A2A
-JSON-RPC — no browser, no human account-creation step, for either side.
+JSON-RPC.
 
 | | |
 |---|---|
@@ -27,8 +29,7 @@ payment after it are both plain API calls:
 - Every `pay_bill` / `pay_bill_batch` / `schedule_bill` call after that sends the same PIN
   back as another JSON field — still just an HTTP request.
 
-`POST /api/agent/link` — real fields, verified live:
-
+{% code title="POST /api/agent/link — real fields, verified live" %}
 ```
 headers: {
   "x-wallet-address": "0xYourAgentWallet...",
@@ -43,11 +44,12 @@ body: {
 }
 -> { "success": true, "api_key": "aba_mcp_..." }
 ```
+{% endcode %}
 
 Full runnable version: [examples/agent-quickstart.mjs](https://github.com/investorphem/AbaPay/blob/main/examples/agent-quickstart.mjs).
 Or skip the wire format entirely: `AbaPayAgent.link()` in [the SDK](sdk.md) does this in one
 line.
 
-> The PIN itself is still real security, not a formality: it's the one thing separate from
-> the signature that has to be right on *every* payment call — unlike x402, which needs
-> neither a PIN nor a link step at all. Two different trust models, both entirely API-driven.
+{% hint style="warning" %}
+The PIN itself is still real security, not a formality: it's the one thing separate from the signature that has to be right on *every* payment call — unlike x402, which needs neither a PIN nor a link step at all. Two different trust models, both entirely API-driven.
+{% endhint %}

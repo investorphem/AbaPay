@@ -1,13 +1,15 @@
 # MCP
 
-> Local + remote
+{% hint style="info" %}
+**Local + remote** — the same protocol Claude and any MCP client speak.
+{% endhint %}
 
-10 tools over Streamable HTTP JSON-RPC — the same protocol Claude and any MCP client speak.
-OAuth 2.1 is supported and preferred; an Agent Hub API key remains the fallback for clients
-that can't do OAuth.
+10 tools over Streamable HTTP JSON-RPC. OAuth 2.1 is supported and preferred; an Agent Hub
+API key remains the fallback for clients that can't do OAuth.
 
 ## Connect
 
+{% code title="claude_desktop_config.json" %}
 ```json
 {
   "mcpServers": {
@@ -15,6 +17,7 @@ that can't do OAuth.
   }
 }
 ```
+{% endcode %}
 
 Claude Desktop / Code: Settings → Connectors → Add custom connector → paste the URL above.
 
@@ -33,7 +36,6 @@ Claude Desktop / Code: Settings → Connectors → Add custom connector → past
 | `list_schedules` | What automations are currently set up. |
 | `cancel_schedule` | Cancel one. |
 
-## Same PIN rules as A2A
-
-MCP and A2A share one execution engine, one linking flow, and one PIN model — set entirely
-by API, never through a browser. See [A2A](a2a.md) for the exact request that does it.
+{% hint style="info" %}
+**Same PIN rules as A2A.** MCP and A2A share one execution engine, one linking flow, and one PIN model — set entirely by API, never through a browser. See [A2A](a2a.md) for the exact request that does it.
+{% endhint %}

@@ -6,10 +6,12 @@ before publication. Full script: [examples/agent-quickstart.mjs](https://github.
 
 ## Run it
 
+{% code title="Terminal" %}
 ```bash
 PRIVATE_KEY=0x... npm install viem
 CHAIN=CELO TOKEN=USDT node agent-quickstart.mjs
 ```
+{% endcode %}
 
 Talks to production and real mainnet contracts — fund the wallet with a trivial amount
 first. Full env var reference (`ALLOWANCE`, `PIN`, `PAY`, …) is in the script's own header
@@ -17,6 +19,11 @@ comment on GitHub.
 
 ## Real session output — verified live
 
+{% hint style="success" %}
+Verified live against production with a throwaway wallet.
+{% endhint %}
+
+{% code title="agent-quickstart.mjs — real session output" %}
 ```
 AbaPay agent quickstart — 0xYourAgentWallet... on CELO, USDT
 
@@ -31,11 +38,13 @@ AbaPay agent quickstart — 0xYourAgentWallet... on CELO, USDT
 → Step 3/3: tools/call check_balance
   USDT 1.8807 — approved limit 9.9254
 ```
+{% endcode %}
 
 ## Step 1 — link the wallet, mint an api_key
 
 A plain `personal_sign`, verified server-side — no session, no cookie, no CAPTCHA.
 
+{% code title="step-1-link.js" %}
 ```js
 const timestamp = String(Date.now());
 const message = `AbaPay Agent Action: POST:/api/agent/link: ${timestamp}`;
@@ -56,12 +65,14 @@ const linkRes = await fetch(`${APP_URL}/api/agent/link`, {
 });
 const { api_key: apiKey } = await linkRes.json();
 ```
+{% endcode %}
 
 ## Step 2 — on-chain: approve + setSpendingAllowance
 
 Two ordinary contract calls, from the wallet itself — nothing here requires the AbaPay
 frontend.
 
+{% code title="step-2-allowance.js" %}
 ```js
 const approveHash = await walletClient.writeContract({
   address: token.address,
@@ -81,12 +92,14 @@ const allowanceHash = await walletClient.writeContract({
 });
 await publicClient.waitForTransactionReceipt({ hash: allowanceHash });
 ```
+{% endcode %}
 
 ## Step 3 — call MCP tools with the api_key
 
 No OAuth needed — the api_key from Step 1 stands alone. Same shape for `pay_bill`,
 `schedule_bill`, any of the 10 tools.
 
+{% code title="step-3-check-balance.js" %}
 ```js
 const balance = await fetch(`${APP_URL}/api/mcp`, {
   method: 'POST',
@@ -99,3 +112,4 @@ const balance = await fetch(`${APP_URL}/api/mcp`, {
 
 console.log(balance.result?.content?.[0]?.text);
 ```
+{% endcode %}
