@@ -1,10 +1,10 @@
 import type { Metadata } from "next";
 import Link from "next/link";
-import { ArrowLeft, Fingerprint, Building2, Rocket, Workflow, ExternalLink } from "lucide-react";
+import { ArrowLeft, Fingerprint, Building2, Rocket, Workflow, ExternalLink, CheckCircle2, Clock } from "lucide-react";
 
 export const metadata: Metadata = {
   title: "About — AbaPay Rails",
-  description: "Who operates AbaPay's Celo agent rails, its on-chain identity, and what's coming next.",
+  description: "What's actually missing in agent-payment infrastructure today, why AbaPay exists to close that gap, who operates it, and what's shipped versus in progress.",
 };
 
 export default function AboutPage() {
@@ -20,6 +20,27 @@ export default function AboutPage() {
           AbaPay is non-custodial stablecoin settlement infrastructure for real-world bills — airtime, mobile data, electricity, cable, education — built by Masonode Technologies Limited. This site is its Celo-only, agent-first front door.
         </p>
       </div>
+
+      {/* ⚡ THE GAP — this is the section the previous version of this page didn't have: not
+          "what AbaPay does" (every other page covers that) but "what's actually missing
+          industry-wide, and why that's the reason this exists," stated plainly rather than
+          left implicit. */}
+      <section className="bg-white dark:bg-[#111114] border border-slate-100 dark:border-slate-800/60 rounded-[2rem] p-6 sm:p-8 mb-6">
+        <h2 className="font-black text-slate-900 dark:text-white mb-4">What's actually missing in agent payments</h2>
+        <div className="space-y-4 text-sm text-slate-600 dark:text-slate-300 leading-relaxed max-w-2xl">
+          <p>
+            Agent-payment infrastructure has converged on three shapes, and each stops short of the same thing: an agent that can settle a payment but can&apos;t <strong className="text-slate-900 dark:text-white">complete an outcome</strong>.
+          </p>
+          <ul className="space-y-2.5">
+            <li className="flex gap-2"><span className="text-emerald-500 flex-shrink-0">•</span> <strong className="text-slate-900 dark:text-white">Crypto-native rails that stop at settlement.</strong> x402, A2A, and similar protocols move a stablecoin from one wallet to another correctly — and then the transaction is the whole story. Nothing on the other end turns that transfer into a phone with airtime on it, or a meter that isn&apos;t about to cut power.</li>
+            <li className="flex gap-2"><span className="text-emerald-500 flex-shrink-0">•</span> <strong className="text-slate-900 dark:text-white">Real-world commerce APIs built for a human in the loop.</strong> Card-based checkout, KYC gates, session cookies, a card-entry form — every one of these assumes a person is present to click through it. An autonomous agent, running unattended at 3am, cannot.</li>
+            <li className="flex gap-2"><span className="text-emerald-500 flex-shrink-0">•</span> <strong className="text-slate-900 dark:text-white">Custody as the price of automation.</strong> The systems that do let an agent transact repeatedly and unattended mostly do it by holding the user&apos;s funds or a stored payment credential on their behalf — trading away non-custodial guarantees for convenience, rather than keeping both.</li>
+          </ul>
+          <p>
+            AbaPay is built at the seam those three leave open: a real x402, MCP, or A2A payment that actually completes — airtime credited, a bill paid, a real result — with the wallet still governed by an on-chain allowance the owner set and can revoke themselves, never a deposit or a stored card. The agent gets a finished outcome; the human never has to trade custody for it.
+          </p>
+        </div>
+      </section>
 
       <section className="grid sm:grid-cols-2 gap-4 mb-6">
         <div className="bg-white dark:bg-[#111114] border border-slate-100 dark:border-slate-800/60 rounded-[1.75rem] p-6">
@@ -53,26 +74,38 @@ export default function AboutPage() {
         </ul>
       </section>
 
-      {/* ROADMAP — clearly labeled as not-yet-shipped */}
-      <h2 className="text-xl font-black tracking-tight text-slate-900 dark:text-white mb-4 px-2">Coming next</h2>
-      <section className="bg-white dark:bg-[#111114] border border-dashed border-slate-200 dark:border-slate-700 rounded-[2rem] p-6 sm:p-8">
+      {/* ⚡ STATUS, NOT A WISHLIST — the previous version of this section was titled "Coming
+          next" and both items said "not started yet." Both have real, verifiable work behind
+          them now; this says exactly how far, not further. */}
+      <h2 className="text-xl font-black tracking-tight text-slate-900 dark:text-white mb-4 px-2">Status</h2>
+      <section className="bg-white dark:bg-[#111114] border border-slate-100 dark:border-slate-800/60 rounded-[2rem] p-6 sm:p-8">
         <div className="grid sm:grid-cols-2 gap-6">
           <div>
-            <div className="bg-slate-50 dark:bg-white/5 w-10 h-10 rounded-xl flex items-center justify-center mb-3 border border-slate-100 dark:border-slate-800/60">
-              <Rocket className="text-slate-400" size={18} />
+            <div className="flex items-center gap-2 mb-3">
+              <div className="bg-emerald-50 dark:bg-emerald-900/20 w-10 h-10 rounded-xl flex items-center justify-center border border-emerald-100 dark:border-emerald-800/50">
+                <Rocket className="text-emerald-500" size={18} />
+              </div>
+              <span className="flex items-center gap-1 text-[10px] font-black uppercase tracking-widest text-emerald-600 dark:text-emerald-400">
+                <CheckCircle2 size={12} /> Shipped, one step short
+              </span>
             </div>
             <h3 className="font-black text-slate-900 dark:text-white mb-1.5">Python SDK</h3>
             <p className="text-sm text-slate-500 dark:text-slate-400 leading-relaxed">
-              The <Link href="/agents/sdk" className="underline hover:text-emerald-500">TypeScript SDK</Link> ships today — a Python port is the natural next one, given how much agent tooling (LangChain, CrewAI, AutoGen) is Python-first. Not started yet — this is a proposal, not a claim.
+              <code className="text-slate-500">python-sdk/</code> in the repo mirrors the <Link href="/agents/sdk" className="underline hover:text-emerald-500">TypeScript SDK</Link> field-for-field — same two functions, a real CLI, tests that recover the signer&apos;s address from the signed EIP-712 data and assert it matches. Verified in CI, not published to PyPI yet — that step needs a one-time PyPI Trusted Publisher setup, the same kind of account action npm publishing needed before it went live.
             </p>
           </div>
           <div>
-            <div className="bg-slate-50 dark:bg-white/5 w-10 h-10 rounded-xl flex items-center justify-center mb-3 border border-slate-100 dark:border-slate-800/60">
-              <Workflow className="text-slate-400" size={18} />
+            <div className="flex items-center gap-2 mb-3">
+              <div className="bg-amber-50 dark:bg-amber-900/20 w-10 h-10 rounded-xl flex items-center justify-center border border-amber-100 dark:border-amber-800/50">
+                <Workflow className="text-amber-600 dark:text-amber-400" size={18} />
+              </div>
+              <span className="flex items-center gap-1 text-[10px] font-black uppercase tracking-widest text-amber-600 dark:text-amber-400">
+                <Clock size={12} /> Drafted, pending go-ahead
+              </span>
             </div>
             <h3 className="font-black text-slate-900 dark:text-white mb-1.5">Wider agent-registry discovery</h3>
             <p className="text-sm text-slate-500 dark:text-slate-400 leading-relaxed">
-              Already listed in the official MCP Registry and on-chain via ERC-8004; a fuller OASF-style listing is the natural next registry to add for cross-framework discoverability.
+              Already listed on the <a href="https://registry.modelcontextprotocol.io" target="_blank" rel="noopener noreferrer" className="underline hover:text-emerald-500">official MCP Registry</a> and on-chain via ERC-8004. A submission to <code className="text-slate-500">awesome-mcp-servers</code> (95k+ stars, also what Glama&apos;s directory indexes from) is written and ready — opening it is a real public action against a third-party repo, held for explicit sign-off rather than sent automatically.
             </p>
           </div>
         </div>

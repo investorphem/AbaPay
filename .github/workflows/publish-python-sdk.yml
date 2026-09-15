@@ -1,0 +1,43 @@
+name: Publish Python SDK
+
+# ⚡ TRUSTED PUBLISHING (OIDC), NOT A TOKEN SECRET — PyPI's modern recommended flow: no
+# PYPI_API_TOKEN to create, copy, or accidentally leak. This workflow authenticates itself to
+# PyPI via GitHub's OIDC identity; PyPI just needs to be told ONCE (before the very first
+# publish) to trust this exact repo + workflow file + environment. That's a one-time step on
+# pypi.org, not something this file can do for you — see the setup note below.
+#
+# ⚠️ ONE-TIME SETUP NEEDED BEFORE THIS CAN PUBLISH (mirrors the npm 2FA/token dance in
+# .github/workflows/publish-sdk.yml, but simpler — there's no token to create at all):
+#   1. Create a PyPI account at pypi.org if you don't have one.
+#   2. Go to https://pypi.org/manage/account/publishing/ → "Add a new pending publisher".
+#   3. PyPI Project Name: abapay-sdk
+#      Owner: investorphem   Repository: AbaPay
+#      Workflow filename: publish-python-sdk.yml   Environment name: pypi
+#   4. Save. The very first push of a py-sdk-v* tag then creates the project on PyPI
+#      automatically — no separate "reserve the name" step needed.
+on:
+  push:
+    tags: ["py-sdk-v*"]
+  workflow_dispatch:
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    environment: pypi
+    permissions:
+      id-token: write # required for OIDC trusted publishing — no token secret needed
+    defaults:
+      run:
+        working-directory: python-sdk
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install -e ".[dev]" build
+      - run: pytest -v
+      - run: python -m build
+      - name: Publish to PyPI
+        uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          packages-dir: python-sdk/dist

@@ -1,0 +1,32 @@
+name: Test Python SDK
+
+# ⚡ THE ACTUAL VERIFICATION GATE for python-sdk/ — this package was written in a sandbox with
+# no Python interpreter available at all (not "constrained", genuinely absent), so nothing in
+# it has been run locally. This workflow, not local testing, is what proves the code works:
+# real dependency resolution, real eth-account signing, real HTTP round-trips against a local
+# server. Treat a red run here as "this needs a real fix," not "flaky CI."
+on:
+  push:
+    branches: [main]
+    paths: ["python-sdk/**", ".github/workflows/test-python-sdk.yml"]
+  pull_request:
+    paths: ["python-sdk/**", ".github/workflows/test-python-sdk.yml"]
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        python-version: ["3.9", "3.12"]
+    defaults:
+      run:
+        working-directory: python-sdk
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+      - run: pip install -e ".[dev]"
+      - run: pytest -v
+      - run: python -c "import abapay; print(abapay.__version__)"
+      - run: python -m abapay.cli --help || python -c "from abapay.cli import main; import sys; sys.argv=['abapay']; main()"
