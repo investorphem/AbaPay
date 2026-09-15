@@ -1,6 +1,8 @@
 # REST API
 
-> Plain HTTP
+{% hint style="info" %}
+**Plain HTTP** — Celo-only, machine-readable, no MCP or A2A client required.
+{% endhint %}
 
 The same settlement rail as x402, described as a plain OpenAPI 3.1 document for any HTTP
 client that isn't speaking MCP or A2A. One endpoint, Celo-only, machine-readable.
@@ -30,8 +32,7 @@ resource.
 - **200 Settled** — bill vended, or queued for background processing.
 - **402 Payment Required** — standard x402 challenge, see [x402](x402.md).
 
-200 response body:
-
+{% code title="200 response body" %}
 ```json
 {
   "success": true,
@@ -42,16 +43,20 @@ resource.
   "tx_hash": "0x91a3...4f2c"
 }
 ```
+{% endcode %}
 
 ### Try it
 
-A GET or probing POST with no payment attached returns a valid 402 challenge — the endpoint
-is always live for discovery, no credential required to see the price.
+{% hint style="success" %}
+A GET or probing POST with no payment attached returns a valid 402 challenge — the endpoint is always live for discovery, no credential required to see the price.
+{% endhint %}
 
+{% code title="Try it — curl" %}
 ```bash
 curl -X POST https://www.abapays.com/api/pay/x402 \
   -H "Content-Type: application/json" \
   -d '{"serviceID":"mtn","serviceCategory":"AIRTIME","network":"MTN","billersCode":"08012345678","nairaAmount":1000,"token":"USDT","blockchain":"CELO","wallet_address":"0xYourAgentWallet"}'
 ```
+{% endcode %}
 
 Full machine-readable spec: [openapi.json](https://abapays.com/openapi.json).

@@ -17,6 +17,7 @@ included.
 
 The two contract-level switches, verbatim:
 
+{% code title="contracts/AbaPayV4.sol — kill switches" %}
 ```solidity
 /// Instantly disables the agent-initiated path system-wide, on-chain --
 /// independent of anything the backend does. A compromised backend
@@ -29,3 +30,4 @@ function setRelayer(address newRelayer) external onlyOwner {
 /// so anyone already charged can still be made whole.
 function pause() external onlyOwner { _pause(); }
 ```
+{% endcode %}

@@ -24,6 +24,7 @@ bypass:
 
 The actual checks, verbatim from `contracts/AbaPayV4.sol`:
 
+{% code title="contracts/AbaPayV4.sol — payBillFor" %}
 ```solidity
 function payBillFor(address user, address tokenAddress, ..., uint256 amount)
     external onlyRelayer whenNotPaused nonReentrant
@@ -47,13 +48,15 @@ function setSpendingAllowance(address tokenAddress, uint256 amount) external {
     spendingAllowance[msg.sender][tokenAddress] = amount;
 }
 ```
+{% endcode %}
 
 This matches the framing published at `/terms`: AbaPay operates as a non-custodial software
 protocol / technology interface, not a custodian, with no access to any wallet's private
 keys.
 
-> `/terms` covers AML monitoring and is explicitly not represented as lawyer-reviewed — read
-> it directly for anything you need to rely on legally.
+{% hint style="warning" %}
+`/terms` covers AML monitoring and is explicitly not represented as lawyer-reviewed — read it directly for anything you need to rely on legally.
+{% endhint %}
 
 ## The off-chain leg: how a payment becomes a delivered bill
 
@@ -67,6 +70,6 @@ not a synchronous call:
    automatic refund flow — flagged, verified against what actually happened, and refunded
    on-chain without a human needing to intervene.
 
-> An agent integrating against this should treat a pending or failed-vend state as a real,
-> expected outcome with money already moved — not an error to retry blindly. Retrying an
-> already-settled payment double-charges the wallet.
+{% hint style="danger" %}
+An agent integrating against this should treat a pending or failed-vend state as a real, expected outcome with money already moved — not an error to retry blindly. Retrying an already-settled payment double-charges the wallet.
+{% endhint %}

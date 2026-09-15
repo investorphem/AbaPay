@@ -13,7 +13,11 @@ and legal terms.
 - Legal: [Terms](https://abapays.com/terms) · [Privacy](https://abapays.com/privacy)
 - Source: [github.com/investorphem/AbaPay](https://github.com/investorphem/AbaPay) (MIT)
 
-## Coming next — proposals, not claims
+## Coming next
+
+{% hint style="info" %}
+Proposals, not claims — neither of these has shipped yet.
+{% endhint %}
 
 - **Python SDK** — the TypeScript SDK ships today; a Python port is the natural next one,
   given how much agent tooling (LangChain, CrewAI, AutoGen) is Python-first. Not started

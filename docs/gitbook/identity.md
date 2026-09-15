@@ -18,6 +18,6 @@ Agent ID **9760** — a verifiable identity any agent's tooling can check indepe
 Listed in the official Model Context Protocol registry as `io.github.investorphem/abapay` —
 discoverable by any MCP-aware client without a hardcoded URL.
 
-> **Honestly stated:** identity here is discovery, not access control. Registration lets
-> another agent verify which on-chain identity is speaking for AbaPay — it does not gate who
-> can call the MCP server or the x402 endpoint. Those stay open by design.
+{% hint style="warning" %}
+**Honestly stated:** identity here is discovery, not access control. Registration lets another agent verify which on-chain identity is speaking for AbaPay — it does not gate who can call the MCP server or the x402 endpoint. Those stay open by design.
+{% endhint %}
