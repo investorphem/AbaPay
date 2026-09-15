@@ -1,5 +1,5 @@
 import {
-  Bot, ShieldCheck, Fingerprint, FolderGit2, FileText, Building2, Mail, Send, Network, BookOpen,
+  Bot, ShieldCheck, Fingerprint, FolderGit2, FileText, Building2, Mail, Send, Network, BookOpen, Puzzle,
 } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 
@@ -26,6 +26,7 @@ const FOOTER_GROUPS: {
       { label: "Agent Card", href: "/.well-known/agent-card.json", icon: Network },
       { label: "OpenAPI reference", href: "/openapi.json", icon: FileText },
       { label: "Full Handbook", href: "https://docs.abapays.com", icon: BookOpen },
+      { label: "Install as a Skill", href: "/skill.md", icon: Puzzle },
     ],
   },
   {

@@ -80,6 +80,64 @@ await agent.payBill({
         />
       </section>
 
+      <h2 className="text-xl font-black tracking-tight text-slate-900 dark:text-white mb-4 px-2">Full function reference</h2>
+      <section className="bg-white dark:bg-[#111114] border border-slate-100 dark:border-slate-800/60 rounded-[2rem] p-6 sm:p-8 mb-6">
+        <div className="overflow-x-auto">
+          <table className="w-full text-sm">
+            <thead>
+              <tr className="text-left text-[10px] uppercase tracking-widest text-slate-400 dark:text-slate-500 border-b border-slate-100 dark:border-slate-800/60">
+                <th className="py-2 pr-4 font-bold">Export</th>
+                <th className="py-2 pr-4 font-bold">Signature</th>
+                <th className="py-2 font-bold">Description</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-slate-100 dark:divide-slate-800/60 align-top">
+              {[
+                ["payBillViaX402", "(params: { signer, bill, baseUrl? }) => Promise<X402PayResult>", "Zero-setup path. Fetches the 402 challenge, signs it, retries, returns the settlement."],
+                ["AbaPayAgent.link", "static (params: LinkParams) => Promise<AbaPayAgent>", "Links a wallet with a plain signed message and mints an api_key. Does NOT grant any on-chain allowance itself — approve() + setSpendingAllowance() stay a separate, explicit step."],
+                ["AbaPayAgent.fromApiKey", "static (apiKey, walletAddress, baseUrl?) => AbaPayAgent", "Reattach to an api_key minted earlier — no new signature needed."],
+                ["agent.callTool", "(name: string, args?: object) => Promise<string>", "Low-level: call any of the 10 MCP tools by name. Every typed method below is a thin wrapper over this."],
+                ["agent.checkBalance", "(chain?: 'CELO') => Promise<string>", "Wraps check_balance."],
+                ["agent.payBill", "(args: { pin, service, provider, account_number, amount_ngn, chain?, token?, variation_code? }) => Promise<string>", "Wraps pay_bill."],
+                ["agent.scheduleBill", "(args: object) => Promise<string>", "Wraps schedule_bill — same fields as the MCP tool, see the Tools reference."],
+                ["agent.transactionHistory", "(args?: object) => Promise<string>", "Wraps transaction_history."],
+              ].map(([name, sig, desc]) => (
+                <tr key={name}>
+                  <td className="py-2.5 pr-4"><code className="text-emerald-600 dark:text-emerald-400 font-bold whitespace-nowrap">{name}</code></td>
+                  <td className="py-2.5 pr-4"><code className="text-slate-400 dark:text-slate-500 text-xs">{sig}</code></td>
+                  <td className="py-2.5 text-slate-600 dark:text-slate-400">{desc}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+
+        <h3 className="text-sm font-black text-slate-900 dark:text-white mt-6 mb-3">Types</h3>
+        <div className="overflow-x-auto">
+          <table className="w-full text-sm">
+            <thead>
+              <tr className="text-left text-[10px] uppercase tracking-widest text-slate-400 dark:text-slate-500 border-b border-slate-100 dark:border-slate-800/60">
+                <th className="py-2 pr-4 font-bold">Type</th>
+                <th className="py-2 font-bold">Shape</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-slate-100 dark:divide-slate-800/60 align-top">
+              {[
+                ["BillDetails", "{ serviceID, serviceCategory, network, billersCode, nairaAmount, token: 'USDC'|'USDT', wallet_address }"],
+                ["X402PayResult", "{ success, status: 'SUCCESS'|'FAILED_VENDING'|'TIMEOUT'|string, purchased_code?, units?, request_id?, tx_hash?, message? }"],
+                ["LinkParams", "{ signer, pin, approvedChain?: 'CELO', approvedToken?, label?, baseUrl? }"],
+                ["AbaPayError", "extends Error — carries .cause and .response for the original failure"],
+              ].map(([name, shape]) => (
+                <tr key={name}>
+                  <td className="py-2.5 pr-4"><code className="text-emerald-600 dark:text-emerald-400 font-bold whitespace-nowrap">{name}</code></td>
+                  <td className="py-2.5"><code className="text-slate-500 dark:text-slate-400 text-xs">{shape}</code></td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </section>
+
       <section className="bg-white dark:bg-[#111114] border border-slate-100 dark:border-slate-800/60 rounded-[2rem] p-6 sm:p-8">
         <h2 className="font-black text-slate-900 dark:text-white mb-3">Correctness, not just types</h2>
         <p className="text-sm text-slate-600 dark:text-slate-300 leading-relaxed max-w-2xl mb-4">

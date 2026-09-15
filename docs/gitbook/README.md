@@ -57,5 +57,5 @@ HTTP challenge, or a wallet-linked conversation.
 | OpenAPI spec | [abapays.com/openapi.json](https://abapays.com/openapi.json) |
 
 {% hint style="info" %}
-**Celo-only, deliberately.** This handbook and the agent rails it documents run on Celo mainnet. AbaPay also settles on Base for its consumer app, but the agent-first surface described here is scoped to one chain on purpose.
+**Celo-only, deliberately.** This handbook and the agent rails it documents run on Celo mainnet, end to end — every endpoint, contract address, and stablecoin here is Celo-scoped.
 {% endhint %}

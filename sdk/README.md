@@ -97,7 +97,24 @@ const agent = AbaPayAgent.fromApiKey(savedApiKey, walletAddress);
 
 Every failure — a bad request, a rejected signature, a settlement AbaPay itself reports as
 unsuccessful — throws `AbaPayError` (`message`, and `response` carrying whatever AbaPay's API
-returned, when there was a response to carry).
+returned, when there was a response to carry). Full error code reference:
+[agents.abapays.com/errors](https://agents.abapays.com/errors).
+
+## CLI
+
+The same two paths, from a terminal — no code required:
+
+```bash
+npm install -g abapay-sdk
+
+PRIVATE_KEY=0x... abapay pay --service AIRTIME --provider mtn --to 08012345678 --amount 1000
+PRIVATE_KEY=0x... abapay link --pin 1234
+abapay balance --api-key aba_mcp_xxxxx
+abapay history --api-key aba_mcp_xxxxx --limit 5
+```
+
+`abapay help` prints the full command reference. `PRIVATE_KEY` never leaves your machine —
+every command signs locally via viem, the same as the library calls above.
 
 ## License
 
