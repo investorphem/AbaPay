@@ -1,11 +1,14 @@
 {
   "name": "abapay-sdk",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Pay real-world bills (airtime, data, electricity, cable) from an agent's own Celo wallet — zero-setup x402, or a linked-wallet client for the fuller MCP tool catalog.",
   "type": "module",
   "main": "./dist/index.cjs",
   "module": "./dist/index.js",
   "types": "./dist/index.d.ts",
+  "bin": {
+    "abapay": "./dist/cli.js"
+  },
   "exports": {
     ".": {
       "types": "./dist/index.d.ts",
@@ -33,7 +36,8 @@
     "mcp",
     "agent-payments",
     "stablecoin",
-    "eip-3009"
+    "eip-3009",
+    "cli"
   ],
   "engines": {
     "node": ">=18"

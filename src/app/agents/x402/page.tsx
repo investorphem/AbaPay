@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import Link from "next/link";
 import { Ban, ArrowLeft } from "lucide-react";
 import CopyBlock from "../CopyBlock";
+import X402Playground from "../X402Playground";
 
 export const metadata: Metadata = {
   title: "x402 — Zero-Setup Agent Payments",
@@ -61,6 +62,10 @@ export default function X402Page() {
         </div>
       </section>
 
+      <div className="mb-6">
+        <X402Playground />
+      </div>
+
       <section className="bg-white dark:bg-[#111114] border border-slate-100 dark:border-slate-800/60 rounded-[2rem] p-6 sm:p-8 mb-6">
         <h2 className="font-black text-slate-900 dark:text-white mb-4">Request &amp; response</h2>
         <div className="mb-4">
@@ -100,7 +105,7 @@ export default function X402Page() {
 }`}
         />
         <p className="text-xs text-slate-400 dark:text-slate-500 mt-4">
-          Both USDC (<code className="text-slate-500">{CELO_USDC.slice(0, 10)}…</code>) and USD₮ settle via Celo&apos;s own x402 facilitator — each implements EIP-3009. Full field reference: <a href="/openapi.json" className="underline hover:text-emerald-500">openapi.json</a>.
+          Both USDC (<code className="text-slate-500">{CELO_USDC.slice(0, 10)}…</code>) and USD₮ settle via Celo&apos;s own x402 facilitator — each implements EIP-3009. Full field reference: <a href="/openapi.json" className="underline hover:text-emerald-500">openapi.json</a>. Every way a challenge or settlement can fail, with real error codes: <Link href="/agents/errors" className="underline hover:text-emerald-500">/agents/errors</Link>.
         </p>
       </section>
 

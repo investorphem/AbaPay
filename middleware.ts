@@ -38,10 +38,40 @@ const AGENT_HOSTS = new Set(['agents.abapays.com', 'rails.abapays.com']);
 const AGENT_HOST_SKIP = /^\/(api|\.well-known|agents|docs|terms|privacy|receipt)(\/|$)/;
 const LOOKS_LIKE_STATIC_FILE = /\.[a-zA-Z0-9]+$/;
 
+// ⚡ CORS FOR THE PUBLIC AGENT-FACING API SURFACE — exact-path allowlist, deliberately narrow.
+// Without this, a browser-based agent (including agents.abapays.com's own "try it" panels)
+// gets silently blocked calling these from a different origin: no Access-Control-Allow-Origin
+// header meant every cross-origin fetch() failed before JS ever saw a response, regardless of
+// whether the request itself would have succeeded. These four are exactly the endpoints this
+// site documents as safe for a third party to call directly — x402 (EIP-712-signed, no
+// cookies), MCP (bearer/api_key, no cookies), A2A (same), and the headless wallet-signature
+// link flow (no cookies either). Nothing session/cookie-based is in this set on purpose: e.g.
+// src/app/api/pay/route.ts (the logged-in-app checkout path) is a SEPARATE file from
+// src/app/api/pay/x402/route.ts and never matches this allowlist.
+const CORS_API_PATHS = new Set(['/api/mcp', '/api/pay/x402', '/api/a2a', '/api/agent/link']);
+const CORS_HEADERS: Record<string, string> = {
+  'Access-Control-Allow-Origin': '*',
+  'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
+  'Access-Control-Allow-Headers': 'Content-Type, Authorization, X-PAYMENT, x-wallet-address, x-wallet-signature, x-wallet-timestamp',
+  'Access-Control-Max-Age': '86400',
+};
+
 export function middleware(req: NextRequest) {
   const host = req.headers.get('host') || '';
   // Strip a port if present (local dev / preview URLs) before comparing.
   const hostname = host.split(':')[0];
+  const { pathname } = req.nextUrl;
+
+  if (CORS_API_PATHS.has(pathname)) {
+    // Preflight never reaches the route handler (none of these export OPTIONS) — answer it
+    // here so the browser's actual request is even attempted.
+    if (req.method === 'OPTIONS') {
+      return new NextResponse(null, { status: 204, headers: CORS_HEADERS });
+    }
+    const res = NextResponse.next();
+    for (const [k, v] of Object.entries(CORS_HEADERS)) res.headers.set(k, v);
+    return res;
+  }
 
   if (hostname === 'app.abapays.com' && !req.nextUrl.pathname.startsWith('/masonode')) {
     const url = req.nextUrl.clone();
@@ -50,7 +80,6 @@ export function middleware(req: NextRequest) {
   }
 
   if (AGENT_HOSTS.has(hostname)) {
-    const { pathname } = req.nextUrl;
     if (!AGENT_HOST_SKIP.test(pathname) && !LOOKS_LIKE_STATIC_FILE.test(pathname)) {
       const url = req.nextUrl.clone();
       url.pathname = pathname === '/' ? '/agents' : `/agents${pathname}`;

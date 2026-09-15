@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import Link from "next/link";
 import { ArrowLeft, FolderGit2 } from "lucide-react";
 import CopyBlock from "../CopyBlock";
+import X402Playground from "../X402Playground";
 
 export const metadata: Metadata = {
   title: "REST API — AbaPay Rails",
@@ -99,10 +100,14 @@ export default function APIPage() {
         />
       </section>
 
+      <div className="mb-6">
+        <X402Playground />
+      </div>
+
       <section className="bg-white dark:bg-[#111114] border border-slate-100 dark:border-slate-800/60 rounded-[2rem] p-6 sm:p-8">
-        <h2 className="font-black text-slate-900 dark:text-white mb-3">Try it</h2>
+        <h2 className="font-black text-slate-900 dark:text-white mb-3">Try it — curl</h2>
         <p className="text-sm text-slate-600 dark:text-slate-300 leading-relaxed mb-4 max-w-2xl">
-          A GET or probing POST with no payment attached returns a valid 402 challenge — the endpoint is always live for discovery, no credential required to see the price.
+          A GET or probing POST with no payment attached returns a valid 402 challenge — the endpoint is always live for discovery, no credential required to see the price. CORS is open on this endpoint (see the live panel above), so this also works straight from browser JS, not just curl.
         </p>
         <CopyBlock
           code={`curl -X POST https://www.abapays.com/api/pay/x402 \\
@@ -110,7 +115,7 @@ export default function APIPage() {
   -d '{"serviceID":"mtn","serviceCategory":"AIRTIME","network":"MTN","billersCode":"08012345678","nairaAmount":1000,"token":"USDT","blockchain":"CELO","wallet_address":"0xYourAgentWallet"}'`}
         />
         <p className="text-xs text-slate-400 dark:text-slate-500 mt-4">
-          Full machine-readable spec: <a href="https://abapays.com/openapi.json" target="_blank" rel="noopener noreferrer" className="underline hover:text-emerald-500">openapi.json</a>. For the signed retry that actually settles it, see <Link href="/agents/x402" className="underline hover:text-emerald-500">/agents/x402</Link> or <Link href="/agents/sdk" className="underline hover:text-emerald-500">abapay-sdk</Link>.
+          Full machine-readable spec: <a href="https://abapays.com/openapi.json" target="_blank" rel="noopener noreferrer" className="underline hover:text-emerald-500">openapi.json</a>. For the signed retry that actually settles it, see <Link href="/agents/x402" className="underline hover:text-emerald-500">/agents/x402</Link> or <Link href="/agents/sdk" className="underline hover:text-emerald-500">abapay-sdk</Link>. Every error code this endpoint can return: <Link href="/agents/errors" className="underline hover:text-emerald-500">/agents/errors</Link>.
         </p>
       </section>
     </>

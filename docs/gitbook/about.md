@@ -1,6 +1,29 @@
 # About
 
-Who operates AbaPay's Celo agent rails, and what's coming next.
+Who operates AbaPay's Celo agent rails, what's actually missing in agent-payment
+infrastructure today, and current status — not a wishlist.
+
+## What's actually missing in agent payments
+
+Agent-payment infrastructure has converged on three shapes, and each stops short of the same
+thing: an agent that can settle a payment but can't **complete an outcome**.
+
+- **Crypto-native rails that stop at settlement.** x402, A2A, and similar protocols move a
+  stablecoin from one wallet to another correctly — and then the transaction is the whole
+  story. Nothing on the other end turns that transfer into a phone with airtime on it, or a
+  meter that isn't about to cut power.
+- **Real-world commerce APIs built for a human in the loop.** Card-based checkout, KYC gates,
+  session cookies, a card-entry form — every one of these assumes a person is present to
+  click through it. An autonomous agent, running unattended at 3am, cannot.
+- **Custody as the price of automation.** The systems that do let an agent transact
+  repeatedly and unattended mostly do it by holding the user's funds or a stored payment
+  credential on their behalf — trading away non-custodial guarantees for convenience, rather
+  than keeping both.
+
+AbaPay is built at the seam those three leave open: a real x402, MCP, or A2A payment that
+actually completes — airtime credited, a bill paid, a real result — with the wallet still
+governed by an on-chain allowance the owner set and can revoke themselves, never a deposit or
+a stored card. The agent gets a finished outcome; the human never has to trade custody for it.
 
 ## Masonode Technologies Limited
 
@@ -13,15 +36,12 @@ and legal terms.
 - Legal: [Terms](https://abapays.com/terms) · [Privacy](https://abapays.com/privacy)
 - Source: [github.com/investorphem/AbaPay](https://github.com/investorphem/AbaPay) (MIT)
 
-## Coming next
+## Status
 
-{% hint style="info" %}
-Proposals, not claims — neither of these has shipped yet.
+{% hint style="success" %}
+**Python SDK — shipped, one step short.** `python-sdk/` in the repo mirrors the TypeScript SDK field-for-field — same two functions, a real CLI, tests that recover the signer's address from the signed EIP-712 data and assert it matches. Verified in CI, not published to PyPI yet — that step needs a one-time PyPI Trusted Publisher setup, the same kind of account action npm publishing needed before it went live.
 {% endhint %}
 
-- **Python SDK** — the TypeScript SDK ships today; a Python port is the natural next one,
-  given how much agent tooling (LangChain, CrewAI, AutoGen) is Python-first. Not started
-  yet.
-- **Wider agent-registry discovery** — already listed in the official MCP Registry and
-  on-chain via ERC-8004; a fuller OASF-style listing is the natural next registry to add for
-  cross-framework discoverability.
+{% hint style="warning" %}
+**Wider agent-registry discovery — drafted, pending go-ahead.** Already listed on the official MCP Registry and on-chain via ERC-8004. A submission to `awesome-mcp-servers` (95k+ stars, also what Glama's directory indexes from) is written and ready — opening it is a real public action against a third-party repo, held for explicit sign-off rather than sent automatically.
+{% endhint %}

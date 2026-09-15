@@ -1,0 +1,36 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "abapay-sdk"
+version = "0.1.0"
+description = "Pay real-world bills (airtime, data, electricity, cable) from an agent's own Celo wallet — zero-setup x402, or a linked-wallet client for the fuller MCP tool catalog."
+readme = "README.md"
+license = "MIT"
+requires-python = ">=3.9"
+authors = [{ name = "Masonode Technologies Limited" }]
+keywords = ["abapay", "celo", "x402", "a2a", "mcp", "agent-payments", "stablecoin", "eip-3009", "cli"]
+classifiers = [
+  "License :: OSI Approved :: MIT License",
+  "Programming Language :: Python :: 3",
+  "Intended Audience :: Developers",
+]
+dependencies = [
+  "eth-account>=0.10,<1.0",
+]
+
+[project.optional-dependencies]
+dev = ["pytest>=7", "pytest-httpserver>=1.0"]
+
+[project.urls]
+Homepage = "https://agents.abapays.com"
+Repository = "https://github.com/investorphem/AbaPay"
+Documentation = "https://docs.abapays.com"
+Issues = "https://github.com/investorphem/AbaPay/issues"
+
+[project.scripts]
+abapay = "abapay.cli:main"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/abapay"]
