@@ -907,7 +907,7 @@ already backs Telegram/WhatsApp/X, not a parallel system with its own rules:
 |---|---|---|
 | `describe_capabilities` | Human-readable menu of what AbaPay can pay and what's currently paused | Nothing — public |
 | `list_plans` | The **real, currently purchasable** plans for DATA / CABLE / EDUCATION, with exact `variation_code`s and live VTpass prices | Nothing — public |
-| `list_international_options` | Browses the live international catalogue (170+ countries) one level at a time — country → product type → operator → priced plan | Nothing — public |
+| `list_international_options` | Browses the live international catalogue (140+ countries) one level at a time — country → product type → operator → priced plan | Nothing — public |
 | `check_balance` | Reads the linked wallet's live balance + approved agent limit, **per token**, on a chain | OAuth Bearer token *or* `api_key` |
 | `transaction_history` | Lists recent real transactions for the linked wallet — same data as the app's History tab | OAuth Bearer token *or* `api_key` |
 | `pay_bill` | Pays a real bill (airtime, data, electricity, cable TV, **education PIN**, or **international airtime/data**) end-to-end, on-chain | (OAuth Bearer token *or* `api_key`) **+ `pin`, always** |

@@ -3,7 +3,7 @@
 Base URL: `https://agents.abapays.com`
 
 Use this skill to pay a real-world bill — airtime, mobile data, electricity, cable TV, a
-WAEC/JAMB education PIN, or international airtime/data across 170+ countries — from an agent's
+WAEC/JAMB education PIN, or international airtime/data across 140+ countries — from an agent's
 own Celo wallet, settled on-chain, non-custodial. Two ways in: zero-setup x402 (no account,
 ever), or a linked wallet with the fuller MCP tool catalog (balances, history, schedules,
 batch payments). Celo mainnet only.

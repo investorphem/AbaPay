@@ -61,7 +61,7 @@ export const TOOLS: ToolDef[] = [
     name: "list_international_options",
     title: "List International Options",
     access: "read",
-    description: "Browse the live international top-up catalogue (170+ countries) one level at a time: country → product type → operator → priced plan.",
+    description: "Browse the live international top-up catalogue (140+ countries) one level at a time: country → product type → operator → priced plan.",
     params: [
       { name: "country", type: "string", required: false, description: 'Country name or ISO code, e.g. "Ghana" or "GH". Omit to list all countries.' },
       { name: "product_type_id", type: "string", required: false, description: "From this country's results. Omit to list product types." },
