@@ -28,7 +28,7 @@ Designed for low fees, cross-border utility vending (Nigeria + every country VTp
 * **On-Chain Agent Identity (ERC-8004):** AbaPay's DeAI agent is registered as a real on-chain identity on **both Celo and Base** via the ERC-8004 "Trustless Agents" registry, so it's discoverable on 8004scan.io / AgentScan — independent of, and unrelated to, how it moves money. See [ERC-8004 agent identity](#erc-8004-agent-identity) below.
 * **MCP Server (AI Agent Payments):** AbaPay is reachable by any MCP-speaking AI client (Claude, or any other agent that supports the Model Context Protocol) as a real tool server — `describe_capabilities`, `check_balance`, `list_plans`, `pay_bill`, multi-recipient `pay_bill_batch`, and recurring/one-off `schedule_bill`/`list_schedules`/`cancel_schedule` — over Streamable HTTP JSON-RPC at `/api/mcp`. This is a fourth channel alongside Telegram/WhatsApp/X, not a new trust boundary: it runs through the exact same allowance-bounded, kill-switch-gated, discount-aware execution pipeline as the chat channels, on **either Celo or Base** depending on what the linking wallet approved. See [MCP Server](#mcp-server-ai-agent-payments) below.
 * **MCP OAuth 2.1 (authorize once, not once per conversation):** the connector supports a full OAuth 2.1 authorization-code + PKCE (S256) flow with Dynamic Client Registration (`/api/oauth/register`, `/api/oauth/authorize`, `/api/oauth/token`, discovery under `/.well-known/`). A user authorizes once in a browser — proving their API key **and** PIN on AbaPay's own hand-rendered consent page — and every future conversation reconnects with a Bearer token instead of retyping an API key. **OAuth never authorizes a spend:** the PIN is still required on every single `pay_bill` call, and a Bearer token alone can only read a balance. The `api_key` tool argument remains the fallback for clients that can't do OAuth.
-* **`list_plans` — real VTpass plan codes and prices, never guessed:** `variation_code` used to be something an agent had to invent for DATA/CABLE/EDUCATION. `list_plans` returns the currently purchasable plans with their exact codes and live VTpass prices, and both the tool description and the server instructions tell the client to call it before `pay_bill` rather than guessing.
+* **`list_plans` — real VTpass plan codes and prices, never guessed:** for DATA/CABLE/EDUCATION, `list_plans` returns the currently purchasable plans with their exact `variation_code`s and live VTpass prices, and both the tool description and the server instructions tell the client to call it before `pay_bill` rather than guessing.
 * **x402 Settlement (main app, both chains):** Payments made directly in the web app settle via the [x402](https://x402.org) HTTP-payment protocol — Celo's own facilitator for **USDC/USD₮/USAT on Celo**, the Coinbase CDP facilitator for **USDC on Base** — so they're genuinely indexed on x402scan, not relabeled contract calls. Anything without EIP-3009 uses the on-chain `payBill` flow, including Base's sponsored-gas path. ⚠️ x402 needs an EIP-3009 `transferWithAuthorization` signature, which is structurally what a drainer asks for, so some wallet scanners flag it as risky — a known, deliberate trade for x402scan visibility; `NEXT_PUBLIC_X402_ENABLED=false` opts out. The signature-free agent-initiated flow is untouched either way. See [x402 settlement](#x402-settlement-main-app-only) below.
 * **Dynamic Exchange Engine:** Live market rate conversions with admin-configurable exchange rate and automated profit spread calculation, verified server-side to prevent underpayment exploits.
 * **Executive Admin Dashboard:** Real-time monitoring of VTpass fiat balance, on-chain vault balances per token/chain, transaction analytics, manual refund tools, and CSV export — protected behind admin auth.
@@ -69,7 +69,7 @@ and `walletConnect()`.
 | **MiniPay** (Opera Mini's built-in Celo wallet) | Detected directly via `window.ethereum.isMiniPay`; the app builds its own viem wallet client and locks to Celo | Gas is paid in a stablecoin (`txConfig.feeCurrency`), so users need no CELO. Network switching is intentionally disabled here. |
 | **Farcaster Mini App** | Detected via `@farcaster/miniapp-sdk`'s `sdk.context`; uses `sdk.wallet.ethProvider`, locked to Base | Addresses are read with a *silent* `getAddresses()` so opening the app never forces a wallet popup. Frame metadata ships in `public/.well-known/farcaster.json`. Has its own Exit button next to the (non-interactive) network badge. |
 | **Valora** | **WalletConnect only** — the injected path is deliberately skipped inside Valora's in-app browser (`isValoraBrowser()`) | Pinned to the top of the WalletConnect modal's recommended list via `explorerRecommendedWalletIds`. Celo-only, which the app follows automatically (`walletApprovedChainIds()`). See "Valora is WalletConnect-only" below for why the injected path is off. |
-| **MetaMask** and other injected browser wallets | Whichever **EIP-6963-discovered** connector the wallet announced, falling back to the generic `injected()` one | wagmi discovers one connector per installed wallet (`multiInjectedProviderDiscovery`, on by default). See "How the Connect button chooses" below — reading `window.ethereum` instead of these is what used to send web3-browser users to a QR code. |
+| **MetaMask** and other injected browser wallets | Whichever **EIP-6963-discovered** connector the wallet announced, falling back to the generic `injected()` one | wagmi discovers one connector per installed wallet (`multiInjectedProviderDiscovery`, on by default). See "How the Connect button chooses" below for why this, rather than reading `window.ethereum` directly, is what keeps web3-browser users off a QR code. |
 | **Coinbase Smart Wallet / Base Account** | `baseAccount()` connector | The only wallets that get **sponsored gas** — the app probes EIP-5792 paymaster capability and batches approve + pay into one sponsored call. Everything else falls back to the normal self-paid flow. |
 | **Base App** (the site opened inside Base App's own in-app browser, detected via `isBaseAppBrowser()`) | Same `baseAccount()` connector as above, but auto-connected like MiniPay/Farcaster (see the allowlist below) and **locked to Base** in the UI — the network switcher, footer network text and token picker all show Base only, with no Celo to switch to | Distinct from the general "Coinbase Smart Wallet" row above: picking that connector from an ordinary browser still gets both chains: this row is only when the page itself is running inside Base App. Has its own Exit button next to the (non-interactive) network badge, same as Farcaster. |
 | **Any other WalletConnect v2 wallet** (Trust, Rainbow, Ledger Live, …) | `walletConnect()` connector with the QR modal | Nothing wallet-specific in the code — if it speaks WalletConnect and supports Celo or Base, it works. |
@@ -95,52 +95,48 @@ it is safe on every page load. Each wallet comes back `authorized` (already appr
   site, `Installed` otherwise). Cancelling ends the attempt rather than falling through to a QR
   code. One extension that is both EIP-6963-announced and parked on `window.ethereum` is
   de-duplicated, so it can't appear twice.
-- **Base Account was configured but never offered.** The connector has been in
-  `src/config/wagmi.ts` all along, yet `probeInjectedConnectors()` only returns connectors of type
-  `injected` and Base Account is its own type — so nothing ever put it in front of a user. It
-  matters most on Base, the default chain, where it is the smart-account experience carrying
-  sponsored gas; `verifySignatureAcrossChains` already validates the ERC-1271 signatures it
-  produces, so nothing else had to change to accept it.
+- **Base Account is offered alongside injected wallets.** The connector lives in
+  `src/config/wagmi.ts`; `probeInjectedConnectors()` returns `injected`-type connectors, and Base
+  Account (its own connector type) is added to the option list separately. It matters most on
+  Base, the default chain, where it is the smart-account experience carrying sponsored gas;
+  `verifySignatureAcrossChains` validates the ERC-1271 signatures it produces.
 - Because those two are always present, the chooser always appears — a browser with no extension
   still gets a real choice between signing in with Base Account and pairing a phone wallet,
   rather than being dropped straight onto a QR code.
 
-🔴 **WalletConnect is always an option, never only a fallback.** The chooser used to require
-*two or more* injected wallets before it appeared, so the very common "one extension installed"
-browser connected to that extension silently and was never offered WalletConnect at all — there
-was no route to pairing a phone wallet short of uninstalling the extension. The option list is
-now built first and the chooser decided from *its* length, which is what turns the single-wallet
-case into a real choice.
+🔵 **WalletConnect is always an option, never only a fallback.** The chooser's option list is
+built first and the chooser itself is decided from *that* list's length — so even the common
+"one extension installed" case still offers WalletConnect as a real route to pairing a phone
+wallet, not just a fallback for zero-extension browsers.
 
-🔴 **Why not `window.ethereum`:** under EIP-6963 a wallet announces itself over an event rather
+🔵 **Why not `window.ethereum`:** under EIP-6963 a wallet announces itself over an event rather
 than claiming that global — which is how several extensions coexist without fighting over one
-slot. So a browser with a perfectly good wallet can have `window.ethereum` undefined, or pointing
-at a different wallet than the user means. Probing only the global reported "no wallet", skipped
-the injected path entirely, and showed a QR code for a wallet sitting in the same browser.
+slot. Probing the EIP-6963-announced connectors (rather than the bare global) means a browser
+with a perfectly good wallet is never reported as walletless just because `window.ethereum` is
+unset or points at a different wallet.
 
 Prompts also say **where** to approve. Over WalletConnect the request lands in a separate app
 that nothing brings to the foreground, so the copy says to open it (`walletApprovalPrompt`).
 
 #### Valora is WalletConnect-only
 
-🔴 **The "first prompt works, the second never comes" hang.** Inside Valora's in-app browser the
-page can see something that answers `eth_accounts` — real enough for the probe above to report a
-wallet, real enough for auto-connect to fire, real enough for the entire UI to look connected.
-Not real enough to pay with. The first request raises a prompt; the user taps **Allow**; Valora
-toasts *"Connection to AbaPay was successful!"* — it has taken a payment authorization for a
-connection handshake, consumed it, and returned nothing to the page. Nothing rejected, so there
-is nothing to catch. The spinner runs forever.
+🔵 **Why the injected path is skipped inside Valora.** Inside Valora's in-app browser, the page
+can see something that answers `eth_accounts` — real enough to report a wallet, real enough for
+auto-connect to fire, real enough for the UI to look connected. Not real enough to pay with:
+Valora's injected provider takes a payment authorization request as a connection handshake,
+consumes it, and returns nothing to the page — so the request never resolves.
 
 Valora's supported rail is WalletConnect, and over WalletConnect it behaves normally: a real
 session request with a real response. So the injected path is skipped inside Valora —
 `isValoraBrowser()` suppresses auto-connect and empties the Connect button's injected candidate
 list, dropping the click through to WalletConnect.
 
-🔴 **But the page's own globals are not enough to spot Valora.** `isValoraBrowser()` looks for an
-`isValora` flag or the name in the user agent, and in Valora's in-app browser **neither is
-present**: it injects no provider and its webview reports a stock Android Chrome user agent. The
-only thing that names the wallet is the session — WalletConnect exchanges peer metadata on
-connect, and `session.peer.metadata.name` is the wallet's own name for itself.
+🔵 **Detecting Valora needs the WalletConnect session, not the page's own globals.**
+`isValoraBrowser()` looks for an `isValora` flag or the name in the user agent, and in Valora's
+in-app browser **neither is present**: it injects no provider and its webview reports a stock
+Android Chrome user agent. The only thing that names the wallet is the session — WalletConnect
+exchanges peer metadata on connect, and `session.peer.metadata.name` is the wallet's own name
+for itself.
 
 So `connectedWalletIsValora()` reads that instead, and a **restored** Valora session is dropped on
 mount so the user pairs fresh. That is deliberately narrow, because the friction only buys
@@ -161,32 +157,27 @@ is the more expensive mistake. Covered in `tests/walletEnv.test.ts`.
 Every cancellation path assumes the wallet reports the rejection — EIP-1193 says it should, and
 injected wallets do. **Valora over WalletConnect does not**: dismissing its sheet sends nothing
 back over the relay, so there is no rejection to catch, no error and no event. The request stays
-open and the page waits on a decision that was already made — *"I cancelled the pop up and it kept
-loading for life"*.
+open and the page waits on a decision that was already made.
 
-`withWalletTimeout` does fire, but 90s of frozen spinner after you've tapped cancel reads as
-broken — and that budget has to stay 90s, because it is also how long someone gets to read a
-prompt before approving. So after 15s of processing the status banner grows a **STOP WAITING**
-control. It cannot abort the in-flight request (nothing on this side can) and deliberately does
-**not** claim the payment was cancelled: if the user approves a moment later it still settles, and
-saying otherwise is how someone pays twice.
+`withWalletTimeout` fires at 90s — that budget has to stay 90s, because it is also how long
+someone gets to read a prompt before approving. So after 15s of processing the status banner
+grows a **STOP WAITING** control. It cannot abort the in-flight request (nothing on this side
+can) and deliberately does **not** claim the payment was cancelled: if the user approves a
+moment later it still settles, and saying otherwise is how someone pays twice.
 
 #### Auto-connect is an allowlist: MiniPay, Base App, Farcaster — and nothing else
 
 On the web, **the Connect button is the only way in.** No wallet is connected until the user asks
 for it, even one whose extension approved this site months ago.
 
-🔴 **The auto-connect nobody could find was in `WagmiProvider` itself.** wagmi persists the
-connector and, with the default `reconnectOnMount`, silently re-establishes it on *every page
-load* — inside the provider, before any effect in `page.tsx` runs and regardless of what those
-effects decide. So the app came up connected on its own no matter how carefully the rules
-downstream were written, and every attempt to fix it by editing those rules was editing the wrong
-thing. `Providers.tsx` now passes `reconnectOnMount={false}`.
+🔵 **`reconnectOnMount={false}` is set deliberately in `Providers.tsx`.** wagmi's default
+`reconnectOnMount` persists the connector and silently re-establishes it on *every page load* —
+inside the provider, before any effect in `page.tsx` runs. Setting it `false` means only an
+explicit `connect()` call ever establishes a session.
 
-The rule downstream was also the wrong shape: it auto-connected **any** `authorized` wallet and
-carved out Valora by name. That made silent connect the default and removed wallets only after
-someone complained, which is how *"it connects by itself and there's no Connect button"* kept
-coming back wearing a different wallet's name. It is an allowlist now (`AUTO_CONNECT_SURFACES`).
+Auto-connect itself is an allowlist (`AUTO_CONNECT_SURFACES`), not a rule that connects any
+previously-`authorized` wallet by default and carves out exceptions by name — an allowlist is
+the shape that keeps a silent connect from reappearing under a different wallet's name later.
 
 Those three are different in kind, not degree: the app is running **inside** the wallet, so there
 is exactly one account it could mean, the user chose it by opening AbaPay there, and no chooser is
@@ -205,20 +196,17 @@ is the point, but it is a real cost on a page people reload.
 restores `connections`/`current` from the cookie and `useAccount()` reports `isConnected` with an
 address — while no provider has been set up and no relay socket exists.
 
-🔴 That is one bug wearing two faces, and both were reported: *"Valora still auto connects"*, and
-then *"your wallet connection has dropped — tap Connect"* when paying a wallet that looks
-perfectly connected. Nothing had dropped. There was never a live session, only a cookie
-describing one. A connection this page did not itself establish is now dropped on mount
-(`userInitiatedConnect` is what separates the two). Base App is unaffected — its silent connect
-calls `connect()` explicitly.
+🔵 A rehydrated cookie session and a live session look identical from `useAccount()` — both
+report `isConnected` with an address — so a connection this page did not itself establish is
+dropped on mount (`userInitiatedConnect` is what separates the two). Base App is unaffected —
+its silent connect calls `connect()` explicitly.
 
 #### Proving the wallet is yours, once per session
 
-🔴 **A filter written by the client is not a permission.** History used to be read straight from
-the browser with the anon key, scoped only by `.ilike('wallet_address', address)`. Swap the
-address and PostgREST returns someone else's rows — phone numbers, meter numbers, amounts. A
-provider that merely *claimed* an address it did not hold was enough, because a wallet address is
-public information.
+🔵 **A filter written by the client is not a permission.** History is never read straight from
+the browser with the anon key scoped by an address parameter — a client-supplied filter like
+`.ilike('wallet_address', address)` is only as trustworthy as the client, and a wallet address is
+public information anyone could pass.
 
 After connecting, the wallet signs a plainly-worded ownership message (`src/lib/walletSession.ts`
 — shared by browser and server, because two copies of that string means one stray character
@@ -230,25 +218,23 @@ point at another person's records.
   Account and Safe are not locked out by the signature being a shape we could not check.
 - A **rejection** disconnects — the user declined to prove the address is theirs.
 - Any **other** failure leaves them connected but unproven: they can still pay, because paying is
-  authorised by the payment signature itself, and only history is withheld. Locking someone out
-  of paying for owning an unusual wallet would be worse than the bug being closed.
+  authorised by the payment signature itself, and only history is withheld — never a hard lockout
+  over a signature shape this endpoint didn't need to check.
 - Read-only, and for a session rather than five minutes, because a wallet popup on every History
   refresh trains people to sign whatever they are shown. It is a bearer credential for that
   window; mutations keep their own fresh, per-action signatures (`verifyWalletOwnership`).
 
 #### A restored WalletConnect session is not a live one
 
-🔴 **The "auto-connects, then hangs forever" failure.** wagmi persists the WalletConnect session
-(`cookieStorage`) and restores it on load — that is the *"it auto-connects after a while"* users
-describe. Restoring produces an address, and an address is all the UI needs to look connected:
-balances render (they come from a public RPC and never touch the wallet), the pay button enables,
-everything reads as normal.
+🔵 wagmi persists the WalletConnect session (`cookieStorage`) and restores it on load, producing
+an address — and an address is all the UI needs to look connected: balances render (they come
+from a public RPC and never touch the wallet), the pay button enables, everything reads as
+normal.
 
-But a WalletConnect request only reaches the phone if the **relay socket is open**. Restored over
-a dead socket, `eth_sendTransaction` is written to a closed pipe: no prompt appears in the wallet,
+But a WalletConnect request only reaches the phone if the **relay socket is open**. Over a dead
+socket, `eth_sendTransaction` is written to a closed pipe: no prompt appears in the wallet,
 nothing comes back, and **there is no error to catch, because nothing rejected** — the request
-simply went nowhere. From the page it is indistinguishable from a user who hasn't looked at their
-wallet yet, which is why it presented as an eternal spinner.
+simply goes nowhere, indistinguishable from a user who hasn't looked at their wallet yet.
 
 `walletConnectSessionLive()` (`src/lib/walletEnv.ts`) checks the relay before any wallet
 interaction; a dead session is reported in one sentence and disconnected so **Connect** pairs
@@ -287,8 +273,8 @@ as unvended.
 Stablecoins: **USD₮** and **USDC** on both chains, plus **USAT** on Celo mainnet only. Which token
 a chain *leads* with, and in what order the rest follow, is `TOKEN_ORDER_BY_CHAIN` in
 `src/constants/index.ts` — **Base: USDC then USD₮; Celo: USD₮, USDC, USAT**. One
-`tokensForChain()` serves the Pay tab, the Agent Hub, the chat agent and the MCP tools, which
-each used to filter `SUPPORTED_TOKENS` themselves and could therefore disagree.
+`tokensForChain()` serves the Pay tab, the Agent Hub, the chat agent and the MCP tools — one
+function, so all four always agree on which tokens a chain offers.
 
 ---
 
@@ -498,18 +484,18 @@ WHATSAPP_SCHEDULE_TEMPLATE_LANG=en                # Must match the template's la
 
 #### The 24-hour window, and why the scheduler needs a template
 
-🔴 WhatsApp lets a business send **free-form text** only within **24 hours of the user's last
+🔵 WhatsApp lets a business send **free-form text** only within **24 hours of the user's last
 message**. Outside that window Meta rejects the send with error **131047** and the *only* thing
 that gets through is a pre-approved template.
 
 **Business Verification does not lift this.** Verification governs how *many* unique people you
 may message outside a window (250 → 1,000 → higher); it has no bearing on *what* you may send
-them. The two are independent, and conflating them is why this looked like it should already work.
+them. The two are independent.
 
-`src/lib/scheduler.ts` is the caller this bites: a payment scheduled for tomorrow reports back
-long after the chat that created it went quiet, so "your electricity bill was paid" was rejected
-every time — and swallowed, so the only symptom was a user who never heard back and had to find
-the receipt in History themselves.
+`src/lib/scheduler.ts` is the caller this affects: a payment scheduled for tomorrow reports back
+long after the chat that created it went quiet — outside the 24h window by design, which is why
+that report always goes through the approved `WHATSAPP_SCHEDULE_TEMPLATE_NAME` template instead
+of free-form text.
 
 `sendWhatsAppMessage()` now sends text first (free, and correct while the window is open) and
 retries through the template **only** on 131047. Any other failure — expired token, blocked
@@ -536,9 +522,10 @@ in `tests/whatsapp.test.ts`.
 
 ⚠️ **`WHATSAPP_APP_SECRET` is required, not optional.** The webhook **fails closed**: with it
 unset, `POST /api/whatsapp/webhook` returns **503 `Webhook not configured`** and every delivery
-from Meta is rejected — the bot goes completely silent with no other symptom. That is deliberate
-(an unset secret used to skip verification entirely, leaving anyone able to impersonate any
-sender), but it means *forgetting to set it looks exactly like the bot being broken*.
+from Meta is rejected — the bot goes completely silent with no other symptom. That's deliberate:
+without the secret there's no way to verify the `X-Hub-Signature-256` on an inbound webhook,
+which would otherwise let anyone impersonate any sender. It does mean *forgetting to set it
+looks exactly like the bot being broken*.
 
 To check a live deployment, POST an unsigned body at the webhook and read the status:
 `503` = the secret is missing; `401 Invalid signature` = the secret is set and the gate is
@@ -623,23 +610,23 @@ in the request. It is a deliberate trade.
 Escape hatches, per chain: `NEXT_PUBLIC_X402_ENABLED=false` moves everything to the contract-call
 rail; `NEXT_PUBLIC_BASE_X402_ENABLED=false` moves only Base. Both default to on.
 
-x402 runs on **every wallet, every environment and both chains**. An earlier version restricted it
-to in-browser wallets, on the theory that Valora's *"Verify wallet"* prompt swallowing the x402
-signature was why it hung; testing disproved that — routed to the contract call, Valora hung at
-exactly the same point on a plain `eth_sendTransaction` with no signature involved. The settlement
-rail was never the problem, so making every other environment pay for it bought nothing.
+x402 runs on **every wallet, every environment and both chains** — Valora's WalletConnect hang
+(see the wallet-connection section above) happens at the same point on a plain
+`eth_sendTransaction` with no signature involved, so restricting x402 to in-browser wallets would
+buy nothing there; the settlement rail isn't the variable.
 
-🔴 **The one remaining limit is the TOKEN, not the chain and not the wallet.** x402 settles on an
+🔵 **The one real limit is the TOKEN, not the chain and not the wallet.** x402 settles on an
 EIP-3009 `transferWithAuthorization` signature, so it only works on tokens that implement one.
 Celo's USDC and USD₮ both do; on Base, USDC does and **Tether's USD₮ does not** — there is no such
 function on that contract to sign against.
 
 That is why the chain's *lead* stablecoin matters so much. Base leads with USDC
-(`TOKEN_ORDER_BY_CHAIN`), so the default path on Base **is** x402. The token-reset effect used to
-fire only when the selected token didn't exist on the new chain — and USD₮ exists on *both*, so
-arriving on Base from Celo silently kept USD₮ selected and quietly demoted every Base user to the
-contract call. It is now keyed on the chain ID, so switching chain resets to that chain's lead
-stablecoin while never fighting a user who deliberately picks the other token in place.
+(`TOKEN_ORDER_BY_CHAIN`), so the default path on Base **is** x402. The token-reset effect is
+keyed on chain ID: switching chain always resets the selected token to that chain's lead
+stablecoin (unless the user deliberately picked the other one), rather than only resetting when
+the previously-selected token doesn't exist on the new chain at all — since USD₮ exists on both
+chains but only settles via x402 on Celo, a reset that fires solely on token-existence would
+silently carry USD₮ over from Celo to Base and demote that user to the contract-call rail.
 
 Settlement runs through **Celo's own x402 facilitator** (`api.x402.celo.org` mainnet /
 `api.x402.sepolia.celo.org` testnet — built by Celo Core Co.), not thirdweb. thirdweb is
@@ -932,7 +919,7 @@ already backs Telegram/WhatsApp/X, not a parallel system with its own rules:
 | `list_schedules` | Lists active schedules for the linked wallet | OAuth Bearer token *or* `api_key` |
 | `cancel_schedule` | Cancels one, some, or all active schedules for the linked wallet | OAuth Bearer token *or* `api_key` |
 
-`list_plans` exists because `variation_code` was previously something the agent had to invent.
+`list_plans` exists so `variation_code` is never something the agent has to invent.
 Its description, and the server-level `instructions`, both tell the client to call it before
 `pay_bill` for those three services and to pass back a returned code verbatim — never to guess a
 plan, a code, or a price. If it returns nothing usable (which genuinely happens — JAMB is not
@@ -979,12 +966,9 @@ light/dark), with a "View receipt" link wired through `ui/open-link`. Declared v
 negotiates the extension just never calls `resources/read`, and every tool behaves exactly as
 before (text ± PNG image), per the spec's own graceful-degradation rule.
 
-**The receipt card covers every real outcome of `pay_bill`, not just full success.** It used to
-build the card (PNG + interactive view) only when `pay_bill` fully succeeded, so a payment that
-went on-chain but was still confirming, or one where the on-chain charge succeeded but VTpass
-failed to vend the code/PIN, fell back to plain text with no card at all — the exact case a user
-most needs the visual status for. `finalizePayBillResult` now builds the full receipt (image +
-`structuredContent`) for **any** outcome that produced a real `txHash` — `SUCCESS`, `PENDING`
+**The receipt card covers every real outcome of `pay_bill`, not just full success.**
+`finalizePayBillResult` builds the full receipt (image + `structuredContent`) for **any**
+outcome that produced a real `txHash` — `SUCCESS`, `PENDING`
 (still confirming on-chain), or `FAILED_VENDING` (charged, refund pending) — each with its own
 status colour, label, and icon on the card; only a payment that never reached the chain falls back
 to text-only.
@@ -1014,12 +998,12 @@ built around protecting. `cancel_schedule` needs no PIN already (same as calling
 which is why it's the one write action the card exposes.
 
 **Already-connected clients pick up new/changed tools without a manual reconnect** — mostly.
-`initialize` now declares `tools: { listChanged: true }`, and `GET /api/mcp` with
-`Accept: text/event-stream` opens a real SSE stream (previously a hard 405) that pushes
+`initialize` declares `tools: { listChanged: true }`, and `GET /api/mcp` with
+`Accept: text/event-stream` opens a real SSE stream that pushes
 `notifications/tools/list_changed` the moment a client starts listening, prompting a fresh
-`tools/list`. This was added after confirming, against production logs, that an already-connected
-client does NOT re-run `initialize` just because a new chat starts — it reuses one persistent
-connection to the connector indefinitely. ⚠️ Not a guaranteed fix by itself: Anthropic's own MCP
+`tools/list`. This matters because an already-connected client does NOT re-run `initialize` just
+because a new chat starts — it reuses one persistent connection to the connector indefinitely.
+⚠️ Not a guarantee by itself: Anthropic's own MCP
 connector tracker has open, acknowledged reports of a remote connector's tool list staying stale
 even across a manual reconnect (`anthropics/claude-ai-mcp#137`, `#476`) — a client/platform-side
 caching issue outside this server's control. Until that's fixed platform-side, "Refresh tools
@@ -1051,9 +1035,9 @@ requires one per DATA recipient instead of inheriting that gap. AIRTIME and DATA
 20 recipients per call.
 
 **`schedule_bill`/`list_schedules`/`cancel_schedule` bring MCP to parity with chat's
-automations.** Telegram/WhatsApp/X have long supported recurring and one-off scheduled bills
-(the `scheduled_bills` table, run by `src/lib/scheduler.ts`'s cron); MCP previously had no way to
-set one up at all — an agent could pay a bill immediately but never later. `schedule_bill` collects
+automations.** Telegram/WhatsApp/X support recurring and one-off scheduled bills
+(the `scheduled_bills` table, run by `src/lib/scheduler.ts`'s cron); MCP has the same
+capability, so an agent can pay a bill immediately or schedule one for later. `schedule_bill` collects
 in one call what chat gathers over a multi-turn conversation, reusing pay_bill's exact validation
 (`requiresVariation`, `checkAccountNumber`, `checkAmountLive`, the live-catalogue provider check)
 and PIN gate, since a schedule is a standing spend. It charges nothing itself: if the wallet's
@@ -1065,10 +1049,9 @@ optional `customer_email` for that — without one, check `list_schedules`/`tran
 yourself to see what happened.
 
 **Why this exists:** third-party agent scanners like [8004scan.io](https://8004scan.io) only run
-a health check against a declared `a2a` or `mcp` service (AbaPay's ERC-8004 card previously only
-declared `web` and `x402`, neither of which they probe) — see `public/.well-known/agent.json`'s
-`services` array. Building a real, working MCP server was the actual fix, not a stub added just
-to satisfy the scanner.
+a health check against a declared `a2a` or `mcp` service — see `public/.well-known/agent.json`'s
+`services` array, which declares both. The MCP server behind that declaration is real and
+working, not a stub added just to satisfy the scanner.
 
 **Same trust model as chat, not a new one.** `pay_bill` doesn't reimplement any security logic —
 it calls straight into the functions already backing Telegram/WhatsApp/X and the multi-recipient
@@ -1127,8 +1110,7 @@ Things worth knowing about this implementation:
   is precisely the open-redirect vulnerability that would leak the authorization code.
 - The consent page is a hand-rendered, fully self-contained HTML string (inline `<style>`, no
   scripts, no fonts, no third-party assets) so it satisfies the app's CSP without exception and
-  can't be broken by anything else in the app. It uses AbaPay's own emerald wordmark styling —
-  it previously ran an unrelated blue theme.
+  can't be broken by anything else in the app, styled with AbaPay's own emerald wordmark.
 - Refresh tokens **rotate** on every use (OAuth 2.1's requirement for public clients), so a
   stolen refresh token stops working as soon as the legitimate client refreshes — and the theft
   becomes detectable instead of silent.
@@ -1185,8 +1167,8 @@ organizational submission through Anthropic, not a code change:
   `readOnlyHint`/`destructiveHint` annotations (✅ done above), a public documentation URL
   (`https://abapays.com/docs` — live), a privacy policy URL (`https://abapays.com/privacy` —
   live), an icon, and reviewer test-account credentials.
-- **OAuth 2.0 — no longer a gap.** The directory requires OAuth for authenticated connectors,
-  and that is now built (see the OAuth section above): authorization code + PKCE, Dynamic Client
+- **OAuth 2.0 is in place.** The directory requires OAuth for authenticated connectors, and
+  AbaPay has it (see the OAuth section above): authorization code + PKCE, Dynamic Client
   Registration, discovery metadata, and a real 401 so clients can discover it. What remains for
   a directory listing is the *organizational* submission itself (a Team/Enterprise org, an icon,
   and reviewer test-account credentials) — not code.
@@ -1277,21 +1259,19 @@ causing registration to silently fail with a correct-looking 402 status but no u
 challenge.
 
 Client-side, the challenge is read, signed and retried by `src/lib/x402Pay.ts` using the same
-viem wallet client every contract call uses. It previously went through `thirdweb`'s
-`useFetchWithPayment`, which meant a second wallet connection alongside the wagmi one — over
-WalletConnect that second stack announced itself as an extra connection prompt in the middle of
-a payment, so one bill could cost four approvals. Signing in-house also lets the page read the
+viem wallet client every contract call uses — one wallet connection for the whole flow, no
+second stack alongside wagmi. Signing in-house also lets the page read the
 server's actual answer: a settlement failure that carries a `tx_hash` means the money already
 moved, and the app must never "retry" it on the contract-call rail.
 
 #### A refused settlement is retried before the rail is abandoned
 
-🔴 **The bug: "it fails, I cancel and retry the same x402, and then it goes through."** Reported
-on Base, with the facilitator answering `unable to estimate gas` / `invalid_payload` — a
-`transferWithAuthorization` simulation that reverted, carrying no transaction, so nothing moved.
-The app's answer was to declare the rail dead and fall back, which costs **two** more prompts
-(approve + payBill) for a bill the fast rail settles on a second attempt costing **one**. Users
-were doing that second attempt by hand; now it happens on its own, at three levels:
+🔵 **Why a refused x402 settlement gets a real retry instead of an immediate fallback.** A
+`transferWithAuthorization` simulation can revert (the facilitator answers `unable to estimate
+gas` / `invalid_payload`) with no transaction and nothing moved. Falling back to the contract
+call in that case costs **two** more prompts (approve + payBill) for a bill the x402 rail can
+often settle on a second attempt costing **one** — so the retry happens automatically, at three
+levels:
 
 1. **Before the facilitator is called at all.** `src/lib/x402Settle.ts` decides the EIP-3009
    revert conditions that are visible in the payload — an expired validity window, a
@@ -1307,23 +1287,13 @@ were doing that second attempt by hand; now it happens on its own, at three leve
    `retryable`, and never when it carries a `tx_hash`. The second prompt is announced, because an
    unexplained one reads as an app that ignored the first.
 
-🔴 **No retry is offered until the CHAIN says the money did not move.** This is the important
-one, and it was learned the expensive way — from on-chain receipts, not from reasoning:
-
-```
-09:21:31   1.4925 USDC   payer -> vault   0xe1f5043a…   ← paid
-09:23:51   1.4925 USDC   payer -> vault   0x19aec564…   ← paid AGAIN, 140s later, same bill
-```
-
-Both are real `transferWithAuthorization` calls that succeeded. The facilitator's answer for the
-second attempt was the same `unable to estimate gas` / `invalid_payload` as ever — because
-EIP-3009 nonces are single-use, so **re-simulating an authorization that already succeeded
-necessarily reverts**, and a revert during estimation is reported exactly that way. The sentence
-is therefore ambiguous *by construction*: a facilitator says it both when nothing has happened
-yet and when everything has already happened. Read as the former, it asked the payer to sign a
-fresh nonce, which the token correctly accepted — a second real payment for one bill.
-
-No amount of message-matching separates those two cases, so the code stops trying. Every
+🔵 **No retry is offered until the CHAIN says the money did not move.** This is the important
+one. `unable to estimate gas` / `invalid_payload` is ambiguous *by construction*: because EIP-3009
+nonces are single-use, re-simulating an authorization that already succeeded necessarily
+reverts, and a revert during estimation is reported the same way whether nothing has happened
+yet or everything already has. Message-matching alone can't separate those two cases — offering
+a retry on the wrong read means asking the payer to sign a fresh nonce and pay a second time for
+one bill. So the code doesn't rely on the message at all. Every
 EIP-3009 token exposes `authorizationState(authorizer, nonce) -> bool`, the chain's own record
 of whether that exact authorization was consumed, and it is asked before any retry is offered
 (`buildAuthorizationStateCall`, and `authorizationWasConsumed` in the settle route). Spent means
@@ -1343,15 +1313,13 @@ session that never negotiated that method drops the request on the floor — no 
 nothing back. Only that is checked, from the session itself: see `walletCanSignTypedData` in
 `src/lib/walletEnv.ts`.
 
-🔴 **It no longer routes by wallet NAME.** An earlier version answered `false` for Valora
-outright, on the strength of Valora rendering the request as "Verify wallet" and reporting a
-successful *connection* without returning a signature. Naming one wallet turned a *maybe* into a
-permanent *no*: Valora lost the x402 rail on **both** Celo and Base and could never earn it back,
-because a wallet routed off a rail can never demonstrate it works on one. Every wallet is now
-asked, and its own answer decides. When the answer never comes, the signature times out, nothing
-has been sent to settle (`src/lib/x402Pay.ts` posts the settle request itself, on the line after
-the signature is awaited, so unwinding it means a late signature reaches nobody) and the page
-falls back to the contract call on its own. That fallback is what made it safe to stop guessing.
+🔵 **Routing is never by wallet NAME.** Every wallet is asked whether it can sign typed data, and
+its own answer decides — not a hardcoded assumption about a specific wallet's behavior (Valora,
+for instance, renders a typed-data request as "Verify wallet" and can report a successful
+*connection* without ever returning a signature). When the answer never comes, the signature
+times out, nothing has been sent to settle (`src/lib/x402Pay.ts` posts the settle request itself,
+on the line after the signature is awaited, so unwinding it means a late signature reaches
+nobody) and the page falls back to the contract call on its own.
 
 That signature requirement is exactly why this is **scoped to the main app only**: the
 agent-initiated flow above depends on paying with *zero* signature at payment time (the whole
@@ -1453,11 +1421,10 @@ exactly those keys, normalising the provider through `resolveServiceId` first so
 `checkServiceAllowed()` is then the gate every non-web channel must pass. Settings are cached
 for **30 seconds**, so flipping a switch takes effect within half a minute everywhere.
 
-> 🔴 **The bug this fixed:** these functions previously returned a single *bare* key
-> (`AIRTIME`, `ELECTRICITY`, …) that nothing has written since the `MASTER_`/per-provider system
-> replaced it. So "pause Electricity" in the dashboard flipped `MASTER_ELECTRICITY`, the website
-> correctly refused — and chat, MCP and the autonomous scheduler carried on spending real user
-> funds on a service the operator had deliberately switched off.
+> ⚠️ **Why this mapping matters:** `killSwitchKeysFor()` is what makes "pause Electricity" in the
+> dashboard actually stop chat, MCP and the autonomous scheduler, not just the website — all four
+> surfaces resolve the same intent to the same `MASTER_`/per-provider keys, so a switch flipped
+> in one place is enforced everywhere.
 
 Separate from the per-service switches, `checkAgentSpendAllowed()` enforces the operator's
 controls over the *agent* specifically: `agent_enabled` (master kill for all agent payments),
@@ -1590,10 +1557,7 @@ review. Neither should be treated as legally vetted until a qualified lawyer has
 them; `/terms` carries a visible notice at the bottom saying exactly that, and it must survive
 any rewrite of the page.
 
-There is no longer a separate in-app Terms/Privacy/FAQ modal. Those components existed in
-`src/components/Modals.tsx`, but `TermsModal`/`PrivacyModal` were imported and never rendered,
-and the FAQ was a footer button duplicating (and drifting from) the `/docs` FAQ. All three are
-gone; `/docs` is the single docs + FAQ surface.
+`/docs` is the single docs + FAQ surface — there is no separate in-app Terms/Privacy/FAQ modal.
 
 ---
 
