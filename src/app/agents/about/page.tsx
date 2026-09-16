@@ -86,12 +86,12 @@ export default function AboutPage() {
                 <Rocket className="text-emerald-500" size={18} />
               </div>
               <span className="flex items-center gap-1 text-[10px] font-black uppercase tracking-widest text-emerald-600 dark:text-emerald-400">
-                <CheckCircle2 size={12} /> Shipped, one step short
+                <CheckCircle2 size={12} /> Shipped
               </span>
             </div>
             <h3 className="font-black text-slate-900 dark:text-white mb-1.5">Python SDK</h3>
             <p className="text-sm text-slate-500 dark:text-slate-400 leading-relaxed">
-              <code className="text-slate-500">python-sdk/</code> in the repo mirrors the <Link href="/agents/sdk" className="underline hover:text-emerald-500">TypeScript SDK</Link> field-for-field — same two functions, a real CLI, tests that recover the signer&apos;s address from the signed EIP-712 data and assert it matches. Verified in CI, not published to PyPI yet — that step needs a one-time PyPI Trusted Publisher setup, the same kind of account action npm publishing needed before it went live.
+              <code className="text-slate-500">python-sdk/</code> mirrors the <Link href="/agents/sdk" className="underline hover:text-emerald-500">TypeScript SDK</Link> field-for-field — same two functions, a real CLI, tests that recover the signer&apos;s address from the signed EIP-712 data and assert it matches. Live on PyPI: <code className="text-slate-500">pip install abapay-sdk</code>, published via a Trusted Publisher (no token secret) off a <code className="text-slate-500">py-sdk-v*</code> tag.
             </p>
           </div>
           <div>
@@ -100,12 +100,12 @@ export default function AboutPage() {
                 <Workflow className="text-amber-600 dark:text-amber-400" size={18} />
               </div>
               <span className="flex items-center gap-1 text-[10px] font-black uppercase tracking-widest text-amber-600 dark:text-amber-400">
-                <Clock size={12} /> Drafted, pending go-ahead
+                <Clock size={12} /> In review
               </span>
             </div>
             <h3 className="font-black text-slate-900 dark:text-white mb-1.5">Wider agent-registry discovery</h3>
             <p className="text-sm text-slate-500 dark:text-slate-400 leading-relaxed">
-              Already listed on the <a href="https://registry.modelcontextprotocol.io" target="_blank" rel="noopener noreferrer" className="underline hover:text-emerald-500">official MCP Registry</a> and on-chain via ERC-8004. A submission to <code className="text-slate-500">awesome-mcp-servers</code> (95k+ stars, also what Glama&apos;s directory indexes from) is written and ready — opening it is a real public action against a third-party repo, held for explicit sign-off rather than sent automatically.
+              Already listed on the <a href="https://registry.modelcontextprotocol.io" target="_blank" rel="noopener noreferrer" className="underline hover:text-emerald-500">official MCP Registry</a> and on-chain via ERC-8004. A PR is open against <code className="text-slate-500">awesome-mcp-servers</code> (95k+ stars), and AbaPay is submitted to <a href="https://glama.ai/mcp/servers" target="_blank" rel="noopener noreferrer" className="underline hover:text-emerald-500">Glama&apos;s directory</a> for review — both mid-process, not claimed early.
             </p>
           </div>
         </div>

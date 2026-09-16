@@ -39,9 +39,9 @@ and legal terms.
 ## Status
 
 {% hint style="success" %}
-**Python SDK — shipped, one step short.** `python-sdk/` in the repo mirrors the TypeScript SDK field-for-field — same two functions, a real CLI, tests that recover the signer's address from the signed EIP-712 data and assert it matches. Verified in CI, not published to PyPI yet — that step needs a one-time PyPI Trusted Publisher setup, the same kind of account action npm publishing needed before it went live.
+**Python SDK — shipped.** `python-sdk/` mirrors the TypeScript SDK field-for-field — same two functions, a real CLI, tests that recover the signer's address from the signed EIP-712 data and assert it matches. Live on PyPI: `pip install abapay-sdk`, published via a Trusted Publisher (no token secret) off a `py-sdk-v*` tag.
 {% endhint %}
 
 {% hint style="warning" %}
-**Wider agent-registry discovery — drafted, pending go-ahead.** Already listed on the official MCP Registry and on-chain via ERC-8004. A submission to `awesome-mcp-servers` (95k+ stars, also what Glama's directory indexes from) is written and ready — opening it is a real public action against a third-party repo, held for explicit sign-off rather than sent automatically.
+**Wider agent-registry discovery — in review.** Already listed on the official MCP Registry and on-chain via ERC-8004. A PR is open against `awesome-mcp-servers` (95k+ stars), and AbaPay is submitted to Glama's directory for review — both mid-process, not claimed early.
 {% endhint %}

@@ -911,9 +911,10 @@ already backs Telegram/WhatsApp/X, not a parallel system with its own rules:
 > See **[docs/AGENT_INTEGRATION.md](docs/AGENT_INTEGRATION.md)** — the x402 zero-setup path,
 > and the fully headless (wallet-signature-only) way to self-serve an MCP API key. Writing
 > TypeScript? **[`sdk/`](sdk)** (`abapay-sdk` on npm) wraps both into two functions. Python?
-> **[`python-sdk/`](python-sdk)** mirrors it field-for-field — tested in CI (no Python
-> interpreter exists in the environment that wrote it, so CI is the real verification, not a
-> local run) and not yet published to PyPI. Prefer a full book over a single doc? **[`docs/
+> **[`python-sdk/`](python-sdk)** mirrors it field-for-field and is on PyPI too —
+> `pip install abapay-sdk`, published via a Trusted Publisher (no token secret) off the
+> `py-sdk-v*` tag; CI (not a local run — no Python interpreter existed in the environment
+> that wrote it) is what actually verified it. Prefer a full book over a single doc? **[`docs/
 > gitbook/`](docs/gitbook)** covers the same ground as 12 chapters (`SUMMARY.md` is the table
 > of contents — Markdown, ready to sync into GitBook or any docs host that reads a repo
 > directly).
