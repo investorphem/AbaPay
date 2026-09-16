@@ -27,7 +27,7 @@ const result = await payBillViaX402({
   bill: {
     serviceID: "mtn", serviceCategory: "AIRTIME",
     network: "MTN", billersCode: "08012345678",
-    nairaAmount: 1000, token: "USDT",
+    nairaAmount: 1000, token: "USDC",
   },
 });
 

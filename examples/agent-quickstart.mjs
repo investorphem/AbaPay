@@ -37,7 +37,7 @@ import { createWalletClient, createPublicClient, http, parseUnits, formatUnits }
 import { privateKeyToAccount } from 'viem/accounts';
 import { celo, base } from 'viem/chains';
 
-const APP_URL = 'https://www.abapays.com';
+const APP_URL = 'https://agents.abapays.com';
 
 // Same addresses documented in README.md's AbaPayV4 section and ENV_SETUP.md §3 —
 // the single source of truth for where payments land on each chain.

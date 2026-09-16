@@ -13,7 +13,7 @@ API key remains the fallback for clients that can't do OAuth.
 ```json
 {
   "mcpServers": {
-    "abapay": { "url": "https://www.abapays.com/api/mcp" }
+    "abapay": { "url": "https://agents.abapays.com/api/mcp" }
   }
 }
 ```

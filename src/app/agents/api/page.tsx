@@ -55,7 +55,7 @@ export default function APIPage() {
                 ["network", "string", "Provider name, e.g. MTN, IKEJA-ELECTRIC, DSTV"],
                 ["billersCode", "string", "Phone number, meter number, or smartcard/IUC number"],
                 ["nairaAmount", "number", "Bill amount in NGN — the source of truth for pricing"],
-                ["token", "string", '"USDC" or "USDT" — both implement EIP-3009 on Celo'],
+                ["token", "string", '"USDC", "USD₮", or "USA₮" — all three implement EIP-3009 on Celo; an unrecognized value falls back to USDC'],
                 ["blockchain", "string", '"CELO" — this site\'s rails are Celo-only'],
                 ["wallet_address", "string", "The paying wallet, cross-checked against the signed authorization"],
               ].map(([field, type, desc]) => (
@@ -110,9 +110,9 @@ export default function APIPage() {
           A GET or probing POST with no payment attached returns a valid 402 challenge — the endpoint is always live for discovery, no credential required to see the price. CORS is open on this endpoint (see the live panel above), so this also works straight from browser JS, not just curl.
         </p>
         <CopyBlock
-          code={`curl -X POST https://www.abapays.com/api/pay/x402 \\
+          code={`curl -X POST https://agents.abapays.com/api/pay/x402 \\
   -H "Content-Type: application/json" \\
-  -d '{"serviceID":"mtn","serviceCategory":"AIRTIME","network":"MTN","billersCode":"08012345678","nairaAmount":1000,"token":"USDT","blockchain":"CELO","wallet_address":"0xYourAgentWallet"}'`}
+  -d '{"serviceID":"mtn","serviceCategory":"AIRTIME","network":"MTN","billersCode":"08012345678","nairaAmount":1000,"token":"USDC","blockchain":"CELO","wallet_address":"0xYourAgentWallet"}'`}
         />
         <p className="text-xs text-slate-400 dark:text-slate-500 mt-4">
           Full machine-readable spec: <a href="https://abapays.com/openapi.json" target="_blank" rel="noopener noreferrer" className="underline hover:text-emerald-500">openapi.json</a>. For the signed retry that actually settles it, see <Link href="/agents/x402" className="underline hover:text-emerald-500">/agents/x402</Link> or <Link href="/agents/sdk" className="underline hover:text-emerald-500">abapay-sdk</Link>. Every error code this endpoint can return: <Link href="/agents/errors" className="underline hover:text-emerald-500">/agents/errors</Link>.

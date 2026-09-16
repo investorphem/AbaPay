@@ -1,6 +1,6 @@
 # AbaPay
 
-Base URL: `https://www.abapays.com`
+Base URL: `https://agents.abapays.com`
 
 Use this skill to pay a real-world bill — airtime, mobile data, electricity, cable TV, a
 WAEC/JAMB education PIN, or international airtime/data across 170+ countries — from an agent's
@@ -33,10 +33,13 @@ No AbaPay account, ever. The agent's own Celo wallet signs one EIP-3009
 `transferWithAuthorization` and the bill is paid.
 
 ```bash
-curl -X POST https://www.abapays.com/api/pay/x402 \
+curl -X POST https://agents.abapays.com/api/pay/x402 \
   -H "Content-Type: application/json" \
-  -d '{"serviceID":"mtn","serviceCategory":"AIRTIME","network":"MTN","billersCode":"08012345678","nairaAmount":1000,"token":"USDT","blockchain":"CELO","wallet_address":"0xYourAgentWallet"}'
+  -d '{"serviceID":"mtn","serviceCategory":"AIRTIME","network":"MTN","billersCode":"08012345678","nairaAmount":1000,"token":"USDC","blockchain":"CELO","wallet_address":"0xYourAgentWallet"}'
 ```
+
+`token` accepts `"USDC"`, `"USD₮"`, or `"USA₮"` (all three implement EIP-3009 on Celo — an
+unrecognized value silently falls back to USDC, so use one of these exact strings).
 
 A request with no payment attached always returns a real `402 Payment Required` naming the
 live price — safe to call for discovery with no credential. Full flow (challenge → sign →
@@ -50,7 +53,7 @@ One signed message links a wallet and mints an `api_key`; every call after that 
 MCP tool call or A2A JSON-RPC request.
 
 ```bash
-curl -X POST https://www.abapays.com/api/agent/link \
+curl -X POST https://agents.abapays.com/api/agent/link \
   -H "Content-Type: application/json" \
   -H "x-wallet-address: 0xYourAgentWallet" \
   -H "x-wallet-signature: <personal_sign over the request>" \
@@ -61,12 +64,12 @@ curl -X POST https://www.abapays.com/api/agent/link \
 MCP connector (Claude Desktop/Code: Settings → Connectors → Add custom connector):
 
 ```json
-{ "mcpServers": { "abapay": { "url": "https://www.abapays.com/api/mcp" } } }
+{ "mcpServers": { "abapay": { "url": "https://agents.abapays.com/api/mcp" } } }
 ```
 
 10 tools, every parameter documented: `https://agents.abapays.com/mcp`. Same catalog over A2A
-JSON-RPC at `https://www.abapays.com/api/a2a`, Agent Card at
-`https://www.abapays.com/.well-known/agent-card.json`.
+JSON-RPC at `https://agents.abapays.com/api/a2a`, Agent Card at
+`https://agents.abapays.com/.well-known/agent-card.json`.
 
 ## Verify
 

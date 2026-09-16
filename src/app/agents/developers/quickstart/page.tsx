@@ -32,7 +32,7 @@ export default function QuickstartPage() {
         <h2 className="font-black text-slate-900 dark:text-white mb-3">Run it</h2>
         <CopyBlock
           code={`PRIVATE_KEY=0x... npm install viem
-CHAIN=CELO TOKEN=USDT node agent-quickstart.mjs`}
+CHAIN=CELO TOKEN=USD₮ node agent-quickstart.mjs`}
         />
         <p className="text-xs text-slate-400 dark:text-slate-500 mt-3">
           Talks to production and real mainnet contracts — fund the wallet with a trivial amount first. Full env var reference (ALLOWANCE, PIN, PAY, …) is in the script&apos;s own header comment on GitHub.
@@ -52,10 +52,10 @@ CHAIN=CELO TOKEN=USDT node agent-quickstart.mjs`}
           </span>
         </div>
         <div className="p-6">
-          <TerminalStep cmd="PRIVATE_KEY=0x... CHAIN=CELO TOKEN=USDT node agent-quickstart.mjs" />
+          <TerminalStep cmd="PRIVATE_KEY=0x... CHAIN=CELO TOKEN=USD₮ node agent-quickstart.mjs" />
           <div className="mt-4 space-y-4 pl-4 border-l-2 border-slate-800">
             <div className="font-mono text-[12px]">
-              <div className="text-slate-300">AbaPay agent quickstart — 0xYourAgentWallet... on CELO, USDT</div>
+              <div className="text-slate-300">AbaPay agent quickstart — 0xYourAgentWallet... on CELO, USD₮</div>
             </div>
             <div className="font-mono text-[12px]">
               <div className="text-emerald-400">→ Step 1/3: POST /api/agent/link (wallet-signature auth)</div>
@@ -63,13 +63,13 @@ CHAIN=CELO TOKEN=USDT node agent-quickstart.mjs`}
               <div className="text-slate-600 pl-4 italic">Shown once — save it. No recovery flow other than minting a new one.</div>
             </div>
             <div className="font-mono text-[12px]">
-              <div className="text-emerald-400">→ Step 2/3: on-chain approve() + setSpendingAllowance() for 2 USDT</div>
+              <div className="text-emerald-400">→ Step 2/3: on-chain approve() + setSpendingAllowance() for 2 USD₮</div>
               <div className="text-slate-500 pl-4">✓ approve() confirmed: 0x...</div>
               <div className="text-slate-500 pl-4">✓ setSpendingAllowance() confirmed: 0x...</div>
             </div>
             <div className="font-mono text-[12px]">
               <div className="text-emerald-400">→ Step 3/3: tools/call check_balance</div>
-              <div className="text-slate-500 pl-4">USDT 1.8807 — approved limit 9.9254</div>
+              <div className="text-slate-500 pl-4">USD₮ 1.8807 — approved limit 9.9254</div>
             </div>
           </div>
         </div>
@@ -95,7 +95,7 @@ const linkRes = await fetch(\`\${APP_URL}/api/agent/link\`, {
   },
   body: JSON.stringify({
     wallet_address: account.address, channel: 'MCP', pin,
-    approved_chain: 'CELO', approved_token: 'USDT',
+    approved_chain: 'CELO', approved_token: 'USD₮',
   }),
 });
 const { api_key: apiKey } = await linkRes.json();`}

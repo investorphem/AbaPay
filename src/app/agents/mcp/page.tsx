@@ -31,7 +31,7 @@ export default function MCPPage() {
         <CopyBlock
           code={`{
   "mcpServers": {
-    "abapay": { "url": "https://www.abapays.com/api/mcp" }
+    "abapay": { "url": "https://agents.abapays.com/api/mcp" }
   }
 }`}
         />

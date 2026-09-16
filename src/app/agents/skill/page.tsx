@@ -42,7 +42,7 @@ export default function SkillPage() {
         </p>
         <CopyBlock label="Terminal" code={`npx skills add https://agents.abapays.com`} />
         <p className="text-xs text-slate-400 dark:text-slate-500 mt-3">
-          This fetches <Link href="/skill.md" className="underline hover:text-emerald-500">agents.abapays.com/skill.md</Link> — the same convention <code className="text-slate-500">celo-builders</code> and other real skills use. Claude Code drops it into <code className="text-slate-500">.claude/skills/</code> automatically; no config to hand-edit.
+          This fetches <Link href="/skill.md" className="underline hover:text-emerald-500">agents.abapays.com/skill.md</Link> directly. Claude Code drops it into <code className="text-slate-500">.claude/skills/</code> automatically; no config to hand-edit.
         </p>
       </section>
 

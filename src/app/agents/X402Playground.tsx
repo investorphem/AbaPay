@@ -3,7 +3,7 @@
 import { useMemo, useState } from "react";
 import { Send, Copy, Check, Loader2 } from "lucide-react";
 
-const X402_ENDPOINT = "https://www.abapays.com/api/pay/x402";
+const X402_ENDPOINT = "https://agents.abapays.com/api/pay/x402";
 
 const DEFAULT_BILL = {
   serviceID: "mtn",
@@ -11,7 +11,7 @@ const DEFAULT_BILL = {
   network: "MTN",
   billersCode: "08012345678",
   nairaAmount: "1000",
-  token: "USDT",
+  token: "USDC",
   blockchain: "CELO",
   wallet_address: "0xYourAgentWallet",
 };
@@ -22,7 +22,7 @@ const FIELD_HINT: Record<string, string> = {
   network: "Provider name, e.g. MTN, DSTV",
   billersCode: "Phone / meter / smartcard number",
   nairaAmount: "Bill amount in NGN",
-  token: "USDC or USDT",
+  token: "USDC, USD₮, or USA₮ — an unrecognized value silently falls back to USDC",
   blockchain: "CELO — this rail is Celo-only",
   wallet_address: "The paying wallet",
 };

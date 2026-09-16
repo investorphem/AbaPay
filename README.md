@@ -1124,10 +1124,10 @@ each with its own label.
    agent to use (Agent Hub → step 1) — this is the real ceiling; nothing below can exceed it.
 2. Still in Agent Hub, pick **MCP (AI Agents)**, optionally label the key (e.g. "Claude"), set a
    PIN, and save the API key it shows you — it will not be shown again.
-3. Point your MCP client at `https://www.abapays.com/api/mcp` as a remote (Streamable HTTP)
+3. Point your MCP client at `https://agents.abapays.com/api/mcp` as a remote (Streamable HTTP)
    server:
    - **Easiest — claude.ai (web), no file editing:** Settings → Connectors ("Integrations" on
-     some accounts) → **Add custom connector** → paste `https://www.abapays.com/api/mcp` → Save.
+     some accounts) → **Add custom connector** → paste `https://agents.abapays.com/api/mcp` → Save.
      It's now available as a tool source in any new chat.
    - **Claude Desktop (local config file)** — merge this into
      `%APPDATA%\Claude\claude_desktop_config.json` (don't overwrite the whole file if you already
@@ -1135,7 +1135,7 @@ each with its own label.
      ```json
      {
        "mcpServers": {
-         "abapay": { "url": "https://www.abapays.com/api/mcp" }
+         "abapay": { "url": "https://agents.abapays.com/api/mcp" }
        }
      }
      ```
@@ -1222,7 +1222,7 @@ free-form JSONB and a missing key reads as enabled.
 Call it:
 
 ```bash
-curl -X POST https://www.abapays.com/api/a2a \
+curl -X POST https://agents.abapays.com/api/a2a \
   -H "Authorization: Bearer aba_mcp_…" \
   -H "Content-Type: application/json" \
   -d '{"jsonrpc":"2.0","id":1,"method":"message/send","params":{"message":{

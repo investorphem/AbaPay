@@ -4,7 +4,7 @@ import { useMemo, useState } from "react";
 import { Send, Copy, Check, Loader2, ShieldAlert } from "lucide-react";
 import { TOOLS } from "./toolSchemas";
 
-const MCP_ENDPOINT = "https://www.abapays.com/api/mcp";
+const MCP_ENDPOINT = "https://agents.abapays.com/api/mcp";
 
 // ⚡ THIS ACTUALLY CALLS THE REAL SERVER — not a mock, not a canned response. Read-only tools
 // (describe_capabilities, check_balance, list_plans, list_international_options,
@@ -12,9 +12,9 @@ const MCP_ENDPOINT = "https://www.abapays.com/api/mcp";
 // changes, and check_balance/transaction_history/list_schedules just need a real api_key to
 // return real data instead of the "unauthorized" they'll return with none. Money-moving tools
 // (pay_bill, pay_bill_batch, schedule_bill, cancel_schedule) are deliberately NOT wired to a
-// Send button here — see the note rendered instead. CORS for this cross-origin call (this page
-// is served from agents.abapays.com, the endpoint is www.abapays.com) is opened narrowly in
-// middleware.ts's CORS_API_PATHS, not globally.
+// Send button here — see the note rendered instead. This call is same-origin (this page and
+// the endpoint both resolve on agents.abapays.com), but /api/mcp still opens CORS narrowly in
+// middleware.ts's CORS_API_PATHS since third-party agents call it cross-origin too.
 export default function MCPPlayground() {
   const [toolName, setToolName] = useState(TOOLS[0].name);
   const tool = useMemo(() => TOOLS.find((t) => t.name === toolName)!, [toolName]);
