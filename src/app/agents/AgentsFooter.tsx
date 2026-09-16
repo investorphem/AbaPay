@@ -26,7 +26,7 @@ const FOOTER_GROUPS: {
       { label: "Agent Card", href: "/.well-known/agent-card.json", icon: Network },
       { label: "OpenAPI reference", href: "/openapi.json", icon: FileText },
       { label: "Full Handbook", href: "https://docs.abapays.com", icon: BookOpen },
-      { label: "Install as a Skill", href: "/skill.md", icon: Puzzle },
+      { label: "Install as a Skill", href: "/agents/skill", icon: Puzzle },
     ],
   },
   {

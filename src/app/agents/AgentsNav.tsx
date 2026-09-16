@@ -28,6 +28,7 @@ const DEVELOPER_LINKS = [
   { label: "Overview", href: "/agents/developers", github: "https://github.com/investorphem/AbaPay/blob/main/docs/AGENT_INTEGRATION.md" },
   { label: "Integration guide", href: "/agents/developers/guide", github: "https://github.com/investorphem/AbaPay/blob/main/docs/AGENT_INTEGRATION.md" },
   { label: "Quickstart script", href: "/agents/developers/quickstart", github: "https://github.com/investorphem/AbaPay/blob/main/examples/agent-quickstart.mjs" },
+  { label: "Install as a Skill", href: "/agents/skill", github: null },
   { label: "Tools reference", href: "/agents/tools", github: "https://github.com/investorphem/AbaPay/blob/main/src/lib/deai/mcpTools.ts" },
   { label: "Error codes", href: "/agents/errors", github: "https://github.com/investorphem/AbaPay/blob/main/src/lib/x402Settle.ts" },
   { label: "Docs & FAQ", href: "/docs", github: null },
