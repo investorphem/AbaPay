@@ -65,7 +65,7 @@ export default async function AboutPage() {
           <p className="text-sm text-slate-500 dark:text-slate-400 leading-relaxed mb-3">
             Registered on Celo under <a href="https://eips.ethereum.org/EIPS/eip-8004" target="_blank" rel="noopener noreferrer" className="underline">ERC-8004</a> — a verifiable agent identity other agents&apos; tooling can check independently, not just a claim on this page.
           </p>
-          <a href="https://8004scan.io/agents/celo/9760" target="_blank" rel="noopener noreferrer" className="text-sm font-bold text-emerald-600 dark:text-emerald-400 hover:underline inline-flex items-center gap-1">Verify on 8004scan <ExternalLink size={12} /></a>
+          <a href="https://8004scan.io/agents/celo/9687" target="_blank" rel="noopener noreferrer" className="text-sm font-bold text-emerald-600 dark:text-emerald-400 hover:underline inline-flex items-center gap-1">Verify on 8004scan <ExternalLink size={12} /></a>
         </div>
       </section>
 
@@ -135,7 +135,7 @@ export default async function AboutPage() {
               </tr>
               <tr>
                 <td className="py-2.5 pr-4 font-bold text-slate-700 dark:text-slate-300">ERC-8004</td>
-                <td className="py-2.5 pr-4"><a href="https://8004scan.io/agents/celo/9760" target="_blank" rel="noopener noreferrer" className="text-emerald-600 dark:text-emerald-400 hover:underline">8004scan.io/agents/celo/9760</a></td>
+                <td className="py-2.5 pr-4"><a href="https://8004scan.io/agents/celo/9687" target="_blank" rel="noopener noreferrer" className="text-emerald-600 dark:text-emerald-400 hover:underline">8004scan.io/agents/celo/9687</a></td>
                 <td className="py-2.5 text-slate-400 dark:text-slate-500">Verified</td>
               </tr>
             </tbody>

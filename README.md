@@ -334,9 +334,7 @@ contracts/
 ├── AbaPayV2.sol                 # V2 — hardened (see below)
 └── AbaPayV3.sol                 # V3 — adds agent-initiated payments (⚠️ NOT AUDITED)
 scripts/
-├── deploy.ts                     # Deploy V1
-├── deployV2.ts                   # Deploy V2
-└── deployV3.ts                   # Deploy V3 (whitelists tokens, sets relayer + per-tx caps)
+└── deployV4.ts                   # Deploy V4 (whitelists tokens, sets relayer + per-tx caps)
 ```
 
 ---
@@ -773,8 +771,7 @@ a query with no panel spends credits updating something nobody can see.
 ```
 npx hardhat compile          # Compile contracts
 npm run test:contracts       # Run the Solidity test suite
-npx hardhat run scripts/deployV2.ts --network <network>   # Deploy the hardened V2
-npx hardhat run scripts/deployV3.ts --network <network>     # Deploy V3 (agent-initiated payments)
+npx hardhat run scripts/deployV4.ts --network <network>     # Deploy V4 (agent-initiated payments, adjustable withdrawal delay)
 npx hardhat run scripts/register8004.ts --network <network> # Register the agent identity (ERC-8004)
 npx hardhat run scripts/update8004uri.ts --network <network> # Re-push the agent URI so an indexer (8004scan) re-reads it
 ```
@@ -827,7 +824,7 @@ the app. V3 adds a **session-key / delegated-spend** pattern instead:
 | Kill switch | Owner calls `setRelayer(address(0))` to instantly disable the agent, or `pause()` to halt all payments |
 
 **⚠️ Not audited.** The contract itself carries this warning in its header. Deploy to testnet for
-demos; on mainnet, keep `maxAgentPaymentPerTx` and `maxRefundPerTx` small (`scripts/deployV3.ts`
+demos; on mainnet, keep `maxAgentPaymentPerTx` and `maxRefundPerTx` small (`scripts/deployV4.ts`
 defaults to a $10-equivalent per token) until a professional audit is done, then raise them via
 `setMaxAgentPayment` / `setMaxRefund`.
 

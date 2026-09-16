@@ -113,8 +113,8 @@ Run all of them. Several features **fail silently** without their table:
 
 ```bash
 npx hardhat compile
-npm run test:contracts        # V2 (21 tests) + V3 (13 tests)
-npx hardhat run scripts/deployV2.ts --network celo-sepolia
+npm run test:contracts        # V2 (21 tests) + V3 (13 tests) + V4 (current)
+npx hardhat run scripts/deployV4.ts --network celo-sepolia
 ```
 
 Then, **from the owner wallet**:

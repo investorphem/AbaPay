@@ -6,11 +6,11 @@ independently, without trusting a claim on a web page.
 ## ERC-8004 on-chain identity
 
 AbaPay is registered on Celo under [ERC-8004](https://eips.ethereum.org/EIPS/eip-8004),
-Agent ID **9760** — a verifiable identity any agent's tooling can check independently.
+Agent ID **9687** — a verifiable identity any agent's tooling can check independently.
 
 | | |
 |---|---|
-| Verify on 8004scan | [8004scan.io/agents/celo/9760](https://8004scan.io/agents/celo/9760) |
+| Verify on 8004scan | [8004scan.io/agents/celo/9687](https://8004scan.io/agents/celo/9687) |
 | Agent Card | `/.well-known/agent-card.json` |
 
 ## MCP Registry

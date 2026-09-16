@@ -1,0 +1,20 @@
+{
+  "name": "abapay-mcp-gateway",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Standalone, secret-free MCP gateway for AbaPay — serves the real tool catalog directly (static data, no DB), proxies tools/call to production. Exists so automated MCP-server checks (Glama, etc.) can build and boot something scoped to the agentic surface, not the whole consumer app.",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "license": "MIT",
+  "homepage": "https://agents.abapays.com",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/investorphem/AbaPay.git",
+    "directory": "mcp-server"
+  }
+}
