@@ -125,7 +125,7 @@ export const LOCAL_LOGO_BY_SERVICE_ID: Record<string, string> = {
   //
   // buildBackendPayload() (src/app/page.tsx) sends a FIXED serviceID for these, never a
   // per-provider one: every bank transfer is 'moniepoint-transfer' and every international
-  // top-up — all 170+ countries — is 'foreign-airtime'. Neither string was ever in the seed
+  // top-up — all 140+ countries — is 'foreign-airtime'. Neither string was ever in the seed
   // arrays above, so every row in either category fell straight through to /logo.png. That is
   // not a gap in provider coverage (every seeded provider here has real art, verified against
   // what actually ships in /public) — it is two entire transaction TYPES with no entry at all,

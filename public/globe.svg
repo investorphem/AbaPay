@@ -1,6 +1,6 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="International">
   <!--
-    International top-up — used for every "foreign-airtime" transaction (170+ countries).
+    International top-up — used for every "foreign-airtime" transaction (140+ countries).
     That serviceID had NO logo mapping at all, which is one of the two categories that made
     "most of the time" the AbaPay mark showed instead of a real one — see LOCAL_LOGO_BY_SERVICE_ID.
     A plain globe rather than any one country's flag, since the service covers all of them.

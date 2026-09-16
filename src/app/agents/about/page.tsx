@@ -2,6 +2,8 @@ import type { Metadata } from "next";
 import Link from "next/link";
 import { ArrowLeft, Fingerprint, Building2, Rocket, Workflow, ExternalLink, CheckCircle2, Clock, Compass } from "lucide-react";
 import { getDiscoveryStats } from "@/lib/discoveryStats";
+import { fetchCountries } from "@/lib/deai/international";
+import { Globe2 } from "lucide-react";
 
 export const metadata: Metadata = {
   title: "About — AbaPay Rails",
@@ -12,6 +14,8 @@ const nf = new Intl.NumberFormat("en-US");
 
 export default async function AboutPage() {
   const stats = await getDiscoveryStats();
+  const countries = await fetchCountries();
+  const sortedCountries = [...countries].sort((a, b) => a.name.localeCompare(b.name));
   return (
     <>
       <Link href="/agents" className="inline-flex items-center gap-1.5 text-xs font-bold uppercase tracking-widest text-slate-400 hover:text-emerald-600 dark:hover:text-emerald-400 mb-6">
@@ -76,6 +80,54 @@ export default async function AboutPage() {
           <li>Legal: <a href="/terms" className="underline hover:text-emerald-500">Terms</a> · <a href="/privacy" className="underline hover:text-emerald-500">Privacy</a></li>
           <li>Source: <a href="https://github.com/investorphem/AbaPay" className="underline hover:text-emerald-500">github.com/investorphem/AbaPay</a> (MIT)</li>
         </ul>
+      </section>
+
+      {/* ⚡ COVERAGE — live-fetched from the same VTpass endpoint the app and the MCP tool
+          (list_international_options) both read, not a hardcoded count that drifts from
+          reality. Nigeria's domestic categories are fixed (the VTpass integration itself
+          defines them); international is airtime/data only and the country list genuinely
+          changes as VTpass adds/drops corridors, so this re-fetches (10-min cache) rather
+          than repeating a static marketing number. */}
+      <section className="bg-white dark:bg-[#111114] border border-slate-100 dark:border-slate-800/60 rounded-[2rem] p-6 sm:p-8 mb-6">
+        <h2 className="font-black text-slate-900 dark:text-white mb-1.5 flex items-center gap-2"><Globe2 size={18} className="text-emerald-500" /> Where this reaches</h2>
+        <p className="text-sm text-slate-500 dark:text-slate-400 leading-relaxed mb-5 max-w-2xl">
+          Two tiers, not one blended claim: full-category domestic bills in Nigeria, plus
+          airtime/data top-ups abroad wherever VTpass currently has a live corridor.
+        </p>
+        <div className="grid sm:grid-cols-2 gap-6">
+          <div>
+            <h3 className="text-[10px] font-black uppercase tracking-widest text-slate-400 dark:text-slate-500 mb-2">Nigeria — every category</h3>
+            <div className="flex flex-wrap gap-1.5">
+              {["Airtime", "Mobile Data", "Electricity", "Cable TV", "Education (WAEC/JAMB)", "Bank Transfer"].map((c) => (
+                <span key={c} className="text-xs font-bold px-2.5 py-1 rounded-full bg-emerald-50 dark:bg-emerald-900/20 text-emerald-700 dark:text-emerald-400 border border-emerald-100 dark:border-emerald-800/50">{c}</span>
+              ))}
+            </div>
+          </div>
+          <div>
+            <h3 className="text-[10px] font-black uppercase tracking-widest text-slate-400 dark:text-slate-500 mb-2">
+              International — airtime &amp; data{" "}
+              {sortedCountries.length > 0 ? (
+                <span className="text-emerald-600 dark:text-emerald-400">({nf.format(sortedCountries.length)} countries, live)</span>
+              ) : (
+                <span className="text-slate-400">(catalogue unavailable right now)</span>
+              )}
+            </h3>
+            {sortedCountries.length > 0 ? (
+              <div className="max-h-40 overflow-y-auto pr-2 text-xs text-slate-500 dark:text-slate-400 leading-relaxed columns-2">
+                {sortedCountries.map((c) => (
+                  <div key={c.code} className="break-inside-avoid">{c.name}</div>
+                ))}
+              </div>
+            ) : (
+              <p className="text-xs text-slate-400 dark:text-slate-500">
+                Fetched live from VTpass on every page load — nothing cached long-term to fall back on right now. Try <Link href="/agents/mcp" className="underline hover:text-emerald-500">list_international_options</Link> directly instead.
+              </p>
+            )}
+          </div>
+        </div>
+        <p className="text-xs text-slate-400 dark:text-slate-500 mt-4">
+          Same live catalogue the <code className="text-slate-500">list_international_options</code> MCP tool reads — an agent gets exactly this list, never a stale one.
+        </p>
       </section>
 
       {/* ⚡ DISCOVERY — every real place an agent (or a person) can actually find this MCP

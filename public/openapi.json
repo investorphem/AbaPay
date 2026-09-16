@@ -3,7 +3,7 @@
   "info": {
     "title": "AbaPay",
     "version": "1.0.0",
-    "description": "AbaPay is a Web3 utility bill payment agent covering 170+ countries — airtime, data, electricity, cable TV, education, bank and more — settled on-chain. This endpoint accepts x402 payments in stablecoins on Celo and Base to pay a bill on behalf of the caller.",
+    "description": "AbaPay is a Web3 utility bill payment agent covering 140+ countries — airtime, data, electricity, cable TV, education, bank and more — settled on-chain. This endpoint accepts x402 payments in stablecoins on Celo and Base to pay a bill on behalf of the caller.",
     "contact": {
       "email": "support@abapays.com",
       "name": "AbaPay",
@@ -17,7 +17,7 @@
     "/api/pay/x402": {
       "post": {
         "operationId": "payBillViaX402",
-        "summary": "Pay a real-world utility bill (airtime, data, electricity, cable) via x402 — 170+ countries",
+        "summary": "Pay a real-world utility bill (airtime, data, electricity, cable) via x402 — 140+ countries",
         "description": "Settles a real-world bill payment via the x402 protocol. The caller pays in a supported stablecoin on Celo or Base; on confirmed settlement, AbaPay vends the underlying service (airtime top-up, data bundle, electricity token, cable subscription) through its provider integration and returns the result. Price is dynamic — it equals the live value of the bill being paid, converted to the settlement token at the platform's current exchange rate, so there is no fixed catalog price for this resource.",
         "requestBody": {
           "required": true,

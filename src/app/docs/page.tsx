@@ -81,7 +81,7 @@ export default function DocsPage() {
               />
               <FeatureBlock
                 icon={<Globe />} title="Borderless Payments"
-                desc="You do not need a local bank account to pay bills in supported countries. Whether you are in Lagos, London, or Los Angeles, as long as you have stablecoins, you can pay Nigerian bills or top up phones abroad across 170+ supported countries, instantly."
+                desc="You do not need a local bank account to pay bills in supported countries. Whether you are in Lagos, London, or Los Angeles, as long as you have stablecoins, you can pay Nigerian bills or top up phones abroad across 140+ supported countries, instantly."
               />
               <FeatureBlock
                 icon={<Plug />} title="Live Provider Catalogue"
@@ -126,7 +126,7 @@ export default function DocsPage() {
               <Plug className="text-violet-500" size={20} /> MCP — Connect Your Own AI Assistant
             </h2>
             <p className="text-slate-600 dark:text-slate-300 font-medium mb-6 leading-relaxed">
-              AbaPay runs an <strong>MCP (Model Context Protocol)</strong> server, so an AI assistant you already use — Claude, or any MCP-speaking client — can pay your bills for you: Nigerian services, or international airtime/data across 170+ countries. It's the same engine chat uses, reached over JSON-RPC instead of a message. Nothing about it is a looser trust boundary: same on-chain allowance, same PIN gate, same kill switches, same operator caps, same spend alerts.
+              AbaPay runs an <strong>MCP (Model Context Protocol)</strong> server, so an AI assistant you already use — Claude, or any MCP-speaking client — can pay your bills for you: Nigerian services, or international airtime/data across 140+ countries. It's the same engine chat uses, reached over JSON-RPC instead of a message. Nothing about it is a looser trust boundary: same on-chain allowance, same PIN gate, same kill switches, same operator caps, same spend alerts.
             </p>
             <div className="space-y-4">
               <div className="bg-slate-50 dark:bg-[#1a1a1f] p-5 rounded-2xl border border-slate-100 dark:border-slate-800/80 transition-colors">

@@ -104,7 +104,7 @@ export async function GET() {
       protocolVersion: '0.3.0',
       name: 'AbaPay',
       description:
-        'Non-custodial bill-payment agent. Pays airtime, mobile data, electricity, cable TV, education fees and international top-ups across 170+ countries, settled in stablecoins on Celo and Base from a wallet that has granted a bounded, revocable on-chain allowance.',
+        'Non-custodial bill-payment agent. Pays airtime, mobile data, electricity, cable TV, education fees and international top-ups across 140+ countries, settled in stablecoins on Celo and Base from a wallet that has granted a bounded, revocable on-chain allowance.',
       url: `${APP_URL}/api/a2a`,
       preferredTransport: 'JSONRPC',
       version: '1.0.0',
