@@ -108,7 +108,7 @@ anything, but there's no reason to give it more exposure than necessary).
 NEXT_PUBLIC_ABAPAY_CELO_ADDRESS=0x...
 NEXT_PUBLIC_ABAPAY_BASE_ADDRESS=0x...
 ```
-Free — these are just the addresses printed by `npx hardhat run scripts/deployV3.ts --network
+Free — these are just the addresses printed by `npx hardhat run scripts/deployV4.ts --network
 <network>`. **This is the single source of truth for where all payments land** — the classic
 contract flow, the admin dashboard's balance/refund/withdrawal tools, and x402's `payTo` all
 read this same value. Keep local and production in sync; a mismatch here is exactly what caused

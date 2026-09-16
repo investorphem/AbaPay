@@ -40,6 +40,8 @@
     "typechain-types",
     "hardhat.config.ts",
     "vitest.config.ts",
-    "sdk"
+    "sdk",
+    "python-sdk",
+    "mcp-server"
   ]
 }

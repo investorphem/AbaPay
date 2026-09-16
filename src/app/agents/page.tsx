@@ -138,7 +138,7 @@ const STACK: { title: string; tag: string; body: string; icon: LucideIcon; href:
     icon: Fingerprint,
     body: "ERC-8004 registration on Celo — a verifiable identity other agents' tooling can check.",
     href: "/agents/about",
-    verify: { label: "8004scan", href: "https://8004scan.io/agents/celo/9760" },
+    verify: { label: "8004scan", href: "https://8004scan.io/agents/celo/9687" },
   },
 ];
 

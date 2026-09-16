@@ -12,9 +12,12 @@ const eslintConfig = defineConfig([
     "out/**",
     "build/**",
     "next-env.d.ts",
-    // sdk/ is its own standalone npm package (own package.json, own tsconfig) — not part of
-    // this Next.js app, so it shouldn't be linted with this app's Next-specific config.
+    // sdk/, python-sdk/, and mcp-server/ are each their own standalone package (own
+    // package.json, none of them part of this Next.js app) — none should be linted with
+    // this app's Next-specific config.
     "sdk/**",
+    "python-sdk/**",
+    "mcp-server/**",
   ]),
 ]);
 
