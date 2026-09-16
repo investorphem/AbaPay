@@ -9,7 +9,7 @@ before publication. Full script: [examples/agent-quickstart.mjs](https://github.
 {% code title="Terminal" %}
 ```bash
 PRIVATE_KEY=0x... npm install viem
-CHAIN=CELO TOKEN=USDT node agent-quickstart.mjs
+CHAIN=CELO TOKEN=USD₮ node agent-quickstart.mjs
 ```
 {% endcode %}
 
@@ -25,18 +25,18 @@ Verified live against production with a throwaway wallet.
 
 {% code title="agent-quickstart.mjs — real session output" %}
 ```
-AbaPay agent quickstart — 0xYourAgentWallet... on CELO, USDT
+AbaPay agent quickstart — 0xYourAgentWallet... on CELO, USD₮
 
 → Step 1/3: POST /api/agent/link (wallet-signature auth)
   ✓ api_key minted: aba_mcp_...
   (shown once — save it. No recovery flow other than minting a new one)
 
-→ Step 2/3: on-chain approve() + setSpendingAllowance() for 2 USDT
+→ Step 2/3: on-chain approve() + setSpendingAllowance() for 2 USD₮
   ✓ approve() confirmed: 0x...
   ✓ setSpendingAllowance() confirmed: 0x...
 
 → Step 3/3: tools/call check_balance
-  USDT 1.8807 — approved limit 9.9254
+  USD₮ 1.8807 — approved limit 9.9254
 ```
 {% endcode %}
 
@@ -60,7 +60,7 @@ const linkRes = await fetch(`${APP_URL}/api/agent/link`, {
   },
   body: JSON.stringify({
     wallet_address: account.address, channel: 'MCP', pin,
-    approved_chain: 'CELO', approved_token: 'USDT',
+    approved_chain: 'CELO', approved_token: 'USD₮',
   }),
 });
 const { api_key: apiKey } = await linkRes.json();

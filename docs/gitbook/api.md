@@ -23,7 +23,7 @@ resource.
 | `network` | string | Provider name, e.g. MTN, IKEJA-ELECTRIC, DSTV |
 | `billersCode` | string | Phone number, meter number, or smartcard/IUC number |
 | `nairaAmount` | number | Bill amount in NGN — the source of truth for pricing |
-| `token` | string | "USDC" or "USDT" — both implement EIP-3009 on Celo |
+| `token` | string | "USDC", "USD₮", or "USA₮" — all three implement EIP-3009 on Celo; an unrecognized value falls back to USDC |
 | `blockchain` | string | "CELO" — this rail is Celo-only |
 | `wallet_address` | string | The paying wallet, cross-checked against the signed authorization |
 
@@ -53,9 +53,9 @@ A GET or probing POST with no payment attached returns a valid 402 challenge —
 
 {% code title="Try it — curl" %}
 ```bash
-curl -X POST https://www.abapays.com/api/pay/x402 \
+curl -X POST https://agents.abapays.com/api/pay/x402 \
   -H "Content-Type: application/json" \
-  -d '{"serviceID":"mtn","serviceCategory":"AIRTIME","network":"MTN","billersCode":"08012345678","nairaAmount":1000,"token":"USDT","blockchain":"CELO","wallet_address":"0xYourAgentWallet"}'
+  -d '{"serviceID":"mtn","serviceCategory":"AIRTIME","network":"MTN","billersCode":"08012345678","nairaAmount":1000,"token":"USDC","blockchain":"CELO","wallet_address":"0xYourAgentWallet"}'
 ```
 {% endcode %}
 

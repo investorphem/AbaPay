@@ -52,7 +52,7 @@ const result = await payBillViaX402({
   bill: {
     serviceID: "mtn", serviceCategory: "AIRTIME",
     network: "MTN", billersCode: "08012345678",
-    nairaAmount: 1000, token: "USDT",
+    nairaAmount: 1000, token: "USDC",
   },
 });
 
@@ -123,7 +123,7 @@ await agent.payBill({
             </thead>
             <tbody className="divide-y divide-slate-100 dark:divide-slate-800/60 align-top">
               {[
-                ["BillDetails", "{ serviceID, serviceCategory, network, billersCode, nairaAmount, token: 'USDC'|'USDT', wallet_address }"],
+                ["BillDetails", "{ serviceID, serviceCategory, network, billersCode, nairaAmount, token: 'USDC'|'USD₮'|'USA₮', wallet_address }"],
                 ["X402PayResult", "{ success, status: 'SUCCESS'|'FAILED_VENDING'|'TIMEOUT'|string, purchased_code?, units?, request_id?, tx_hash?, message? }"],
                 ["LinkParams", "{ signer, pin, approvedChain?: 'CELO', approvedToken?, label?, baseUrl? }"],
                 ["AbaPayError", "extends Error — carries .cause and .response for the original failure"],

@@ -21,6 +21,9 @@ server on the other end of the proxy, exactly as it is for any other caller.
 
 ## Run it
 
+Two transports, one handler — `initialize`/`tools/list`/`tools/call` are implemented once and
+shared by both.
+
 ```bash
 npm start
 # or
@@ -31,6 +34,10 @@ PORT=8080 node server.js
 curl -X POST http://localhost:8080 -H "Content-Type: application/json" \
   -d '{"jsonrpc":"2.0","id":1,"method":"tools/list"}'
 ```
+
+For a stdio-speaking client (e.g. `mcp-proxy -- node server.js --stdio`), pass `--stdio`
+instead — the server then reads one JSON-RPC message per line from stdin and writes one back
+per line on stdout, with all logging on stderr so stdout stays clean.
 
 ## Docker
 
@@ -46,6 +53,6 @@ No `.env`, no secrets, no build step — the whole image is `node:20-slim` plus 
 | Method | What it does |
 |---|---|
 | `GET /health` | Liveness check |
-| `POST /` (JSON-RPC) | `initialize`, `tools/list` — served locally. `tools/call` — proxied to `https://www.abapays.com/api/mcp` |
+| `POST /` (JSON-RPC) | `initialize`, `tools/list` — served locally. `tools/call` — proxied to `https://agents.abapays.com/api/mcp` |
 
 Full tool reference with prose descriptions: [agents.abapays.com/tools](https://agents.abapays.com/tools) and [/agents/mcp](https://agents.abapays.com/mcp).

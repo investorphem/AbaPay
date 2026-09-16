@@ -74,7 +74,7 @@ export default function X402Page() {
             code={`{
   "serviceID": "mtn", "serviceCategory": "AIRTIME",
   "network": "MTN", "billersCode": "08012345678",
-  "nairaAmount": 1000, "token": "USDT",
+  "nairaAmount": 1000, "token": "USDC",
   "blockchain": "CELO", "wallet_address": "0xYourAgentWallet..."
 }`}
           />

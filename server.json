@@ -7,11 +7,11 @@
     "url": "https://github.com/investorphem/AbaPay",
     "source": "github"
   },
-  "version": "1.0.0",
+  "version": "1.0.1",
   "remotes": [
     {
       "type": "streamable-http",
-      "url": "https://www.abapays.com/api/mcp"
+      "url": "https://agents.abapays.com/api/mcp"
     }
   ]
 }

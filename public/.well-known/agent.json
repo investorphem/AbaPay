@@ -8,15 +8,15 @@
   "services": [
     {
       "name": "web",
-      "endpoint": "https://www.abapays.com"
+      "endpoint": "https://agents.abapays.com"
     },
     {
       "name": "x402",
-      "endpoint": "https://www.abapays.com/api/pay/x402"
+      "endpoint": "https://agents.abapays.com/api/pay/x402"
     },
     {
       "name": "MCP",
-      "endpoint": "https://www.abapays.com/api/mcp",
+      "endpoint": "https://agents.abapays.com/api/mcp",
       "version": "2025-06-18"
     },
     {

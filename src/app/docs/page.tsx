@@ -132,7 +132,7 @@ export default function DocsPage() {
               <div className="bg-slate-50 dark:bg-[#1a1a1f] p-5 rounded-2xl border border-slate-100 dark:border-slate-800/80 transition-colors">
                 <h4 className="text-sm font-black text-slate-800 dark:text-slate-200 mb-1">The server URL your client needs</h4>
                 <p className="text-sm text-slate-600 dark:text-slate-400 font-medium leading-relaxed">
-                  Add <code className="font-mono text-[13px] bg-white dark:bg-[#111114] px-2 py-0.5 rounded-lg text-slate-900 dark:text-white">https://abapays.com/api/mcp</code> as the AbaPay server in your MCP client. It&apos;s shown with a copy button in <strong>Agent Hub → MCP</strong> too, so you never have to type it.
+                  Add <code className="font-mono text-[13px] bg-white dark:bg-[#111114] px-2 py-0.5 rounded-lg text-slate-900 dark:text-white">https://agents.abapays.com/api/mcp</code> as the AbaPay server in your MCP client. It&apos;s shown with a copy button in <strong>Agent Hub → MCP</strong> too, so you never have to type it.
                 </p>
               </div>
               <div className="bg-violet-50 dark:bg-violet-900/20 border border-violet-100 dark:border-violet-800/50 p-5 rounded-2xl transition-colors">
