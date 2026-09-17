@@ -1,7 +1,7 @@
 import 'server-only';
 import { supabaseAdmin } from '@/utils/supabase';
 import { rateLimit } from '@/lib/rateLimit';
-import { getServiceRules, checkServiceAllowed, checkAgentSpendAllowed } from '@/lib/serviceRules';
+import { getServiceRules, checkServiceAllowed, checkAgentSpendAllowed, computeServiceFee } from '@/lib/serviceRules';
 import { describeCapabilities, capabilityForIntent, getCapability, getCapabilitiesForCard } from '@/lib/deai/capabilities';
 import { resolveServiceId, fetchCryptoBalances, verifyAccount } from '@/lib/deai/services';
 import { getRemainingAllowance } from '@/lib/deai/relayer';
@@ -1092,9 +1092,15 @@ async function callPayBill(args: any, oauthIdentity: McpIdentity | null) {
   // limit). Falls back to the default if an invalid/unsupported symbol is passed.
   const tokenSymbol = tokenOverride && chainTokens.includes(tokenOverride) ? tokenOverride : (identity.approved_token || 'USD₮');
 
+  // Same fee executeAgentPayment (batch.ts) actually charges — computed here too so this
+  // capacity check tests against the real amount that will be charged, not the bill amount
+  // alone. Checking against too little would pass here and then revert on-chain for a shortfall
+  // this call could have caught up front.
+  const serviceFee = computeServiceFee(service, provider);
+
   // The allowance is enforced BY THE CONTRACT regardless — checked here first so a shortfall
   // fails with a clear message instead of a wasted on-chain revert.
-  const capacity = await checkAutonomousCapacity(identity.wallet_address, chain, tokenSymbol, amountNgn, rate);
+  const capacity = await checkAutonomousCapacity(identity.wallet_address, chain, tokenSymbol, amountNgn + serviceFee, rate);
   if (!capacity.ok) {
     // Don't just report the shortfall — check whether ANOTHER token on this same chain
     // already has both the balance and the approved allowance to cover it, and say so. This
@@ -1102,7 +1108,7 @@ async function callPayBill(args: any, oauthIdentity: McpIdentity | null) {
     // that only names the one token that came up short.
     const otherTokens = chainTokens.filter((t) => t !== tokenSymbol);
     const otherChecks = await Promise.all(
-      otherTokens.map((t) => checkAutonomousCapacity(identity.wallet_address, chain, t, amountNgn, rate))
+      otherTokens.map((t) => checkAutonomousCapacity(identity.wallet_address, chain, t, amountNgn + serviceFee, rate))
     );
     const viable = otherTokens.find((_, i) => otherChecks[i].ok);
     if (viable) {
@@ -1539,7 +1545,9 @@ async function callPayBillBatch(args: any, oauthIdentity: McpIdentity | null) {
   const groups = groupByChainToken(items);
   for (const [key, groupItems] of groups) {
     const [gChain, gToken] = key.split('|');
-    const gTotal = groupItems.reduce((s, it) => s + it.amountNgn, 0);
+    // Same fee executeAgentPayment (batch.ts) charges per item, summed per group — see the
+    // single-payment capacity check above for why this has to include it too.
+    const gTotal = groupItems.reduce((s, it) => s + it.amountNgn + computeServiceFee(it.serviceCategory, it.provider), 0);
     const capacity = await checkAutonomousCapacity(identity.wallet_address, gChain, gToken, gTotal, rate);
     if (!capacity.ok) return errorResult(`${gToken} on ${gChain}: ${capacity.reason}`);
   }
@@ -1562,7 +1570,9 @@ async function callPayBillBatch(args: any, oauthIdentity: McpIdentity | null) {
   }
 
   const okCount = results.filter((r) => r.result.success).length;
-  const totalCharged = results.filter((r) => r.result.success).reduce((s, r) => s + r.v.amountNgn, 0);
+  // Includes each recipient's fee (computeServiceFee), so this matches what executeAgentPayment
+  // actually charged on-chain, not just the sum of bill amounts.
+  const totalCharged = results.filter((r) => r.result.success).reduce((s, r) => s + r.v.amountNgn + computeServiceFee(r.v.service, r.v.provider), 0);
 
   // One aggregate out-of-band alert for the whole batch rather than one per recipient — the
   // owner learns money moved without N separate pings for N small payments. Never blocks the
@@ -1582,7 +1592,8 @@ async function callPayBillBatch(args: any, oauthIdentity: McpIdentity | null) {
   // only thing a card-less client ever sees — used to show only the NGN amount, never which
   // stablecoin or chain actually moved for that recipient.
   const lines = results.map(({ v, result }, i) => {
-    const label = `${i + 1}. ${v.provider.toUpperCase()} ${v.service} — $${(v.amountNgn / rate).toFixed(2)} (${v.tokenSymbol} on ${v.chain}, NGN ${v.amountNgn.toLocaleString()}) to ${v.accountNumber}`;
+    const vFee = computeServiceFee(v.service, v.provider);
+    const label = `${i + 1}. ${v.provider.toUpperCase()} ${v.service} — $${((v.amountNgn + vFee) / rate).toFixed(2)} (${v.tokenSymbol} on ${v.chain}, NGN ${v.amountNgn.toLocaleString()}) to ${v.accountNumber}`;
     if (result.success && !result.vendFailed) return `${label} — OK${result.txHash ? ` (${result.txHash.slice(0, 10)}...)` : ''}`;
     if (result.pending) return `${label} — sent, still confirming`;
     return `${label} — FAILED: ${result.message}`;
@@ -1603,7 +1614,7 @@ async function callPayBillBatch(args: any, oauthIdentity: McpIdentity | null) {
       provider: v.provider.toUpperCase(),
       service: v.service,
       accountNumber: v.accountNumber,
-      displayAmountNgn: `$${(v.amountNgn / rate).toFixed(2)} (₦${v.amountNgn.toLocaleString()})`,
+      displayAmountNgn: `$${((v.amountNgn + computeServiceFee(v.service, v.provider)) / rate).toFixed(2)} (₦${v.amountNgn.toLocaleString()})`,
       status: result.success && !result.vendFailed ? 'OK' : result.pending ? 'PENDING' : 'FAILED',
       txHash: result.txHash || null,
     })),

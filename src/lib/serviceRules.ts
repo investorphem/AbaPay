@@ -26,6 +26,13 @@ export interface ServiceRules {
   agentMaxNgnPerTx: number;           // operator ceiling on a single agent payment
   agentDailyCapNgn: number;           // operator ceiling per user, per day
   aiChatEnabled: boolean;             // in-app chat widget
+  // ⚡ Passed through to the x402 payer at cost — see computeServiceFee below for why this is
+  // admin-configurable rather than a hardcoded constant: neither Celo's facilitator nor
+  // Coinbase's CDP facilitator on Base exposes a live pricing endpoint (confirmed against
+  // docs.celo.org's own /verify, /settle, /supported, /health list — no /pricing or /fees
+  // exists), so there is no way to fetch this automatically. Update the row instead of the
+  // code if either facilitator's rate changes.
+  x402FacilitatorFeeUsd: number;
 }
 
 let cache: { rules: ServiceRules; at: number } | null = null;
@@ -42,12 +49,13 @@ export async function getServiceRules(): Promise<ServiceRules> {
     agentMaxNgnPerTx: 50_000,
     agentDailyCapNgn: 100_000,
     aiChatEnabled: true,
+    x402FacilitatorFeeUsd: 0.001,
   };
 
   try {
     const { data } = await supabaseAdmin
       .from('platform_settings')
-      .select('exchange_rate, kill_switches, agent_enabled, agent_autonomous_enabled, agent_max_ngn_per_tx, agent_daily_cap_ngn, ai_chat_enabled')
+      .select('exchange_rate, kill_switches, agent_enabled, agent_autonomous_enabled, agent_max_ngn_per_tx, agent_daily_cap_ngn, ai_chat_enabled, x402_facilitator_fee_usd')
       .eq('id', 1)
       .single();
 
@@ -62,6 +70,7 @@ export async function getServiceRules(): Promise<ServiceRules> {
       agentMaxNgnPerTx: Number(d.agent_max_ngn_per_tx) || fallback.agentMaxNgnPerTx,
       agentDailyCapNgn: Number(d.agent_daily_cap_ngn) || fallback.agentDailyCapNgn,
       aiChatEnabled: d.ai_chat_enabled !== false,
+      x402FacilitatorFeeUsd: Number.isFinite(Number(d.x402_facilitator_fee_usd)) ? Number(d.x402_facilitator_fee_usd) : fallback.x402FacilitatorFeeUsd,
     };
 
     cache = { rules, at: Date.now() };
@@ -308,4 +317,22 @@ export async function checkAgentSpendAllowed(
   }
 
   return { allowed: true };
+}
+
+// ⚡ ONE FEE RULE, EVERY RAIL — extracted from what was previously only
+// src/app/api/pay/x402/route.ts's own local `serviceFee` const, so x402, MCP (pay_bill/
+// schedule_bill/pay_bill_batch), and the chat/DeAI agent all charge the identical flat NGN fee
+// for the identical categories, computed once instead of three places that could quietly drift
+// apart. Flat, not percentage-based: AbaPay picked Celo's facilitator specifically because it's
+// a flat $0.001/settlement instead of thirdweb's ~0.3% cut (see README's x402 section) — the
+// service fee mirrors that same flat-fee philosophy rather than scaling with the amount paid.
+//
+// serviceCategory: 'AIRTIME' | 'DATA' | 'ELECTRICITY' | 'CABLE' | 'BANK' | 'EDUCATION' |
+// 'INTERNATIONAL' (INTERNATIONAL never matches any branch below — no fee, same as AIRTIME/DATA).
+// network: only matters for CABLE (SHOWMAX is fee-free; every other cable provider is not).
+export function computeServiceFee(serviceCategory: string, network?: string | null): number {
+  const category = (serviceCategory || '').toUpperCase();
+  if (category === 'ELECTRICITY' || category === 'BANK' || category === 'EDUCATION') return 100;
+  if (category === 'CABLE' && (network || '').toUpperCase() !== 'SHOWMAX') return 100;
+  return 0;
 }

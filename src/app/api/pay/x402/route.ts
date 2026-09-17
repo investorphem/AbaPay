@@ -3,7 +3,7 @@ import { supabaseAdmin as supabase } from '@/utils/supabase';
 import { executeVend, getStrictRequestId } from '@/lib/vend';
 import { resolveTokenOnChain, DEFAULT_CHAIN } from '@/constants';
 import { sendTelegramAlert } from '@/lib/telegram';
-import { getServiceRules } from '@/lib/serviceRules';
+import { getServiceRules, computeServiceFee } from '@/lib/serviceRules';
 import { isDuplicateElectricity } from '@/lib/parity';
 import { enqueueRefund } from '@/lib/refunds';
 import { readAuthorization, checkAuthorization, isRetryableSettleFailure, settleResponseNamesTransaction, buildAuthorizationStateCall, parseAuthorizationState, transferAuthorizationTypedData, type X402Authorization } from '@/lib/x402Settle';
@@ -393,17 +393,25 @@ async function handleX402Request(req: Request) {
   const isMainnet = process.env.NEXT_PUBLIC_NETWORK === 'mainnet' || process.env.NEXT_PUBLIC_NETWORK === 'celo' || process.env.NEXT_PUBLIC_NETWORK === 'base';
   const isForeign = serviceID === 'foreign-airtime';
   const requestedNaira = parseFloat(nairaAmount);
-  const needsVerification = !isForeign && (serviceCategory === 'ELECTRICITY' || serviceCategory === 'BANK' || (serviceCategory === 'EDUCATION' && serviceID === 'jamb') || (serviceCategory === 'CABLE' && network !== 'SHOWMAX'));
-  const serviceFee = (needsVerification || serviceCategory === 'EDUCATION') ? 100 : 0;
+  // computeServiceFee (src/lib/serviceRules.ts) is the shared rule MCP and the chat/DeAI agent
+  // also charge from now — isForeign stays a LOCAL guard here, not baked into the shared
+  // function, because it protects against this REST endpoint specifically: a caller naming
+  // serviceID "foreign-airtime" but mismatching serviceCategory to something fee-bearing. MCP
+  // and chat never construct a request that way, so they have no equivalent case to guard.
+  const serviceFee = isForeign ? 0 : computeServiceFee(serviceCategory, network);
   // ⚡ FACILITATOR FEE, PASSED THROUGH — was previously absorbed by AbaPay from its own prepaid
   // Celo facilitator credit balance / CDP account (see the header comment above and the
   // low-credits check further down); now charged to the payer instead, at cost, in the
-  // settlement token (already USD-pegged, so no NGN conversion needed). Flat $0.001/settlement
-  // either way: Celo's facilitator always charges this from the prepaid balance; Coinbase's CDP
-  // facilitator on Base is free for the first 1,000 tx/month then the same $0.001 — charged
-  // here regardless of which bracket Base is actually in, so the payer never sees this line
-  // item vary chain-to-chain for a reason unrelated to what they're doing.
-  const FACILITATOR_FEE_USD = 0.001;
+  // settlement token (already USD-pegged, so no NGN conversion needed). Read from
+  // platform_settings.x402_facilitator_fee_usd (getServiceRules(), below) rather than
+  // hardcoded — neither Celo's facilitator nor Base's CDP facilitator exposes a live pricing
+  // endpoint (checked: /verify, /settle, /supported, /health is the complete documented list,
+  // nothing pricing-related), so there's no way to fetch this automatically; an operator
+  // updates the row instead of this file if either facilitator's rate changes. Charged
+  // uniformly regardless of chain — Celo's facilitator always charges this from the prepaid
+  // balance, Coinbase's CDP facilitator on Base is free for the first 1,000 tx/month then the
+  // same rate — so the payer never sees this line item vary chain-to-chain for a reason
+  // unrelated to what they're doing.
   const vendAmount = Number.isFinite(requestedNaira) && requestedNaira > 0 ? requestedNaira : null;
   // ⚡ CBN STAMP DUTY — ₦50 fixed, mandated on electronic transfers of ₦10,000 and above. See
   // /api/pay's identical comment — same rule, tracked in stamp_duty_ngn, never shown to the user.
@@ -478,7 +486,7 @@ async function handleX402Request(req: Request) {
   if (vendAmount !== null) {
     const rules = await getServiceRules();
     baseRate = rules.exchangeRate;
-    requiredCrypto = (vendAmount + serviceFee + stampDutyNgn) / baseRate + FACILITATOR_FEE_USD;
+    requiredCrypto = (vendAmount + serviceFee + stampDutyNgn) / baseRate + rules.x402FacilitatorFeeUsd;
     requiredWei = BigInt(Math.round(requiredCrypto * 10 ** usdc.decimals));
   } else {
     requiredCrypto = Number(FALLBACK_MIN_USDC);

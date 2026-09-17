@@ -7,6 +7,7 @@ import { getActiveDiscountForService, computeDiscountNgn } from '@/lib/discounts
 import { isMainnetEnv } from '@/lib/chain';
 import { isDuplicateElectricity } from '@/lib/parity';
 import { sendTelegramAlert } from '@/lib/telegram';
+import { computeServiceFee } from '@/lib/serviceRules';
 
 // ⚡ MULTI-RECIPIENT (BATCH) PAYMENTS — shared between the in-app chat (/api/deai/chat) and
 // the social channels (/api/deai/core). The intent engine emits `recipients` whenever a user
@@ -139,7 +140,14 @@ export async function executeAgentPayment(params: {
   // own destination account and may hit its own per-destination cap separately.
   const activeDiscount = await getActiveDiscountForService(item.serviceCategory);
   const { discountNgn, discountPhone } = await computeDiscountNgn(item.amountNgn, activeDiscount, userWallet, item.billersCode);
-  const amountCrypto = ((item.amountNgn - discountNgn) / exchangeRate).toFixed(6);
+  // ⚡ RECONCILED WITH x402 — this used to charge exactly item.amountNgn/exchangeRate, no fee at
+  // all, while /api/pay/x402 charged (vendAmount + serviceFee)/rate for the identical service
+  // categories. computeServiceFee (src/lib/serviceRules.ts) is the same rule both now use. Added
+  // ONLY here, to what's CHARGED on-chain — item.amountNgn itself, and the `vendAmount` passed
+  // to executeVend() further down, stay the real bill amount untouched, so VTpass still gets
+  // told to deliver exactly what was asked for, not the bill amount plus AbaPay's own fee.
+  const serviceFee = computeServiceFee(item.serviceCategory, item.provider);
+  const amountCrypto = ((item.amountNgn + serviceFee - discountNgn) / exchangeRate).toFixed(6);
   const vtRequestId = getStrictRequestId();
   const explorerBase = item.chain === 'BASE'
     ? (isMainnetEnv() ? 'https://basescan.org' : 'https://sepolia.basescan.org')
@@ -153,7 +161,7 @@ export async function executeAgentPayment(params: {
       service_category: item.serviceCategory, service_id: item.serviceID,
       variation_code: params.variationCode || null, network: item.provider || null, blockchain: item.chain,
       account_number: item.billersCode, phone: null,
-      amount_usdt: Number(amountCrypto), amount_naira: item.amountNgn, fee_naira: 0,
+      amount_usdt: Number(amountCrypto), amount_naira: item.amountNgn, fee_naira: serviceFee,
       discount_ngn: discountNgn, discount_campaign_id: activeDiscount?.id || null, discount_phone: discountPhone,
       status: 'PENDING',
       wallet_address: userWallet.toLowerCase(),
