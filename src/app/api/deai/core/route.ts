@@ -5,7 +5,7 @@ import { humanizeReply } from '@/lib/deai/humanize';
 import { verifyAccount as realVerifyAccount, fetchCryptoBalances as realFetchCryptoBalances, resolveServiceId } from '@/lib/deai/services';
 import { createDeepLink } from '@/lib/deai/deeplink';
 import { relayPayBillFor, getRemainingAllowance } from '@/lib/deai/relayer';
-import { checkServiceAllowed, checkAgentSpendAllowed, isChannelEnabled } from '@/lib/serviceRules';
+import { checkServiceAllowed, checkAgentSpendAllowed, isChannelEnabled, computeServiceFee } from '@/lib/serviceRules';
 import { assessFeasibility, describeCapabilities, getCapability, capabilityForIntent } from '@/lib/deai/capabilities';
 import { checkParity, checkAccountNumber, checkAmountLive, isDuplicateElectricity, formatConversion, REQ, requiresVariation, supportsRenew, requiresVerifiedName } from '@/lib/parity';
 import { sendTelegramAlert } from '@/lib/telegram';
@@ -384,6 +384,19 @@ function needsEmailOptIn(d: any): boolean {
     if (d.email_choice_made) return false;
     if (alreadyHasEmail(d)) return false; // already mandatory for this category, or already answered
     return true;
+}
+
+// ⚡ DeAI's own internal intent names ('VEND_DATA', 'TV', 'BANK_TRANSFER', ...) → the
+// serviceCategory computeServiceFee (src/lib/serviceRules.ts) and x402/MCP both key on. One
+// mapping, used everywhere this file needs to price a fee or show one before charging it — the
+// autonomous-payment execution path below and both "Final Checkout" confirmation screens all
+// call this instead of repeating (and risking drifting) their own copy of the same ternary chain.
+function serviceCategoryForIntent(intent: string): string {
+  return intent === 'ELECTRICITY' ? 'ELECTRICITY'
+       : intent === 'TV' ? 'CABLE'
+       : intent === 'VEND_DATA' ? 'DATA'
+       : intent === 'EDUCATION' ? 'EDUCATION'
+       : intent === 'BANK_TRANSFER' ? 'BANK' : 'AIRTIME';
 }
 
 // ⚡ Which tokens are actually available on a given chain?
@@ -1386,10 +1399,7 @@ async function handleCore(req: Request, ctx: HumanizeCtx): Promise<NextResponse>
         // engine (getActiveDiscountForService) and the app's pre-fill — so an education PIN
         // would have been recorded, discounted and re-opened as an airtime top-up. It matches
         // page.tsx's own uiCategory ("EDUCATION").
-        const serviceCategory = d.intent === 'ELECTRICITY' ? 'ELECTRICITY'
-                               : d.intent === 'TV' ? 'CABLE'
-                               : d.intent === 'VEND_DATA' ? 'DATA'
-                               : d.intent === 'EDUCATION' ? 'EDUCATION' : 'AIRTIME';
+        const serviceCategory = serviceCategoryForIntent(d.intent);
 
         // ⚡ PATH A — AUTONOMOUS AGENT PAYMENT (user pre-approved an on-chain allowance)
         //
@@ -1452,7 +1462,12 @@ async function handleCore(req: Request, ctx: HumanizeCtx): Promise<NextResponse>
             // "verify what the user already paid" step to hook a discount into afterward.
             const activeDiscount = await getActiveDiscountForService(serviceCategory);
             const { discountNgn, discountPhone } = await computeDiscountNgn(Number(d.amount_ngn), activeDiscount, userWallet, d.destination_account);
-            const amountCrypto = ((Number(d.amount_ngn) - discountNgn) / rate).toFixed(6);
+            // ⚡ RECONCILED WITH x402/MCP — same computeServiceFee rule (src/lib/serviceRules.ts)
+            // those rails now charge, added only to what's charged on-chain. `vendAmount` passed
+            // to executeVend() further down stays Number(d.amount_ngn) untouched, so VTpass still
+            // delivers exactly the requested bill, not the bill plus AbaPay's fee.
+            const chatServiceFee = computeServiceFee(serviceCategory, d.provider);
+            const amountCrypto = ((Number(d.amount_ngn) + chatServiceFee - discountNgn) / rate).toFixed(6);
 
             if (!allowance.ok || allowance.remaining < Number(amountCrypto)) {
               allowanceShortfall = { needed: amountCrypto, have: allowance.ok ? allowance.remaining.toFixed(2) : '0' };
@@ -1485,7 +1500,7 @@ async function handleCore(req: Request, ctx: HumanizeCtx): Promise<NextResponse>
                 tx_hash: preflightTxHash, request_id: vtRequestId, service_category: serviceCategory, service_id: serviceID,
                 variation_code: d.variation_code || null, network: d.provider || null, blockchain: chain,
                 account_number: d.destination_account, phone: d.phone || null,
-                amount_usdt: Number(amountCrypto), amount_naira: Number(d.amount_ngn), fee_naira: Number(d.fee || 0),
+                amount_usdt: Number(amountCrypto), amount_naira: Number(d.amount_ngn), fee_naira: chatServiceFee,
                 discount_ngn: discountNgn, discount_campaign_id: activeDiscount?.id || null, discount_phone: discountPhone, status: 'PENDING',
                 wallet_address: userWallet.toLowerCase(),
                 customer_name: d.customer_name || null, customer_address: d.customer_address || null,
@@ -1783,7 +1798,7 @@ async function handleCore(req: Request, ctx: HumanizeCtx): Promise<NextResponse>
       else if (d2.intent === 'BANK_TRANSFER') detailsRow2 = `Bank: ${d2.provider?.toUpperCase()}`;
       else detailsRow2 = `Name: ${d2.verified_name || 'N/A'}`;
 
-      const total2 = Number(d2.amount_ngn || 0) + Number(d2.fee || 0);
+      const total2 = Number(d2.amount_ngn || 0) + computeServiceFee(serviceCategoryForIntent(d2.intent), d2.provider);
       return NextResponse.json({
         action: 'REPLY',
         message: `${d2.email ? `✅ Receipt will go to ${d2.email}.` : "👍 No receipt — proceeding without an email."}\n\n🤖 *Final Checkout*\n\nService: ${d2.intent.replace('_', ' ')}\nAccount: ${d2.destination_account}\n${detailsRow2}\nAmount: ${currencySymbol}${d2.amount_ngn || 0}\n*Total: ${currencySymbol}${total2}*\n\n🔒 Reply with your *PIN* to confirm.`,
@@ -2236,7 +2251,7 @@ async function handleCore(req: Request, ctx: HumanizeCtx): Promise<NextResponse>
       else if (session.intent_data.intent === 'BANK_TRANSFER') detailsRow = `Bank: ${session.intent_data.provider?.toUpperCase()}`;
       else detailsRow = `Name: ${session.intent_data.verified_name || 'N/A'}`;
 
-      const total = Number(session.intent_data.amount_ngn || 0) + Number(session.intent_data.fee || 0);
+      const total = Number(session.intent_data.amount_ngn || 0) + computeServiceFee(serviceCategoryForIntent(session.intent_data.intent), session.intent_data.provider);
       return NextResponse.json({
           action: 'REPLY',
           message: `🤖 *Final Checkout*\n\nService: ${session.intent_data.intent.replace('_', ' ')}\nAccount: ${session.intent_data.destination_account}\n${detailsRow}\nAmount: ${currencySymbol}${session.intent_data.amount_ngn || 0}\nPayment: *${selected}*\n*Total: ${currencySymbol}${total}*\n\n🔒 Reply with your *PIN* to confirm.`
