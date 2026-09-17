@@ -395,6 +395,15 @@ async function handleX402Request(req: Request) {
   const requestedNaira = parseFloat(nairaAmount);
   const needsVerification = !isForeign && (serviceCategory === 'ELECTRICITY' || serviceCategory === 'BANK' || (serviceCategory === 'EDUCATION' && serviceID === 'jamb') || (serviceCategory === 'CABLE' && network !== 'SHOWMAX'));
   const serviceFee = (needsVerification || serviceCategory === 'EDUCATION') ? 100 : 0;
+  // ⚡ FACILITATOR FEE, PASSED THROUGH — was previously absorbed by AbaPay from its own prepaid
+  // Celo facilitator credit balance / CDP account (see the header comment above and the
+  // low-credits check further down); now charged to the payer instead, at cost, in the
+  // settlement token (already USD-pegged, so no NGN conversion needed). Flat $0.001/settlement
+  // either way: Celo's facilitator always charges this from the prepaid balance; Coinbase's CDP
+  // facilitator on Base is free for the first 1,000 tx/month then the same $0.001 — charged
+  // here regardless of which bracket Base is actually in, so the payer never sees this line
+  // item vary chain-to-chain for a reason unrelated to what they're doing.
+  const FACILITATOR_FEE_USD = 0.001;
   const vendAmount = Number.isFinite(requestedNaira) && requestedNaira > 0 ? requestedNaira : null;
   // ⚡ CBN STAMP DUTY — ₦50 fixed, mandated on electronic transfers of ₦10,000 and above. See
   // /api/pay's identical comment — same rule, tracked in stamp_duty_ngn, never shown to the user.
@@ -469,7 +478,7 @@ async function handleX402Request(req: Request) {
   if (vendAmount !== null) {
     const rules = await getServiceRules();
     baseRate = rules.exchangeRate;
-    requiredCrypto = (vendAmount + serviceFee + stampDutyNgn) / baseRate;
+    requiredCrypto = (vendAmount + serviceFee + stampDutyNgn) / baseRate + FACILITATOR_FEE_USD;
     requiredWei = BigInt(Math.round(requiredCrypto * 10 ** usdc.decimals));
   } else {
     requiredCrypto = Number(FALLBACK_MIN_USDC);

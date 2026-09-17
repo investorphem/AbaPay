@@ -11,8 +11,8 @@ client that isn't speaking MCP or A2A. One endpoint, Celo-only, machine-readable
 
 Settles a real-world bill payment. The caller pays in a supported Celo stablecoin; on
 confirmed settlement, AbaPay vends the underlying service and returns the result. Price is
-dynamic — it equals the live value of the bill, so there is no fixed catalog price for this
-resource.
+dynamic — it equals the live value of the bill (plus any applicable service fee and a flat
+$0.001 x402 facilitator fee), so there is no fixed catalog price for this resource.
 
 ### Request body
 

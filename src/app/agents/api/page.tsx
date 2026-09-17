@@ -35,7 +35,7 @@ export default function APIPage() {
           <code className="text-sm font-bold text-slate-900 dark:text-white">/api/pay/x402</code>
         </div>
         <p className="text-sm text-slate-600 dark:text-slate-300 leading-relaxed mb-5 max-w-2xl">
-          Settles a real-world bill payment. The caller pays in a supported Celo stablecoin; on confirmed settlement, AbaPay vends the underlying service and returns the result. Price is dynamic — it equals the live value of the bill, so there is no fixed catalog price for this resource.
+          Settles a real-world bill payment. The caller pays in a supported Celo stablecoin; on confirmed settlement, AbaPay vends the underlying service and returns the result. Price is dynamic — it equals the live value of the bill, plus any applicable service fee and a flat $0.001 x402 facilitator fee, so there is no fixed catalog price for this resource.
         </p>
 
         <h2 className="text-xs font-black uppercase tracking-widest text-slate-400 dark:text-slate-500 mb-3">Request body</h2>
