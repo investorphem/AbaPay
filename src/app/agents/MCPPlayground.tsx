@@ -79,7 +79,7 @@ export default function MCPPlayground() {
     <div className="bg-white dark:bg-[#111114] border border-slate-100 dark:border-slate-800/60 rounded-[2rem] p-6 sm:p-8">
       <h2 className="font-black text-slate-900 dark:text-white mb-1.5">Try it — live</h2>
       <p className="text-sm text-slate-500 dark:text-slate-400 mb-5 max-w-2xl">
-        Pick a tool, fill in real values, and this calls the actual production MCP server — not a mock. Read-only tools send for real; anything that moves money or state shows the exact request instead of a Send button.
+        Pick a tool, fill in values, and this calls the production MCP server. Read-only tools send for real; anything that moves money or state shows the exact request instead of a Send button.
       </p>
 
       <div className="grid lg:grid-cols-2 gap-6">

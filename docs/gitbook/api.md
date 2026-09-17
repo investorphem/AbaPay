@@ -59,4 +59,4 @@ curl -X POST https://agents.abapays.com/api/pay/x402 \
 ```
 {% endcode %}
 
-Full machine-readable spec: [openapi.json](https://abapays.com/openapi.json).
+Full machine-readable spec: [openapi.json](https://agents.abapays.com/openapi.json).

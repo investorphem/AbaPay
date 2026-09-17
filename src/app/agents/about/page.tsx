@@ -138,7 +138,7 @@ export default async function AboutPage() {
       <section id="discovery" className="bg-white dark:bg-[#111114] border border-slate-100 dark:border-slate-800/60 rounded-[2rem] p-6 sm:p-8 mb-6 scroll-mt-24">
         <h2 className="font-black text-slate-900 dark:text-white mb-1.5 flex items-center gap-2"><Compass size={18} className="text-emerald-500" /> Where this agent is discoverable</h2>
         <p className="text-sm text-slate-500 dark:text-slate-400 leading-relaxed mb-4 max-w-2xl">
-          Every real listing, not a claims list — click through and verify any of these yourself.
+          Where AbaPay is listed, and current counts where the source publishes them.
         </p>
         <div className="overflow-x-auto">
           <table className="w-full text-sm">
@@ -162,8 +162,13 @@ export default async function AboutPage() {
               </tr>
               <tr>
                 <td className="py-2.5 pr-4 font-bold text-slate-700 dark:text-slate-300">Glama — connector</td>
-                <td className="py-2.5 pr-4"><a href="https://glama.ai/mcp/connectors" target="_blank" rel="noopener noreferrer" className="text-emerald-600 dark:text-emerald-400 hover:underline">glama.ai/mcp/connectors</a></td>
-                <td className="py-2.5 text-slate-400 dark:text-slate-500">Listed</td>
+                <td className="py-2.5 pr-4"><a href="https://glama.ai/mcp/connectors/io.github.investorphem/abapay" target="_blank" rel="noopener noreferrer" className="text-emerald-600 dark:text-emerald-400 hover:underline">glama.ai/mcp/connectors/io.github.investorphem/abapay</a></td>
+                <td className="py-2.5 text-slate-400 dark:text-slate-500">Verified owner</td>
+              </tr>
+              <tr>
+                <td className="py-2.5 pr-4 font-bold text-slate-700 dark:text-slate-300">Glama — tools</td>
+                <td className="py-2.5 pr-4"><a href="https://glama.ai/mcp/tools?query=abapay" target="_blank" rel="noopener noreferrer" className="text-emerald-600 dark:text-emerald-400 hover:underline">glama.ai/mcp/tools?query=abapay</a></td>
+                <td className="py-2.5 text-slate-400 dark:text-slate-500">Indexed</td>
               </tr>
               <tr>
                 <td className="py-2.5 pr-4 font-bold text-slate-700 dark:text-slate-300">awesome-mcp-servers</td>
@@ -178,7 +183,7 @@ export default async function AboutPage() {
               <tr>
                 <td className="py-2.5 pr-4 font-bold text-slate-700 dark:text-slate-300">PyPI</td>
                 <td className="py-2.5 pr-4"><a href="https://pypi.org/project/abapay-sdk/" target="_blank" rel="noopener noreferrer" className="text-emerald-600 dark:text-emerald-400 hover:underline">abapay-sdk</a></td>
-                <td className="py-2.5 text-slate-400 dark:text-slate-500">New</td>
+                <td className="py-2.5 text-slate-400 dark:text-slate-500">{stats.pypiDownloadsLastMonth !== null ? `${nf.format(stats.pypiDownloadsLastMonth)} / mo` : "—"}</td>
               </tr>
               <tr>
                 <td className="py-2.5 pr-4 font-bold text-slate-700 dark:text-slate-300">GitHub</td>

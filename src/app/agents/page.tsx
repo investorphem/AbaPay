@@ -65,7 +65,7 @@ const PATHS = [
     tag: "ZERO SETUP",
     title: "x402",
     forWhom: "An agent that already holds a Celo wallet and wants to pay, right now, with nothing set up in advance.",
-    needs: ["No account", "No API key", "No PIN", "No visit to abapays.com — ever"],
+    needs: ["No account", "No API key", "No PIN", "No website visit — ever"],
     href: "/agents/x402",
   },
   {

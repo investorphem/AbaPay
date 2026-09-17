@@ -56,7 +56,7 @@ export default function X402Page() {
       <section className="bg-red-50 dark:bg-red-900/10 border border-red-100 dark:border-red-900/30 rounded-[2rem] p-6 sm:p-8 mb-6">
         <p className="text-xs font-black uppercase tracking-widest text-red-500 dark:text-red-400 mb-3 flex items-center gap-1.5"><Ban size={13} /> Never required for this path</p>
         <div className="flex flex-wrap gap-2">
-          {["abapays.com account", "Agent Hub", "API key", "PIN", "Wallet-signature link"].map((x) => (
+          {["Account", "Agent Hub", "API key", "PIN", "Wallet-signature link"].map((x) => (
             <span key={x} className="text-xs font-medium text-slate-600 dark:text-slate-400 bg-white dark:bg-[#111114] border border-slate-200 dark:border-slate-800 rounded-full px-3 py-1">{x}</span>
           ))}
         </div>
