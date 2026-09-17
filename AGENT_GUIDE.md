@@ -189,17 +189,23 @@ transaction would pay someone out of the treasury for nothing.
 
 ## 8. Chains & tokens
 
-| Chain | Tokens |
+| Chain | Tokens offered for new payments |
 |---|---|
-| **Celo** | USD₮, USDC, USDm (cUSD) |
-| **Base** | USD₮, USDC |
+| **Celo** | USD₮, USDC, USA₮ |
+| **Base** | USDC, USD₮ |
 
 The agent asks the user to pick a chain, then offers **only the tokens that exist on it**,
-with their real on-chain balances. Sourced from `SUPPORTED_TOKENS` — the same constant the web
-app uses, so they cannot disagree.
+with their real on-chain balances. Sourced from `TOKEN_ORDER_BY_CHAIN` in
+`src/constants/index.ts` — the same constant the web app, the MCP tools, and the chat agent all
+use, so they cannot disagree.
 
-> Note the real symbols are **`USD₮`** and **`USDm`** (not "USDT"/"cUSD"). Using the wrong
+> Note the real symbols are **`USD₮`** and **`USA₮`** (not "USDT"/"USAT"). Using the wrong
 > string breaks token resolution at the relayer.
+>
+> `USDm` (Mento's Celo dollar) is no longer offered for new payments — it only supports
+> EIP-2612 `permit()`, not `transferWithAuthorization`, so it can't settle via x402. It stays in
+> `SUPPORTED_TOKENS` purely because the admin vault still holds and can withdraw it, and
+> historical transaction rows still name it; USA₮ is what replaced it in the picker.
 
 ---
 

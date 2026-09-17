@@ -580,7 +580,7 @@ ERC8004_AGENT_ID=59561 ERC8004_AGENT_URI=https://abapays.com/.well-known/agent.j
 ```
 Run this any time `agent.json`'s contents change (like the `mcp` service entry above) and you want an already-registered identity to be re-read.
 
-### x402 Settlement (main app, Celo + USDC/USD₮)
+### x402 Settlement (main app, Celo + USDC/USD₮/USA₮)
 ```
 CELO_X402_API_KEY=your_x402_celo_org_api_key   # Server-side: settles via api.x402.celo.org
 ```
@@ -590,7 +590,7 @@ the user already connected (`src/lib/x402Pay.ts`), not by a second wallet SDK.
 NEXT_PUBLIC_X402_ENABLED=                      # Default ON. Set to "false" to use the contract call instead
 ```
 
-**x402 is the default settlement rail on both chains** — **USDC or USD₮ on Celo** (each settling
+**x402 is the default settlement rail on both chains** — **USDC, USD₮, or USA₮ on Celo** (each settling
 against its own EIP-712 domain) and **USDC on Base** — so payments are genuinely indexed on
 x402scan rather than being relabeled contract calls. Anything without EIP-3009 uses the normal
 contract call. It never touches the agent-initiated flow, since x402 needs a fresh signature per
@@ -615,7 +615,7 @@ buy nothing there; the settlement rail isn't the variable.
 
 🔵 **The one real limit is the TOKEN, not the chain and not the wallet.** x402 settles on an
 EIP-3009 `transferWithAuthorization` signature, so it only works on tokens that implement one.
-Celo's USDC and USD₮ both do; on Base, USDC does and **Tether's USD₮ does not** — there is no such
+Celo's USDC, USD₮, and USA₮ all do; on Base, USDC does and **Tether's USD₮ does not** — there is no such
 function on that contract to sign against.
 
 That is why the chain's *lead* stablecoin matters so much. Base leads with USDC
@@ -1238,10 +1238,10 @@ requires is structurally what a drainer asks for, so some scanners flag it.
 
 The web app's payment flow settles via [x402](https://x402.org) — through **Celo's own
 facilitator** (`api.x402.celo.org`, built by Celo Core Co. — see
-`src/app/api/pay/x402/route.ts`), not thirdweb — whenever the user is paying with **USDC or
-USD₮ on Celo**. Each token settles against its own EIP-712 domain (`X402_TOKEN_EIP712` in that
-route) since Circle's USDC and Tether's USD₮ deployments don't share one. The same "Confirm &
-Pay" button routes through x402 for either token on Celo and through the normal `payBill`
+`src/app/api/pay/x402/route.ts`), not thirdweb — whenever the user is paying with **USDC, USD₮,
+or USA₮ on Celo**. Each token settles against its own EIP-712 domain (`X402_TOKEN_EIP712` in that
+route) since Circle's USDC and Tether's USD₮/USA₮ deployments don't share one. The same "Confirm &
+Pay" button routes through x402 for any of the three tokens on Celo and through the normal `payBill`
 contract call for everything else (a token without EIP-3009, Base when `NEXT_PUBLIC_BASE_X402_ENABLED=false`,
 or x402 unconfigured). This makes the payment genuinely visible on x402scan — not a
 relabeled transaction — because x402 settlement requires an EIP-3009
@@ -1326,7 +1326,7 @@ are unaffected — those payments already execute from `RELAYER_ADDRESS`, the sa
 registered under the ERC-8004 identity below, so they're already attributable to the agent
 without needing x402.
 
-- **Scope: Celo + USDC/USD₮, confirmed live** — not just a caution. Native Celo USDC (Circle's
+- **Scope: Celo + USDC/USD₮/USA₮, confirmed live** — not just a caution. Native Celo USDC (Circle's
   FiatTokenV2) and native Celo USD₮ (Tether's deployment) both implement EIP-3009
   `transferWithAuthorization`; USDm doesn't (Mento tokens expose only EIP-2612 `permit()`), so there's no signature scheme to settle it — which is exactly why USAT replaced it in the picker
   with. Not a self-imposed limit — if support is added for another token later, no code change
