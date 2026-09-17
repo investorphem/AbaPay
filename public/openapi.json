@@ -18,7 +18,7 @@
       "post": {
         "operationId": "payBillViaX402",
         "summary": "Pay a real-world utility bill (airtime, data, electricity, cable) via x402 — 140+ countries",
-        "description": "Settles a real-world bill payment via the x402 protocol. The caller pays in a supported stablecoin on Celo or Base; on confirmed settlement, AbaPay vends the underlying service (airtime top-up, data bundle, electricity token, cable subscription) through its provider integration and returns the result. Price is dynamic — it equals the live value of the bill being paid, converted to the settlement token at the platform's current exchange rate, so there is no fixed catalog price for this resource.",
+        "description": "Settles a real-world bill payment via the x402 protocol. The caller pays in a supported stablecoin on Celo or Base; on confirmed settlement, AbaPay vends the underlying service (airtime top-up, data bundle, electricity token, cable subscription) through its provider integration and returns the result. Price is dynamic — it equals the live value of the bill being paid, converted to the settlement token at the platform's current exchange rate, plus any applicable service fee and a flat $0.001 facilitator fee, so there is no fixed catalog price for this resource.",
         "requestBody": {
           "required": true,
           "content": {

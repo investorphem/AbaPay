@@ -598,7 +598,7 @@ async function callTransactionHistory(args: any, oauthIdentity: McpIdentity | nu
   const lines = data.map((tx: any, i: number) => {
     const date = new Date(tx.created_at).toLocaleString('en-NG', { timeZone: 'Africa/Lagos', day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' });
     const serviceLabel = `${(tx.network || '').toUpperCase()} ${tx.service_category || ''}`.trim();
-    const amount = `₦${Number(tx.amount_naira || 0).toLocaleString()}`;
+    const amount = `$${Number(tx.amount_usdt || 0).toFixed(2)} (₦${Number(tx.amount_naira || 0).toLocaleString()})`;
     const explorerLink = String(tx.tx_hash || '').startsWith('0x') ? ` — ${explorerBaseFor(tx.blockchain)}/tx/${tx.tx_hash}` : '';
     return `${i + 1}. ${date} — ${serviceLabel} — ${amount} — ${tx.status} — acct ${tx.account_number}${explorerLink}`;
   });
@@ -736,7 +736,12 @@ async function finalizePayBillResult(params: {
   // down) is used here deliberately: it's already the same pre-discount estimate the
   // out-of-band spend alert above sends the wallet owner — "good enough for a was-this-you
   // alert" per that comment applies equally to a plain-text confirmation line.
-  const amountSummary = `**₦${amountNgn.toLocaleString()}** (${capacity.neededCrypto.toFixed(6)} ${tokenSymbol} on ${chain})`;
+  // ⚡ USD LEADS, NOT NGN — tokenSymbol is always a USD-pegged stablecoin (USDC/USD₮/USA₮), so
+  // the crypto amount IS the USD amount, not a separate currency to convert. An agent reasoning
+  // about cost should see that dollar figure first; the exact token amount stays for on-chain
+  // verification, and NGN stays parenthetical since that's still the real bill amount VTpass
+  // vends against, just no longer the headline number.
+  const amountSummary = `**$${capacity.neededCrypto.toFixed(2)}** (${capacity.neededCrypto.toFixed(6)} ${tokenSymbol} on ${chain} · ₦${amountNgn.toLocaleString()})`;
   const baseText = `${result.message}\n${amountSummary}${result.txHash ? `\nTx: \`${result.txHash}\`` : ''}`;
 
   // 🔴 THE BUG THIS FIXES: this used to build the receipt card (PNG image AND the interactive
@@ -1577,27 +1582,28 @@ async function callPayBillBatch(args: any, oauthIdentity: McpIdentity | null) {
   // only thing a card-less client ever sees — used to show only the NGN amount, never which
   // stablecoin or chain actually moved for that recipient.
   const lines = results.map(({ v, result }, i) => {
-    const label = `${i + 1}. ${v.provider.toUpperCase()} ${v.service} — NGN ${v.amountNgn.toLocaleString()} (${v.tokenSymbol} on ${v.chain}) to ${v.accountNumber}`;
+    const label = `${i + 1}. ${v.provider.toUpperCase()} ${v.service} — $${(v.amountNgn / rate).toFixed(2)} (${v.tokenSymbol} on ${v.chain}, NGN ${v.amountNgn.toLocaleString()}) to ${v.accountNumber}`;
     if (result.success && !result.vendFailed) return `${label} — OK${result.txHash ? ` (${result.txHash.slice(0, 10)}...)` : ''}`;
     if (result.pending) return `${label} — sent, still confirming`;
     return `${label} — FAILED: ${result.message}`;
   });
 
+  const totalChargedUsd = totalCharged / rate;
   const summary = okCount === validated.length
-    ? `All ${validated.length} payments sent — NGN ${totalCharged.toLocaleString()} total.`
-    : `${okCount} of ${validated.length} payments went through — NGN ${totalCharged.toLocaleString()} charged.`;
+    ? `All ${validated.length} payments sent — $${totalChargedUsd.toFixed(2)} total (NGN ${totalCharged.toLocaleString()}).`
+    : `${okCount} of ${validated.length} payments went through — $${totalChargedUsd.toFixed(2)} charged (NGN ${totalCharged.toLocaleString()}).`;
 
   return withCard(textResult(`${summary}\n\n${lines.join('\n')}`), {
     view: 'batch',
     okCount,
     totalCount: validated.length,
     totalNgn: totalCharged,
-    totalDisplay: `₦${totalCharged.toLocaleString()}`,
+    totalDisplay: `$${totalChargedUsd.toFixed(2)} (₦${totalCharged.toLocaleString()})`,
     recipients: results.map(({ v, result }) => ({
       provider: v.provider.toUpperCase(),
       service: v.service,
       accountNumber: v.accountNumber,
-      displayAmountNgn: `₦${v.amountNgn.toLocaleString()}`,
+      displayAmountNgn: `$${(v.amountNgn / rate).toFixed(2)} (₦${v.amountNgn.toLocaleString()})`,
       status: result.success && !result.vendFailed ? 'OK' : result.pending ? 'PENDING' : 'FAILED',
       txHash: result.txHash || null,
     })),
