@@ -77,7 +77,7 @@ export default function X402Playground() {
     <div className="bg-white dark:bg-[#111114] border border-slate-100 dark:border-slate-800/60 rounded-[2rem] p-6 sm:p-8">
       <h2 className="font-black text-slate-900 dark:text-white mb-1.5">Try it — live</h2>
       <p className="text-sm text-slate-500 dark:text-slate-400 mb-5 max-w-2xl">
-        Edit the bill, hit send — this is a real probe against production with no payment attached, so it always returns a genuine 402 challenge naming the live price. Nothing here can move money.
+        Edit the bill, hit send — a probe against production with no payment attached returns a 402 challenge naming the live price. Nothing here moves money.
       </p>
 
       <div className="grid lg:grid-cols-2 gap-6">
@@ -112,7 +112,7 @@ export default function X402Playground() {
             className="w-full flex items-center justify-center gap-2 bg-emerald-500 hover:bg-emerald-600 disabled:opacity-60 text-white text-sm font-bold rounded-xl py-2.5 transition-colors"
           >
             {sending ? <Loader2 size={15} className="animate-spin" /> : <Send size={15} />}
-            {sending ? "Sending…" : "Send — real endpoint, real response"}
+            {sending ? "Sending…" : "Send to the production endpoint"}
           </button>
 
           {response && (

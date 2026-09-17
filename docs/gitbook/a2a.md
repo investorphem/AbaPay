@@ -9,8 +9,8 @@ JSON-RPC.
 
 | | |
 |---|---|
-| Agent Card | `abapays.com/.well-known/agent-card.json` |
-| JSON-RPC endpoint | `abapays.com/api/a2a` |
+| Agent Card | `agents.abapays.com/.well-known/agent-card.json` |
+| JSON-RPC endpoint | `agents.abapays.com/api/a2a` |
 
 ## Skills (10)
 
@@ -18,7 +18,7 @@ JSON-RPC.
 `transaction_history` `pay_bill` `pay_bill_batch` `schedule_bill` `list_schedules`
 `cancel_schedule`
 
-## Can an agent set and use a PIN without visiting abapays.com? Yes.
+## Can an agent set and use a PIN without visiting a website? Yes.
 
 The PIN is a field in a JSON body, not something entered into a web form. Linking and every
 payment after it are both plain API calls:

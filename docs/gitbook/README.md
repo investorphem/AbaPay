@@ -77,7 +77,7 @@ See the [About](about.md) chapter for who operates this and where it's discovera
 | Live site | [agents.abapays.com](https://agents.abapays.com) |
 | Repository (MIT) | [github.com/investorphem/AbaPay](https://github.com/investorphem/AbaPay) |
 | TypeScript SDK | [npmjs.com/package/abapay-sdk](https://npmjs.com/package/abapay-sdk) |
-| OpenAPI spec | [abapays.com/openapi.json](https://abapays.com/openapi.json) |
+| OpenAPI spec | [agents.abapays.com/openapi.json](https://agents.abapays.com/openapi.json) |
 
 {% hint style="info" %}
 **Celo-only, deliberately.** This handbook and the agent rails it documents run on Celo mainnet, end to end — every endpoint, contract address, and stablecoin here is Celo-scoped.

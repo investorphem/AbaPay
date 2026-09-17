@@ -11,7 +11,7 @@
     }
   },
   "servers": [
-    { "url": "https://www.abapays.com" }
+    { "url": "https://agents.abapays.com" }
   ],
   "paths": {
     "/api/pay/x402": {

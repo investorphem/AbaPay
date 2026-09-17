@@ -28,11 +28,11 @@ export default function A2APage() {
       <section className="grid sm:grid-cols-2 gap-4 mb-6">
         <div className="bg-white dark:bg-[#111114] border border-slate-100 dark:border-slate-800/60 rounded-2xl p-5">
           <div className="text-[10px] font-black uppercase tracking-widest text-slate-400 dark:text-slate-500 mb-1">Agent Card</div>
-          <a href="/.well-known/agent-card.json" className="text-xs font-mono text-emerald-600 dark:text-emerald-400 hover:underline break-all">abapays.com/.well-known/agent-card.json</a>
+          <a href="https://agents.abapays.com/.well-known/agent-card.json" target="_blank" rel="noopener noreferrer" className="text-xs font-mono text-emerald-600 dark:text-emerald-400 hover:underline break-all">agents.abapays.com/.well-known/agent-card.json</a>
         </div>
         <div className="bg-white dark:bg-[#111114] border border-slate-100 dark:border-slate-800/60 rounded-2xl p-5">
           <div className="text-[10px] font-black uppercase tracking-widest text-slate-400 dark:text-slate-500 mb-1">JSON-RPC endpoint</div>
-          <span className="text-xs font-mono text-slate-600 dark:text-slate-400 break-all">abapays.com/api/a2a</span>
+          <span className="text-xs font-mono text-slate-600 dark:text-slate-400 break-all">agents.abapays.com/api/a2a</span>
         </div>
       </section>
 
@@ -44,11 +44,11 @@ export default function A2APage() {
       </div>
 
       {/* ⚡ THE QUESTION THIS SECTION EXISTS TO ANSWER, DIRECTLY: "can an agent set and use a
-          PIN without ever visiting abapays.com?" Yes — and the previous version of this page
+          PIN without ever visiting a website?" Yes — and the previous version of this page
           only implied it by omission, which read as uncertainty rather than an answer. Said
           in exactly these words, with the two API calls that make it true. */}
       <section className="bg-white dark:bg-[#111114] border border-slate-100 dark:border-slate-800/60 rounded-[2rem] p-6 sm:p-8 mb-6">
-        <h2 className="font-black text-slate-900 dark:text-white mb-4">Can an agent set and use a PIN without visiting abapays.com? Yes.</h2>
+        <h2 className="font-black text-slate-900 dark:text-white mb-4">Can an agent set and use a PIN without visiting a website? Yes.</h2>
         <p className="text-sm text-slate-600 dark:text-slate-300 leading-relaxed mb-5 max-w-2xl">
           The PIN is a field in a JSON body, not something entered into a web form. Linking and every payment after it are both plain API calls:
         </p>

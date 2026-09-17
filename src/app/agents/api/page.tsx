@@ -24,7 +24,7 @@ export default function APIPage() {
             The same settlement rail as <Link href="/agents/x402" className="underline hover:text-emerald-500">x402</Link>, described as a plain OpenAPI 3.1 document for any HTTP client that isn&apos;t speaking MCP or A2A. One endpoint, Celo-only, machine-readable.
           </p>
         </div>
-        <a href="https://abapays.com/openapi.json" target="_blank" rel="noopener noreferrer" title="View raw openapi.json" className="p-2 text-slate-300 dark:text-slate-600 hover:text-slate-600 dark:hover:text-slate-300 flex-shrink-0">
+        <a href="https://agents.abapays.com/openapi.json" target="_blank" rel="noopener noreferrer" title="View raw openapi.json" className="p-2 text-slate-300 dark:text-slate-600 hover:text-slate-600 dark:hover:text-slate-300 flex-shrink-0">
           <FolderGit2 size={20} />
         </a>
       </div>
