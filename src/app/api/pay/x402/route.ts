@@ -6,6 +6,7 @@ import { sendTelegramAlert } from '@/lib/telegram';
 import { getServiceRules, computeServiceFee } from '@/lib/serviceRules';
 import { isDuplicateElectricity } from '@/lib/parity';
 import { enqueueRefund } from '@/lib/refunds';
+import { verifyAccount } from '@/lib/deai/services';
 import { readAuthorization, checkAuthorization, isRetryableSettleFailure, settleResponseNamesTransaction, buildAuthorizationStateCall, parseAuthorizationState, transferAuthorizationTypedData, type X402Authorization } from '@/lib/x402Settle';
 import { rpcUrlsFor } from '@/lib/chain';
 import { verifyTypedData, recoverTypedDataAddress, hashTypedData } from 'viem';
@@ -1494,6 +1495,60 @@ async function handleX402Request(req: Request) {
       message: payerMismatch ? 'Payer address mismatch. Your payment is being refunded.' : 'Payment settled, but the request was missing bill details — your payment is being refunded automatically.',
       tx_hash: txHash,
     }, { status: 400 });
+  }
+
+  // 🔐 CUSTOMER VERIFICATION — the same VTpass merchant-verify pass MCP's pay_bill already
+  // requires before money moves (see requiresVerifiedName/verifyAccount in mcpTools.ts), and
+  // the same category set /api/pay's own needsVerification flag uses. x402 can't run this
+  // BEFORE settlement without opening an unauthenticated, VTpass-cost-bearing probe on this
+  // endpoint — a 402 challenge requires no wallet, no PIN, no payer-scoped rate limit, so
+  // anyone could hit merchant-verify for free all day. It runs here instead, right after the
+  // payer has actually put money down, alongside the missingBillDetails check above: a
+  // wrong-but-plausible meter/smartcard/JAMB-ID/bank-account number is caught and refunded
+  // automatically, before VTpass is ever asked to vend against it — closing the one gap the
+  // existing missingBillDetails/payerMismatch checks don't cover (a real, correctly-shaped,
+  // but WRONG account number).
+  const needsVerification = !isForeign && (
+    serviceCategory === 'ELECTRICITY' ||
+    serviceCategory === 'BANK' ||
+    (serviceCategory === 'EDUCATION' && serviceID === 'jamb') ||
+    (serviceCategory === 'CABLE' && network !== 'SHOWMAX')
+  );
+
+  if (needsVerification && billersCode) {
+    // Electricity's type is prepaid/postpaid; JAMB and bank transfers pass their chosen
+    // product/bank code as `variation_code` — same split /api/verify's own comment documents
+    // ("pass the variation code for JAMB, Bank Transfers, and Electricity"). Cable never sends
+    // a type here, matching MCP's own verifyAccount call.
+    const verifyType = serviceCategory === 'ELECTRICITY' ? (meter_account_type || undefined) : (variation_code || undefined);
+    const va = await verifyAccount(serviceID, billersCode, verifyType);
+    if (!va.success) {
+      const reason = va.message || 'Could not verify that account.';
+      await supabase.from('transactions').update({ status: 'FAILED_VENDING', error_code: 'FAILED_VERIFICATION', api_response: reason }).eq('tx_hash', txHash);
+      try {
+        await enqueueRefund({
+          txHash,
+          walletAddress: settledWallet,
+          tokenUsed: requestedTokenSymbol,
+          amountCrypto: chargedCrypto,
+          amountNaira: vendAmount ?? undefined,
+          blockchain: chainKey,
+          reason,
+          vtpassError: 'FAILED_VERIFICATION',
+          userMessage: reason,
+          serviceCategory: serviceCategory || undefined,
+          sourceChannel: source_channel || 'WEB',
+        });
+      } catch (refundErr) {
+        console.error('[Pay/x402] Failed to queue refund for failed verification:', refundErr);
+      }
+      return NextResponse.json({
+        success: false,
+        status: 'FAILED_VENDING',
+        message: `${reason} Your payment is being refunded automatically.`,
+        tx_hash: txHash,
+      }, { status: 400 });
+    }
   }
 
   const { data: lockedRecord, error: lockError } = await supabase
