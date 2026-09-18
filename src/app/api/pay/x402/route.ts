@@ -4,7 +4,7 @@ import { executeVend, getStrictRequestId } from '@/lib/vend';
 import { resolveTokenOnChain, DEFAULT_CHAIN } from '@/constants';
 import { sendTelegramAlert } from '@/lib/telegram';
 import { getServiceRules, computeServiceFee } from '@/lib/serviceRules';
-import { isDuplicateElectricity } from '@/lib/parity';
+import { isDuplicateElectricity, needsX402Verification } from '@/lib/parity';
 import { enqueueRefund } from '@/lib/refunds';
 import { verifyAccount } from '@/lib/deai/services';
 import { readAuthorization, checkAuthorization, isRetryableSettleFailure, settleResponseNamesTransaction, buildAuthorizationStateCall, parseAuthorizationState, transferAuthorizationTypedData, type X402Authorization } from '@/lib/x402Settle';
@@ -1508,12 +1508,7 @@ async function handleX402Request(req: Request) {
   // automatically, before VTpass is ever asked to vend against it — closing the one gap the
   // existing missingBillDetails/payerMismatch checks don't cover (a real, correctly-shaped,
   // but WRONG account number).
-  const needsVerification = !isForeign && (
-    serviceCategory === 'ELECTRICITY' ||
-    serviceCategory === 'BANK' ||
-    (serviceCategory === 'EDUCATION' && serviceID === 'jamb') ||
-    (serviceCategory === 'CABLE' && network !== 'SHOWMAX')
-  );
+  const needsVerification = needsX402Verification(serviceCategory, serviceID, network, isForeign);
 
   if (needsVerification && billersCode) {
     // Electricity's type is prepaid/postpaid; JAMB and bank transfers pass their chosen

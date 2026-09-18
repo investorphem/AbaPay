@@ -131,6 +131,32 @@ export function requiresVerifiedName(intent: string, provider?: string | null): 
   }
 }
 
+// Same rule as requiresVerifiedName above, reached through x402's own field names
+// (serviceCategory/network, e.g. 'CABLE'/'BANK' rather than 'TV'/'BANK_TRANSFER') instead of
+// MCP's mapped intent/provider — see /api/pay/x402/route.ts's post-settlement verification
+// block. Kept as a distinct function rather than a wrapper around requiresVerifiedName so
+// each caller's own vocabulary stays the source of truth; the two are asserted to agree in
+// tests/x402Verification.test.ts.
+export function needsX402Verification(
+  serviceCategory: string | null | undefined,
+  serviceID: string | null | undefined,
+  network: string | null | undefined,
+  isForeign: boolean,
+): boolean {
+  if (isForeign) return false;
+  switch (serviceCategory) {
+    case 'ELECTRICITY':
+    case 'BANK':
+      return true;
+    case 'EDUCATION':
+      return serviceID === 'jamb';
+    case 'CABLE':
+      return network !== 'SHOWMAX';
+    default:
+      return false;
+  }
+}
+
 // ─── VARIATIONS / PLANS ───────────────────────────────────────────────────────
 //
 // Which services require a plan to be chosen, and the subtle DStv/GOtv rule the agent
