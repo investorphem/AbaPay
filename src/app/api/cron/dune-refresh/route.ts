@@ -144,19 +144,27 @@ const DASHBOARDS: Record<string, Dashboard | null> = {
 // same day the 400s started. Executing the SAME query IDs that fail in production
 // (8683609-8683614, the celo dashboard's panel queries) via that session's credential
 // succeeded at `free`, `small`, AND `medium`, all on the first try, no retries. So the
-// team's plan supports API execution fine — DUNE_API_KEY (this route's actual secret,
-// injected via GitHub Actions) is the thing that can't execute, not the tier it asks for.
-// That points at the secret itself: either it belongs to a team member whose own seat
-// doesn't carry execute rights under the new plan, or it's a personal (non-team) key that
-// was never a member of `abapay` with billing access in the first place.
+// team's plan supports API execution fine — DUNE_API_KEY itself is the thing that can't
+// execute, not the tier it asks for. That points at the secret's value: either it belongs
+// to a team member whose own seat doesn't carry execute rights under the new plan, or it's
+// a personal (non-team) key that was never a member of `abapay` with billing access.
 //
-// THE FIX IS NOT IN THIS FILE. Generate a fresh Dune API key from an account that is
-// confirmed to work against the `abapay` team (e.g. the one behind the MCP session used for
-// the 2026-09-18 test above — check dune.com → Settings → API Keys under that login), then
-// replace the DUNE_API_KEY repository secret with it (Settings → Secrets and variables →
-// Actions on GitHub, or `gh secret set DUNE_API_KEY`). Confirm with a real
-// `workflow_dispatch` run before assuming it's fixed — do not just trust a green tick from
-// before the key was rotated.
+// 2026-09-18, corrected: DUNE_API_KEY is read below via `process.env.DUNE_API_KEY` (line
+// ~320) — this route runs on the deployed Vercel app, NOT inside the GitHub Actions runner.
+// The workflow only sends APP_URL + CRON_SECRET to authenticate its own request to this
+// route; it never touches DUNE_API_KEY at all. A first pass at this fix wrongly said to
+// rotate a GitHub Actions repository secret named DUNE_API_KEY — that secret (if one now
+// exists) does nothing here; GitHub Actions secrets and Vercel environment variables are
+// separate stores. Rotating it there and re-running workflow_dispatch reproduced the
+// identical 400, confirming this.
+//
+// THE ACTUAL FIX: generate a fresh Dune API key from an account/session confirmed to work
+// against the `abapay` team (the one behind the 2026-09-18 MCP test above — dune.com →
+// Settings → API Keys under that login), then set it as `DUNE_API_KEY` in Vercel → this
+// project → Settings → Environment Variables (Production at minimum), and trigger a new
+// deployment — an env var change does not take effect on a deployment that already built.
+// Confirm with a real `workflow_dispatch` run against the new deployment before assuming
+// it's fixed.
 const PERFORMANCE = 'free';
 
 /**
