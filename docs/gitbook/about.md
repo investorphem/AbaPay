@@ -43,5 +43,5 @@ and legal terms.
 {% endhint %}
 
 {% hint style="warning" %}
-**Wider agent-registry discovery — in review.** Already listed on the official MCP Registry and on-chain via ERC-8004. A PR is open against `awesome-mcp-servers` (95k+ stars), and AbaPay is submitted to Glama's directory for review — both mid-process, not claimed early.
+**Wider agent-registry discovery — in review.** Already listed on the official MCP Registry, on-chain via ERC-8004, approved on Glama's server and connector directories, and live on MCP Playground's server registry. A PR is still open against `awesome-mcp-servers` (95k+ stars), ready to merge and waiting on that repo's own maintainer.
 {% endhint %}

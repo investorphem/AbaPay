@@ -139,11 +139,24 @@ const DASHBOARDS: Record<string, Dashboard | null> = {
 // that mistake: any future fix here needs to be checked against DUNE_API_KEY's own account,
 // not a different Dune login.
 //
-// Current best guess is that the `abapay` Dune team's plan no longer permits any
-// API-triggered execution tier at all (not just `small`) — check dune.com → the abapay
-// team → Settings → Billing/Plan for what changed, then set this to whatever that says is
-// actually available, and confirm with a real workflow_dispatch run before assuming it's
-// fixed.
+// 2026-09-18 finding: it is NOT the tier value. `getUsage` on the `abapay` team's own Dune
+// MCP session shows the plan changed to `trial_fluid_engine` exactly on 2026-09-10 — the
+// same day the 400s started. Executing the SAME query IDs that fail in production
+// (8683609-8683614, the celo dashboard's panel queries) via that session's credential
+// succeeded at `free`, `small`, AND `medium`, all on the first try, no retries. So the
+// team's plan supports API execution fine — DUNE_API_KEY (this route's actual secret,
+// injected via GitHub Actions) is the thing that can't execute, not the tier it asks for.
+// That points at the secret itself: either it belongs to a team member whose own seat
+// doesn't carry execute rights under the new plan, or it's a personal (non-team) key that
+// was never a member of `abapay` with billing access in the first place.
+//
+// THE FIX IS NOT IN THIS FILE. Generate a fresh Dune API key from an account that is
+// confirmed to work against the `abapay` team (e.g. the one behind the MCP session used for
+// the 2026-09-18 test above — check dune.com → Settings → API Keys under that login), then
+// replace the DUNE_API_KEY repository secret with it (Settings → Secrets and variables →
+// Actions on GitHub, or `gh secret set DUNE_API_KEY`). Confirm with a real
+// `workflow_dispatch` run before assuming it's fixed — do not just trust a green tick from
+// before the key was rotated.
 const PERFORMANCE = 'free';
 
 /**
