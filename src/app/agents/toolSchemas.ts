@@ -41,7 +41,7 @@ export const TOOLS: ToolDef[] = [
     name: "check_balance",
     title: "Check Balance",
     access: "read",
-    description: "Check a linked wallet's stablecoin balances and remaining agent spending allowance. Works with no arguments once authorized via OAuth; otherwise pass the api_key.",
+    description: "Check a linked wallet's stablecoin balances and remaining agent spending allowance. Works with no arguments once authorized via OAuth.",
     params: [
       { name: "api_key", type: "string", required: false, description: "AbaPay MCP API key (starts with aba_mcp_). Not needed over OAuth." },
       { name: "chain", type: "string", required: false, enum: ["CELO"], description: "Which chain to check.", note: "Backend also accepts BASE for the multi-chain consumer app; this site's rails are Celo-only." },

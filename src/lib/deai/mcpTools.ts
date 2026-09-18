@@ -159,7 +159,7 @@ export const TOOLS = [
   {
     name: 'check_balance',
     title: 'Check Balance',
-    description: "Check a linked wallet's stablecoin balances and remaining agent spending allowance. Works with no arguments once this connector is authorized via OAuth; otherwise pass the api_key created in the AbaPay app's Agent Hub (MCP).",
+    description: "Check a linked wallet's stablecoin balances and remaining agent spending allowance. Works with no arguments once this connector is authorized via OAuth.",
     inputSchema: {
       type: 'object',
       properties: {
@@ -248,7 +248,7 @@ export const TOOLS = [
   {
     name: 'pay_bill',
     title: 'Pay Bill',
-    description: 'Pay a real bill — Nigerian (airtime, data, electricity, cable TV, a WAEC/JAMB education PIN) or international airtime/data across 140+ countries — from the linked wallet, settled on-chain and delivered via the same pipeline as the AbaPay app. For DATA, CABLE (when changing package), and EDUCATION, call list_plans first and use a real variation_code from it. For service: INTERNATIONAL, call list_international_options first and pass back its exact country/product_type_id/operator_id/variation_code — never guess any of these. ALWAYS requires the PIN — including when this connector is authorized via OAuth; ask the human for it every time and never guess or reuse a remembered one. The api_key is only needed when OAuth is not in use. Money moves for real — only call this once the human has clearly confirmed the exact amount, provider, and account. EXECUTES IMMEDIATELY, with no delay/schedule parameter of any kind — there is no way to queue this call for later on this connection. If the human asks to pay "in N minutes", "later today", "tomorrow", or any other future time, do NOT call this now: ask them to confirm they want it sent immediately instead, or tell them delayed/recurring automations can only be set up from the AbaPay app or by messaging the AbaPay agent on Telegram/WhatsApp/X — never silently pay right away when a delay was requested.',
+    description: 'Pay a real bill — Nigerian (airtime, data, electricity, cable TV, a WAEC/JAMB education PIN) or international airtime/data across 140+ countries — from the linked wallet, settled on-chain and delivered via the same pipeline as the AbaPay app. For DATA, CABLE (when changing package), and EDUCATION, call list_plans first and use a real variation_code from it. For service: INTERNATIONAL, call list_international_options first and pass back its exact country/product_type_id/operator_id/variation_code — never guess any of these. ALWAYS requires the PIN — including when this connector is authorized via OAuth; ask the human for it every time and never guess or reuse a remembered one. Money moves for real — only call this once the human has clearly confirmed the exact amount, provider, and account. EXECUTES IMMEDIATELY, with no delay/schedule parameter of any kind — there is no way to queue this call for later on this connection. If the human asks to pay "in N minutes", "later today", "tomorrow", or any other future time, do NOT call this now: ask them to confirm they want it sent immediately instead, or tell them delayed/recurring automations can only be set up from the AbaPay app or by messaging the AbaPay agent on Telegram/WhatsApp/X — never silently pay right away when a delay was requested.',
     inputSchema: {
       type: 'object',
       properties: {
