@@ -29,7 +29,7 @@ describe("AbaPayAgent.link", () => {
     expect(agent.walletAddress).toBe(signer.address);
 
     const [url, init] = fetchMock.mock.calls[0];
-    expect(url).toBe("https://www.abapays.com/api/agent/link");
+    expect(url).toBe("https://agents.abapays.com/api/agent/link");
     expect(init.headers["x-wallet-address"]).toBe(signer.address);
     expect(init.headers["x-wallet-signature"]).toMatch(/^0xsigned:AbaPay Agent Action: POST:\/api\/agent\/link: \d+$/);
 

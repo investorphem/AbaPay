@@ -1,4 +1,5 @@
 import { NextResponse } from 'next/server';
+import { getAgentAppUrl } from '@/lib/agentAppUrl';
 
 // ⚡ RFC 9728 — OAuth 2.0 Protected Resource Metadata.
 //
@@ -16,7 +17,7 @@ const CORS = {
 export const dynamic = 'force-dynamic';
 
 export async function GET() {
-  const base = process.env.NEXT_PUBLIC_APP_URL || 'https://abapays.com';
+  const base = getAgentAppUrl();
 
   return NextResponse.json(
     {

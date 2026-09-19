@@ -2,7 +2,7 @@ import type { Hex } from "viem";
 import type { BillDetails, Signer, X402PayResult } from "./types.js";
 import { AbaPayError } from "./types.js";
 
-export const DEFAULT_BASE_URL = "https://www.abapays.com";
+export const DEFAULT_BASE_URL = "https://agents.abapays.com";
 
 // ⚡ THE EIP-712 TYPES — must match src/lib/x402Settle.ts's TRANSFER_WITH_AUTHORIZATION_TYPES
 // in the main AbaPay repo byte-for-byte, since that file is what verifies the signature this

@@ -173,6 +173,16 @@ jobs:
       - name: Block on high/critical advisories against direct deps
         run: |
           npm audit --omit=dev --json > audit.json || true
+          # 🔴 npm's registry can (and, on 2026-09-19, did) reject the audit request itself —
+          # e.g. the legacy quick-audit endpoint being retired mid-flight — leaving audit.json
+          # as an error object with no `.vulnerabilities` key at all. That is a registry
+          # outage, not a dependency we can act on, so it must fail OPEN the same way the
+          # informational report above already does on `|| true` — not crash the job when jq
+          # can't iterate a null.
+          if ! jq -e 'has("vulnerabilities")' audit.json > /dev/null 2>&1; then
+            echo "::warning::npm audit did not return a usable report (registry error) — skipping the advisory gate for this run rather than failing on it."
+            exit 0
+          fi
           OWN=$(jq -r '
             [ .vulnerabilities[]
               | select(.isDirect)
