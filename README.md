@@ -779,7 +779,7 @@ npx hardhat run scripts/update8004uri.ts --network <network> # Re-push the agent
 #### `AbaPayV2.sol` — hardened contract (⚠️ NOT YET AUDITED)
 
 `contracts/AbaPayV2.sol` is a security-hardened successor to the original `AbaPay.sol`,
-addressing the findings in `AUDIT_REPORT.md`. **`payBill`'s signature and the
+addressing the hardening gaps below. **`payBill`'s signature and the
 `PaymentReceived` event are byte-for-byte identical to V1**, so the frontend, the `/api/pay`
 calldata decoder, and the webhook's event cross-validation all work with no backend changes.
 
