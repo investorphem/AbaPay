@@ -20,7 +20,7 @@ from eth_account.messages import encode_typed_data
 
 from .types import AbaPayError, BillDetails, X402PayResult
 
-DEFAULT_BASE_URL = "https://www.abapays.com"
+DEFAULT_BASE_URL = "https://agents.abapays.com"
 
 # ⚡ MUST MATCH src/lib/x402Settle.ts's TRANSFER_WITH_AUTHORIZATION_TYPES BYTE-FOR-BYTE (and
 # sdk/src/x402.ts's copy of the same) — that's the code that reconstructs this signature

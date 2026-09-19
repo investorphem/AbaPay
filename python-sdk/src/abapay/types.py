@@ -77,4 +77,4 @@ class LinkParams:
     approved_chain: str = "CELO"
     approved_token: Optional[str] = None
     label: str = "abapay-sdk-py"
-    base_url: str = field(default="https://www.abapays.com")
+    base_url: str = field(default="https://agents.abapays.com")

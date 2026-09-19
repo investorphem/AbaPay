@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "abapay-sdk"
-version = "0.1.0"
+version = "0.1.1"
 description = "Pay real-world bills (airtime, data, electricity, cable) from an agent's own Celo wallet — zero-setup x402, or a linked-wallet client for the fuller MCP tool catalog."
 readme = "README.md"
 license = "MIT"

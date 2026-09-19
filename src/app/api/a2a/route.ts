@@ -6,6 +6,7 @@ import { isChannelEnabled } from '@/lib/serviceRules';
 import { resolveMcpIdentity, type McpIdentity } from '@/lib/deai/mcpAuth';
 import { validateAccessToken } from '@/lib/deai/mcpOAuth';
 import { TOOLS, NEEDS_AUTH, WWW_AUTH_MISSING, WWW_AUTH_INVALID, callTool } from '@/lib/deai/mcpTools';
+import { getAgentAppUrl } from '@/lib/agentAppUrl';
 
 // ⚡ A2A SERVER — AbaPay over the Agent2Agent protocol (a2a-protocol.org), a FIFTH way in to
 // the same execution engine behind WhatsApp/Telegram/X/MCP. Discovery document lives at
@@ -220,7 +221,7 @@ export async function POST(req: Request) {
 // A2A discovery is the agent card, not this endpoint — but a bare GET here is usually a scanner
 // or a human pasting the URL, so point them at the card rather than returning a bare 405.
 export async function GET() {
-  const appUrl = process.env.NEXT_PUBLIC_APP_URL || 'https://abapays.com';
+  const appUrl = getAgentAppUrl();
   return NextResponse.json({
     name: 'AbaPay',
     protocol: 'a2a',

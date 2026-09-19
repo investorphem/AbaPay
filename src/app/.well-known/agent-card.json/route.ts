@@ -1,6 +1,7 @@
 import 'server-only';
 import { NextResponse } from 'next/server';
 import { TOOLS } from '@/lib/deai/mcpTools';
+import { getAgentAppUrl } from '@/lib/agentAppUrl';
 
 // ⚡ A2A AGENT CARD — the discovery document for the Agent2Agent protocol (a2a-protocol.org).
 // A peer agent fetches this first to learn what AbaPay can do and where to call it.
@@ -15,7 +16,7 @@ import { TOOLS } from '@/lib/deai/mcpTools';
 // Served as a route rather than a static file so `url` always matches the deployment it is
 // served from (preview deploys included) instead of hardcoding production.
 
-const APP_URL = process.env.NEXT_PUBLIC_APP_URL || 'https://abapays.com';
+const APP_URL = getAgentAppUrl();
 
 // A2A skills are the peer-facing view of the same tools MCP exposes — one implementation
 // (src/lib/deai/mcpTools.ts), described twice for two protocols. Descriptions are pulled from
