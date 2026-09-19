@@ -129,10 +129,21 @@ export function AgentHub({ address, selectedToken, activeChainName, onApproveAll
    * out its own URL instead of production's — a copied URL that points somewhere else is worse
    * than none, because it fails with the client's credentials looking like the problem. Falls
    * back to the canonical domain during SSR, where there is no origin to read.
+   *
+   * 🔴 THE BUG THIS FIXES: on any real production domain, that origin-echoing logic handed out
+   * whichever consumer subdomain the user happened to be on (abapays.com, www., app. — all the
+   * same server per middleware.ts, but not the domain every agent-facing surface is supposed to
+   * show per the agents.abapays.com migration). A user on app.abapays.com copied
+   * app.abapays.com/api/mcp here instead of the canonical agents.abapays.com/api/mcp. Forced to
+   * the canonical host on any *.abapays.com origin; the preview-deployment case (a Vercel
+   * *.vercel.app URL, or localhost) still echoes its own origin exactly as before, so testing an
+   * unmerged PR's server still works.
    */
   const mcpServerUrl = typeof window !== 'undefined'
-    ? `${window.location.origin}/api/mcp`
-    : 'https://abapays.com/api/mcp';
+    ? (/(^|\.)abapays\.com$/i.test(window.location.hostname)
+        ? 'https://agents.abapays.com/api/mcp'
+        : `${window.location.origin}/api/mcp`)
+    : 'https://agents.abapays.com/api/mcp';
 
   const handleCopy = async (text?: string | null) => {
     const value = text ?? linkCode;

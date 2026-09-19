@@ -2,7 +2,7 @@ import 'server-only';
 import { NextResponse } from 'next/server';
 import { enforceRateLimit } from '@/lib/rateLimit';
 import { isChannelEnabled } from '@/lib/serviceRules';
-import { type McpIdentity } from '@/lib/deai/mcpAuth';
+import { type McpIdentity, resolveMcpIdentity } from '@/lib/deai/mcpAuth';
 import { validateAccessToken } from '@/lib/deai/mcpOAuth';
 import {
   PROTOCOL_VERSION,
@@ -61,6 +61,17 @@ export async function POST(req: Request) {
   if (/^Bearer\s+/i.test(authHeader)) {
     const token = authHeader.replace(/^Bearer\s+/i, '').trim();
     oauthIdentity = await validateAccessToken(token);
+    // 🔴 THE GAP THIS CLOSES: this route only ever checked a Bearer value against the OAuth
+    // access-token table — but plenty of MCP clients (confirmed: MCP Playground, which only
+    // offers a single "API key" field and no OAuth flow) send whatever key you configure as a
+    // plain `Authorization: Bearer <key>` header, never as a pay_bill-style tool argument.
+    // A real aba_mcp_ key sent that way got rejected outright as "invalid or expired" — not
+    // actually expired, just never checked against the api_key table at all. Falls through to
+    // the same identity resolution api_key already uses elsewhere (resolveIdentity in
+    // mcpTools.ts), so precedence (an explicit args.api_key still wins) is unaffected.
+    if (!oauthIdentity && token.startsWith('aba_mcp_')) {
+      oauthIdentity = await resolveMcpIdentity(token);
+    }
     if (!oauthIdentity) {
       return unauthorized(null, WWW_AUTH_INVALID, 'Invalid or expired access token. Re-authorize the AbaPay connector.');
     }
