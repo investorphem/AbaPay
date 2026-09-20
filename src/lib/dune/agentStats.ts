@@ -21,11 +21,22 @@ import celoChainQueryIds from '@/lib/dune/celo-query-ids.json';
 const KPI_QUERY_ID = celoChainQueryIds.queries['10_kpi_summary.sql'];
 const RAIL_QUERY_ID = celoChainQueryIds.queries['12_by_rail.sql'];
 
+export type RailBreakdown = {
+  rail: string;
+  volumeUsd: number;
+  payments: number;
+  pct: number; // share of total volume, 0-100
+};
+
 export type AgentStats = {
   volumeUsd: number;
   agentNativePct: number;
   uniqueWallets: number;
   transactions: number;
+  // Same three rails 12_by_rail.sql's header comment defines ("Direct (wallet)",
+  // "Agent (relayer)", "x402"), aggregated across every day in the result and sorted by
+  // volume descending — the breakdown behind agentNativePct, exposed so the UI can show it.
+  rails: RailBreakdown[];
 };
 
 // Last known-good snapshot, used ONLY if the live fetch fails outright (missing API key,
@@ -36,6 +47,11 @@ const FALLBACK: AgentStats = {
   agentNativePct: 96.6,
   uniqueWallets: 211,
   transactions: 3689,
+  rails: [
+    { rail: 'x402', volumeUsd: 22392, payments: 1974, pct: 82.9 },
+    { rail: 'Agent (relayer)', volumeUsd: 3287, payments: 1401, pct: 12.2 },
+    { rail: 'Direct (wallet)', volumeUsd: 1313, payments: 314, pct: 4.9 },
+  ],
 };
 
 async function duneGet(queryId: number, apiKey: string, limit: number): Promise<Record<string, unknown>[] | null> {
@@ -68,20 +84,35 @@ export async function getAgentStats(): Promise<AgentStats> {
 
     // Agent-native = everything that ISN'T a human signing in the app themselves —
     // "Agent (relayer)" and "x402" — as a share of total volume. Same definition
-    // dune/celo-chain/12_by_rail.sql's own header comment uses.
+    // dune/celo-chain/12_by_rail.sql's own header comment uses. Aggregated in the same pass
+    // per-rail (across every day in the result) so the UI can show the full breakdown, not
+    // just the collapsed agent-vs-human percentage.
     let agentNativeVolume = 0;
     let totalVolume = 0;
+    const byRail = new Map<string, { volumeUsd: number; payments: number }>();
     for (const row of railRows) {
       const v = Number(row.volume_usd) || 0;
+      const p = Number(row.payments) || 0;
+      const rail = String(row.rail ?? 'Unknown');
       totalVolume += v;
-      if (row.rail === 'Agent (relayer)' || row.rail === 'x402') agentNativeVolume += v;
+      if (rail === 'Agent (relayer)' || rail === 'x402') agentNativeVolume += v;
+      const existing = byRail.get(rail) ?? { volumeUsd: 0, payments: 0 };
+      byRail.set(rail, { volumeUsd: existing.volumeUsd + v, payments: existing.payments + p });
     }
     const agentNativePct = totalVolume > 0 ? (100 * agentNativeVolume) / totalVolume : 0;
+    const rails: RailBreakdown[] = Array.from(byRail.entries())
+      .map(([rail, { volumeUsd, payments }]) => ({
+        rail,
+        volumeUsd,
+        payments,
+        pct: totalVolume > 0 ? (100 * volumeUsd) / totalVolume : 0,
+      }))
+      .sort((a, b) => b.volumeUsd - a.volumeUsd);
 
     if (![volumeUsd, agentNativePct, uniqueWallets, transactions].every(Number.isFinite)) {
       return FALLBACK;
     }
-    return { volumeUsd, agentNativePct, uniqueWallets, transactions };
+    return { volumeUsd, agentNativePct, uniqueWallets, transactions, rails };
   } catch {
     return FALLBACK;
   }
