@@ -24,17 +24,25 @@ const FALLBACK: DiscoveryStats = {
 
 export async function getDiscoveryStats(): Promise<DiscoveryStats> {
   try {
+    // 🔴 A TIMEOUT ON EACH FETCH, NOT JUST A try/catch — a registry that hangs instead of
+    // erroring (a network partition, a stalled connection) would otherwise block whatever
+    // page called this indefinitely, since none of these three calls had one before. 5s is
+    // generous for a JSON GET to a public API; a real outage still resolves to "—" instead
+    // of hanging the request.
     const [npmRes, pypiRes, ghRes] = await Promise.all([
       fetch('https://api.npmjs.org/downloads/point/last-month/abapay-sdk', {
         next: { revalidate: 3600 },
+        signal: AbortSignal.timeout(5000),
       }),
       fetch('https://pypistats.org/api/packages/abapay-sdk/recent', {
         headers: { 'User-Agent': 'agents.abapays.com' },
         next: { revalidate: 3600 },
+        signal: AbortSignal.timeout(5000),
       }),
       fetch('https://api.github.com/repos/investorphem/AbaPay', {
         headers: { 'User-Agent': 'agents.abapays.com', Accept: 'application/vnd.github+json' },
         next: { revalidate: 3600 },
+        signal: AbortSignal.timeout(5000),
       }),
     ]);
 

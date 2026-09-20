@@ -4,8 +4,10 @@ import {
   Zap, ShieldCheck, CalendarClock, Layers, Link2, Terminal,
   ExternalLink, CheckCircle2, MessageCircle, Rocket, Fingerprint,
 } from "lucide-react";
+import { Star, Package, PackageSearch } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 import { getAgentStats } from "@/lib/dune/agentStats";
+import { getDiscoveryStats } from "@/lib/discoveryStats";
 
 // ⚡ agents.abapays.com'S HOMEPAGE — see middleware.ts's AGENT_HOSTS rewrite for how this
 // domain resolves here, and layout.tsx for the header/nav/footer shared across every page in
@@ -149,12 +151,38 @@ const CELO_NETWORK = "eip155:42220";
 const CELO_VAULT = "0x5df8aE2B963165b735B18Ca86B1ea448d2AA032C";
 
 export default async function AgentsHomePage() {
-  const stats = await getAgentStats();
+  const [stats, discovery] = await Promise.all([getAgentStats(), getDiscoveryStats()]);
   const HERO_STATS = [
     { v: `$${Math.round(stats.volumeUsd).toLocaleString()}`, l: "Total volume" },
     { v: `${stats.agentNativePct.toFixed(1)}%`, l: "Agent-native rail" },
     { v: stats.uniqueWallets.toLocaleString(), l: "Unique wallets" },
     { v: stats.transactions.toLocaleString(), l: "Transactions" },
+  ];
+  const nf = new Intl.NumberFormat("en-US");
+  const RAIL_COLORS: Record<string, string> = {
+    "x402": "bg-emerald-500",
+    "Agent (relayer)": "bg-sky-500",
+    "Direct (wallet)": "bg-slate-400 dark:bg-slate-600",
+  };
+  const INFRA_STATS: { icon: LucideIcon; v: string; l: string; href: string }[] = [
+    {
+      icon: Package,
+      v: discovery.npmDownloadsLastMonth !== null ? nf.format(discovery.npmDownloadsLastMonth) : "—",
+      l: "npm downloads / mo",
+      href: "https://www.npmjs.com/package/abapay-sdk",
+    },
+    {
+      icon: PackageSearch,
+      v: discovery.pypiDownloadsLastMonth !== null ? nf.format(discovery.pypiDownloadsLastMonth) : "—",
+      l: "PyPI downloads / mo",
+      href: "https://pypi.org/project/abapay-sdk/",
+    },
+    {
+      icon: Star,
+      v: discovery.githubStars !== null ? nf.format(discovery.githubStars) : "—",
+      l: "GitHub stars",
+      href: "https://github.com/investorphem/AbaPay",
+    },
   ];
 
   return (
@@ -220,7 +248,7 @@ export default async function AgentsHomePage() {
       </section>
 
       {/* LIVE NUMBERS — Celo mainnet only, read from Dune at request time. */}
-      <section className="grid grid-cols-2 sm:grid-cols-4 gap-px bg-slate-100 dark:bg-slate-800/60 rounded-[2rem] overflow-hidden border border-slate-100 dark:border-slate-800/60 mb-6">
+      <section className="grid grid-cols-2 sm:grid-cols-4 gap-px bg-slate-100 dark:bg-slate-800/60 rounded-[2rem] overflow-hidden border border-slate-100 dark:border-slate-800/60 mb-1">
         {HERO_STATS.map((s) => (
           <div key={s.l} className="bg-white dark:bg-[#111114] p-5 sm:p-6">
             <div className="text-2xl sm:text-3xl font-black text-slate-900 dark:text-white tracking-tight">{s.v}</div>
@@ -228,9 +256,65 @@ export default async function AgentsHomePage() {
           </div>
         ))}
       </section>
-      <p className="text-xs text-slate-400 dark:text-slate-500 mb-10 px-2">
+      <p className="text-xs text-slate-400 dark:text-slate-500 mb-6 px-2">
         Celo mainnet only, refreshed daily. &quot;Agent-native&quot; is x402 plus agent-relayer volume, as a share of total volume. <a href="https://dune.com/abapay/abapay-on-celo" target="_blank" rel="noopener noreferrer" className="underline hover:text-emerald-500">Verify on Dune →</a>
       </p>
+
+      {/* RAIL BREAKDOWN — same three rails agentNativePct is derived from (Direct wallet,
+          Agent relayer, x402), broken out individually instead of collapsed into one
+          percentage, so a visitor can see which rail actually carries the volume. */}
+      {stats.rails.length > 0 && (
+        <section className="bg-white dark:bg-[#111114] border border-slate-100 dark:border-slate-800/60 rounded-[2rem] p-6 sm:p-7 mb-6">
+          <h3 className="text-xs font-black uppercase tracking-widest text-slate-400 dark:text-slate-500 mb-4">Volume by rail</h3>
+          <div className="flex h-2.5 rounded-full overflow-hidden bg-slate-100 dark:bg-slate-800 mb-5">
+            {stats.rails.map((r) => (
+              <div
+                key={r.rail}
+                className={`${RAIL_COLORS[r.rail] || "bg-slate-400"} h-full`}
+                style={{ width: `${Math.max(r.pct, r.pct > 0 ? 1.5 : 0)}%` }}
+                title={`${r.rail}: ${r.pct.toFixed(1)}%`}
+              />
+            ))}
+          </div>
+          <div className="grid sm:grid-cols-3 gap-4">
+            {stats.rails.map((r) => (
+              <div key={r.rail} className="flex items-start gap-2.5">
+                <span className={`${RAIL_COLORS[r.rail] || "bg-slate-400"} w-2.5 h-2.5 rounded-full mt-1 flex-shrink-0`} />
+                <div>
+                  <div className="text-sm font-black text-slate-900 dark:text-white">{r.rail}</div>
+                  <div className="text-xs text-slate-500 dark:text-slate-400">
+                    ${Math.round(r.volumeUsd).toLocaleString()} · {r.payments.toLocaleString()} payments · {r.pct.toFixed(1)}%
+                  </div>
+                </div>
+              </div>
+            ))}
+          </div>
+        </section>
+      )}
+
+      {/* INFRASTRUCTURE — the rest of the real, live footprint beyond on-chain volume: how
+          much the published SDKs are actually pulled, and community signal on GitHub. Same
+          getDiscoveryStats() source as /agents/about's fuller table; a null renders as "—"
+          rather than a guess, same rule as the on-chain numbers above. */}
+      <section className="grid grid-cols-1 sm:grid-cols-3 gap-4 mb-14">
+        {INFRA_STATS.map((s) => (
+          <a
+            key={s.l}
+            href={s.href}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="bg-white dark:bg-[#111114] border border-slate-100 dark:border-slate-800/60 rounded-[1.75rem] p-5 sm:p-6 flex items-center gap-4 hover:border-emerald-200 dark:hover:border-emerald-800/60 transition-colors"
+          >
+            <div className="bg-emerald-50 dark:bg-emerald-900/20 w-11 h-11 rounded-xl flex items-center justify-center border border-emerald-100 dark:border-emerald-800/50 flex-shrink-0">
+              <s.icon className="text-emerald-500" size={20} />
+            </div>
+            <div>
+              <div className="text-xl font-black text-slate-900 dark:text-white tracking-tight">{s.v}</div>
+              <div className="text-[11px] font-bold uppercase tracking-wider text-slate-400 dark:text-slate-500 mt-0.5">{s.l}</div>
+            </div>
+          </a>
+        ))}
+      </section>
 
       {/* THE RAILS */}
       <h2 className="text-xl font-black tracking-tight text-slate-900 dark:text-white mb-4 px-2">The rails</h2>
