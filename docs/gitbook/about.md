@@ -42,6 +42,6 @@ and legal terms.
 **Python SDK — shipped.** `python-sdk/` mirrors the TypeScript SDK field-for-field — same two functions, a real CLI, tests that recover the signer's address from the signed EIP-712 data and assert it matches. Live on PyPI: `pip install abapay-sdk`, published via a Trusted Publisher (no token secret) off a `py-sdk-v*` tag.
 {% endhint %}
 
-{% hint style="warning" %}
-**Wider agent-registry discovery — in review.** Already listed on the official MCP Registry, on-chain via ERC-8004, approved on Glama's server and connector directories, and live on MCP Playground's server registry. A PR is still open against `awesome-mcp-servers` (95k+ stars), ready to merge and waiting on that repo's own maintainer.
+{% hint style="success" %}
+**Wider agent-registry discovery — shipped.** Listed on the official MCP Registry, on-chain via ERC-8004, approved on Glama's server and connector directories, live on MCP Playground's server registry, and merged into `awesome-mcp-servers` (95k+ stars).
 {% endhint %}

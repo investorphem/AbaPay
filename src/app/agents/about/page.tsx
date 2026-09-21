@@ -1,6 +1,6 @@
 import type { Metadata } from "next";
 import Link from "next/link";
-import { ArrowLeft, Fingerprint, Building2, Rocket, Workflow, ExternalLink, CheckCircle2, Clock, Compass } from "lucide-react";
+import { ArrowLeft, Fingerprint, Building2, Rocket, Workflow, ExternalLink, CheckCircle2, Compass } from "lucide-react";
 import { getDiscoveryStats } from "@/lib/discoveryStats";
 import { fetchCountries } from "@/lib/deai/international";
 import { Globe2 } from "lucide-react";
@@ -172,8 +172,8 @@ export default async function AboutPage() {
               </tr>
               <tr>
                 <td className="py-2.5 pr-4 font-bold text-slate-700 dark:text-slate-300">awesome-mcp-servers</td>
-                <td className="py-2.5 pr-4"><a href="https://github.com/punkpeye/awesome-mcp-servers/pull/14459" target="_blank" rel="noopener noreferrer" className="text-emerald-600 dark:text-emerald-400 hover:underline">PR #14459</a></td>
-                <td className="py-2.5 text-slate-400 dark:text-slate-500">Open</td>
+                <td className="py-2.5 pr-4"><a href="https://github.com/punkpeye/awesome-mcp-servers#-finance--fintech" target="_blank" rel="noopener noreferrer" className="text-emerald-600 dark:text-emerald-400 hover:underline">Finance &amp; Fintech</a></td>
+                <td className="py-2.5 text-slate-400 dark:text-slate-500">Merged</td>
               </tr>
               <tr>
                 <td className="py-2.5 pr-4 font-bold text-slate-700 dark:text-slate-300">MCP Playground</td>
@@ -230,16 +230,16 @@ export default async function AboutPage() {
           </div>
           <div>
             <div className="flex items-center gap-2 mb-3">
-              <div className="bg-amber-50 dark:bg-amber-900/20 w-10 h-10 rounded-xl flex items-center justify-center border border-amber-100 dark:border-amber-800/50">
-                <Workflow className="text-amber-600 dark:text-amber-400" size={18} />
+              <div className="bg-emerald-50 dark:bg-emerald-900/20 w-10 h-10 rounded-xl flex items-center justify-center border border-emerald-100 dark:border-emerald-800/50">
+                <Workflow className="text-emerald-500" size={18} />
               </div>
-              <span className="flex items-center gap-1 text-[10px] font-black uppercase tracking-widest text-amber-600 dark:text-amber-400">
-                <Clock size={12} /> In review
+              <span className="flex items-center gap-1 text-[10px] font-black uppercase tracking-widest text-emerald-600 dark:text-emerald-400">
+                <CheckCircle2 size={12} /> Shipped
               </span>
             </div>
             <h3 className="font-black text-slate-900 dark:text-white mb-1.5">Wider agent-registry discovery</h3>
             <p className="text-sm text-slate-500 dark:text-slate-400 leading-relaxed">
-              Listed on the official MCP Registry, on-chain via ERC-8004, approved on <a href="https://glama.ai/mcp/servers/investorphem/AbaPay" target="_blank" rel="noopener noreferrer" className="underline hover:text-emerald-500">Glama&apos;s server directory</a> and its <a href="https://glama.ai/mcp/connectors" target="_blank" rel="noopener noreferrer" className="underline hover:text-emerald-500">connector directory</a>, and now live on <a href="https://mcpplaygroundonline.com/mcp-servers/investorphem-abapay" target="_blank" rel="noopener noreferrer" className="underline hover:text-emerald-500">MCP Playground&apos;s server registry</a>. One PR still open against <code className="text-slate-500">awesome-mcp-servers</code> (95k+ stars) — ready to merge, waiting on that repo&apos;s own maintainer. Full list: <a href="#discovery" className="underline hover:text-emerald-500">above</a>.
+              Listed on the official MCP Registry, on-chain via ERC-8004, approved on <a href="https://glama.ai/mcp/servers/investorphem/AbaPay" target="_blank" rel="noopener noreferrer" className="underline hover:text-emerald-500">Glama&apos;s server directory</a> and its <a href="https://glama.ai/mcp/connectors" target="_blank" rel="noopener noreferrer" className="underline hover:text-emerald-500">connector directory</a>, live on <a href="https://mcpplaygroundonline.com/mcp-servers/investorphem-abapay" target="_blank" rel="noopener noreferrer" className="underline hover:text-emerald-500">MCP Playground&apos;s server registry</a>, and merged into <a href="https://github.com/punkpeye/awesome-mcp-servers#-finance--fintech" target="_blank" rel="noopener noreferrer" className="underline hover:text-emerald-500">awesome-mcp-servers</a> (95k+ stars). Full list: <a href="#discovery" className="underline hover:text-emerald-500">above</a>.
             </p>
           </div>
         </div>
