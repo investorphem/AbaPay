@@ -11,8 +11,8 @@ included.
 - **Relayer kill switch** — instantly disables the agent-initiated payment path
   system-wide, on-chain, independent of anything the backend does. A compromised backend
   cannot re-enable itself.
-- **Per-credential rate limiting** — every money-moving call is rate-limited per API key,
-  on top of the PIN requirement.
+- **Per-credential rate limiting** — every money-moving call is rate-limited per API key, on
+  top of the PIN requirement. See [Rate limits](rate-limits.md) for the full numbers.
 - **PIN lockout** — escalating lockout on repeated failed PIN attempts.
 
 The two contract-level switches, verbatim:

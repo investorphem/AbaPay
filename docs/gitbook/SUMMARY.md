@@ -22,6 +22,7 @@
 
 * [Custody & settlement](custody.md)
 * [Kill switches](kill-switches.md)
+* [Rate limits](rate-limits.md)
 
 ## Product
 

@@ -12,7 +12,7 @@ const HTTP_STATUS: { code: string; meaning: string; where: string }[] = [
   { code: "402", meaning: "Payment Required — a genuine x402 challenge, or a signed authorization that failed verification (see x402 error codes below).", where: "x402 / REST" },
   { code: "401", meaning: "No credential at all (missing api_key and no OAuth token) — carries a WWW-Authenticate header pointing at the OAuth flow.", where: "MCP" },
   { code: "409", meaning: "This exact payment is already locked/being processed — don't retry, it's not a fresh failure.", where: "x402 / REST" },
-  { code: "429", meaning: "Rate limited — per-IP on the whole MCP surface, and separately per-credential on every money-moving tool call.", where: "MCP" },
+  { code: "429", meaning: "Rate limited — 60/min per-IP on the whole MCP/A2A surface, and separately per-credential on money-moving calls (pay_bill 10/min, schedule_bill 5/min, pay_bill_batch 5/min). Carries a Retry-After header.", where: "MCP, A2A" },
   { code: "500", meaning: "Server-side failure unrelated to the caller's request (token not configured, vault misconfigured, or an unhandled exception).", where: "x402 / REST" },
 ];
 

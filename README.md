@@ -1059,14 +1059,10 @@ batch flow: `checkPinAllowed`/`verifyPin`/`recordPinFailure` (same escalating lo
 `notifySpendOutOfBand` (email + every other linked channel is told the instant money moves, so a
 leaked API key is caught exactly like a stolen chat session would be).
 
-**Rate limiting is defense in depth, layered on top of the above, not a substitute for it.**
-`/api/mcp` applies a blanket per-IP limit across every tool call. On top of that, `pay_bill`,
-`schedule_bill`, and `pay_bill_batch` each apply their own per-identity limit (keyed by the
-`agent_links` row id, not the IP) once the PIN has been checked — the escalating PIN lockout
-only ever fires on a *wrong* PIN, so on its own it does nothing to slow down a run of *correct*
-calls from a leaked API key or OAuth token. Neither limit is the real backstop (the on-chain
-allowance is, same as everywhere else in this doc) — they just make a leaked credential slower
-to drain before its owner sees the out-of-band alert and revokes it.
+**Rate limiting is defense in depth, layered on top of the above, not a substitute for it** — a
+blanket per-IP limit across every MCP tool call, plus a tighter per-identity limit on `pay_bill`,
+`schedule_bill`, and `pay_bill_batch` specifically. Full numbers and mechanics: see
+[Rate Limiting](#rate-limiting) under Security Architecture.
 
 **Chain-agnostic — Celo or Base, whichever the linking wallet approved.** An MCP key inherits the
 `approved_chain`/`approved_token` recorded when it was created (same fields Telegram/WhatsApp/X
@@ -1533,6 +1529,57 @@ The app ships with Farcaster frame metadata (`public/.well-known/farcaster.json`
 * **Bot Webhook Signatures:** The WhatsApp and X webhooks verify Meta's `X-Hub-Signature-256` / X's `x-twitter-webhooks-signature` HMAC on every inbound payload (when the corresponding secret is configured), and Telegram verifies its secret token — so message events can't be forged.
 * **Hashed Transaction PINs:** DeAI PINs are stored as salted scrypt hashes (`src/utils/pinSecurity.ts`), never plaintext, with legacy plaintext values transparently upgraded on next use and a 4-attempt lockout.
 * **Scoped Paymaster Proxy:** The gas-sponsorship proxy (`/api/paymaster`) allowlists only ERC-7677 paymaster JSON-RPC methods, so it can't be abused as a general-purpose RPC relay running on your CDP key.
+
+### Rate Limiting
+
+Two independent layers, both implemented in `src/lib/rateLimit.ts` and both **defense in
+depth** — neither is the real backstop (the on-chain allowance, kill switches, and PIN lockout
+are), they just slow down abuse of a leaked credential before its owner sees the out-of-band
+alert and revokes it.
+
+* **Layer 1 — per-IP, at the route.** A fixed window keyed by client IP (`getClientKey`), applied
+  per endpoint via `enforceRateLimit`. The IP is read in order of trust — `x-vercel-forwarded-for`,
+  then `x-real-ip`, then the **rightmost** entry of `x-forwarded-for` (never the leftmost, which a
+  caller can forge by prepending their own value to the header).
+* **Layer 2 — per-identity, on spend actions only.** `pay_bill`, `schedule_bill`, and
+  `pay_bill_batch` additionally rate-limit by the `agent_links` row id of the credential that
+  authenticated the call (`checkSpendRateLimit` in `src/lib/deai/mcpTools.ts`) — not the IP — so
+  a leaked API key or OAuth token can't outrun the limit by rotating source addresses. This runs
+  *after* the PIN check, since the escalating PIN lockout only ever triggers on a wrong PIN and
+  does nothing to slow down a run of correct calls.
+
+| Scope | Limit | Window | Gates |
+|---|---|---|---|
+| `mcp` | 60 | 60s | Every `/api/mcp` tool call, per IP |
+| `a2a` | 60 | 60s | Every `/api/a2a` call, per IP |
+| `mcp-pay_bill` | 10 | 60s | `pay_bill`, per credential |
+| `mcp-schedule_bill` | 5 | 60s | `schedule_bill`, per credential |
+| `mcp-pay_bill_batch` | 5 | 60s | `pay_bill_batch`, per credential |
+| `oauth-authorize` | 40 | 300s | `GET /api/oauth/authorize` |
+| `oauth-authorize-submit` | 15 | 300s | Consent-form submission |
+| `oauth-token` | 60 | 300s | Token exchange |
+| `oauth-register` | 20 | 300s | Dynamic client registration |
+| `agent-link-read` | 60 | 60s | Reading a linked agent's config |
+| `agent-link-write` | 10 | 300s | Creating/editing/revoking an agent link |
+| `pay` | 30 | 60s | REST `/api/pay` |
+| `schedules-read` / `schedules-write` | 60 / 20 | 60s | `/api/schedules` |
+| `deai-chat` | 20 | 60s | A chat turn on Telegram/WhatsApp/X |
+| `deai-resolve` | 30 | 60s | Intent resolution |
+| `requery` | 30 | 60s | `/api/requery` |
+| `verify` / `otp-request` / `otp-confirm` | 20 / 5 / 15 | 60s / 600s / 60s | Account verification, OTP send, OTP confirm |
+| `monnify-verify` / `monnify-banks` / `monnify-resolve` / `monnify-requery` | 20 / 30 / 8 / 30 | 60s | Monnify bank-transfer lookups |
+| `foreign` | 60 | 60s | International catalogue reads |
+| `support` | 5 | 300s | Support ticket submission |
+
+**Mechanics:** a Postgres-backed fixed window (`rate_limits` table), incremented atomically via
+the `rate_limit_hit` RPC (`supabase/migrations/023_rate_limit_atomic_increment.sql`) to close a
+race where concurrent requests could all read "under limit" before any of them writes — falling
+back to a non-atomic read-modify-write if that migration isn't deployed yet. **Fails open, not
+closed:** if the `rate_limits` table or RPC is unreachable, the request is allowed rather than
+taking the whole API down — rate limiting is an abuse control, not an auth control, and must
+never become a single point of failure (`001_rate_limits.sql` creates the table; without it,
+limiting silently does nothing). A limited call returns **HTTP 429** with a `Retry-After` header
+and a JSON body: `{"success": false, "error": "Too many requests..."}`.
 
 ---
 
