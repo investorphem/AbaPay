@@ -1231,7 +1231,13 @@ export default function Home() {
         const data = await res.json();
 
         if (data.code === '000') {
-          setCustomerName(data.content.Customer_Name || data.content.account_name || data.content.name);
+          // 🔴 THE BUG THIS FIXES: VTpass doesn't consistently case this field — some
+          // discos/postpaid meters return `Customer_name` (lowercase n) instead of
+          // `Customer_Name`. src/lib/deai/services.ts's verifyAccount() already falls back to
+          // both casings for chat/MCP; this web-only path only checked the capitalised one, so
+          // a real registered name from VTpass was silently dropped while `Address` (checked
+          // correctly below) still came through — a receipt with an address but no name.
+          setCustomerName(data.content.Customer_Name || data.content.Customer_name || data.content.account_name || data.content.name);
           if (data.content.Address) setMeterAddress(data.content.Address);
           if (data.content.Min_Purchase_Amount) setDynamicElecMin(Number(data.content.Min_Purchase_Amount));
           if (data.content.Customer_Account_Type) setMeterAccountType(data.content.Customer_Account_Type);
