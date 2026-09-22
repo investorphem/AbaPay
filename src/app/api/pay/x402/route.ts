@@ -713,7 +713,17 @@ async function handleX402Request(req: Request) {
       // above for what this declares and why it can no longer live only here.
       extensions: acceptEntry.extensions,
     };
-    const v1Body = { x402Version: 1, error: 'Payment required', accepts: [acceptEntry] };
+    const v1Body = {
+      x402Version: 1,
+      error: 'Payment required',
+      accepts: [acceptEntry],
+      // ⚡ NOT PART OF THE x402 SPEC — additive, ignored by any client that only reads the
+      // fields it knows about. A wallet that can sign EIP-3009 but has no client driving the
+      // challenge/sign/retry sequence itself has no way to act on a bare 402 — this points a
+      // human stuck here at the already-guided, non-x402 flow instead of a dead end. Left off
+      // v2Challenge (the header) since x402scan's crawler validates that one more strictly.
+      hint: `This is a machine-to-machine x402 endpoint. If your wallet can sign but has no client that runs the challenge/sign/retry sequence, pay this bill instead at https://www.abapays.com — no x402 required there. Full x402 flow: https://docs.abapays.com`,
+    };
     return NextResponse.json(v1Body, {
       status: 402,
       headers: { 'payment-required': Buffer.from(JSON.stringify(v2Challenge)).toString('base64') },

@@ -1257,6 +1257,13 @@ second stack alongside wagmi. Signing in-house also lets the page read the
 server's actual answer: a settlement failure that carries a `tx_hash` means the money already
 moved, and the app must never "retry" it on the contract-call rail.
 
+The body-based (v1) challenge also carries a `hint` field — outside the x402 spec, additive, and
+ignored by any client that only reads the fields it knows about. Being able to *sign* an
+EIP-3009 authorization and having a client that *drives* the challenge/sign/retry sequence are
+two different capabilities; a wallet with the former but not the latter gets a bare 402 with
+nowhere to go. `hint` points that caller at the ordinary guided flow instead — `abapays.com`,
+which needs no x402 at all.
+
 #### A refused settlement is retried before the rail is abandoned
 
 🔵 **Why a refused x402 settlement gets a real retry instead of an immediate fallback.** A
