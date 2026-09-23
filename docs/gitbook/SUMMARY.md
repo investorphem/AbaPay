@@ -17,6 +17,7 @@
 ## Build
 
 * [TypeScript SDK](sdk.md)
+* [Python SDK](python-sdk.md)
 
 ## Trust & safety
 
@@ -28,3 +29,4 @@
 
 * [Channels](channels.md)
 * [About](about.md)
+* [Changelog](changelog.md)
