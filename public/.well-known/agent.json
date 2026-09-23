@@ -17,7 +17,19 @@
     {
       "name": "MCP",
       "endpoint": "https://agents.abapays.com/api/mcp",
-      "version": "2025-06-18"
+      "version": "2025-06-18",
+      "capabilities": [
+        "describe_capabilities",
+        "check_balance",
+        "list_plans",
+        "list_international_options",
+        "transaction_history",
+        "pay_bill",
+        "pay_bill_batch",
+        "schedule_bill",
+        "list_schedules",
+        "cancel_schedule"
+      ]
     },
     {
       "name": "OASF",

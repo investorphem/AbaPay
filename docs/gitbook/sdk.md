@@ -66,3 +66,5 @@ reconstructs to check the signature against. A silent drift there would be a sig
 fails to verify; the test exists so that drift fails loudly instead.
 
 [Source, tests, and the full README →](https://github.com/investorphem/AbaPay/tree/main/sdk)
+
+Writing Python instead? See the [Python SDK](python-sdk.md) — same two functions, live on PyPI.
