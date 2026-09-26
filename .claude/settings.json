@@ -1,0 +1,26 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(npm run typecheck)",
+      "mcp__dune__executeQueryById",
+      "mcp__claude-in-chrome__tabs_context_mcp",
+      "mcp__claude-in-chrome__navigate",
+      "mcp__dune__getExecutionResults",
+      "Bash(git fetch *)",
+      "Bash(npm run build)",
+      "mcp__claude-in-chrome__get_page_text",
+      "mcp__dune__getDuneQuery",
+      "mcp__claude-in-chrome__find",
+      "mcp__claude_ai_Vercel__get_runtime_logs",
+      "mcp__claude_ai_Vercel__list_deployments",
+      "mcp__claude_ai_Vercel__get_project",
+      "mcp__dune__getMaterializedView",
+      "mcp__dune__getDashboard",
+      "mcp__claude_ai_Vercel__get_deployment",
+      "Bash(gh search *)",
+      "mcp__claude_ai_Supabase__list_projects",
+      "mcp__dune__searchTables",
+      "mcp__dune__searchDocs"
+    ]
+  }
+}
