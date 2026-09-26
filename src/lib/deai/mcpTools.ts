@@ -459,9 +459,18 @@ async function resolveIdentity(
   const apiKey = String(args?.api_key || '');
   if (apiKey) {
     const identity = await resolveMcpIdentity(apiKey);
+    // 🔍 WHO'S CALLING — logs the resolved identity's own row id and wallet address only,
+    // both already-public/internal, never the api_key itself. This is the one choke point
+    // every identity-requiring tool passes through regardless of auth method (api_key here,
+    // OAuth below), so it's the cheapest place to answer "who's actually using the MCP
+    // server right now" from Vercel's runtime logs instead of guessing from traffic shape.
+    if (identity) console.log(`[MCP] identity resolved: id=${identity.id} wallet=${identity.wallet_address}`);
     return identity ? { identity } : { error: 'invalid' };
   }
-  if (oauthIdentity) return { identity: oauthIdentity };
+  if (oauthIdentity) {
+    console.log(`[MCP] identity resolved: id=${oauthIdentity.id} wallet=${oauthIdentity.wallet_address} (oauth)`);
+    return { identity: oauthIdentity };
+  }
   return { error: 'missing' };
 }
 
