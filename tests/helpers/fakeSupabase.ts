@@ -15,6 +15,8 @@ export interface FakeDb {
   log: { table: string; op: string; payload?: any }[];
   /** When set, the next insert into this table fails with a generic database error. */
   failNextInsert?: string;
+  /** Test-supplied implementations of Postgres functions called via `.rpc(name, args)`. */
+  rpcHandlers?: Record<string, (args: any, db: FakeDb) => any>;
 }
 
 export function createFakeDb(seed: Record<string, Row[]> = {}): FakeDb {
@@ -144,6 +146,9 @@ function likeToRegex(pattern: string, insensitive: boolean) {
 export function fakeSupabase(db: FakeDb) {
   return {
     from: (table: string) => new Query(db, table),
-    rpc: async () => ({ data: null, error: null }),
+    rpc: async (name: string, args: any) => {
+      const handler = db.rpcHandlers?.[name];
+      return handler ? { data: handler(args, db), error: null } : { data: null, error: null };
+    },
   };
 }

@@ -5,6 +5,7 @@ import { buildReceiptEmail } from '@/lib/receiptEmail';
 import { enqueueRefund } from '@/lib/refunds';
 import { initiateTransfer, getTransferStatus, classifyTransferStatus, extractMonnifyFailureReason, extractMonnifyUserFailureReason, friendlyMonnifyError, isInsufficientBalanceError } from '@/lib/monnify';
 import { checkProviderBalances } from '@/lib/balanceAlerts';
+import { tripCircuit } from '@/lib/circuitBreaker';
 import type { VendInput, VendResult } from '@/lib/vend';
 import { Resend } from 'resend';
 
@@ -198,6 +199,9 @@ export async function finalizeMonnifyTransfer(p: FinalizeParams): Promise<VendRe
   // operator, alert now, bypassing the normal 6h cooldown.
   if (isInsufficientBalanceError(p.raw)) {
     checkProviderBalances({ force: true }).catch(() => {});
+    // Same breaker as VTpass's 018 (src/lib/circuitBreaker.ts): refuse bank transfers before
+    // payment until the Moniepoint float is funded, instead of charging and refunding each one.
+    await tripCircuit('MONNIFY', 'Monnify refused a transfer with D04 (insufficient Moniepoint balance).').catch(() => {});
   }
 
   try {

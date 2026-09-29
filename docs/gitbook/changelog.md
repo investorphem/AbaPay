@@ -19,6 +19,14 @@ GitHub](https://github.com/investorphem/AbaPay/commits/main).
 * **Unpayable x402 requests are refused before settlement.** A request with no bill details, or
   signed by a different wallet than its `wallet_address`, now gets a `400` and is never charged.
   Previously it was settled and refunded.
+* **Paused services are refused before payment on every rail.** The web app's payment API and
+  the x402 endpoint now check the same service switches, and VTpass's live amount limits, that
+  chat and MCP always did. That check happens before anything is signed or settled. A 402
+  challenge is still returned to discovery crawlers.
+* **Sales pause automatically when a provider's float runs out.** The first "insufficient
+  balance" answer from VTpass or Monnify pauses that provider's services until the float is
+  topped up. Payers are told "temporarily unavailable" up front instead of being charged and
+  refunded.
 * **"Accepted" is no longer reported as "delivered".** When the biller accepts an order but
   hasn't fulfilled it yet, or doesn't answer at all, the payment now shows as being delivered
   rather than as a success. AbaPay then confirms the real outcome with the biller. An order is

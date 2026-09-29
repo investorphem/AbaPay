@@ -2,6 +2,7 @@ import 'server-only';
 import { getHeaders } from '@/lib/vtpass';
 import { getWalletBalance } from '@/lib/monnify';
 import { sendTelegramAlert } from '@/lib/telegram';
+import { isCircuitOpen, resetCircuit, type Provider } from '@/lib/circuitBreaker';
 
 // ⚡ LOW-BALANCE ALERTING — proactive, not reactive.
 //
@@ -35,11 +36,42 @@ async function getVtpassBalance(): Promise<number | null> {
   }
 }
 
+// ⚡ CIRCUIT RECOVERY — a breaker opened on float exhaustion (src/lib/circuitBreaker.ts) closes
+// the moment the balance is back above the SAME threshold this file alerts below. Only a real,
+// readable balance closes it: an unreadable one proves nothing and leaves it as it is.
+async function closeIfFunded(provider: Provider, balance: number | null, threshold: number) {
+  if (balance === null || balance < threshold) return;
+  if (!(await isCircuitOpen(provider))) return;
+  await resetCircuit(provider, `Balance is back to ₦${balance.toLocaleString()} (threshold ₦${threshold.toLocaleString()}).`);
+}
+
+const RECOVERY_PROBE_MS = 5 * 60 * 1000;
+const lastProbeAt: Record<Provider, number> = { VTPASS: 0, MONNIFY: 0 };
+
+/**
+ * Called by the service gate when a customer hits an OPEN breaker: re-read that one provider's
+ * balance (at most once per 5 min per instance) and close the breaker if it has been funded.
+ * So recovery never depends on the scheduled sweep actually running — the next customer after a
+ * top-up brings sales back.
+ */
+export async function probeCircuitRecovery(provider: Provider): Promise<void> {
+  const now = Date.now();
+  if (now - lastProbeAt[provider] < RECOVERY_PROBE_MS) return;
+  lastProbeAt[provider] = now;
+  if (provider === 'VTPASS') {
+    await closeIfFunded('VTPASS', await getVtpassBalance(), VTPASS_THRESHOLD_NGN);
+  } else {
+    const m = await getWalletBalance();
+    await closeIfFunded('MONNIFY', m?.availableBalance ?? null, MONNIFY_THRESHOLD_NGN);
+  }
+}
+
 export async function checkProviderBalances(opts: { force?: boolean } = {}) {
   const now = Date.now();
   const results: { provider: string; balance: number | null; alerted: boolean }[] = [];
 
   const vtpassBalance = await getVtpassBalance();
+  await closeIfFunded('VTPASS', vtpassBalance, VTPASS_THRESHOLD_NGN).catch(() => {});
   if (vtpassBalance !== null && vtpassBalance < VTPASS_THRESHOLD_NGN) {
     if (opts.force || now - lastAlertedAt.VTPASS > COOLDOWN_MS) {
       await sendTelegramAlert(
@@ -55,6 +87,7 @@ export async function checkProviderBalances(opts: { force?: boolean } = {}) {
   }
 
   const monnifyBalance = await getWalletBalance();
+  await closeIfFunded('MONNIFY', monnifyBalance?.availableBalance ?? null, MONNIFY_THRESHOLD_NGN).catch(() => {});
   if (monnifyBalance !== null && monnifyBalance.availableBalance < MONNIFY_THRESHOLD_NGN) {
     if (opts.force || now - lastAlertedAt.MONNIFY > COOLDOWN_MS) {
       await sendTelegramAlert(

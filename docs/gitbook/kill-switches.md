@@ -4,6 +4,12 @@ All of them stop the agent, not just the UI — enforced by the same code path (
 contract itself) regardless of which channel or credential is calling in, MCP and A2A
 included.
 
+- **Per-service and per-provider switches**: pausing, say, Electricity or just MTN airtime
+  applies to every rail, including the web app's API and x402. A paused service is refused
+  before anything is paid.
+- **Automatic float breaker**: if a provider reports that AbaPay's float with it is empty, its
+  services are refused before payment until the float is topped up. They then resume on their
+  own. Payers see "temporarily unavailable" instead of being charged and refunded.
 - **Per-channel pause** — an operator can pause just the MCP surface without touching
   Telegram/WhatsApp/X.
 - **Global pause** — the contract itself can be paused; payments revert while paused, but

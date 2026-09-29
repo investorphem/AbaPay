@@ -21,6 +21,8 @@ vi.mock('@/lib/refunds', () => ({ enqueueRefund: () => enqueueRefund() }));
 vi.mock('@/lib/monnifyVend', () => ({ initiateMonnifyBankTransfer: async () => ({ success: true, status: 'TIMEOUT' }) }));
 vi.mock('@/lib/balanceAlerts', () => ({ checkProviderBalances: async () => ({ ok: true }) }));
 vi.mock('resend', () => ({ Resend: class { emails = { send: async () => ({}) }; } }));
+const tripCircuit = vi.fn(async (_p: string, _r: string) => {});
+vi.mock('@/lib/circuitBreaker', () => ({ tripCircuit: (p: string, r: string) => tripCircuit(p, r) }));
 
 vi.stubGlobal('fetch', async (url: string) => {
   if (!String(url).endsWith('/pay')) throw new Error(`unexpected fetch ${url}`);
@@ -92,5 +94,14 @@ describe('executeVend', () => {
     expect(r.status).toBe('FAILED_VENDING');
     expect(rowNow()).toMatchObject({ status: 'FAILED_VENDING', error_code: '018' });
     expect(enqueueRefund).toHaveBeenCalledTimes(1);
+    // …and pauses VTpass sales so the NEXT payer isn't charged for the same failure.
+    expect(tripCircuit).toHaveBeenCalledWith('VTPASS', expect.stringContaining('018'));
+  });
+
+  it('does not trip the breaker on an ordinary rejection', async () => {
+    tripCircuit.mockClear();
+    vtpass = () => Response.json({ code: '011', response_description: 'INVALID ARGUMENTS' });
+    await executeVend(input());
+    expect(tripCircuit).not.toHaveBeenCalled();
   });
 });

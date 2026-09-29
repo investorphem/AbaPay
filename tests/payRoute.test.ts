@@ -32,6 +32,8 @@ vi.mock('@/lib/discounts', () => ({
   computeDiscountNgn: async () => ({ discountNgn: 0, discountPhone: null }),
 }));
 vi.mock('@/lib/parity', () => ({ isDuplicateElectricity: async () => false }));
+let gate: { allowed: boolean; code?: string; reason?: string } = { allowed: true };
+vi.mock('@/lib/serviceRules', () => ({ checkWebPayment: async () => gate }));
 vi.mock('@/lib/rateLimit', () => ({
   enforceRateLimit: async () => (rateLimited ? new Response('{}', { status: 429 }) : null),
 }));
@@ -73,6 +75,7 @@ beforeEach(() => {
   executeVend.mockClear();
   sendTelegramAlert.mockClear();
   rateLimited = false;
+  gate = { allowed: true };
 });
 
 describe('/api/pay intent', () => {
@@ -96,6 +99,14 @@ describe('/api/pay intent', () => {
   it('refuses an intent that carries a real transaction hash', async () => {
     const r = await intent({ txHash: hash(1) });
     expect(r.status).toBe(400);
+    expect(db.tables.transactions).toHaveLength(0);
+  });
+
+  it('refuses a switched-off service before anything is signed (server-side gate)', async () => {
+    gate = { allowed: false, code: 'SERVICE_UNAVAILABLE', reason: 'Airtime payments are temporarily unavailable. Nothing was charged.' };
+    const r = await intent();
+    expect(r.status).toBe(409);
+    expect(r.json).toMatchObject({ code: 'SERVICE_UNAVAILABLE' });
     expect(db.tables.transactions).toHaveLength(0);
   });
 

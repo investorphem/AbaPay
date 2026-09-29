@@ -7,6 +7,7 @@ import { vendInputFromRow } from '@/lib/vendInput';
 import { getActiveDiscountForService, computeDiscountNgn } from '@/lib/discounts';
 import { isDuplicateElectricity } from '@/lib/parity';
 import { enforceRateLimit } from '@/lib/rateLimit';
+import { checkWebPayment } from '@/lib/serviceRules';
 import { explorerBaseFor } from '@/lib/chain';
 import { verifyVaultPayment, UNDECIDED_PROOF_FAILURES } from '@/lib/paymentProof';
 import { normalizeChainName, LEGACY_RECORD_CHAIN } from '@/constants';
@@ -120,6 +121,18 @@ async function createIntent(req: Request, body: PayRequest) {
   const vendAmount = Number(nairaAmount);
   if (!Number.isFinite(vendAmount) || vendAmount <= 0) {
     return NextResponse.json({ success: false, status: 'FAILED_VENDING', message: "Invalid bill amount." }, { status: 400 });
+  }
+
+  // 🔐 SERVER-SIDE SERVICE GATE — the operator's kill switches and VTpass's live per-provider
+  // limits, enforced here before the wallet is asked to sign (page.tsx only greys its button).
+  // See checkWebPayment in src/lib/serviceRules.ts.
+  const cat = String(serviceCategory || '').toUpperCase();
+  const gate = await checkWebPayment({
+    serviceCategory, serviceID, amountNgn: vendAmount,
+    isFixedPlan: ['INTERNET', 'DATA', 'CABLE', 'EDUCATION'].includes(cat) && !!variation_code && variation_code !== 'none',
+  });
+  if (!gate.allowed) {
+    return NextResponse.json({ success: false, status: 'FAILED_VENDING', code: gate.code, message: gate.reason }, { status: gate.code === 'AMOUNT_OUT_OF_RANGE' ? 400 : 409 });
   }
 
   const isForeign = serviceID === 'foreign-airtime';

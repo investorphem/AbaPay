@@ -1418,8 +1418,23 @@ refused when **either** level is off — the same `||` the web app uses.
 `killSwitchKeysFor(intent, provider)` in `src/lib/serviceRules.ts` maps an agent intent onto
 exactly those keys, normalising the provider through `resolveServiceId` first so a loose
 `"ikeja"` from chat resolves to the `ELEC_ikeja-electric` key the operator actually toggled.
-`checkServiceAllowed()` is then the gate every non-web channel must pass. Settings are cached
-for **30 seconds**, so flipping a switch takes effect within half a minute everywhere.
+`checkServiceAllowed()` is then the gate chat, MCP, A2A and the scheduler pass. The web rails
+(`/api/pay` and `/api/pay/x402`) pass `checkWebPayment()`, which uses the same switches plus
+VTpass's live per-provider amount limits, **before** anything is signed or settled. They used to
+rely on the web page greying out its button, so a direct API or x402 caller could pay for a
+switched-off service. International follows the web app's own rule: it is off unless
+`MASTER_INTERNATIONAL` exists and is not `false`. Settings are cached for **30 seconds**, so
+flipping a switch takes effect within half a minute everywhere.
+
+**Automatic float breakers.** When VTpass answers `018` (our float is empty) or Monnify answers
+`D04`, a breaker in `platform_settings.provider_circuits` opens (`src/lib/circuitBreaker.ts`,
+migration 028). While it's open, every service that provider fulfils is refused on every rail
+**before the customer pays**, where previously each payer was charged and refunded. The breaker
+closes by itself once the provider's balance is back above its alert threshold. The scheduled
+balance check notices it, and so does a throttled probe when a customer next hits the breaker.
+An operator can also close it with the admin action `RESET_PROVIDER_CIRCUIT`. Breakers are
+stored apart from `kill_switches` and never change them, so an operator's own switch always wins.
+`CIRCUIT_BREAKER_ENABLED=false` turns the feature off.
 
 > ⚠️ **Why this mapping matters:** `killSwitchKeysFor()` is what makes "pause Electricity" in the
 > dashboard actually stop chat, MCP and the autonomous scheduler, not just the website — all four

@@ -4,7 +4,7 @@ import { executeVend, getStrictRequestId } from '@/lib/vend';
 import { vendInputFromRow } from '@/lib/vendInput';
 import { resolveTokenOnChain, DEFAULT_CHAIN } from '@/constants';
 import { sendTelegramAlert } from '@/lib/telegram';
-import { getServiceRules, computeServiceFee } from '@/lib/serviceRules';
+import { getServiceRules, computeServiceFee, checkWebPayment } from '@/lib/serviceRules';
 import { isDuplicateElectricity } from '@/lib/parity';
 import { enqueueRefund } from '@/lib/refunds';
 import { verifyAccount } from '@/lib/deai/services';
@@ -769,6 +769,24 @@ async function handleX402Request(req: Request) {
       retryable: false,
       accepts: [acceptEntry],
     }, { status: 400 });
+  }
+
+  // 🔐 SERVER-SIDE SERVICE GATE — the operator's kill switches and VTpass's live per-provider
+  // limits (checkWebPayment, src/lib/serviceRules.ts). Runs only once a payment is attached, so
+  // discovery crawlers still get their 402 challenge; and before settlement, so a switched-off
+  // service is refused with nothing charged instead of settled and refunded.
+  {
+    const cat = String(serviceCategory || '').toUpperCase();
+    const gate = await checkWebPayment({
+      serviceCategory, serviceID, amountNgn: vendAmount,
+      isFixedPlan: ['INTERNET', 'DATA', 'CABLE', 'EDUCATION'].includes(cat) && !!variation_code && variation_code !== 'none',
+    });
+    if (!gate.allowed) {
+      return NextResponse.json(
+        { x402Version: 1, error: gate.reason, errorCode: gate.code, retryable: false, accepts: [acceptEntry] },
+        { status: gate.code === 'AMOUNT_OUT_OF_RANGE' ? 400 : 409 },
+      );
+    }
   }
 
   // A payment header is present — decode it and forward it to Celo's facilitator to settle.

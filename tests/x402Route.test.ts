@@ -29,9 +29,11 @@ vi.mock('@/lib/vend', () => {
 vi.mock('@/lib/refunds', () => ({ enqueueRefund: () => enqueueRefund() }));
 vi.mock('@/lib/parity', () => ({ isDuplicateElectricity: async () => false }));
 vi.mock('@/lib/deai/services', () => ({ verifyAccount: async () => ({ success: true }) }));
+let gate: { allowed: boolean; code?: string; reason?: string } = { allowed: true };
 vi.mock('@/lib/serviceRules', () => ({
   getServiceRules: async () => ({ exchangeRate: 1340, x402FacilitatorFeeUsd: 0 }),
   computeServiceFee: () => 0,
+  checkWebPayment: async () => gate,
 }));
 vi.mock('@/lib/chain', async (importOriginal) => {
   const actual = await importOriginal<typeof import('@/lib/chain')>();
@@ -114,6 +116,7 @@ beforeEach(() => {
   executeVend.mockClear();
   enqueueRefund.mockClear();
   sendTelegramAlert.mockClear();
+  gate = { allowed: true };
 });
 
 describe('/api/pay/x402 — happy path', () => {
@@ -156,6 +159,20 @@ describe('/api/pay/x402 — refused BEFORE any money moves', () => {
     expect(facilitatorCalls).toBe(0);
     expect(enqueueRefund).not.toHaveBeenCalled();
     expect(db.tables.transactions).toHaveLength(0);
+  });
+
+  it('refuses a switched-off service (or an open provider breaker) before settling', async () => {
+    gate = { allowed: false, code: 'SERVICE_UNAVAILABLE', reason: 'paused' };
+    const r = await pay();
+    expect(r.status).toBe(409);
+    expect(r.json.errorCode).toBe('SERVICE_UNAVAILABLE');
+    expect(facilitatorCalls).toBe(0);
+    expect(db.tables.transactions).toHaveLength(0);
+  });
+
+  it('still answers a crawler probe with a 402 even when the service is paused', async () => {
+    gate = { allowed: false, code: 'SERVICE_UNAVAILABLE', reason: 'paused' };
+    expect((await pay(bill, null)).status).toBe(402);
   });
 
   it('refuses a payment signed by a different wallet than the one paying', async () => {

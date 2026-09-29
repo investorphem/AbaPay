@@ -8,6 +8,7 @@ import { buildReceiptEmail } from '@/lib/receiptEmail';
 import { enqueueRefund } from '@/lib/refunds';
 import { initiateMonnifyBankTransfer } from '@/lib/monnifyVend';
 import { checkProviderBalances } from '@/lib/balanceAlerts';
+import { tripCircuit } from '@/lib/circuitBreaker';
 import { Resend } from 'resend';
 import { normalizePurchasedCode, issuesTokenOrPin } from '@/lib/purchasedCode';
 
@@ -284,6 +285,10 @@ export async function executeVend(input: VendInput): Promise<VendResult> {
     // Fire-and-forget: a monitoring call must never delay or break the refund below.
     if (FLOAT_EXHAUSTED_CODES.has(String(payData.code))) {
       checkProviderBalances({ force: true }).catch(() => {});
+      // ⚡ AND STOP SELLING. Every VTpass payment after this one would fail identically and be
+      // refunded; the breaker refuses them BEFORE the customer pays (src/lib/circuitBreaker.ts)
+      // and lifts itself once the float is funded again.
+      await tripCircuit('VTPASS', `VTpass answered ${payData.code} (${payData.response_description || 'LOW WALLET BALANCE'}) on a ${serviceCategory} vend.`).catch(() => {});
     }
 
     try {
