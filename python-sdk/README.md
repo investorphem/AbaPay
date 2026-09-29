@@ -53,7 +53,7 @@ account = Account.from_key("0x...")
 
 # One-time: prove wallet ownership, mint an Agent Hub api_key. Save agent.api_key somewhere —
 # there is no recovery flow other than linking again.
-agent = AbaPayAgent.link(LinkParams(signer=account, pin="1234"))
+agent = AbaPayAgent.link(LinkParams(signer=account, pin="123456"))
 
 # Elsewhere, an on-chain approve() + setSpendingAllowance() grants AbaPay a bounded, revocable
 # allowance — see examples/agent-quickstart.mjs in the main repo for the two calls. Nothing in
@@ -76,7 +76,7 @@ agent = AbaPayAgent.from_api_key(saved_api_key, wallet_address)
 pip install abapay-sdk
 
 PRIVATE_KEY=0x... abapay pay --service AIRTIME --provider mtn --to 08012345678 --amount 1000
-PRIVATE_KEY=0x... abapay link --pin 1234
+PRIVATE_KEY=0x... abapay link --pin 123456
 abapay balance --api-key aba_mcp_xxxxx
 abapay history --api-key aba_mcp_xxxxx --limit 5
 ```

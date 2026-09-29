@@ -86,7 +86,7 @@ export const TOOLS: ToolDef[] = [
     description: "Pay a real bill — Nigerian (airtime, data, electricity, cable, WAEC/JAMB) or international airtime/data — from the linked wallet, settled on-chain. Executes immediately; no delay parameter exists.",
     params: [
       { name: "api_key", type: "string", required: false, description: "Not needed over OAuth." },
-      { name: "pin", type: "string", required: true, description: "4-6 digit PIN. Required on every payment, including over OAuth." },
+      { name: "pin", type: "string", required: true, description: "The key's PIN (6 digits for keys created now; older keys may have 4-6). Required on every payment, including over OAuth." },
       { name: "service", type: "string", required: true, enum: ["AIRTIME", "DATA", "ELECTRICITY", "CABLE", "EDUCATION", "INTERNATIONAL"], description: "Which kind of bill." },
       { name: "provider", type: "string", required: false, description: "e.g. mtn, ikeja-electric, dstv, waec. Not used for INTERNATIONAL." },
       { name: "account_number", type: "string", required: true, description: "Phone/meter/smartcard/JAMB ID/destination number, depending on service." },

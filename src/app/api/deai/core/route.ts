@@ -1142,10 +1142,13 @@ async function handleCore(req: Request, ctx: HumanizeCtx): Promise<NextResponse>
       // a deep link before chain selection, well before AWAITING_PIN is ever entered — see
       // "isGuest" at the chain-selection choke point above), but the guard below turns "should
       // never happen" into "provably can't crash" rather than trusting that invariant alone.
+      // The gate also RESERVES this attempt (it is counted before the PIN is checked), and is
+      // passed to recordPinFailure below so the attempt isn't counted twice.
+      let gateCheck: Awaited<ReturnType<typeof checkPinAllowed>> | undefined;
       if (!isGuest && identity._linkId) {
-        const gateCheck = await checkPinAllowed(identity._linkId);
+        gateCheck = await checkPinAllowed(identity._linkId);
         if (!gateCheck.allowed) {
-          await supabase.from('deai_sessions').delete().eq('chat_id', platform_id);
+          if (!gateCheck.unavailable) await supabase.from('deai_sessions').delete().eq('chat_id', platform_id);
           return NextResponse.json({ action: 'REPLY', message: gateCheck.message! });
         }
       }
@@ -1740,7 +1743,7 @@ async function handleCore(req: Request, ctx: HumanizeCtx): Promise<NextResponse>
         const linkId = identity._linkId;
 
         if (linkId) {
-          const result = await recordPinFailure(linkId, platform_id, channel);
+          const result = await recordPinFailure(linkId, platform_id, channel, gateCheck);
 
           if (!result.allowed) {
             // Locked — wipe the pending transaction too.

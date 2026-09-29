@@ -13,7 +13,7 @@ export type ApprovedChain = "CELO" | "BASE";
 
 export interface LinkParams {
   signer: Signer & { signMessage: (args: { message: string }) => Promise<`0x${string}`> };
-  /** 4-6 digits. Yours to pick; AbaPay never generates or stores it in recoverable form. */
+  /** 6 digits. Yours to pick; AbaPay never generates or stores it in recoverable form. */
   pin: string;
   approvedChain?: ApprovedChain;
   approvedToken?: string;
@@ -56,8 +56,8 @@ export class AbaPayAgent {
    */
   static async link(params: LinkParams): Promise<AbaPayAgent> {
     const { signer, pin, approvedChain = "CELO", approvedToken, label, baseUrl = DEFAULT_BASE_URL } = params;
-    if (!/^\d{4,6}$/.test(pin)) {
-      throw new AbaPayError("PIN must be 4-6 digits.");
+    if (!/^\d{6}$/.test(pin)) {
+      throw new AbaPayError("PIN must be 6 digits.");
     }
 
     const timestamp = String(Date.now());

@@ -545,7 +545,7 @@ export default function DocsPage() {
               <FAQItem
                 q="Is my AbaPay PIN the same as my wallet password?"
                 a={<>
-                  <p>No, and it's important not to confuse them. Your wallet password and recovery phrase belong to your wallet app and we never see them. Your AbaPay PIN is a separate 4–6 digit code you set when linking a chat account or creating an MCP credential.</p>
+                  <p>No, and it's important not to confuse them. Your wallet password and recovery phrase belong to your wallet app and we never see them. Your AbaPay PIN is a separate code you set when linking a chat account (4–6 digits) or creating an MCP credential (6 digits). Five wrong PINs lock it for a while, with longer lockouts each time, however fast the guesses arrive.</p>
                   <p>It gates one thing: authorising a payment through those channels. It can't move funds on its own — it only unlocks spending inside the allowance you already approved on-chain. Repeated wrong PINs lock the channel out.</p>
                 </>}
               />

@@ -58,7 +58,7 @@ export default function SkillPage() {
         <div className="grid sm:grid-cols-2 gap-3">
           {[
             "Pay ₦1000 of MTN airtime to 08012345678 using AbaPay's x402 rail from my wallet.",
-            "Link my wallet to AbaPay with PIN 1234, then check my USDT balance on Celo.",
+            "Link my wallet to AbaPay with PIN 123456, then check my USDT balance on Celo.",
             "Using AbaPay, pay my DSTV cable bill and my electricity bill in one batch.",
             "Set up a monthly AbaPay schedule for ₦2000 MTN data on the 1st of each month.",
           ].map((prompt) => (

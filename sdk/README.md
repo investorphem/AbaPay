@@ -61,7 +61,7 @@ const account = privateKeyToAccount(process.env.PRIVATE_KEY as `0x${string}`);
 
 // One-time: prove wallet ownership, mint an Agent Hub api_key. Save agent.apiKey somewhere —
 // there is no recovery flow other than linking again.
-const agent = await AbaPayAgent.link({ signer: account, pin: "1234" });
+const agent = await AbaPayAgent.link({ signer: account, pin: "123456" });
 
 // Elsewhere, an on-chain approve() + setSpendingAllowance() grants AbaPay a bounded, revocable
 // allowance — see examples/agent-quickstart.mjs in the main repo for the two calls. Nothing in
@@ -70,7 +70,7 @@ const agent = await AbaPayAgent.link({ signer: account, pin: "1234" });
 console.log(await agent.checkBalance());
 
 await agent.payBill({
-  pin: "1234",
+  pin: "123456",
   service: "AIRTIME",
   provider: "mtn",
   account_number: "08012345678",
@@ -108,7 +108,7 @@ The same two paths, from a terminal — no code required:
 npm install -g abapay-sdk
 
 PRIVATE_KEY=0x... abapay pay --service AIRTIME --provider mtn --to 08012345678 --amount 1000
-PRIVATE_KEY=0x... abapay link --pin 1234
+PRIVATE_KEY=0x... abapay link --pin 123456
 abapay balance --api-key aba_mcp_xxxxx
 abapay history --api-key aba_mcp_xxxxx --limit 5
 ```

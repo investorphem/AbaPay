@@ -276,7 +276,7 @@ export async function POST(req: Request) {
   }
 
   if (!verifyPin(pin, identity.pin_hash)) {
-    const fail = await recordPinFailure(identity.id, p.client_id, 'MCP');
+    const fail = await recordPinFailure(identity.id, p.client_id, 'MCP', gate);
     // recordPinFailure's message names the attempts remaining, which is only meaningful once
     // we know the api_key was right — so it's appended to, not substituted for, the generic
     // message. An attacker with a wrong api_key never reaches this line at all.

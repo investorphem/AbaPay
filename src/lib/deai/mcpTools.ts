@@ -253,7 +253,7 @@ export const TOOLS = [
       type: 'object',
       properties: {
         api_key: { type: 'string', description: 'AbaPay MCP API key. NOT needed when the connector is authorized via OAuth — omit it entirely in that case.' },
-        pin: { type: 'string', description: '4-6 digit PIN set when the API key was created. Required on EVERY payment, including over an OAuth connection — ask the human for it each time.' },
+        pin: { type: 'string', description: 'The PIN set when the API key was created (6 digits for new keys). Required on EVERY payment, including over an OAuth connection — ask the human for it each time.' },
         service: { type: 'string', enum: ['AIRTIME', 'DATA', 'ELECTRICITY', 'CABLE', 'EDUCATION', 'INTERNATIONAL'], description: 'Which kind of bill' },
         // WAEC genuinely has no account of its own — the web app sends the buyer's phone as
         // the billers code (page.tsx: `payloadBillersCode = educationProvider === "jamb" ?
@@ -301,7 +301,7 @@ export const TOOLS = [
       type: 'object',
       properties: {
         api_key: { type: 'string', description: 'AbaPay MCP API key. NOT needed when the connector is authorized via OAuth — omit it entirely in that case.' },
-        pin: { type: 'string', description: '4-6 digit PIN set when the API key was created. Required to create a schedule, same as pay_bill.' },
+        pin: { type: 'string', description: 'The PIN set when the API key was created (6 digits for new keys). Required to create a schedule, same as pay_bill.' },
         service: { type: 'string', enum: ['AIRTIME', 'DATA', 'ELECTRICITY', 'CABLE'], description: 'Which kind of bill to schedule. EDUCATION and INTERNATIONAL are not schedulable — use pay_bill directly for those.' },
         provider: { type: 'string', description: 'e.g. mtn, airtel, glo, 9mobile, ikeja-electric, dstv, gotv, startimes' },
         account_number: { type: 'string', description: 'Phone number (airtime/data), meter number (electricity), or smartcard/IUC number (cable)' },
@@ -378,7 +378,7 @@ export const TOOLS = [
       type: 'object',
       properties: {
         api_key: { type: 'string', description: 'AbaPay MCP API key. NOT needed when the connector is authorized via OAuth — omit it entirely in that case.' },
-        pin: { type: 'string', description: '4-6 digit PIN set when the API key was created. Required once for the whole batch.' },
+        pin: { type: 'string', description: 'The PIN set when the API key was created (6 digits for new keys). Required once for the whole batch.' },
         recipients: {
           type: 'array',
           minItems: 2,
@@ -1022,7 +1022,7 @@ async function callPayBill(args: any, oauthIdentity: McpIdentity | null) {
   if (!pinGate.allowed) return errorResult(pinGate.message || 'Locked — too many incorrect PINs.');
 
   if (!verifyPin(pin, identity.pin_hash)) {
-    const fail = await recordPinFailure(identity.id, identity.wallet_address, 'MCP');
+    const fail = await recordPinFailure(identity.id, identity.wallet_address, 'MCP', pinGate);
     return errorResult(fail.message || 'Incorrect PIN.');
   }
   await clearPinFailures(identity.id);
@@ -1237,7 +1237,7 @@ async function callScheduleBill(args: any, oauthIdentity: McpIdentity | null) {
   const pinGate = await checkPinAllowed(identity.id);
   if (!pinGate.allowed) return errorResult(pinGate.message || 'Locked — too many incorrect PINs.');
   if (!verifyPin(pin, identity.pin_hash)) {
-    const fail = await recordPinFailure(identity.id, identity.wallet_address, 'MCP');
+    const fail = await recordPinFailure(identity.id, identity.wallet_address, 'MCP', pinGate);
     return errorResult(fail.message || 'Incorrect PIN.');
   }
   await clearPinFailures(identity.id);
@@ -1514,7 +1514,7 @@ async function callPayBillBatch(args: any, oauthIdentity: McpIdentity | null) {
   const pinGate = await checkPinAllowed(identity.id);
   if (!pinGate.allowed) return errorResult(pinGate.message || 'Locked — too many incorrect PINs.');
   if (!verifyPin(pin, identity.pin_hash)) {
-    const fail = await recordPinFailure(identity.id, identity.wallet_address, 'MCP');
+    const fail = await recordPinFailure(identity.id, identity.wallet_address, 'MCP', pinGate);
     return errorResult(fail.message || 'Incorrect PIN.');
   }
   await clearPinFailures(identity.id);
