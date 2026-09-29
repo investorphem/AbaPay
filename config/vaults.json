@@ -68,6 +68,16 @@
         "USDC": { "supported": false },
         "USD₮": { "supported": false }
       }
+    },
+    {
+      "name": "Base AbaPay V1 (legacy — retire; no pause function)",
+      "chain": "base",
+      "kind": "v1",
+      "address": "0xF3AeFF0c326B1277A2D8623b7694aEB5E6A565e5",
+      "tokens": {
+        "USDC": { "supported": false },
+        "USD₮": { "supported": false }
+      }
     }
   ]
 }
