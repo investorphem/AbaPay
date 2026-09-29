@@ -6,6 +6,16 @@ test-tooling fixes are left out. Full history: [commits on
 GitHub](https://github.com/investorphem/AbaPay/commits/main).
 {% endhint %}
 
+## 2026-09-30
+
+* **New MCP API keys need a 6-digit PIN.** Creating a key (or changing its PIN) with 4 or 5
+  digits now gets a `400`. Existing keys keep working with their current PIN. The TypeScript
+  and Python SDKs check this before sending.
+* **PIN lockouts hold under parallel guessing.** Every attempt is counted before the PIN is
+  checked, so a burst of simultaneous guesses gets no more than the 5 allowed before the
+  lockout. If the attempt counter is unreachable, the payment is refused (nothing is charged)
+  instead of being let through.
+
 ## 2026-09-29
 
 * **x402 records every payment before any money moves.** The payment is written down before

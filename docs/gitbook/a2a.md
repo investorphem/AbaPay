@@ -39,7 +39,7 @@ headers: {
 body: {
   "wallet_address": "0xYourAgentWallet...",
   "channel": "MCP",
-  "pin": "1234",
+  "pin": "123456",
   "approved_chain": "CELO"
 }
 -> { "success": true, "api_key": "aba_mcp_..." }

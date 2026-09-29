@@ -22,11 +22,11 @@ def test_link_signs_and_returns_agent(httpserver):
 
     httpserver.expect_request("/api/agent/link", method="POST").respond_with_handler(handler)
 
-    agent = AbaPayAgent.link(LinkParams(signer=account, pin="1234", base_url=httpserver.url_for("")))
+    agent = AbaPayAgent.link(LinkParams(signer=account, pin="123456", base_url=httpserver.url_for("")))
 
     assert agent.api_key == "aba_mcp_test123"
     assert agent.wallet_address == account.address
-    assert captured["body"]["pin"] == "1234"
+    assert captured["body"]["pin"] == "123456"
     assert captured["body"]["wallet_address"] == account.address
 
     # The signature really does verify against the message it claims to sign.

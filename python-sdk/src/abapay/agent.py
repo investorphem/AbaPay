@@ -15,7 +15,7 @@ from typing import Any, Optional
 from .types import AbaPayError, LinkParams
 from .x402 import DEFAULT_BASE_URL
 
-_PIN_RE = re.compile(r"^\d{4,6}$")
+_PIN_RE = re.compile(r"^\d{6}$")
 
 
 def _http_json(url: str, method: str, body: Optional[dict] = None, headers: Optional[dict] = None) -> dict:
@@ -54,7 +54,7 @@ class AbaPayAgent:
         Raises AbaPayError if the signature is rejected or the PIN is malformed.
         """
         if not _PIN_RE.match(params.pin):
-            raise AbaPayError("PIN must be 4-6 digits.")
+            raise AbaPayError("PIN must be 6 digits.")
 
         timestamp = str(int(time.time() * 1000))
         message = f"AbaPay Agent Action: POST:/api/agent/link: {timestamp}"

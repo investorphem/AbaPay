@@ -28,7 +28,7 @@ const HELP = `abapay-cli — pay real-world bills from a Celo wallet, no browser
 
 USAGE
   abapay pay --service <S> --provider <P> --to <account> --amount <ngn> [--token USDT|USDC]
-  abapay link --pin <4-6 digits> [--chain CELO] [--token USDT|USDC] [--label <name>]
+  abapay link --pin <6 digits> [--chain CELO] [--token USDT|USDC] [--label <name>]
   abapay balance --api-key <aba_mcp_...> [--chain CELO]
   abapay history --api-key <aba_mcp_...> [--limit N] [--offset N]
 
@@ -39,7 +39,7 @@ ENV
 
 EXAMPLES
   PRIVATE_KEY=0x... abapay pay --service AIRTIME --provider mtn --to 08012345678 --amount 1000
-  PRIVATE_KEY=0x... abapay link --pin 1234
+  PRIVATE_KEY=0x... abapay link --pin 123456
   abapay balance --api-key aba_mcp_xxxxx
 
 Full reference: https://agents.abapays.com/sdk · https://agents.abapays.com/tools
@@ -91,7 +91,7 @@ async function cmdLink(argv: string[]) {
       label: { type: "string" },
     },
   });
-  if (!values.pin) fail("link requires --pin (4-6 digits).");
+  if (!values.pin) fail("link requires --pin (6 digits).");
   const account = privateKeyToAccount(requirePrivateKey());
   console.log(`Linking ${account.address}…`);
   try {

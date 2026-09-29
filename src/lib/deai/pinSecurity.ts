@@ -18,82 +18,98 @@ import { sendTelegramToUser, sendTelegramAlert } from '@/lib/telegram';
 
 const MAX_ATTEMPTS = 5;
 
-// Escalating lockouts. A legitimate user who fat-fingers their PIN twice is barely
-// inconvenienced; someone grinding through the keyspace is stopped cold.
-const LOCKOUT_LADDER_MINUTES = [1, 5, 30, 120, 1440]; // 1m, 5m, 30m, 2h, 24h
+// 🔴 EVERY ATTEMPT IS SPENT BEFORE THE PIN IS CHECKED. checkPinAllowed() reserves one attempt
+// atomically (pin_attempt_reserve, migration 029: row lock, counter + 1, lockout set on the
+// 5th/10th/… attempt from the ladder 1m, 5m, 30m, 2h, 24h). The old code read the counter,
+// verified the PIN and only then wrote "counter + 1" back, so a parallel burst of wrong PINs
+// all saw 0 and all got checked. Now at most 5 guesses reach scrypt between lockouts however
+// many arrive at once, and a correct PIN clears the counter (clearPinFailures).
+//
+// 🔴 FAILS CLOSED. If the counter can't be reserved (DB unreachable, function missing), the
+// attempt is refused. Letting it through would hand out uncounted guesses exactly when the
+// counter isn't being kept.
 
 export interface PinGate {
   allowed: boolean;
   message?: string;
   attemptsLeft?: number;
+  /** Set by checkPinAllowed on the attempt it reserved: the lockout minutes if THIS attempt
+   *  was the one that started a lockout (so exactly one caller sends the security alert). */
+  lockedMinutes?: number;
+  attempts?: number;
+  /** Refused because the counter couldn't be reached, not because of a lockout — the caller
+   *  should keep the pending request so the user can simply retry. */
+  unavailable?: boolean;
+}
+
+const UNAVAILABLE: PinGate = {
+  allowed: false,
+  unavailable: true,
+  message: "⚠️ PIN checks are temporarily unavailable, so nothing was charged. Please try again in a minute.",
+};
+
+function lockedFor(until: string | Date): string {
+  const mins = Math.max(1, Math.ceil((new Date(until).getTime() - Date.now()) / 60000));
+  return mins >= 60 ? `${Math.round(mins / 60)} hour${mins >= 120 ? 's' : ''}` : `${mins} minute${mins === 1 ? '' : 's'}`;
 }
 
 /**
- * Can this identity attempt a PIN right now?
+ * Reserve one PIN attempt for this identity, or refuse it (locked, or the counter is
+ * unavailable). Call it immediately before verifying the PIN, and pass the result to
+ * recordPinFailure if the PIN turns out wrong.
  */
 export async function checkPinAllowed(linkId: string): Promise<PinGate> {
   try {
-    const { data } = await supabaseAdmin
-      .from('agent_links')
-      .select('failed_pin_attempts, locked_until')
-      .eq('id', linkId)
-      .maybeSingle();
-
-    if (!data) return { allowed: true };
-
-    const d = data as any;
-
-    if (d.locked_until) {
-      const until = new Date(d.locked_until).getTime();
-      const now = Date.now();
-
-      if (now < until) {
-        const mins = Math.ceil((until - now) / 60000);
-        return {
-          allowed: false,
-          message: `🔒 *Locked.*\n\nToo many incorrect PINs. Try again in *${mins} minute${mins === 1 ? '' : 's'}*.\n\n_If this wasn't you, someone may have access to this chat. Revoke your agent limit immediately in the AbaPay app._`,
-        };
-      }
-
-      // Lockout expired — clear it, but KEEP the failure count so the next lockout is longer.
-      await supabaseAdmin.from('agent_links').update({ locked_until: null }).eq('id', linkId);
+    const { data, error } = await supabaseAdmin.rpc('pin_attempt_reserve', { p_link_id: linkId });
+    const row = Array.isArray(data) ? data[0] : data;
+    if (error || !row) {
+      console.error('[PinSecurity] reserve failed:', error?.message || 'no row');
+      return UNAVAILABLE;
     }
 
-    const used = Number(d.failed_pin_attempts || 0);
-    return { allowed: true, attemptsLeft: Math.max(0, MAX_ATTEMPTS - used) };
+    const attempts = Number(row.attempts || 0);
+    if (!row.allowed) {
+      if (!row.locked_until) return UNAVAILABLE; // unknown identity — never an uncounted guess
+      return {
+        allowed: false,
+        attempts,
+        message: `🔒 *Locked.*\n\nToo many incorrect PINs. Try again in *${lockedFor(row.locked_until)}*.\n\n_If this wasn't you, someone may have access to this chat. Revoke your agent limit immediately in the AbaPay app._`,
+      };
+    }
+
+    const lockedMinutes = row.locked_now && row.locked_until
+      ? Math.max(1, Math.round((new Date(row.locked_until).getTime() - Date.now()) / 60000))
+      : undefined;
+    return { allowed: true, attempts, lockedMinutes, attemptsLeft: MAX_ATTEMPTS - (attempts % MAX_ATTEMPTS || MAX_ATTEMPTS) };
   } catch (err) {
     console.error('[PinSecurity] check failed:', err);
-    return { allowed: true }; // never lock a legitimate user out because of a DB hiccup
+    return UNAVAILABLE;
   }
 }
 
 /**
- * Record a wrong PIN. Locks the identity when the threshold is hit, with escalating duration.
+ * Report a wrong PIN on an attempt checkPinAllowed already reserved (the counter was
+ * incremented there — this does not count it again). Returns the message for the user and,
+ * for the attempt that started a lockout, alerts the user and the operator.
  */
-export async function recordPinFailure(linkId: string, chatId: string, channel: string): Promise<PinGate> {
+export async function recordPinFailure(linkId: string, chatId: string, channel: string, gate?: PinGate): Promise<PinGate> {
   try {
     const { data } = await supabaseAdmin
       .from('agent_links')
-      .select('failed_pin_attempts, wallet_address')
+      .select('failed_pin_attempts, locked_until, wallet_address')
       .eq('id', linkId)
       .maybeSingle();
 
-    const prev = Number((data as any)?.failed_pin_attempts || 0);
-    const attempts = prev + 1;
+    const attempts = gate?.attempts ?? Number((data as any)?.failed_pin_attempts || 0);
+    const lockedUntil = (data as any)?.locked_until;
+    const isLocked = !!lockedUntil && new Date(lockedUntil).getTime() > Date.now();
 
-    if (attempts >= MAX_ATTEMPTS) {
-      // How many times have they been locked out before? Escalate accordingly.
-      const lockoutIndex = Math.min(
-        Math.floor(attempts / MAX_ATTEMPTS) - 1,
-        LOCKOUT_LADDER_MINUTES.length - 1
-      );
-      const minutes = LOCKOUT_LADDER_MINUTES[lockoutIndex];
-      const until = new Date(Date.now() + minutes * 60_000);
-
-      await supabaseAdmin
-        .from('agent_links')
-        .update({ failed_pin_attempts: attempts, locked_until: until.toISOString() })
-        .eq('id', linkId);
+    if (gate?.lockedMinutes || isLocked) {
+      if (!gate?.lockedMinutes) {
+        // Another attempt in flight started this lockout and sends the alert; just say so.
+        return { allowed: false, message: `🔒 *Locked for ${lockedFor(lockedUntil)}.*\n\nToo many incorrect PINs.` };
+      }
+      const minutes = gate.lockedMinutes;
 
       // ⚡ TELL THE USER SOMEONE IS GUESSING AT THEIR PIN.
       // If their account is compromised, silence is the worst thing we can do.
@@ -122,31 +138,28 @@ export async function recordPinFailure(linkId: string, chatId: string, channel: 
       };
     }
 
-    await supabaseAdmin
-      .from('agent_links')
-      .update({ failed_pin_attempts: attempts })
-      .eq('id', linkId);
-
-    const left = MAX_ATTEMPTS - attempts;
+    const left = MAX_ATTEMPTS - (attempts % MAX_ATTEMPTS);
     return {
       allowed: true,
       attemptsLeft: left,
       message: `❌ *Incorrect PIN* — ${left} attempt${left === 1 ? '' : 's'} left before lockout.`,
     };
   } catch (err) {
+    // The attempt was already counted by checkPinAllowed, so a failure here loses only the
+    // wording, never the count.
     console.error('[PinSecurity] recordFailure error:', err);
-    return { allowed: true };
+    return { allowed: true, message: '❌ *Incorrect PIN.*' };
   }
 }
 
-/** Wipe the failure counter after a correct PIN. */
+/** Wipe the failure counter (and any lockout) after a correct PIN. */
 export async function clearPinFailures(linkId: string): Promise<void> {
   try {
-    await supabaseAdmin
-      .from('agent_links')
-      .update({ failed_pin_attempts: 0, locked_until: null })
-      .eq('id', linkId);
-  } catch { /* non-fatal */ }
+    const { error } = await supabaseAdmin.rpc('pin_attempt_clear', { p_link_id: linkId });
+    if (error) console.error('[PinSecurity] clear failed:', error.message);
+  } catch (err) {
+    console.error('[PinSecurity] clear failed:', err);
+  }
 }
 
 import { Resend } from 'resend';

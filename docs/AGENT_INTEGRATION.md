@@ -72,7 +72,7 @@ x-wallet-timestamp: <same timestamp, must be within 5 minutes>
 {
   "wallet_address": "0xYourAgentWallet",
   "channel": "MCP",
-  "pin": "1234",                    # 4-6 digits, YOU choose it, YOU remember it
+  "pin": "123456",                    # 6 digits, YOU choose it, YOU remember it
   "approved_chain": "CELO",         # or "BASE"
   "approved_token": "USD₮",         # or "USDC" / "USA₮"
   "mcp_key_label": "my-agent"       # optional, for your own bookkeeping
