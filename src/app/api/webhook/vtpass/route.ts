@@ -6,6 +6,7 @@ import { getHeaders } from '@/lib/vtpass';
 import { Resend } from 'resend';
 import { normalizePurchasedCode, issuesTokenOrPin } from '@/lib/purchasedCode';
 import { buildReceiptEmail } from '@/lib/receiptEmail';
+import { recordLateDelivery, recordLateFailure } from '@/lib/providerOutcome';
 
 const resend = new Resend(process.env.RESEND_API_KEY || "re_dummy_key_for_build");
 
@@ -111,19 +112,12 @@ async function processNotification(body: any) {
 
       const alertTokenRef = dbPurchasedCode || trustedTx.transactionId || requestId || "Success";
 
-      // 🔐 ATOMIC CLAIM: only one execution transitions the record and sends notifications
-      const { data: claimed } = await supabase
-        .from('transactions')
-        .update({
-            status: 'SUCCESS',
-            purchased_code: dbPurchasedCode,
-            units: vendedUnits
-        })
-        .eq('request_id', requestId)
-        .neq('status', 'SUCCESS')
-        .select();
-
-      if (!claimed || claimed.length === 0) return;
+      // 🔐 ATOMIC, STATE-AWARE CLAIM — only one execution records the delivery and notifies, and
+      // never over a refund. This used to be `.neq('status', 'SUCCESS')`, which also flipped a
+      // FAILED_VENDING or REFUNDED row to SUCCESS and texted the token to a customer whose money
+      // was already coming back (ABAPAY_FULL_AUDIT.md P-5). See src/lib/providerOutcome.ts.
+      const outcome = await recordLateDelivery(txData, { purchased_code: dbPurchasedCode, units: vendedUnits?.toString() ?? null });
+      if (outcome !== 'DELIVERED') return;
 
       // ⚡ TRIGGER ALL DELAYED NOTIFICATIONS ⚡
       const notifications = [];
@@ -194,20 +188,14 @@ async function processNotification(body: any) {
 
     // --- SCENARIO 2: TRANSACTION REVERSAL (CONFIRMED BY VTPASS) ---
     if (confirmedStatus === 'reversed' || confirmedStatus === 'failed') {
+       // The customer paid and has nothing. recordLateFailure moves the row (SUCCESS ->
+       // REVERSED_NEEDS_REFUND, PENDING/PROCESSING -> FAILED_VENDING) and QUEUES the refund, so it
+       // appears in the Ops refund tab — this used to only alert, leaving the refund to memory.
+       const reason = `VTpass ${confirmedStatus}: ${confirmedPayload.response_description || 'Provider Reversal'}`;
+       const queued = await recordLateFailure(txData, reason);
+       if (queued === 'ALREADY') return;
 
-       if (txData.status === 'REVERSED_NEEDS_REFUND' || txData.status === 'REFUNDED') return;
-
-       // 1. Update the database to flag this for a crypto refund
-       await supabase
-        .from('transactions')
-        .update({ status: 'REVERSED_NEEDS_REFUND' })
-        .eq('request_id', requestId);
-
-       // 2. Fire an EMERGENCY Telegram Alert to the Admin
-       const userWallet = txData.wallet_address || "Unknown";
-       const cryptoAmount = txData.amount_usdt || "Unknown";
-
-       const alertMessage = `⚠️ *VTPASS REVERSAL ALERT*\n\nVTpass bounced a delayed transaction and refunded your Naira wallet.\n\n🛒 *Req ID:* ${requestId}\n💰 *Naira Refunded:* ₦${txData.amount_naira}\n🛑 *Reason:* ${confirmedPayload.response_description || 'Provider Reversal'}\n\n🚨 *ACTION REQUIRED:* You need to manually refund the user's crypto from the Vault.\n👤 *User Wallet:* \`${userWallet}\`\n🪙 *Crypto Owed:* $${cryptoAmount}`;
+       const alertMessage = `⚠️ *VTPASS REVERSAL ALERT*\n\nVTpass ${confirmedStatus === 'reversed' ? 'reversed' : 'failed'} a transaction after the fact and refunded our Naira float.\n\n🛒 *Req ID:* ${requestId}\n💰 *Naira:* ₦${txData.amount_naira}\n🛑 *Reason:* ${confirmedPayload.response_description || 'Provider Reversal'}\n\n💸 A crypto refund has been queued — approve it in Admin → Refunds.\n👤 *User Wallet:* \`${txData.wallet_address || 'Unknown'}\`\n🪙 *Crypto Owed:* ${txData.amount_usdt} ${txData.token_used || ''}`;
 
        await sendTelegramAlert(alertMessage);
        return;

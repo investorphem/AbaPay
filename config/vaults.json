@@ -1,0 +1,83 @@
+{
+  "$comment": "Expected on-chain configuration of every AbaPay vault. scripts/vault-config.mjs diffs the live chain against this file and prints the owner transactions needed to converge. See ABAPAY_IMPLEMENTATION_PLAN.md M0.3. Amounts are in whole tokens (the script applies decimals).",
+  "owner": "0xec24bafbc989a9be5f6f0ead8848753b5e4ae0b6",
+  "relayer": "0x4f9b9c40345258684cfe23f02fdb2b88f1d2ea62",
+  "tokens": {
+    "celo": {
+      "USDm": { "address": "0x765DE816845861e75A25fCA122bb6898B8B1282a", "decimals": 18 },
+      "USDC": { "address": "0xcebA9300f2b948710d2653dD7B07f33A8B32118C", "decimals": 6 },
+      "USD₮": { "address": "0x48065fbbe25f71c9282ddf5e1cd6d6a887483d5e", "decimals": 6 },
+      "USA₮": { "address": "0xD2ab3C9A02DBBAB236BfEC45D1d755DF4267F771", "decimals": 6 }
+    },
+    "base": {
+      "USDC": { "address": "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913", "decimals": 6 },
+      "USD₮": { "address": "0xfde4C96c8593536E31F229EA8f37b2ADa2699bb2", "decimals": 6 }
+    }
+  },
+  "vaults": [
+    {
+      "name": "Celo AbaPayV4 (current)",
+      "chain": "celo",
+      "kind": "v4",
+      "address": "0x5df8aE2B963165b735B18Ca86B1ea448d2AA032C",
+      "$withdrawalDelayComment": "Kept at 0 by the owner's decision (2026-09-29) for immediate emergency access. The trade-off is in contracts/AbaPayV4.sol's NatSpec.",
+      "withdrawalDelaySeconds": 0,
+      "paused": false,
+      "relayerEnabled": true,
+      "tokens": {
+        "USDm": { "supported": false, "maxRefund": "400", "maxAgentPayment": "10" },
+        "USDC": { "supported": true, "maxRefund": "400", "maxAgentPayment": "50" },
+        "USD₮": { "supported": true, "maxRefund": "400", "maxAgentPayment": "50" },
+        "USA₮": { "supported": true, "maxRefund": "400", "maxAgentPayment": "50" }
+      }
+    },
+    {
+      "name": "Base AbaPayV4 (current)",
+      "chain": "base",
+      "kind": "v4",
+      "address": "0xC0A4dAA04DEd9c54D1239507B5A5E645761ef488",
+      "$withdrawalDelayComment": "Kept at 0 by the owner's decision (2026-09-29); see the Celo V4 entry.",
+      "withdrawalDelaySeconds": 0,
+      "paused": false,
+      "relayerEnabled": true,
+      "tokens": {
+        "USDC": { "supported": true, "maxRefund": "400", "maxAgentPayment": "50" },
+        "USD₮": { "supported": true, "maxRefund": "400", "maxAgentPayment": "50" }
+      }
+    },
+    {
+      "name": "Celo AbaPayV3 (legacy — retire)",
+      "chain": "celo",
+      "kind": "v3",
+      "address": "0x42Fa463798Ed129a9B5Ee51721CB6db1bfCBe3b9",
+      "paused": true,
+      "relayerEnabled": false,
+      "tokens": {
+        "USDm": { "supported": false },
+        "USDC": { "supported": false },
+        "USD₮": { "supported": false }
+      }
+    },
+    {
+      "name": "Celo AbaPay V1 (legacy — retire; no pause function)",
+      "chain": "celo",
+      "kind": "v1",
+      "address": "0x1d12519876a116fc92236bb6cb8eff6243d65eaa",
+      "tokens": {
+        "USDm": { "supported": false },
+        "USDC": { "supported": false },
+        "USD₮": { "supported": false }
+      }
+    },
+    {
+      "name": "Base AbaPay V1 (legacy — retire; no pause function)",
+      "chain": "base",
+      "kind": "v1",
+      "address": "0xF3AeFF0c326B1277A2D8623b7694aEB5E6A565e5",
+      "tokens": {
+        "USDC": { "supported": false },
+        "USD₮": { "supported": false }
+      }
+    }
+  ]
+}

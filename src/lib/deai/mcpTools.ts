@@ -4,7 +4,7 @@ import { rateLimit } from '@/lib/rateLimit';
 import { getServiceRules, checkServiceAllowed, checkAgentSpendAllowed, computeServiceFee } from '@/lib/serviceRules';
 import { describeCapabilities, capabilityForIntent, getCapability, getCapabilitiesForCard } from '@/lib/deai/capabilities';
 import { resolveServiceId, fetchCryptoBalances, verifyAccount } from '@/lib/deai/services';
-import { getRemainingAllowance } from '@/lib/deai/relayer';
+import { getRemainingAllowance, getMaxAgentPayment } from '@/lib/deai/relayer';
 import { LEGACY_RECORD_CHAIN, tokenSymbolsForChain } from '@/constants';
 import { providersForIntent } from '@/lib/vtpassCatalog';
 import { checkAccountNumber, checkAmountLive, requiresVariation, requiresVerifiedName } from '@/lib/parity';
@@ -519,9 +519,12 @@ async function callCheckBalance(args: any, oauthIdentity: McpIdentity | null) {
 
   const chain = args?.chain === 'BASE' || args?.chain === 'CELO' ? args.chain : identity.approved_chain || LEGACY_RECORD_CHAIN;
   const tokens = tokensForChain(chain);
-  const [balances, allowances] = await Promise.all([
+  const [balances, allowances, caps] = await Promise.all([
     fetchCryptoBalances(identity.wallet_address, chain),
     Promise.all(tokens.map((sym) => getRemainingAllowance(identity.wallet_address, sym, chain))),
+    // The vault's per-payment ceiling for agent payments — see getMaxAgentPayment. Shown so an
+    // agent knows up front that a bill above it can't be paid this way.
+    Promise.all(tokens.map((sym) => getMaxAgentPayment(sym, chain))),
   ]);
 
   // Every token on this chain, not just the one the API key defaults to — pay_bill accepts a
@@ -543,15 +546,18 @@ async function callCheckBalance(args: any, oauthIdentity: McpIdentity | null) {
     `**Wallet:** \`${shortWallet}\` on **${chain}**`,
     `**Default token for pay_bill:** ${identity.approved_token || 'USD₮'} _(set when this API key was created)_`,
     '',
-    '| Token | Balance | Approved agent limit |',
-    '|---|---|---|',
+    '| Token | Balance | Approved agent limit | Max per payment |',
+    '|---|---|---|---|',
     ...tokens.map((sym, i) => {
       const bal = balances[sym] ?? '0.0000';
       const a = allowances[i];
       const lim = a.ok ? a.remaining.toFixed(4) : 'unavailable';
+      const cap = caps[i] === null ? 'unavailable' : String(caps[i]);
       const isDefault = sym === (identity.approved_token || 'USD₮');
-      return `| ${sym}${isDefault ? ' ⭐' : ''} | ${bal} | ${lim} |`;
+      return `| ${sym}${isDefault ? ' ⭐' : ''} | ${bal} | ${lim} | ${cap} |`;
     }),
+    '',
+    '_"Max per payment" is the vault\'s on-chain ceiling for one agent payment. A bill above it can\'t be paid through this API; the human can pay it in the AbaPay app._',
   ];
   return withCard(textResult(lines.join('\n')), {
     view: 'balance',
@@ -562,6 +568,7 @@ async function callCheckBalance(args: any, oauthIdentity: McpIdentity | null) {
       symbol: sym,
       balance: balances[sym] ?? '0.0000',
       limit: allowances[i].ok ? allowances[i].remaining.toFixed(4) : null,
+      maxPerPayment: caps[i],
     })),
   });
 }

@@ -1634,8 +1634,12 @@ export default function Home() {
       const realNonce = await publicClient.getTransactionCount({ address: address as `0x${string}`, blockTag: 'latest' });
 
       // 3. TRUE PRE-FLIGHT INTENT
-      preflightHash = `preflight_${address}_${Date.now()}`;
-      backendPayload.txHash = preflightHash;
+      //
+      // 🔴 THE SERVER NAMES THE INTENT NOW. This used to be `preflight_${address}_${Date.now()}`,
+      // generated here and upserted by /api/pay under whatever id the browser sent — the same
+      // write that let a real tx hash be replayed (ABAPAY_FULL_AUDIT.md P-1). /api/pay returns
+      // `intent_id`, and that is what settle and cancel refer to below.
+      delete backendPayload.txHash;
 
       setStatus("Securing transaction intent...");
       const intentRes = await fetch('/api/pay', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ ...backendPayload, intent_only: true }) });
@@ -1651,6 +1655,13 @@ export default function Home() {
         setStatus(intentMsg);
         setIsProcessing(false);
         return; // 🛑 EXIT FUNCTION IMMEDIATELY — nothing was signed, nothing to clean up
+      }
+      try { preflightHash = String((await intentRes.json())?.intent_id || ''); } catch { preflightHash = ''; }
+      if (!preflightHash.startsWith('preflight_')) {
+        // No intent id means no row to attach the payment to — never prompt a signature for it.
+        setStatus("Couldn't start this payment. Please try again.");
+        setIsProcessing(false);
+        return;
       }
 
       // 🔴 THE BUG THIS FIXES: hasEnoughBalanceOnChain() only ran ONCE, before the approve

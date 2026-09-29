@@ -1,9 +1,10 @@
 import { NextResponse } from 'next/server';
 import { supabaseAdmin as supabase } from '@/utils/supabase';
 import { executeVend, getStrictRequestId } from '@/lib/vend';
+import { vendInputFromRow } from '@/lib/vendInput';
 import { resolveTokenOnChain, DEFAULT_CHAIN } from '@/constants';
 import { sendTelegramAlert } from '@/lib/telegram';
-import { getServiceRules, computeServiceFee } from '@/lib/serviceRules';
+import { getServiceRules, computeServiceFee, checkWebPayment } from '@/lib/serviceRules';
 import { isDuplicateElectricity } from '@/lib/parity';
 import { enqueueRefund } from '@/lib/refunds';
 import { verifyAccount } from '@/lib/deai/services';
@@ -11,6 +12,8 @@ import { readAuthorization, checkAuthorization, isRetryableSettleFailure, settle
 import { rpcUrlsFor } from '@/lib/chain';
 import { verifyTypedData, recoverTypedDataAddress, hashTypedData } from 'viem';
 import { getPublicClient } from '@/lib/chain';
+import { verifyTokenTransfer, UNDECIDED_PROOF_FAILURES } from '@/lib/paymentProof';
+import { x402IntentKey, x402UnconfirmedKey } from '@/lib/reconcileX402';
 
 // ⚡ THE RAW ERC-1271 CHECK — deliberately not viem's `verifyTypedData`/`verifyHash`, which
 // falls back to ecrecover on any failure here (see the long comment where this is used). This
@@ -747,6 +750,45 @@ async function handleX402Request(req: Request) {
     }
   }
 
+  // 🔴 NOTHING THAT CAN'T BE VENDED MAY BE SETTLED. These two checks used to run AFTER the
+  // facilitator had already moved the payer's money, and "fixed" the problem with a refund —
+  // a round trip through the manual refund queue for a payment that should never have been
+  // taken. Everything they need is known before settlement, so they run here now and nothing
+  // moves:
+  //   • no real bill (a generic x402 client that only echoed the challenge), or a request that
+  //     named one chain while the route could only settle on another;
+  //   • (below, once the authorization is decoded) a signer other than the wallet the request
+  //     names.
+  if (requestedChain !== chainKey || vendAmount === null || !serviceID || !billersCode) {
+    return NextResponse.json({
+      x402Version: 1,
+      error: requestedChain !== chainKey
+        ? `x402 payments on ${requestedChain} are not available right now — nothing was charged.`
+        : 'This payment is missing bill details (serviceID, billersCode, amount) — nothing was charged.',
+      errorCode: 'MISSING_BILL_DETAILS',
+      retryable: false,
+      accepts: [acceptEntry],
+    }, { status: 400 });
+  }
+
+  // 🔐 SERVER-SIDE SERVICE GATE — the operator's kill switches and VTpass's live per-provider
+  // limits (checkWebPayment, src/lib/serviceRules.ts). Runs only once a payment is attached, so
+  // discovery crawlers still get their 402 challenge; and before settlement, so a switched-off
+  // service is refused with nothing charged instead of settled and refunded.
+  {
+    const cat = String(serviceCategory || '').toUpperCase();
+    const gate = await checkWebPayment({
+      serviceCategory, serviceID, amountNgn: vendAmount,
+      isFixedPlan: ['INTERNET', 'DATA', 'CABLE', 'EDUCATION'].includes(cat) && !!variation_code && variation_code !== 'none',
+    });
+    if (!gate.allowed) {
+      return NextResponse.json(
+        { x402Version: 1, error: gate.reason, errorCode: gate.code, retryable: false, accepts: [acceptEntry] },
+        { status: gate.code === 'AMOUNT_OUT_OF_RANGE' ? 400 : 409 },
+      );
+    }
+  }
+
   // A payment header is present — decode it and forward it to Celo's facilitator to settle.
   // Their /settle endpoint does verify + settle in one call, and per their own docs only
   // successful settlements consume a credit, so there's no need for a separate /verify
@@ -787,6 +829,25 @@ async function handleX402Request(req: Request) {
   // The payer's signature, hoisted for the same reason: a failed settlement can only be
   // replayed against the facilitator if the alert carries the signature it was made with.
   let settledSignature = "";
+  // The signed value in base units — what the settlement's Transfer log must cover.
+  let chargedWei: bigint = requiredWei;
+  // The intent row written BEFORE the facilitator is called (see recordIntent below): its id,
+  // and its placeholder tx_hash while it has no real one yet.
+  let intentRowId: string | null = null;
+  let intentKey = '';
+  const intentRowFields = {
+    service_category: serviceCategory || 'UNKNOWN', service_id: serviceID || 'UNKNOWN',
+    variation_code: variation_code, network: network || 'UNKNOWN', blockchain: chainKey,
+    account_number: billersCode || phone || 'N/A', phone: phone || null,
+    amount_naira: vendAmount, fee_naira: serviceFee, stamp_duty_ngn: stampDutyNgn,
+    customer_name: customer_name || null, customer_address: customer_address || null,
+    source_channel: source_channel || 'WEB', token_used: requestedTokenSymbol,
+    meter_account_type: meter_account_type || null, customer_email: email || null,
+    operator_id: operator_id || null, country_code: country_code || null, product_type_id: product_type_id || null,
+    subscription_type: subscription_type || null,
+    foreign_amount: foreignAmount || null, display_amount: displayAmount || null,
+    payment_method: 'X402',
+  };
   try {
     let decodedPayload: any;
     try {
@@ -847,8 +908,20 @@ async function handleX402Request(req: Request) {
     // and it refuses, opaquely. checkAuthorization has already established that the signed value
     // covers this bill and is not wildly above it, so the signed value is the honest figure for
     // both — and the figure the user is actually charged, which is what gets recorded.
-    const chargedWei = authCheck.chargedWei;
+    chargedWei = authCheck.chargedWei;
     chargedCrypto = Number(chargedWei) / 10 ** usdc.decimals;
+
+    // The second pre-settlement refusal (see MISSING_BILL_DETAILS above): the signer is not the
+    // wallet this request names. Used to settle first and refund after (PAYER_MISMATCH).
+    if (auth && wallet_address && auth.from.toLowerCase() !== String(wallet_address).toLowerCase()) {
+      return NextResponse.json({
+        x402Version: 1,
+        error: 'This payment was signed by a different wallet than the one paying — nothing was charged.',
+        errorCode: 'PAYER_MISMATCH',
+        retryable: false,
+        accepts: [acceptEntry],
+      }, { status: 400 });
+    }
 
     // A shortfall inside the tolerance band is settled rather than refused (see MAX_UNDERPAY_RATIO)
     // — but it is never silent. One is a rounding difference; one on EVERY payment is a pricing
@@ -1071,6 +1144,65 @@ async function handleX402Request(req: Request) {
       }
     }
 
+    // 🔐 RECORD THE PAYMENT BEFORE ANY MONEY MOVES (ABAPAY_FULL_AUDIT.md P-3).
+    //
+    // This row used to be written only after the facilitator had settled — unchecked. A failed
+    // insert, or the function dying between the facilitator's reply and the insert, left the
+    // payer's money in the vault with no row, no vend, no refund, and a reply claiming it was
+    // "already being processed". Now: no row, no settlement.
+    //
+    // Keyed by (payer, authorization nonce) — the thing that makes an EIP-3009 payment unique —
+    // so the SAME signed header submitted twice (a client retry, a race) finds the first row and
+    // is answered from it instead of being settled again. If this request dies at any point
+    // after here, src/lib/reconcileX402.ts finishes or expires the intent by asking the token
+    // whether the authorization was spent.
+    if (!auth) {
+      return NextResponse.json({ x402Version: 1, error: 'The payment authorization was incomplete.', retryable: false, accepts: [acceptEntry] }, { status: 402 });
+    }
+    const payerLower = auth.from.toLowerCase();
+    const nonceLower = auth.nonce.toLowerCase();
+
+    const { data: priorIntent } = await supabase.from('transactions')
+      .select('id, status, tx_hash')
+      .eq('x402_payer', payerLower).eq('x402_nonce', nonceLower)
+      .maybeSingle();
+    if (priorIntent) {
+      console.warn(`[Pay/x402] Authorization already recorded (${chainKey}) — answering from the existing row, not settling again:`, priorIntent.status);
+      return NextResponse.json(
+        priorIntent.status === 'SUCCESS'
+          ? { success: true, status: 'SUCCESS', tx_hash: String(priorIntent.tx_hash).startsWith('0x') ? priorIntent.tx_hash : undefined }
+          : { success: false, status: 'TIMEOUT', message: 'This payment is already being processed — check History shortly. Do not pay again.' },
+      );
+    }
+
+    intentKey = x402IntentKey(chainKey, payerLower, nonceLower);
+    const validBeforeSec = Number(auth.validBefore);
+    const { data: intentRow, error: intentError } = await supabase.from('transactions').insert({
+      ...intentRowFields,
+      tx_hash: intentKey, request_id: vtRequestId, status: 'PENDING',
+      amount_usdt: chargedCrypto, wallet_address: payerLower,
+      x402_payer: payerLower, x402_nonce: nonceLower,
+      x402_valid_before: Number.isFinite(validBeforeSec) ? new Date(validBeforeSec * 1000).toISOString() : null,
+    }).select('id').single();
+
+    if (intentError || !intentRow) {
+      if (intentError?.code === '23505') {
+        // Lost a race with a concurrent submission of this same authorization.
+        return NextResponse.json({ success: false, status: 'TIMEOUT', message: 'This payment is already being processed — check History shortly. Do not pay again.' });
+      }
+      console.error(`[Pay/x402] Could not record the payment intent (${chainKey}) — refusing to settle:`, intentError?.message);
+      sendTelegramAlert(
+        `🚨 *x402 INTENT WRITE FAILED (${chainKey})*\n\nCouldn't record the payment before settling, so it was NOT settled — nothing moved.\n\n` +
+        `payer \`${auth.from}\` · ${requestedTokenSymbol} ${chargedCrypto.toFixed(4)}\n🛑 ${intentError?.message || 'no row returned'}`,
+      ).catch(() => {});
+      return NextResponse.json(
+        // Retryable: nothing was sent to the facilitator, so a fresh signature cannot double-pay.
+        { x402Version: 1, error: "Couldn't start this payment — nothing was charged. Please try again.", retryable: true, accepts: [acceptEntry] },
+        { status: 503 },
+      );
+    }
+    intentRowId = intentRow.id;
+
     // ⚡ `resource` ON THE PAYLOAD, NOT ONLY ON THE REQUIREMENTS.
     //
     // `decodedPayload` is what the CLIENT sent us. `resourceUrl` is added here as a courtesy
@@ -1201,8 +1333,12 @@ async function handleX402Request(req: Request) {
     // accepted. No parsing of that message can tell the two apart, so we stop parsing and ask
     // the token: `authorizationState(payer, nonce)` is the chain's own record of the answer.
     let settledWithoutHash = false;
+    // What the chain says about this authorization: true = spent, false = provably unspent,
+    // null = unreadable, undefined = not asked yet.
+    let consumedState: boolean | null | undefined;
     if (retryable && settledAuth) {
       const consumed = await authorizationWasConsumedAfterSettling(chainKey, isMainnet, usdc.address, settledAuth);
+      consumedState = consumed;
       if (consumed !== false) {
         // `true` (spent) and `null` (could not read it) both land here on purpose. The cost of
         // being wrong is asymmetric: a needless contract-call fallback costs two prompts, while
@@ -1210,6 +1346,24 @@ async function handleX402Request(req: Request) {
         retryable = false;
         settledWithoutHash = consumed === true;
       }
+    }
+
+    if (!settledWithoutHash && intentRowId) {
+      // Settle the intent row's fate. A refusal the chain PROVES moved nothing closes the row as
+      // FAILED_PAYMENT: nothing to refund, hidden from History, and — importantly — no longer a
+      // PENDING row, so it can't make the page's contract-call fallback look like a duplicate of
+      // itself. Anything the chain can't vouch for stays PENDING for src/lib/reconcileX402.ts,
+      // which keeps asking until the authorization is spent (vend it) or expires (close it).
+      if (consumedState === undefined && settledAuth) {
+        consumedState = await authorizationWasConsumed(chainKey, isMainnet, usdc.address, settledAuth);
+      }
+      const refusalNote = `Facilitator refused (HTTP ${settleHttpStatus}): ${allText.slice(0, 300)}`;
+      const { error: closeError } = await supabase.from('transactions')
+        .update(consumedState === false
+          ? { status: 'FAILED_PAYMENT', error_code: 'X402_SETTLE_REFUSED', api_response: refusalNote }
+          : { api_response: `${refusalNote} — authorization state unknown; left for reconciliation.` })
+        .eq('id', intentRowId).eq('status', 'PENDING');
+      if (closeError) console.error(`[Pay/x402] Could not record the refusal on the intent row (${chainKey}):`, closeError.message);
     }
 
     console.error(`[Pay/x402] Settle rejected (${chainKey}):`, settleHttpStatus, 'token:', requestedTokenSymbol, 'asset:', usdc.address, 'retryable:', retryable, 'authorizationSpent:', settledWithoutHash, 'raw:', allText.slice(0, 800));
@@ -1232,26 +1386,17 @@ async function handleX402Request(req: Request) {
       // Not vended, not refunded automatically: we know the authorization was consumed, not that
       // it went where THIS row expects — the honest move is to make the payment visible and flag
       // it, not to guess at the rest.
-      const unconfirmedTxHash = `x402_unconfirmed_${chainKey}_${settledAuth?.nonce ?? vtRequestId}`;
-      await supabase.from('transactions').upsert({
-        tx_hash: unconfirmedTxHash, request_id: vtRequestId,
-        service_category: serviceCategory || 'UNKNOWN', service_id: serviceID || 'UNKNOWN',
-        variation_code: variation_code, network: network || 'UNKNOWN', blockchain: chainKey,
-        account_number: billersCode || phone || 'N/A', phone: phone || null,
-        amount_usdt: chargedCrypto, amount_naira: vendAmount, fee_naira: serviceFee, stamp_duty_ngn: stampDutyNgn,
+      //
+      // The intent row recorded before settling IS that row now: renamed out of the `preflight_`
+      // namespace (so History shows it) and flagged. Written through the same intent — never a
+      // second insert — so a retry of this request can't create a duplicate.
+      const unconfirmedTxHash = x402UnconfirmedKey(chainKey, settledAuth?.nonce ?? vtRequestId);
+      const { error: flagError } = await supabase.from('transactions').update({
+        tx_hash: unconfirmedTxHash,
         status: 'FAILED_VENDING', error_code: 'X402_SETTLED_UNCONFIRMED',
         api_response: `Facilitator refused (${allText.slice(0, 300)}) but the chain shows the authorization was consumed — money moved, hash unknown. Needs manual reconciliation.`,
-        wallet_address: (settledAuth?.from || wallet_address || 'UNKNOWN').toLowerCase(),
-        customer_name: customer_name || null, customer_address: customer_address || null,
-        source_channel: source_channel || 'WEB', token_used: requestedTokenSymbol,
-        meter_account_type: meter_account_type || null, customer_email: email || null,
-        operator_id: operator_id || null, country_code: country_code || null, product_type_id: product_type_id || null,
-        subscription_type: subscription_type || null,
-        foreign_amount: foreignAmount || null, display_amount: displayAmount || null,
-        payment_method: 'X402',
-      }, { onConflict: 'tx_hash' }).then(({ error }) => {
-        if (error) console.error(`[Pay/x402] Could not write the unconfirmed-settlement row (${chainKey}):`, error.message);
-      });
+      }).eq('id', intentRowId).eq('status', 'PENDING');
+      if (flagError) console.error(`[Pay/x402] Could not flag the unconfirmed settlement (${chainKey}):`, flagError.message);
 
       sendTelegramAlert(
         `🚨 *x402 PAID BUT UNCONFIRMED (${chainKey})*\n\n` +
@@ -1404,10 +1549,11 @@ async function handleX402Request(req: Request) {
     );
   }
 
-  const txHash = settleResult.transaction;
-  const payer = settleResult.payer;
+  const txHash = String(settleResult.transaction || '').toLowerCase();
   const explorerUrl = `${explorerBase}/tx/${txHash}`;
-  const settledWallet = (payer || wallet_address || 'UNKNOWN').toLowerCase();
+  // The payer is the SIGNER of the authorization, which the facilitator cannot change — not
+  // the `payer` field of its reply, which is only its own account of the same thing.
+  const settledWallet = (settledAuth?.from || settleResult.payer || wallet_address || 'UNKNOWN').toLowerCase();
 
   // ⚡ WARN BEFORE ZERO, NOT JUST AFTER. "my balance just ran to zero on the facilitator end and
   // the transaction just failed" — the only alert that existed before this fired reactively,
@@ -1440,71 +1586,63 @@ async function handleX402Request(req: Request) {
     }
   }
 
-  const dbPayload = {
-    tx_hash: txHash, request_id: vtRequestId, service_category: serviceCategory || 'UNKNOWN', service_id: serviceID || 'UNKNOWN',
-    variation_code: variation_code, network: network || 'UNKNOWN', blockchain: chainKey,
-    account_number: billersCode || phone || 'N/A', phone: phone || null,
-    // The amount the facilitator ACTUALLY transferred (the payer's signed value), not the
-    // figure we recomputed at settle time — those can differ by an exchange-rate tick, and a
-    // refund issued against the wrong one under- or over-pays the user. See x402Settle.ts.
-    amount_usdt: chargedCrypto, amount_naira: vendAmount, fee_naira: serviceFee, stamp_duty_ngn: stampDutyNgn, status: 'PENDING',
-    wallet_address: settledWallet,
-    customer_name: customer_name || null, customer_address: customer_address || null,
-    source_channel: source_channel || 'WEB', token_used: requestedTokenSymbol,
-    meter_account_type: meter_account_type || null, customer_email: email || null,
-    operator_id: operator_id || null, country_code: country_code || null, product_type_id: product_type_id || null,
-    subscription_type: subscription_type || null,
-    foreign_amount: foreignAmount || null, display_amount: displayAmount || null,
-    payment_method: 'X402',
-  };
+  // 🔐 THE FACILITATOR'S WORD IS NOT THE PROOF (ABAPAY_FULL_AUDIT.md P-7). `success` and
+  // `transaction` came from its reply; the chain is what decides. Require the token's own
+  // Transfer log — signer -> vault, at least the signed amount — in that transaction before
+  // anything is vended. `payTo` is the vault the challenge named and the payer signed over.
+  const transfer = await verifyTokenTransfer(txHash, {
+    blockchain: chainKey,
+    tokenSymbol: requestedTokenSymbol,
+    from: settledWallet,
+    to: payTo,
+    minAmountWei: chargedWei,
+  }, { waitMs: 30_000 });
 
-  await supabase.from('transactions').upsert(dbPayload, { onConflict: 'tx_hash' });
-
-  // Cross-check the payer matches who the frontend claims is paying — mirrors the
-  // SENDER_MISMATCH check in /api/webhook for the contract-call path.
-  const payerMismatch = payer && wallet_address && payer.toLowerCase() !== String(wallet_address).toLowerCase();
-  // Note: this checks blockchain/vendAmount/etc, but NOT tokenSymbol against 'USDC' — the
-  // actual charged token is requestedTokenSymbol (resolved above from the request, falling
-  // back to USDC), which is what really went on-chain. It's used below in place of the raw
-  // client-claimed tokenSymbol for exactly that reason.
-  // The settled chain is whatever chainCfg actually used — cross-check the client's requested
-  // chain agrees, so a Base settlement can't be mislabelled as Celo (or a Base request that
-  // silently fell back to Celo because Base wasn't configured can't vend).
-  const missingBillDetails = requestedChain !== chainKey || vendAmount === null || !serviceID || !billersCode;
-
-  if (payerMismatch || missingBillDetails) {
-    const errorCode = payerMismatch ? 'PAYER_MISMATCH' : 'SETTLED_MISSING_BILL_DETAILS';
-    const reason = payerMismatch
-      ? 'x402 settled but the payer address did not match the wallet the request claimed.'
-      : 'x402 settled but the request lacked real bill details (serviceID/billersCode/amount) — likely a generic x402 client that only resent the payment challenge fields.';
-    console.error('[Pay/x402] Settled payment cannot be vended:', { errorCode, blockchain, requestedChain, chainKey, tokenSymbol, vendAmount, serviceID, billersCode, tx: txHash });
-
-    await supabase.from('transactions').update({ status: 'FAILED_VENDING', error_code: errorCode, api_response: reason }).eq('tx_hash', txHash);
-
-    try {
-      await enqueueRefund({
-        txHash,
-        walletAddress: settledWallet,
-        tokenUsed: requestedTokenSymbol,
-        amountCrypto: chargedCrypto,
-        amountNaira: vendAmount ?? undefined,
-        blockchain: chainKey,
-        reason,
-        vtpassError: errorCode,
-        userMessage: "There was an issue processing your payment.",
-        serviceCategory: serviceCategory || undefined,
-        sourceChannel: source_channel || 'WEB',
-      });
-    } catch (refundErr) {
-      console.error('[Pay/x402] Failed to queue refund for settled-but-unvendable payment:', refundErr);
+  if (!transfer.ok) {
+    if (UNDECIDED_PROOF_FAILURES.has(transfer.code)) {
+      // The chain can't answer yet. Keep the facilitator's hash on the intent and leave it
+      // PENDING — the reconciler re-checks it — instead of either vending on trust or telling a
+      // payer whose money may well have moved that it failed.
+      await supabase.from('transactions').update({ x402_settle_tx: txHash }).eq('id', intentRowId).eq('status', 'PENDING');
+      return NextResponse.json(
+        { success: false, status: 'TIMEOUT', verifying: true, tx_hash: txHash, message: 'Payment sent — confirming it on-chain. Check History shortly; do not pay again.' },
+        { status: 202 },
+      );
     }
+    console.error(`[Pay/x402] Facilitator reported success but the chain disagrees (${chainKey}):`, transfer.code, transfer.detail, txHash);
+    await supabase.from('transactions').update({
+      x402_settle_tx: txHash, status: 'FAILED_VENDING', error_code: 'X402_TX_UNVERIFIED',
+      api_response: `Facilitator reported ${txHash}, but: ${transfer.detail}`.slice(0, 500),
+    }).eq('id', intentRowId).eq('status', 'PENDING');
+    sendTelegramAlert(
+      `🚨 *x402 SETTLEMENT NOT FOUND ON-CHAIN (${chainKey})*\n\nThe facilitator reported success, but \`${transfer.code}\`: ${transfer.detail}\nNothing was vended. Check the facilitator and the payer's balance by hand.\n\n` +
+      `payer \`${settledWallet}\` · ${requestedTokenSymbol} ${chargedCrypto.toFixed(4)}\n🔗 ${explorerUrl}`,
+    ).catch(() => {});
+    return NextResponse.json(
+      // No tx_hash in the body on purpose: x402Pay.ts reads a tx_hash as "money moved", and on
+      // the chain's own evidence it did not arrive where it should have.
+      { x402Version: 1, success: false, status: 'FAILED_VENDING', error: "We couldn't confirm this payment on-chain. It has been flagged for review — don't pay again; contact support if your balance changed.", retryable: false },
+      { status: 402 },
+    );
+  }
 
-    return NextResponse.json({
-      success: false,
-      status: 'FAILED_VENDING',
-      message: payerMismatch ? 'Payer address mismatch. Your payment is being refunded.' : 'Payment settled, but the request was missing bill details — your payment is being refunded automatically.',
-      tx_hash: txHash,
-    }, { status: 400 });
+  // ⚡ CLAIM + LOCK — one conditional write on the intent row: attach the proven hash (the
+  // UNIQUE tx_hash index refuses it if another row already carries it), take PENDING ->
+  // PROCESSING. If the reconciler already picked this intent up, nothing matches and it
+  // finishes the job instead.
+  const { data: lockedRecord, error: lockError } = await supabase.from('transactions')
+    .update({ tx_hash: txHash, status: 'PROCESSING', x402_settle_tx: txHash })
+    .eq('id', intentRowId)
+    .eq('status', 'PENDING')
+    .select()
+    .maybeSingle();
+
+  if (lockError?.code === '23505') {
+    sendTelegramAlert(`🚨 *x402 SETTLEMENT HASH ALREADY CLAIMED (${chainKey})*\n\`${txHash}\` is already attached to another transaction — not vended twice. Check intent \`${intentKey}\`.`).catch(() => {});
+    return NextResponse.json({ success: false, status: 'TIMEOUT', message: 'This payment is already being processed.', tx_hash: txHash });
+  }
+  if (!lockedRecord || lockError) {
+    return NextResponse.json({ success: true, status: 'TIMEOUT', message: 'This payment is already being processed.', tx_hash: txHash });
   }
 
   // 🔐 CUSTOMER VERIFICATION — the same VTpass merchant-verify pass MCP's pay_bill already
@@ -1561,26 +1699,9 @@ async function handleX402Request(req: Request) {
     }
   }
 
-  const { data: lockedRecord, error: lockError } = await supabase
-    .from('transactions')
-    .update({ status: 'PROCESSING', request_id: vtRequestId })
-    .eq('tx_hash', txHash)
-    .eq('status', 'PENDING')
-    .select()
-    .single();
-
-  if (!lockedRecord || lockError) {
-    return NextResponse.json({ success: true, status: 'TIMEOUT', message: 'This payment is already being processed.' });
-  }
-
-  const vendResult = await executeVend({
-    vtRequestId, txHash, serviceID, serviceCategory, network, billersCode, phone,
-    variation_code, subscription_type, amount: chargedCrypto, tokenSymbol: requestedTokenSymbol, vendAmount, displayAmount,
-    foreignAmount, isForeign, operator_id, country_code, product_type_id, email,
-    wallet_address: payer || wallet_address, blockchain: chainKey, source_channel, customer_name, customer_address,
-    baseRate,
-    explorerUrl,
-  });
+  // Vended from the row recorded before settlement — the bill the payer's signature was
+  // collected for — the same rule /api/pay follows.
+  const vendResult = await executeVend(vendInputFromRow(lockedRecord, { txHash, explorerUrl, baseRate }));
 
   // The client never sees this transaction directly (the facilitator submits it, not the
   // browser's wallet) — unlike the contract-call path, so it has to come back explicitly.

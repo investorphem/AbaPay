@@ -43,7 +43,7 @@ is still right — don't just copy Base's `2026-04-01`, it isn't verified for th
 | Address | Contract |
 |---|---|
 | `0x5df8aE2B963165b735B18Ca86B1ea448d2AA032C` | AbaPayV4 — current |
-| `0x42Fa463798Ed129a9B5Ee51721CB6db1bfCBe3b9` | AbaPayV3 — original |
+| `0x42Fa463798Ed129a9B5Ee51721CB6db1bfCBe3b9` | AbaPayV3 — original, retired 2026-09-29 (no tokens, paused; kept for history) |
 
 Configured via `ABAPAY_CELO_CONTRACTS` in `.env.local` (`address=label`, comma-separated), not
 hardcoded in the SQL — see `scripts/dune-celo-setup.mjs`.

@@ -8,6 +8,7 @@ import { enforceRateLimit } from '@/lib/rateLimit';
 import { buildReceiptEmail } from '@/lib/receiptEmail';
 import { Resend } from 'resend';
 import { normalizePurchasedCode, issuesTokenOrPin } from '@/lib/purchasedCode';
+import { recordLateDelivery, recordLateFailure } from '@/lib/providerOutcome';
 
 const resend = new Resend(process.env.RESEND_API_KEY || "re_dummy_key_for_build");
 
@@ -104,15 +105,16 @@ export async function POST(req: Request) {
           return NextResponse.json({ success: true, status: 'PENDING', message: 'Provider is still generating the Token/PIN. Please check back again.' });
       }
 
-      // 🔐 ATOMIC CLAIM: only the first successful requery transitions the record.
-      // Prevents replaying /api/requery to farm points or spam SMS/email receipts.
-      const { data: claimed } = await supabase.from('transactions').update({ 
-        status: 'SUCCESS',
-        purchased_code: dbPurchasedCode,
-        units: vendedUnits?.toString()
-      }).eq('request_id', request_id).neq('status', 'SUCCESS').select();
+      // 🔐 ATOMIC, STATE-AWARE CLAIM: only the first successful requery transitions the record
+      // (no farming points or re-sending receipts by replaying this), and never over a refund —
+      // this used to be `.neq('status', 'SUCCESS')`, which also turned a FAILED_VENDING or
+      // REFUNDED row into SUCCESS. See src/lib/providerOutcome.ts.
+      const outcome = await recordLateDelivery(record, { purchased_code: dbPurchasedCode, units: vendedUnits?.toString() ?? null });
 
-      if (!claimed || claimed.length === 0) {
+      if (outcome === 'FLAGGED') {
+        return NextResponse.json({ success: true, status: record.status, purchased_code: dbPurchasedCode, units: vendedUnits, message: 'The provider delivered this, but its refund is already paid or in flight. Not marked delivered — decide by hand (see the Telegram alert).' });
+      }
+      if (outcome === 'ALREADY') {
         return NextResponse.json({ success: true, status: 'SUCCESS', purchased_code: dbPurchasedCode, units: vendedUnits, message: 'Transaction already completed.' });
       }
 
@@ -166,13 +168,17 @@ export async function POST(req: Request) {
 
       return NextResponse.json({ success: true, status: 'SUCCESS', purchased_code: dbPurchasedCode, units: vendedUnits, earnedPoints: points });
 
-    } else if (actualStatus === 'failed') {
+    } else if (actualStatus === 'failed' || actualStatus === 'reversed') {
 
-      await supabase.from('transactions').update({ status: 'FAILED_VENDING' }).eq('request_id', request_id);
-      
-      try { await sendTelegramAlert(`🚨 *DELAYED TX FAILED (REQUERY)*\n⛓️ *Chain:* ${record.blockchain || 'CELO'}\n🛒 *Product:* ${record.network} ${record.service_category}\n👤 *User:* ${record.account_number}\nVTpass finally rejected this pending transaction. User is ready for a refund.`); } catch (e) {}
+      // Moves the row and QUEUES the refund (this used to mark FAILED_VENDING and alert only,
+      // so the refund never reached the Ops tab). A row already refunded is left alone.
+      const queued = await recordLateFailure(record, `VTpass ${actualStatus} (requery): ${requeryData.response_description || ''}`.trim());
 
-      return NextResponse.json({ success: true, status: 'FAILED_VENDING' });
+      if (queued === 'QUEUED') {
+        try { await sendTelegramAlert(`🚨 *DELAYED TX FAILED (REQUERY)*\n⛓️ *Chain:* ${record.blockchain || 'CELO'}\n🛒 *Product:* ${record.network} ${record.service_category}\n👤 *User:* ${record.account_number}\nVTpass finally rejected this transaction. A refund has been queued — approve it in Admin → Refunds.`); } catch (e) {}
+      }
+
+      return NextResponse.json({ success: true, status: record.status === 'SUCCESS' ? 'REVERSED_NEEDS_REFUND' : 'FAILED_VENDING' });
 
     } else {
       return NextResponse.json({ success: true, status: 'PENDING', message: 'Transaction is still processing at the provider.' });

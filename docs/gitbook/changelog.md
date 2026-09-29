@@ -6,6 +6,41 @@ test-tooling fixes are left out. Full history: [commits on
 GitHub](https://github.com/investorphem/AbaPay/commits/main).
 {% endhint %}
 
+## 2026-09-29
+
+* **x402 records every payment before any money moves.** The payment is written down before
+  the facilitator is asked to settle, so a settlement can no longer happen with no record of it.
+  An interrupted request is finished (or closed, if the authorization expires unspent) by a
+  background reconciler that asks the token whether the authorization was spent.
+* **x402 settlements are confirmed on-chain before delivery.** The facilitator's reply alone no
+  longer triggers a vend: the token's own `Transfer` log (payer to vault, full amount) must be
+  in the reported transaction. A settlement the chain can't confirm yet returns `202` with
+  `verifying: true`. Don't pay again. See [What the retry can answer](x402.md#what-the-retry-can-answer).
+* **Unpayable x402 requests are refused before settlement.** A request with no bill details, or
+  signed by a different wallet than its `wallet_address`, now gets a `400` and is never charged.
+  Previously it was settled and refunded.
+* **`check_balance` shows the on-chain maximum per agent payment.** A new "Max per payment"
+  column reports each vault's `maxAgentPaymentPerTx`. An agent payment above it is now refused up
+  front, naming the limit, instead of being broadcast and reverting on-chain. That limit is now
+  **50** (USDC, USD₮, USA₮) on both vaults, up from 10.
+* **USDm is no longer accepted by any vault.** Pay in USDC, USD₮ or USA₮. The retired Celo
+  vaults (V3 and the original V1) no longer accept any token.
+* **Paused services are refused before payment on every rail.** The web app's payment API and
+  the x402 endpoint now check the same service switches, and VTpass's live amount limits, that
+  chat and MCP always did. That check happens before anything is signed or settled. A 402
+  challenge is still returned to discovery crawlers.
+* **Sales pause automatically when a provider's float runs out.** The first "insufficient
+  balance" answer from VTpass or Monnify pauses that provider's services until the float is
+  topped up. Payers are told "temporarily unavailable" up front instead of being charged and
+  refunded.
+* **"Accepted" is no longer reported as "delivered".** When the biller accepts an order but
+  hasn't fulfilled it yet, or doesn't answer at all, the payment now shows as being delivered
+  rather than as a success. AbaPay then confirms the real outcome with the biller. An order is
+  never re-sent in that state, so it can't be delivered twice.
+* **The web app's payment check is stricter.** The web app's contract-call payments are now
+  verified against the vault's own `PaymentReceived` event (token, amount, account, service and
+  payer), and the bill delivered is the one stored when the payment was started.
+
 ## 2026-09-23
 
 * **x402 challenge carries a `hint` field.** A wallet that can sign EIP-3009 but has no client

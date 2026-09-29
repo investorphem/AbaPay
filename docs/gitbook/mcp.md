@@ -26,7 +26,7 @@ Claude Desktop / Code: Settings → Connectors → Add custom connector → past
 | Tool | What it does |
 |---|---|
 | `describe_capabilities` | Human-readable menu of what AbaPay can pay and what's currently paused. |
-| `check_balance` | The linked wallet's live balance and approved agent limit, per token, per chain. |
+| `check_balance` | The linked wallet's live balance, approved agent limit, and the vault's on-chain maximum for a single agent payment, per token, per chain. A bill above that maximum can't be paid through the API; it is refused before anything is sent. |
 | `list_plans` | Real, currently purchasable DATA / CABLE / EDUCATION plans with exact variation codes. |
 | `list_international_options` | Browses the international catalogue — country → product type → operator → priced plan. |
 | `transaction_history` | Recent payments, paginated. |

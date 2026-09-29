@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 import { supabaseAdmin as supabase } from '@/utils/supabase';
 import { verifyAdminRequest } from '@/utils/adminAuth';
+import { resetCircuit } from '@/lib/circuitBreaker';
 
 export async function POST(req: Request) {
     // 🔐 SECURITY: block anyone who is not the contract owner
@@ -37,6 +38,15 @@ export async function POST(req: Request) {
             if (error) {
                 return NextResponse.json({ success: false, message: error.message });
             }
+        } else if (action === 'RESET_PROVIDER_CIRCUIT') {
+            // Manual override for the automatic float breaker (src/lib/circuitBreaker.ts) — for when
+            // a provider has been funded but its balance endpoint can't confirm it yet.
+            const provider = payload?.provider;
+            if (provider !== 'VTPASS' && provider !== 'MONNIFY') {
+                return NextResponse.json({ success: false, message: "provider must be VTPASS or MONNIFY." }, { status: 400 });
+            }
+            const changed = await resetCircuit(provider, `Reset by the operator (${auth.address || 'admin'}).`);
+            return NextResponse.json({ success: true, changed });
         } else {
             return NextResponse.json({ success: false, message: "Unknown action provided." }, { status: 400 });
         }

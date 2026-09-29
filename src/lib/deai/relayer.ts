@@ -44,7 +44,46 @@ const ABAPAY_V3_ABI = [
     stateMutability: 'view',
     type: 'function',
   },
+  {
+    inputs: [{ internalType: 'address', name: '', type: 'address' }],
+    name: 'maxAgentPaymentPerTx',
+    outputs: [{ internalType: 'uint256', name: '', type: 'uint256' }],
+    stateMutability: 'view',
+    type: 'function',
+  },
 ] as const;
+
+// The vault's own per-payment ceiling changes only by an owner transaction, so a short cache is
+// safe and keeps this off the hot path of every agent payment.
+const CAP_CACHE_MS = 10 * 60 * 1000;
+const capCache = new Map<string, { at: number; raw: bigint; decimals: number }>();
+
+/**
+ * The vault's on-chain ceiling on a SINGLE agent payment (`maxAgentPaymentPerTx`), in human units.
+ *
+ * 🔴 WHY THIS IS READ, NOT ASSUMED (ABAPAY_FULL_AUDIT.md P-10). The vaults cap an agent payment at
+ * 10 tokens while the platform's own limit (agent_max_ngn_per_tx) allows ₦50,000 — about $37. So
+ * any agent payment over ~$10 cleared every server-side gate, cost the relayer gas, and then
+ * reverted with ExceedsMaxAgentPayment. The contract is the authority on this number; reading it
+ * lets the agent refuse up front and say what the real limit is. `null` = could not read.
+ */
+export async function getMaxAgentPayment(tokenSymbol: string, blockchain: string = DEFAULT_CHAIN): Promise<number | null> {
+  const contract = contractAddressFor(blockchain);
+  const token = resolveTokenOnChain(tokenSymbol, blockchain, isMainnetEnv());
+  if (!contract || !token) return null;
+  const key = `${blockchain}:${token.address}`;
+  const hit = capCache.get(key);
+  if (hit && Date.now() - hit.at < CAP_CACHE_MS) return Number(formatUnits(hit.raw, hit.decimals));
+  try {
+    const raw = (await getPublicClient(blockchain).readContract({
+      address: contract, abi: ABAPAY_V3_ABI, functionName: 'maxAgentPaymentPerTx', args: [token.address as `0x${string}`],
+    })) as bigint;
+    capCache.set(key, { at: Date.now(), raw, decimals: token.decimals });
+    return Number(formatUnits(raw, token.decimals));
+  } catch {
+    return null;
+  }
+}
 
 function contractAddressFor(blockchain: string): `0x${string}` | null {
   const addr =
@@ -185,6 +224,18 @@ export async function relayPayBillFor(params: {
       return {
         success: false,
         message: `Your approved agent spend limit is too low. Remaining: ${allowance.remaining.toFixed(2)} ${tokenSymbol}. Raise it in the app to continue.`,
+      };
+    }
+
+    // The vault's own per-payment ceiling — refused here, before gas is spent on a transaction
+    // the contract would revert (ExceedsMaxAgentPayment). Unreadable = let the contract decide.
+    const cap = await getMaxAgentPayment(tokenSymbol, blockchain);
+    if (cap !== null && Number(amountCrypto) > cap) {
+      return {
+        success: false,
+        message: cap === 0
+          ? `Agent payments in ${tokenSymbol} on ${blockchain} are switched off on-chain right now. Pay this one in the app.`
+          : `That's above the ${cap} ${tokenSymbol} per-payment limit for agent payments on ${blockchain}. Pay this one in the app, or split it into smaller payments.`,
       };
     }
 

@@ -348,6 +348,15 @@ float every time `/api/cleanup` runs (same external cron already recommended for
 transaction sweep) and sends a Telegram alert when either drops below its threshold, with a 6h
 cooldown per provider so a cron running every few minutes doesn't spam the same warning.
 
+**Automatic float breaker:**
+```
+CIRCUIT_BREAKER_ENABLED=true   # default true; set "false" to turn the breaker off
+```
+When VTpass answers `018` or Monnify answers `D04`, that provider's services are refused before
+payment until its balance is back above the threshold above. The same thresholds decide when
+sales resume. Requires migration `028_provider_circuits.sql`. Without it, the breaker never
+opens, and nothing else is affected.
+
 ---
 
 ## 10. Telegram

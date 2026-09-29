@@ -450,7 +450,7 @@ hold keys. Two paths exist:
    below), the relayer calls `payBillFor()` directly — no deep link, no signature at payment
    time — bounded entirely by the allowance the user set and revocable by them at any moment.
    Before broadcasting, a `preflight_<wallet>_<timestamp>` transaction row is written (the same
-   pattern the web app uses ahead of a signature), then renamed to the real tx hash once
+   idea as the web app's server-issued `preflight_<uuid>` intent ahead of a signature), then renamed to the real tx hash once
    confirmed — so the payment is vended through the exact same verified pipeline as every other
    rail, and a stale/abandoned attempt is swept automatically rather than left dangling. If the
    RPC can't confirm the receipt in time (a network hiccup right after broadcast — including
@@ -780,8 +780,8 @@ npx hardhat run scripts/update8004uri.ts --network <network> # Re-push the agent
 
 `contracts/AbaPayV2.sol` is a security-hardened successor to the original `AbaPay.sol`,
 addressing the hardening gaps below. **`payBill`'s signature and the
-`PaymentReceived` event are byte-for-byte identical to V1**, so the frontend, the `/api/pay`
-calldata decoder, and the webhook's event cross-validation all work with no backend changes.
+`PaymentReceived` event are byte-for-byte identical to V1**, so the frontend and the shared
+`PaymentReceived` verifier (`src/lib/paymentProof.ts`) work with no backend changes.
 
 | Hardening | Why |
 |---|---|
@@ -826,7 +826,10 @@ the app. V3 adds a **session-key / delegated-spend** pattern instead:
 **⚠️ Not audited.** The contract itself carries this warning in its header. Deploy to testnet for
 demos; on mainnet, keep `maxAgentPaymentPerTx` and `maxRefundPerTx` small (`scripts/deployV4.ts`
 defaults to a $10-equivalent per token) until a professional audit is done, then raise them via
-`setMaxAgentPayment` / `setMaxRefund`.
+`setMaxAgentPayment` / `setMaxRefund`. The live V4 vaults are set to **50** per agent payment
+and **400** per refund for each supported stablecoin. The expected values are in
+[`config/vaults.json`](config/vaults.json), and `node scripts/vault-config.mjs` diffs them
+against the chain.
 
 `payBillFor` emits the same `PaymentReceived` event as V1/V2 (so the webhook needs no changes),
 plus an additional `AgentPayment` event so the backend/any observer can distinguish "the user
@@ -836,8 +839,9 @@ signed" from "the agent spent an allowance."
 
 V4 is V3 plus one change: the withdrawal timelock is no longer a hardcoded 24 hours. It is a
 variable, `withdrawalDelay`, that the owner can raise, lower, or set to **0** via
-`setWithdrawalDelay(n)`. It still defaults to 24h, so nothing changes unless the owner
-deliberately changes it. V4 is what is deployed on **both mainnets**:
+`setWithdrawalDelay(n)`. A fresh deploy defaults to 24h. **Both live vaults run at 0**, a deliberate owner
+choice, so withdrawals from them are instant (see the warning below). V4 is what is deployed on
+**both mainnets**:
 
 | Chain | AbaPayV4 |
 |---|---|
@@ -846,7 +850,8 @@ deliberately changes it. V4 is what is deployed on **both mainnets**:
 
 ⚠️ The **previous Celo contract `0x42Fa4637…` is a V3** — it has no `setWithdrawalDelay`, so its
 24h timelock is fixed and it can never be made instant. That is why Celo was redeployed rather
-than reconfigured.
+than reconfigured. It is now **retired**: every token is unsupported, its relayer is `0x0` and it
+is paused. The old Celo V1 (`0x1d125198…`) no longer accepts any token either.
 
 The queue itself is not removable — it is compiled into the bytecode and there is no direct
 `withdraw()`. At delay 0 a withdrawal is `queueWithdrawal` then `executeWithdrawal` back to
@@ -1418,8 +1423,23 @@ refused when **either** level is off — the same `||` the web app uses.
 `killSwitchKeysFor(intent, provider)` in `src/lib/serviceRules.ts` maps an agent intent onto
 exactly those keys, normalising the provider through `resolveServiceId` first so a loose
 `"ikeja"` from chat resolves to the `ELEC_ikeja-electric` key the operator actually toggled.
-`checkServiceAllowed()` is then the gate every non-web channel must pass. Settings are cached
-for **30 seconds**, so flipping a switch takes effect within half a minute everywhere.
+`checkServiceAllowed()` is then the gate chat, MCP, A2A and the scheduler pass. The web rails
+(`/api/pay` and `/api/pay/x402`) pass `checkWebPayment()`, which uses the same switches plus
+VTpass's live per-provider amount limits, **before** anything is signed or settled. They used to
+rely on the web page greying out its button, so a direct API or x402 caller could pay for a
+switched-off service. International follows the web app's own rule: it is off unless
+`MASTER_INTERNATIONAL` exists and is not `false`. Settings are cached for **30 seconds**, so
+flipping a switch takes effect within half a minute everywhere.
+
+**Automatic float breakers.** When VTpass answers `018` (our float is empty) or Monnify answers
+`D04`, a breaker in `platform_settings.provider_circuits` opens (`src/lib/circuitBreaker.ts`,
+migration 028). While it's open, every service that provider fulfils is refused on every rail
+**before the customer pays**, where previously each payer was charged and refunded. The breaker
+closes by itself once the provider's balance is back above its alert threshold. The scheduled
+balance check notices it, and so does a throttled probe when a customer next hits the breaker.
+An operator can also close it with the admin action `RESET_PROVIDER_CIRCUIT`. Breakers are
+stored apart from `kill_switches` and never change them, so an operator's own switch always wins.
+`CIRCUIT_BREAKER_ENABLED=false` turns the feature off.
 
 > ⚠️ **Why this mapping matters:** `killSwitchKeysFor()` is what makes "pause Electricity" in the
 > dashboard actually stop chat, MCP and the autonomous scheduler, not just the website — all four
@@ -1519,8 +1539,8 @@ The app ships with Farcaster frame metadata (`public/.well-known/farcaster.json`
 ## 🛡️ Security Architecture
 
 * **No-Log Keys:** VTpass secret keys, Supabase service role key, Telegram tokens, and all other secrets are strictly contained within server-side API routes — never exposed to the client bundle.
-* **Replay Protection:** Every blockchain transaction hash is recorded and checked against a **persistent ledger** (a Supabase table with a unique constraint on the tx hash) before a utility vend is triggered. ⚠️ In-memory tracking alone is **not safe** in serverless environments: state resets on cold starts and isn't shared across concurrent instances, which would allow the same transaction hash to be replayed for multiple vends.
-* **On-Chain Verification:** Every payment is independently verified against the blockchain (transaction receipt, contract address, and amount) server-side before any bill is vended — the client-submitted payload is never trusted blindly. Under Base gas sponsorship, the top-level transaction's `to` can be a bundler/EntryPoint contract rather than the AbaPay contract itself, so the webhook additionally decodes the transaction's logs and requires that the AbaPay contract genuinely emitted `PaymentReceived` — this holds regardless of how deeply nested the call was.
+* **Replay Protection:** Every blockchain transaction hash is recorded in a **persistent ledger** (a Supabase table with a unique constraint on the tx hash), and a hash can back at most one transaction. The web app's payment intent is created under an id the server issues and written as an insert (never an overwrite). A database trigger (`supabase/migrations/026_transaction_state_guard.sql`) refuses to move a finished transaction back to pending, to change a real tx hash, or to change a transaction's provider reference once it has left pending, so a settled or refunded payment can't be re-vended. ⚠️ In-memory tracking alone is **not safe** in serverless environments: state resets on cold starts and isn't shared across concurrent instances.
+* **On-Chain Verification:** Before any bill is vended, the server reads the transaction receipt and requires the configured AbaPay vault to have emitted `PaymentReceived` for the **token, amount, account, service and payer recorded when the payment was started**, not the values in the request (`src/lib/paymentProof.ts`). Decimals come from the token the event names, so a payment in a different token can't pass for one in another. The event is emitted the same way for a direct wallet call, a sponsored ERC-4337 UserOperation on Base, or the agent relayer. The bill that is vended is read from the server's stored record, not from the client.
 * **Event Cross-Validation:** The webhook decodes the `PaymentReceived` event and requires that its **payer, token, amount, and account number all match the pending record** before vending. This blocks the class of attack where a user has a small pending intent and then manually sends a different (or larger/smaller) transfer to the contract hoping it gets attached to the wrong record.
 * **Stale Intent Expiry:** Pre-flight intents (records created before signing) that never result in an on-chain transaction are automatically expired by a scheduled cleanup (`/api/cleanup`, every 15 min) so they don't linger as `PENDING` forever. This only ever touches `preflight_`-prefixed rows, so a real broadcast transaction can never be expired.
 * **Webhook Acknowledgment:** The webhook always returns 2xx once a request passes signature verification, even when no matching transaction record is found (test pings, unrelated activity, or a payment intent that hasn't synced yet are normal, expected outcomes — not delivery failures). Returning a non-2xx here would cause Alchemy to eventually auto-disable the webhook after repeated "failures" that were never really failures.

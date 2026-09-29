@@ -1,6 +1,7 @@
 import 'server-only';
 import { supabaseAdmin } from '@/utils/supabase';
 import { resolveServiceId } from '@/lib/deai/services';
+import { isCircuitOpen, providerForIntent } from '@/lib/circuitBreaker';
 
 // ⚡ SHARED SERVICE RULES — one source of truth for the app AND the agent.
 //
@@ -215,6 +216,115 @@ export async function checkServiceAllowed(
       allowed: false,
       reason: `${what} payments are temporarily unavailable while we resolve an issue with our provider. Please try again shortly.`,
     };
+  }
+
+  const circuit = await circuitGate(intent, keys.label);
+  if (circuit) return circuit;
+
+  return { allowed: true };
+}
+
+/**
+ * The automatic provider breaker (src/lib/circuitBreaker.ts): refuse a service whose provider's
+ * float is exhausted, before anyone pays for it. An open breaker first gets one throttled chance
+ * to notice a top-up, so recovery doesn't wait on the scheduled sweep.
+ */
+async function circuitGate(intent: string, label: string): Promise<RuleCheck | null> {
+  const provider = providerForIntent(intent);
+  if (!(await isCircuitOpen(provider))) return null;
+  try {
+    const { probeCircuitRecovery } = await import('@/lib/balanceAlerts');
+    await probeCircuitRecovery(provider);
+  } catch { /* a failed probe leaves the breaker as it is */ }
+  if (!(await isCircuitOpen(provider))) return null;
+  return {
+    allowed: false,
+    reason: `${label} payments are temporarily unavailable while we top up with our provider. Please try again shortly.`,
+  };
+}
+
+// ⚡ THE WEB RAILS' SERVER-SIDE GATE (ABAPAY_FULL_AUDIT.md P-8).
+//
+// 🔴 THE GAP: /api/pay and /api/pay/x402 never consulted the kill switches — only page.tsx did,
+// by greying out its own button. Anything that called the API directly (an x402 agent, a stale
+// tab, curl) could pay for a service the operator had switched off; VTpass then refused the
+// vend, and the payment went round the manual refund queue. The chat/MCP/scheduler path has
+// always been gated (checkServiceAllowed above); the web rails now are too, BEFORE anything is
+// signed or settled.
+//
+// Deliberately NOT the agent's amount rules. The web app legitimately permits more than the
+// agent ceiling (₦1,000,000 electricity, ₦5,000,000 bank transfer — see maxAmountFor's note in
+// src/lib/parity.ts), so borrowing that flat ₦500,000 cap would refuse real payments the form
+// allows. Only the LIVE per-provider limits VTpass itself publishes are enforced here — a bill
+// outside those is one VTpass will reject at vend time anyway, i.e. a guaranteed refund.
+
+/** The web app's uiCategory / the x402 serviceCategory -> the agent intent the switches are keyed by. */
+export function intentForWebCategory(serviceCategory: string | null | undefined, serviceID?: string | null): string | null {
+  const c = String(serviceCategory || '').toUpperCase();
+  if (serviceID === 'foreign-airtime' || c === 'INTERNATIONAL' || c.startsWith('INTL')) return 'INTERNATIONAL';
+  switch (c) {
+    case 'AIRTIME': return 'VEND_AIRTIME';
+    case 'INTERNET':
+    case 'DATA': return 'VEND_DATA';
+    case 'ELECTRICITY': return 'ELECTRICITY';
+    case 'CABLE': return 'TV';
+    case 'EDUCATION': return 'EDUCATION';
+    case 'BANK': return 'BANK_TRANSFER';
+    default: return null;
+  }
+}
+
+export interface WebPaymentGate {
+  allowed: boolean;
+  code?: 'SERVICE_UNAVAILABLE' | 'AMOUNT_OUT_OF_RANGE' | 'UNKNOWN_SERVICE';
+  reason?: string;
+}
+
+export async function checkWebPayment(p: {
+  serviceCategory: string | null | undefined;
+  serviceID: string | null | undefined;
+  amountNgn: number;
+  /** A fixed-price plan (data bundle, cable package): its price is the price, no range check. */
+  isFixedPlan?: boolean;
+}): Promise<WebPaymentGate> {
+  const intent = intentForWebCategory(p.serviceCategory, p.serviceID);
+  if (!intent) {
+    return { allowed: false, code: 'UNKNOWN_SERVICE', reason: `Unknown service category "${p.serviceCategory}".` };
+  }
+
+  if (intent === 'INTERNATIONAL') {
+    // Mirrors page.tsx's isCurrentServiceDisabled exactly: international is OFF unless the
+    // switch exists and is not false (a missing key means "never enabled", not "enabled").
+    const rules = await getServiceRules();
+    const sw = rules.killSwitches;
+    if (!Object.prototype.hasOwnProperty.call(sw, 'MASTER_INTERNATIONAL') || sw.MASTER_INTERNATIONAL === false) {
+      return { allowed: false, code: 'SERVICE_UNAVAILABLE', reason: 'International top-ups are temporarily unavailable. Nothing was charged.' };
+    }
+    const circuit = await circuitGate('INTERNATIONAL', 'International top-up');
+    if (circuit) return { allowed: false, code: 'SERVICE_UNAVAILABLE', reason: `${circuit.reason} Nothing was charged.` };
+    return { allowed: true };
+  }
+
+  const gate = await checkServiceAllowed(intent, p.serviceID || null);
+  if (!gate.allowed) {
+    return { allowed: false, code: 'SERVICE_UNAVAILABLE', reason: `${gate.reason} Nothing was charged.` };
+  }
+
+  if (!p.isFixedPlan && p.serviceID) {
+    try {
+      const { limitsForIntent } = await import('@/lib/vtpassCatalog');
+      const live = await limitsForIntent(intent, p.serviceID);
+      if (live.min && p.amountNgn < live.min) {
+        return { allowed: false, code: 'AMOUNT_OUT_OF_RANGE', reason: `The minimum for this provider is ₦${live.min.toLocaleString()}. Nothing was charged.` };
+      }
+      if (live.max && p.amountNgn > live.max) {
+        return { allowed: false, code: 'AMOUNT_OUT_OF_RANGE', reason: `The maximum for this provider is ₦${live.max.toLocaleString()} per payment. Nothing was charged.` };
+      }
+    } catch (err) {
+      // A catalogue outage must not block payments the switches allow — same stance as
+      // parity.ts's checkAmountLive.
+      console.error('[Rules] live limit lookup failed for the web gate, skipping the range check:', err);
+    }
   }
 
   return { allowed: true };
