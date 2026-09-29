@@ -51,6 +51,7 @@ class Query implements PromiseLike<{ data: any; error: any }> {
   in(col: string, vs: any[]) { this.filters.push((r) => vs.includes(r[col])); return this; }
   like(col: string, pat: string) { const re = likeToRegex(pat, false); this.filters.push((r) => re.test(String(r[col] ?? ''))); return this; }
   ilike(col: string, pat: string) { const re = likeToRegex(pat, true); this.filters.push((r) => re.test(String(r[col] ?? ''))); return this; }
+  is(col: string, v: null | boolean) { this.filters.push((r) => (v === null ? r[col] == null : r[col] === v)); return this; }
   not(col: string, op: string, v: any) {
     if (op === 'like') { const re = likeToRegex(v, false); this.filters.push((r) => !re.test(String(r[col] ?? ''))); }
     else if (op === 'is') this.filters.push((r) => (v === null ? r[col] != null : r[col] !== v));
