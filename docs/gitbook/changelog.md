@@ -19,6 +19,9 @@ GitHub](https://github.com/investorphem/AbaPay/commits/main).
 * **Unpayable x402 requests are refused before settlement.** A request with no bill details, or
   signed by a different wallet than its `wallet_address`, now gets a `400` and is never charged.
   Previously it was settled and refunded.
+* **`check_balance` shows the on-chain maximum per agent payment.** A new "Max per payment"
+  column reports each vault's `maxAgentPaymentPerTx`. An agent payment above it is now refused up
+  front, naming the limit, instead of being broadcast and reverting on-chain.
 * **Paused services are refused before payment on every rail.** The web app's payment API and
   the x402 endpoint now check the same service switches, and VTpass's live amount limits, that
   chat and MCP always did. That check happens before anything is signed or settled. A 402

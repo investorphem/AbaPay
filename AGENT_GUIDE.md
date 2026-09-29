@@ -82,6 +82,13 @@ to any address. That line is not negotiable.
 **The top four are the real protection.** The rest are operational convenience — valuable, but
 they are not what you rely on when things go wrong.
 
+The per-transaction ceiling is the vault's `maxAgentPaymentPerTx`, currently **10 tokens** per
+agent payment on every vault. That is lower than the database cap (`agent_max_ngn_per_tx`).
+`check_balance` reports it per token as "Max per payment". The relayer reads it before
+broadcasting, so a bill above it is refused with that limit named and no transaction is sent,
+instead of reverting on-chain. Raising it is an owner transaction; see
+`scripts/vault-config.mjs`.
+
 ---
 
 ## 4. Setup

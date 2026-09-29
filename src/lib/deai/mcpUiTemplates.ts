@@ -352,7 +352,8 @@ export const MCP_UI_CARD_HTML = `<!DOCTYPE html>
     for (var i = 0; i < toks.length; i++) {
       var t = toks[i];
       var label = t.symbol + (t.symbol === sc.defaultToken ? ' (default)' : '');
-      var value = t.balance + ' · limit ' + (t.limit === null || t.limit === undefined ? 'unavailable' : t.limit);
+      var value = t.balance + ' · limit ' + (t.limit === null || t.limit === undefined ? 'unavailable' : t.limit)
+        + (t.maxPerPayment === null || t.maxPerPayment === undefined ? '' : ' · max ' + t.maxPerPayment + ' per payment');
       html += detailRow(label, value);
     }
     html += '</div>';
