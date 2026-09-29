@@ -167,11 +167,35 @@ export async function executeVend(input: VendInput): Promise<VendResult> {
     payRes = await fetch(`${baseUrl}/pay`, { method: 'POST', headers: getHeaders(), body: JSON.stringify(vtpassPayload) });
     payData = await payRes.json();
   } catch (e: any) {
-    await supabase.from('transactions').update({ status: 'PENDING' }).eq('tx_hash', txHash);
+    // 🔴 AN UNANSWERED /pay IS AN UNKNOWN OUTCOME, NOT A FAILED ONE (ABAPAY_FULL_AUDIT.md P-4).
+    // This used to put the row back to PENDING — which let the next settle or webhook re-claim
+    // it and send VTpass a SECOND order for a bill the first one may already have delivered.
+    // The row stays PROCESSING (nothing can re-lock it), the request_id VTpass was sent stays
+    // put, and src/lib/reconcileStuck.ts resolves it by REQUERY — never by paying again.
+    console.warn('[Vend] VTpass /pay unanswered — left PROCESSING for requery:', txHash, e?.message);
+    await supabase.from('transactions').update({
+      error_code: 'PROVIDER_NO_RESPONSE',
+      api_response: `VTpass /pay did not answer (${String(e?.message || 'no response').slice(0, 200)}). Outcome unknown — resolve by requery, never by re-sending.`,
+    }).eq('tx_hash', txHash);
     return { success: true, status: 'TIMEOUT', message: 'Network slow. Finishing in background.' };
   }
 
-  if (payData.code === '000' || payData.code === '099') {
+  // 🔴 "ACCEPTED" IS NOT "DELIVERED" (ABAPAY_FULL_AUDIT.md B-7). VTpass answers 099 — and 000
+  // with a pending/initiated status — for an order it has taken but not yet fulfilled. Those were
+  // recorded as SUCCESS here (while the webhook's own vend copy correctly held them), so a vend
+  // that later failed at the provider read as delivered. They stay PROCESSING now; the VTpass
+  // push (src/app/api/webhook/vtpass) or the requery sweep moves them on. A 000 with no status at
+  // all is still treated as delivered, exactly as before.
+  const providerStatus = String(payData?.content?.transactions?.status || '').toLowerCase();
+  if (payData.code === '099' || (payData.code === '000' && ['pending', 'initiated', 'processing'].includes(providerStatus))) {
+    await supabase.from('transactions').update({
+      error_code: 'PROVIDER_PENDING',
+      api_response: `VTpass accepted the order (${payData.code}${providerStatus ? `, ${providerStatus}` : ''}) and has not delivered it yet.`,
+    }).eq('tx_hash', txHash);
+    return { success: true, status: 'TIMEOUT', request_id: vtRequestId, message: 'Your purchase is being delivered — you will get your receipt shortly.' };
+  }
+
+  if (payData.code === '000') {
     let dbPurchasedCode = null; let vendedUnits = null; let alertTokenRef = 'Success';
 
     if (serviceCategory === 'ELECTRICITY' && !isForeign) {

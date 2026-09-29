@@ -19,6 +19,10 @@ GitHub](https://github.com/investorphem/AbaPay/commits/main).
 * **Unpayable x402 requests are refused before settlement.** A request with no bill details, or
   signed by a different wallet than its `wallet_address`, now gets a `400` and is never charged.
   Previously it was settled and refunded.
+* **"Accepted" is no longer reported as "delivered".** When the biller accepts an order but
+  hasn't fulfilled it yet, or doesn't answer at all, the payment now shows as being delivered
+  rather than as a success. AbaPay then confirms the real outcome with the biller. An order is
+  never re-sent in that state, so it can't be delivered twice.
 * **The web app's payment check is stricter.** The web app's contract-call payments are now
   verified against the vault's own `PaymentReceived` event (token, amount, account, service and
   payer), and the bill delivered is the one stored when the payment was started.
