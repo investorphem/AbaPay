@@ -10,6 +10,7 @@ import { ABAPAY_CONTRACT_ABI_EVENTS, resolveTokenOnChain } from '@/constants';
 import { cleanupStalePreflights } from '@/lib/cleanupPreflights';
 import { reconcileStuckProcessing } from '@/lib/reconcileStuck';
 import { reconcileRecordedRefunds } from '@/lib/refundVerify';
+import { reconcileX402Intents } from '@/lib/reconcileX402';
 import { resolveChain, getPublicClient, explorerBaseFor } from '@/lib/chain';
 import { buildReceiptEmail } from '@/lib/receiptEmail';
 import { enqueueRefund } from '@/lib/refunds';
@@ -115,6 +116,9 @@ export async function POST(req: Request) {
         // the operator's connection dropped). Without this the money is gone from the vault and
         // the queue still says the user is owed — see src/lib/refundVerify.ts.
         reconcileRecordedRefunds().catch(() => {});
+        // And x402 payments whose request died between recording the intent and vending it —
+        // see src/lib/reconcileX402.ts. Same throttle, same fire-and-forget.
+        reconcileX402Intents().catch(() => {});
 
         // Extract the user's wallet address from Alchemy payload to find abandoned preflights
         const fromAddress = activity.fromAddress || null;
@@ -155,6 +159,10 @@ export async function POST(req: Request) {
                         .ilike('wallet_address', fromAddress)
                         .eq('status', 'PENDING')
                         .like('tx_hash', 'preflight_%')
+                        // An x402 intent is not a contract-call preflight: its settlement has no
+                        // PaymentReceived event, so "rescuing" one here would fail it as
+                        // NO_CONTRACT_EVENT mid-flight. src/lib/reconcileX402.ts owns those.
+                        .not('tx_hash', 'like', 'preflight_x402_%')
                         .limit(1)
                         .maybeSingle();
                     hasRescuable = !!pendingPreflight;
@@ -191,6 +199,7 @@ export async function POST(req: Request) {
                     .ilike('wallet_address', fromAddress) // ⚡ case-insensitive: Alchemy normalizes addresses to lowercase, but stored records may be checksummed mixed-case
                     .eq('status', 'PENDING')
                     .like('tx_hash', 'preflight_%')
+                    .not('tx_hash', 'like', 'preflight_x402_%') // see the fast pre-check above
                     .order('created_at', { ascending: false })
                     .limit(1)
                     .single();

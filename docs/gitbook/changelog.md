@@ -6,6 +6,23 @@ test-tooling fixes are left out. Full history: [commits on
 GitHub](https://github.com/investorphem/AbaPay/commits/main).
 {% endhint %}
 
+## 2026-09-29
+
+* **x402 records every payment before any money moves.** The payment is written down before
+  the facilitator is asked to settle, so a settlement can no longer happen with no record of it.
+  An interrupted request is finished (or closed, if the authorization expires unspent) by a
+  background reconciler that asks the token whether the authorization was spent.
+* **x402 settlements are confirmed on-chain before delivery.** The facilitator's reply alone no
+  longer triggers a vend: the token's own `Transfer` log (payer to vault, full amount) must be
+  in the reported transaction. A settlement the chain can't confirm yet returns `202` with
+  `verifying: true`. Don't pay again. See [What the retry can answer](x402.md#what-the-retry-can-answer).
+* **Unpayable x402 requests are refused before settlement.** A request with no bill details, or
+  signed by a different wallet than its `wallet_address`, now gets a `400` and is never charged.
+  Previously it was settled and refunded.
+* **The web app's payment check is stricter.** The web app's contract-call payments are now
+  verified against the vault's own `PaymentReceived` event (token, amount, account, service and
+  payer), and the bill delivered is the one stored when the payment was started.
+
 ## 2026-09-23
 
 * **x402 challenge carries a `hint` field.** A wallet that can sign EIP-3009 but has no client

@@ -31,11 +31,17 @@ export async function cleanupStalePreflights(opts: { force?: boolean } = {}) {
 
   const cutoff = new Date(now - STALE_MINUTES * 60 * 1000).toISOString();
 
+  // 🔴 x402 INTENTS ARE NOT ABANDONED PREFLIGHTS. A `preflight_x402_…` row is written after the
+  // payer SIGNED, immediately before the facilitator moves the money (see /api/pay/x402), so
+  // "no hash after 20 minutes" says nothing about whether it was paid — only the token's
+  // authorizationState does. Expiring one here would close a row whose payment may have landed.
+  // src/lib/reconcileX402.ts owns them.
   const { data: expired, error } = await supabase
     .from('transactions')
     .update({ status: 'EXPIRED', error_code: 'PREFLIGHT_UNCONFIRMED', api_response: 'No on-chain transaction observed — user never completed payment.' })
     .eq('status', 'PENDING')
     .like('tx_hash', 'preflight_%')
+    .not('tx_hash', 'like', 'preflight_x402_%')
     .lt('created_at', cutoff)
     .select('id');
 
