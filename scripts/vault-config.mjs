@@ -12,6 +12,7 @@
 //
 //   node scripts/vault-config.mjs                 # human-readable diff + transactions
 //   node scripts/vault-config.mjs --safe-json     # also write Safe Transaction Builder files
+//   node scripts/vault-config.mjs --plan-json f   # also write the ordered transactions as JSON
 //
 // Why each expected value is what it is: ABAPAY_IMPLEMENTATION_PLAN.md M0.3.
 
@@ -177,6 +178,16 @@ if (txs.length) {
 if (problems.length) {
   console.log('NOT FIXABLE BY THIS SCRIPT — needs a decision:');
   problems.forEach((p) => console.log(`  • ${p}`));
+}
+
+// --plan-json <file>: the ordered transactions as plain JSON, for whatever sends them.
+const planIdx = process.argv.indexOf('--plan-json');
+if (planIdx !== -1 && process.argv[planIdx + 1]) {
+  writeFileSync(process.argv[planIdx + 1], JSON.stringify(txs.map((t) => ({
+    chain: t.chain, vault: t.vault, to: t.to, fn: t.fn,
+    args: t.args.map((a) => (typeof a === 'bigint' ? a.toString() : a)), data: t.data, why: t.why,
+  })), null, 2));
+  console.log(`Wrote ${txs.length} planned transactions to ${process.argv[planIdx + 1]}`);
 }
 
 if (wantSafeJson) {

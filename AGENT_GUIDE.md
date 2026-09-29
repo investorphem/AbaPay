@@ -82,8 +82,9 @@ to any address. That line is not negotiable.
 **The top four are the real protection.** The rest are operational convenience — valuable, but
 they are not what you rely on when things go wrong.
 
-The per-transaction ceiling is the vault's `maxAgentPaymentPerTx`, currently **10 tokens** per
-agent payment on every vault. That is lower than the database cap (`agent_max_ngn_per_tx`).
+The per-transaction ceiling is the vault's `maxAgentPaymentPerTx`, currently **50 tokens** (≈ $50) per
+agent payment for USDC, USD₮ and USA₮ on both V4 vaults. The database cap
+(`agent_max_ngn_per_tx`) is checked too, and whichever is lower is the one that binds.
 `check_balance` reports it per token as "Max per payment". The relayer reads it before
 broadcasting, so a bill above it is refused with that limit named and no transaction is sent,
 instead of reverting on-chain. Raising it is an owner transaction; see
@@ -132,8 +133,8 @@ Then, **from the owner wallet**:
 
 ⚠️ **Set `ABAPAY_OWNER` to a multisig (Safe).** With a single EOA, the withdrawal timelock
 (24h by default) only buys detection time — an attacker with the key simply waits it out. On
-**V4** the delay is owner-adjustable and can be set to 0, in which case it buys nothing at all;
-check the live value with `node scripts/instant-withdrawals.mjs --chain base` before relying on it.
+**V4** the delay is owner-adjustable and can be set to 0, in which case it buys nothing at all.
+Both live V4 vaults currently run at **0**, by the owner's choice. Check the live value with `node scripts/instant-withdrawals.mjs --chain base` before relying on it.
 
 ---
 

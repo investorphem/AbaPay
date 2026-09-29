@@ -21,7 +21,10 @@ GitHub](https://github.com/investorphem/AbaPay/commits/main).
   Previously it was settled and refunded.
 * **`check_balance` shows the on-chain maximum per agent payment.** A new "Max per payment"
   column reports each vault's `maxAgentPaymentPerTx`. An agent payment above it is now refused up
-  front, naming the limit, instead of being broadcast and reverting on-chain.
+  front, naming the limit, instead of being broadcast and reverting on-chain. That limit is now
+  **50** (USDC, USD₮, USA₮) on both vaults, up from 10.
+* **USDm is no longer accepted by any vault.** Pay in USDC, USD₮ or USA₮. The retired Celo
+  vaults (V3 and the original V1) no longer accept any token.
 * **Paused services are refused before payment on every rail.** The web app's payment API and
   the x402 endpoint now check the same service switches, and VTpass's live amount limits, that
   chat and MCP always did. That check happens before anything is signed or settled. A 402

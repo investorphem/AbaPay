@@ -20,14 +20,15 @@
       "chain": "celo",
       "kind": "v4",
       "address": "0x5df8aE2B963165b735B18Ca86B1ea448d2AA032C",
-      "withdrawalDelaySeconds": 86400,
+      "$withdrawalDelayComment": "Kept at 0 by the owner's decision (2026-09-29) for immediate emergency access. The trade-off is in contracts/AbaPayV4.sol's NatSpec.",
+      "withdrawalDelaySeconds": 0,
       "paused": false,
       "relayerEnabled": true,
       "tokens": {
         "USDm": { "supported": false, "maxRefund": "400", "maxAgentPayment": "10" },
-        "USDC": { "supported": true, "maxRefund": "400", "maxAgentPayment": "10" },
-        "USD₮": { "supported": true, "maxRefund": "400", "maxAgentPayment": "10" },
-        "USA₮": { "supported": true, "maxRefund": "400", "maxAgentPayment": "10" }
+        "USDC": { "supported": true, "maxRefund": "400", "maxAgentPayment": "50" },
+        "USD₮": { "supported": true, "maxRefund": "400", "maxAgentPayment": "50" },
+        "USA₮": { "supported": true, "maxRefund": "400", "maxAgentPayment": "50" }
       }
     },
     {
@@ -35,12 +36,13 @@
       "chain": "base",
       "kind": "v4",
       "address": "0xC0A4dAA04DEd9c54D1239507B5A5E645761ef488",
-      "withdrawalDelaySeconds": 86400,
+      "$withdrawalDelayComment": "Kept at 0 by the owner's decision (2026-09-29); see the Celo V4 entry.",
+      "withdrawalDelaySeconds": 0,
       "paused": false,
       "relayerEnabled": true,
       "tokens": {
-        "USDC": { "supported": true, "maxRefund": "400", "maxAgentPayment": "10" },
-        "USD₮": { "supported": true, "maxRefund": "400", "maxAgentPayment": "10" }
+        "USDC": { "supported": true, "maxRefund": "400", "maxAgentPayment": "50" },
+        "USD₮": { "supported": true, "maxRefund": "400", "maxAgentPayment": "50" }
       }
     },
     {

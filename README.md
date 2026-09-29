@@ -826,7 +826,10 @@ the app. V3 adds a **session-key / delegated-spend** pattern instead:
 **⚠️ Not audited.** The contract itself carries this warning in its header. Deploy to testnet for
 demos; on mainnet, keep `maxAgentPaymentPerTx` and `maxRefundPerTx` small (`scripts/deployV4.ts`
 defaults to a $10-equivalent per token) until a professional audit is done, then raise them via
-`setMaxAgentPayment` / `setMaxRefund`.
+`setMaxAgentPayment` / `setMaxRefund`. The live V4 vaults are set to **50** per agent payment
+and **400** per refund for each supported stablecoin. The expected values are in
+[`config/vaults.json`](config/vaults.json), and `node scripts/vault-config.mjs` diffs them
+against the chain.
 
 `payBillFor` emits the same `PaymentReceived` event as V1/V2 (so the webhook needs no changes),
 plus an additional `AgentPayment` event so the backend/any observer can distinguish "the user
@@ -836,8 +839,9 @@ signed" from "the agent spent an allowance."
 
 V4 is V3 plus one change: the withdrawal timelock is no longer a hardcoded 24 hours. It is a
 variable, `withdrawalDelay`, that the owner can raise, lower, or set to **0** via
-`setWithdrawalDelay(n)`. It still defaults to 24h, so nothing changes unless the owner
-deliberately changes it. V4 is what is deployed on **both mainnets**:
+`setWithdrawalDelay(n)`. A fresh deploy defaults to 24h. **Both live vaults run at 0**, a deliberate owner
+choice, so withdrawals from them are instant (see the warning below). V4 is what is deployed on
+**both mainnets**:
 
 | Chain | AbaPayV4 |
 |---|---|
@@ -846,7 +850,8 @@ deliberately changes it. V4 is what is deployed on **both mainnets**:
 
 ⚠️ The **previous Celo contract `0x42Fa4637…` is a V3** — it has no `setWithdrawalDelay`, so its
 24h timelock is fixed and it can never be made instant. That is why Celo was redeployed rather
-than reconfigured.
+than reconfigured. It is now **retired**: every token is unsupported, its relayer is `0x0` and it
+is paused. The old Celo V1 (`0x1d125198…`) no longer accepts any token either.
 
 The queue itself is not removable — it is compiled into the bytecode and there is no direct
 `withdraw()`. At delay 0 a withdrawal is `queueWithdrawal` then `executeWithdrawal` back to
