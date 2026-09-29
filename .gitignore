@@ -40,6 +40,9 @@ yarn-error.log*
 *.tsbuildinfo
 next-env.d.ts
 
+# scripts/vault-config.mjs --safe-json output (regenerate from config/vaults.json)
+vault-config.*.safe-batch.json
+
 # Hardhat build output
 artifacts/
 cache/
