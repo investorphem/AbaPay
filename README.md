@@ -450,7 +450,7 @@ hold keys. Two paths exist:
    below), the relayer calls `payBillFor()` directly — no deep link, no signature at payment
    time — bounded entirely by the allowance the user set and revocable by them at any moment.
    Before broadcasting, a `preflight_<wallet>_<timestamp>` transaction row is written (the same
-   pattern the web app uses ahead of a signature), then renamed to the real tx hash once
+   idea as the web app's server-issued `preflight_<uuid>` intent ahead of a signature), then renamed to the real tx hash once
    confirmed — so the payment is vended through the exact same verified pipeline as every other
    rail, and a stale/abandoned attempt is swept automatically rather than left dangling. If the
    RPC can't confirm the receipt in time (a network hiccup right after broadcast — including
@@ -780,8 +780,8 @@ npx hardhat run scripts/update8004uri.ts --network <network> # Re-push the agent
 
 `contracts/AbaPayV2.sol` is a security-hardened successor to the original `AbaPay.sol`,
 addressing the hardening gaps below. **`payBill`'s signature and the
-`PaymentReceived` event are byte-for-byte identical to V1**, so the frontend, the `/api/pay`
-calldata decoder, and the webhook's event cross-validation all work with no backend changes.
+`PaymentReceived` event are byte-for-byte identical to V1**, so the frontend and the shared
+`PaymentReceived` verifier (`src/lib/paymentProof.ts`) work with no backend changes.
 
 | Hardening | Why |
 |---|---|
@@ -1519,8 +1519,8 @@ The app ships with Farcaster frame metadata (`public/.well-known/farcaster.json`
 ## 🛡️ Security Architecture
 
 * **No-Log Keys:** VTpass secret keys, Supabase service role key, Telegram tokens, and all other secrets are strictly contained within server-side API routes — never exposed to the client bundle.
-* **Replay Protection:** Every blockchain transaction hash is recorded and checked against a **persistent ledger** (a Supabase table with a unique constraint on the tx hash) before a utility vend is triggered. ⚠️ In-memory tracking alone is **not safe** in serverless environments: state resets on cold starts and isn't shared across concurrent instances, which would allow the same transaction hash to be replayed for multiple vends.
-* **On-Chain Verification:** Every payment is independently verified against the blockchain (transaction receipt, contract address, and amount) server-side before any bill is vended — the client-submitted payload is never trusted blindly. Under Base gas sponsorship, the top-level transaction's `to` can be a bundler/EntryPoint contract rather than the AbaPay contract itself, so the webhook additionally decodes the transaction's logs and requires that the AbaPay contract genuinely emitted `PaymentReceived` — this holds regardless of how deeply nested the call was.
+* **Replay Protection:** Every blockchain transaction hash is recorded in a **persistent ledger** (a Supabase table with a unique constraint on the tx hash), and a hash can back at most one transaction. The web app's payment intent is created under an id the server issues and written as an insert (never an overwrite). A database trigger (`supabase/migrations/026_transaction_state_guard.sql`) refuses to move a finished transaction back to pending, to change a real tx hash, or to change a transaction's provider reference once it has left pending, so a settled or refunded payment can't be re-vended. ⚠️ In-memory tracking alone is **not safe** in serverless environments: state resets on cold starts and isn't shared across concurrent instances.
+* **On-Chain Verification:** Before any bill is vended, the server reads the transaction receipt and requires the configured AbaPay vault to have emitted `PaymentReceived` for the **token, amount, account, service and payer recorded when the payment was started**, not the values in the request (`src/lib/paymentProof.ts`). Decimals come from the token the event names, so a payment in a different token can't pass for one in another. The event is emitted the same way for a direct wallet call, a sponsored ERC-4337 UserOperation on Base, or the agent relayer. The bill that is vended is read from the server's stored record, not from the client.
 * **Event Cross-Validation:** The webhook decodes the `PaymentReceived` event and requires that its **payer, token, amount, and account number all match the pending record** before vending. This blocks the class of attack where a user has a small pending intent and then manually sends a different (or larger/smaller) transfer to the contract hoping it gets attached to the wrong record.
 * **Stale Intent Expiry:** Pre-flight intents (records created before signing) that never result in an on-chain transaction are automatically expired by a scheduled cleanup (`/api/cleanup`, every 15 min) so they don't linger as `PENDING` forever. This only ever touches `preflight_`-prefixed rows, so a real broadcast transaction can never be expired.
 * **Webhook Acknowledgment:** The webhook always returns 2xx once a request passes signature verification, even when no matching transaction record is found (test pings, unrelated activity, or a payment intent that hasn't synced yet are normal, expected outcomes — not delivery failures). Returning a non-2xx here would cause Alchemy to eventually auto-disable the webhook after repeated "failures" that were never really failures.
