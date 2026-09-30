@@ -120,7 +120,10 @@ class AbaPayAgent:
         chain: Optional[str] = None,
         token: Optional[str] = None,
         variation_code: Optional[str] = None,
+        idempotency_key: Optional[str] = None,
     ) -> str:
+        """idempotency_key: a unique id for THIS payment (8-128 chars, e.g. str(uuid.uuid4())).
+        Retrying with the same key returns the first result instead of paying twice."""
         args: dict[str, Any] = {
             "pin": pin,
             "service": service,
@@ -134,10 +137,16 @@ class AbaPayAgent:
             args["token"] = token
         if variation_code:
             args["variation_code"] = variation_code
+        if idempotency_key:
+            args["idempotency_key"] = idempotency_key
         return self.call_tool("pay_bill", args)
 
     def schedule_bill(self, **args: Any) -> str:
         return self.call_tool("schedule_bill", args)
+
+    def get_payment_status(self, reference: str) -> str:
+        """One payment's status by tx hash or request id: delivered, still confirming, failed or refunded."""
+        return self.call_tool("get_payment_status", {"reference": reference})
 
     def transaction_history(self, limit: Optional[int] = None, offset: Optional[int] = None) -> str:
         args: dict[str, Any] = {}

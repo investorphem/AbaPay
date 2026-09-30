@@ -68,6 +68,30 @@ def test_call_tool_round_trips(httpserver):
     assert text == "USDT 1.88"
 
 
+def test_pay_bill_forwards_idempotency_key_and_status_sends_reference(httpserver):
+    seen = []
+
+    def handler(request):
+        from werkzeug.wrappers import Response
+
+        seen.append(json.loads(request.data)["params"])
+        return Response(
+            json.dumps({"jsonrpc": "2.0", "id": 1, "result": {"content": [{"type": "text", "text": "ok"}]}}),
+            status=200,
+            content_type="application/json",
+        )
+
+    httpserver.expect_request("/api/mcp", method="POST").respond_with_handler(handler)
+
+    agent = AbaPayAgent.from_api_key("aba_mcp_test123", "0xabc", base_url=httpserver.url_for(""))
+    agent.pay_bill(pin="123456", service="AIRTIME", provider="mtn", account_number="080", amount_ngn=100, idempotency_key="order-0001")
+    agent.get_payment_status("0xabc")
+
+    assert seen[0]["arguments"]["idempotency_key"] == "order-0001"
+    assert seen[1]["name"] == "get_payment_status"
+    assert seen[1]["arguments"]["reference"] == "0xabc"
+
+
 def test_call_tool_raises_on_jsonrpc_error(httpserver):
     httpserver.expect_request("/api/mcp", method="POST").respond_with_json(
         {"jsonrpc": "2.0", "id": 1, "error": {"message": "Invalid or revoked API key."}}

@@ -8,6 +8,12 @@ GitHub](https://github.com/investorphem/AbaPay/commits/main).
 
 ## 2026-09-30
 
+* **SDK releases: `abapay-sdk` 0.3.0 (npm) and 0.2.0 (PyPI).**
+  * Linking now requires a 6-digit PIN, matching the server.
+  * `payBill` / `pay_bill` accept `idempotency_key`, so a retry never pays twice.
+  * New `getPaymentStatus` / `get_payment_status` looks up one payment by tx hash or request
+    id.
+
 * **Sponsored gas covers AbaPay payments only.** The Base gas-sponsorship proxy now checks
   what each transaction does, and pays gas only for approving a stablecoin to the AbaPay vault,
   paying a bill, and setting the agent limit. Payers are unaffected. Other transactions are

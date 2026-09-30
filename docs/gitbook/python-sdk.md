@@ -42,6 +42,7 @@ catalog.
 
 {% code title="linked_agent.py" %}
 ```python
+import uuid
 from eth_account import Account
 from abapay import AbaPayAgent, LinkParams
 
@@ -51,7 +52,7 @@ account = Account.from_key("0x...")
 agent = AbaPayAgent.link(LinkParams(signer=account, pin="123456"))
 
 print(agent.check_balance())
-agent.pay_bill(pin="1234", service="AIRTIME", provider="mtn", account_number="08012345678", amount_ngn=1000)
+agent.pay_bill(pin="123456", service="AIRTIME", provider="mtn", account_number="08012345678", amount_ngn=1000, idempotency_key=str(uuid.uuid4()))
 ```
 {% endcode %}
 

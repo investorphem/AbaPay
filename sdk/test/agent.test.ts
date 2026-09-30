@@ -86,4 +86,21 @@ describe("AbaPayAgent tool calls", () => {
       pin: "0000", service: "AIRTIME", provider: "mtn", account_number: "080", amount_ngn: 100,
     })).rejects.toThrow("Invalid PIN");
   });
+
+  it("payBill forwards idempotency_key, and getPaymentStatus sends the reference", async () => {
+    const ok = () => new Response(JSON.stringify({ result: { content: [{ type: "text", text: "ok" }] } }), { status: 200 });
+    fetchMock.mockResolvedValueOnce(ok()).mockResolvedValueOnce(ok());
+    const agent = AbaPayAgent.fromApiKey("aba_mcp_test123", "0xWallet");
+
+    await agent.payBill({
+      pin: "123456", service: "AIRTIME", provider: "mtn", account_number: "080", amount_ngn: 100,
+      idempotency_key: "order-0001",
+    });
+    expect(JSON.parse(fetchMock.mock.calls[0][1].body).params.arguments.idempotency_key).toBe("order-0001");
+
+    await agent.getPaymentStatus("0xabc");
+    const status = JSON.parse(fetchMock.mock.calls[1][1].body).params;
+    expect(status.name).toBe("get_payment_status");
+    expect(status.arguments.reference).toBe("0xabc");
+  });
 });

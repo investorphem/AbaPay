@@ -54,7 +54,11 @@ console.log(await agent.checkBalance());
 await agent.payBill({
   pin: "123456", service: "AIRTIME", provider: "mtn",
   account_number: "08012345678", amount_ngn: 1000,
+  idempotency_key: crypto.randomUUID(), // a retry with the same key never pays twice
 });
+
+// Lost the result? Look the payment up instead of paying again.
+console.log(await agent.getPaymentStatus("0x…tx hash or request id"));
 ```
 {% endcode %}
 
