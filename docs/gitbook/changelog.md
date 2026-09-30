@@ -8,6 +8,11 @@ GitHub](https://github.com/investorphem/AbaPay/commits/main).
 
 ## 2026-09-30
 
+* **Sponsored gas covers AbaPay payments only.** The Base gas-sponsorship proxy now checks
+  what each transaction does, and pays gas only for approving a stablecoin to the AbaPay vault,
+  paying a bill, and setting the agent limit. Payers are unaffected. Other transactions are
+  refused, and so is too many requests from one wallet.
+
 * **New MCP API keys need a 6-digit PIN.** Creating a key (or changing its PIN) with 4 or 5
   digits now gets a `400`. Existing keys keep working with their current PIN. The TypeScript
   and Python SDKs check this before sending.
