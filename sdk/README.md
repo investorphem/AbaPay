@@ -75,6 +75,7 @@ await agent.payBill({
   provider: "mtn",
   account_number: "08012345678",
   amount_ngn: 1000,
+  idempotency_key: crypto.randomUUID(), // a retry with the same key never pays twice
 });
 ```
 

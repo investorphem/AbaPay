@@ -125,6 +125,9 @@ export class AbaPayAgent {
     chain?: ApprovedChain;
     token?: string;
     variation_code?: string;
+    /** A unique id for THIS payment (8-128 chars, e.g. crypto.randomUUID()). Retrying with the
+     *  same key returns the first result instead of paying twice. Strongly recommended. */
+    idempotency_key?: string;
   }): Promise<string> {
     return this.callTool("pay_bill", args);
   }
@@ -135,5 +138,10 @@ export class AbaPayAgent {
 
   transactionHistory(args: Record<string, unknown> = {}): Promise<string> {
     return this.callTool("transaction_history", args);
+  }
+
+  /** One payment's status by tx hash or request id: delivered, still confirming, failed or refunded. */
+  getPaymentStatus(reference: string): Promise<string> {
+    return this.callTool("get_payment_status", { reference });
   }
 }

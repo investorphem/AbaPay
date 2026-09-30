@@ -46,6 +46,7 @@ no account creation, no API key, no PIN. Full wire format:
 ## Linked wallet: the fuller tool catalog
 
 ```python
+import uuid
 from eth_account import Account
 from abapay import AbaPayAgent, LinkParams
 
@@ -61,7 +62,7 @@ agent = AbaPayAgent.link(LinkParams(signer=account, pin="123456"))
 
 print(agent.check_balance())
 
-agent.pay_bill(pin="1234", service="AIRTIME", provider="mtn", account_number="08012345678", amount_ngn=1000)
+agent.pay_bill(pin="123456", service="AIRTIME", provider="mtn", account_number="08012345678", amount_ngn=1000, idempotency_key=str(uuid.uuid4()))
 ```
 
 Reattach to a previously-minted key without signing again:
