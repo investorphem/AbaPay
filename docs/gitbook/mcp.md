@@ -4,7 +4,7 @@
 **Local + remote** — the same protocol Claude and any MCP client speak.
 {% endhint %}
 
-10 tools over Streamable HTTP JSON-RPC. OAuth 2.1 is supported and preferred; an Agent Hub
+11 tools over Streamable HTTP JSON-RPC. OAuth 2.1 is supported and preferred; an Agent Hub
 API key remains the fallback for clients that can't do OAuth.
 
 ## Connect
@@ -21,7 +21,7 @@ API key remains the fallback for clients that can't do OAuth.
 
 Claude Desktop / Code: Settings → Connectors → Add custom connector → paste the URL above.
 
-## The 10 tools
+## The 11 tools
 
 | Tool | What it does |
 |---|---|
@@ -30,6 +30,7 @@ Claude Desktop / Code: Settings → Connectors → Add custom connector → past
 | `list_plans` | Real, currently purchasable DATA / CABLE / EDUCATION plans with exact variation codes. |
 | `list_international_options` | Browses the international catalogue — country → product type → operator → priced plan. |
 | `transaction_history` | Recent payments, paginated. |
+| `get_payment_status` | One payment by tx hash or request id: delivered, still confirming, failed or refunded, with its refund state. Use it instead of paying again when a result was lost. |
 | `pay_bill` | Pay one bill — airtime, data, electricity, cable, education, international. |
 | `pay_bill_batch` | Up to 20 recipients under one PIN. |
 | `schedule_bill` | Recurring or delayed payments. |

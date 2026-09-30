@@ -80,6 +80,16 @@ export const TOOLS: ToolDef[] = [
     ],
   },
   {
+    name: "get_payment_status",
+    title: "Get Payment Status",
+    access: "read",
+    description: "Look up one payment by tx hash or request id: delivered, still confirming, failed or refunded, with refund state. Only the linked wallet's payments. No PIN required.",
+    params: [
+      { name: "api_key", type: "string", required: false, description: "Not needed over OAuth." },
+      { name: "reference", type: "string", required: true, description: "The transaction hash (0x…) or request id." },
+    ],
+  },
+  {
     name: "pay_bill",
     title: "Pay Bill",
     access: "destructive",

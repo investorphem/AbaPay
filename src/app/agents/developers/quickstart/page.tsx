@@ -128,7 +128,7 @@ await publicClient.waitForTransactionReceipt({ hash: allowanceHash });`}
 
       <section className="bg-white dark:bg-[#111114] border border-slate-100 dark:border-slate-800/60 rounded-[2rem] p-6 sm:p-8">
         <h3 className="font-black text-slate-900 dark:text-white mb-1.5">Step 3 — call MCP tools with the api_key</h3>
-        <p className="text-sm text-slate-500 dark:text-slate-400 mb-4">No OAuth needed — the api_key from Step 1 stands alone. Same shape for <code className="text-slate-500">pay_bill</code>, <code className="text-slate-500">schedule_bill</code>, any of the 10 tools.</p>
+        <p className="text-sm text-slate-500 dark:text-slate-400 mb-4">No OAuth needed — the api_key from Step 1 stands alone. Same shape for <code className="text-slate-500">pay_bill</code>, <code className="text-slate-500">schedule_bill</code>, any of the 11 tools.</p>
         <CopyBlock
           code={`const balance = await fetch(\`\${APP_URL}/api/mcp\`, {
   method: 'POST',

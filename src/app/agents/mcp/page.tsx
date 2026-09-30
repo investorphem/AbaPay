@@ -8,7 +8,7 @@ import { TOOLS } from "../toolSchemas";
 
 export const metadata: Metadata = {
   title: "MCP — AbaPay Tool Server",
-  description: "AbaPay as a Model Context Protocol server — 10 tools over Streamable HTTP JSON-RPC, full parameter reference, and a live try-it panel against production.",
+  description: "AbaPay as a Model Context Protocol server — 11 tools over Streamable HTTP JSON-RPC, full parameter reference, and a live try-it panel against production.",
 };
 
 export default function MCPPage() {

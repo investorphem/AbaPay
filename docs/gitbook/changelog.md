@@ -27,6 +27,9 @@ GitHub](https://github.com/investorphem/AbaPay/commits/main).
   an `idempotency_key`. A retry with the same key returns the first result instead of paying
   again, and an identical call without a key within 2 minutes is treated the same way. See
   [Retries never pay twice](mcp.md#retries-never-pay-twice).
+* **New MCP tool: `get_payment_status`.** Look up one payment by its transaction hash or
+  request id and get its status in plain words: delivered, still being confirmed, failed, or
+  refunded, including where any refund stands. It only finds the linked wallet's own payments.
 
 ## 2026-09-29
 

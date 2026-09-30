@@ -40,7 +40,7 @@ const RAILS = [
   {
     icon: Terminal,
     title: "MCP tools",
-    body: "10 tools over Streamable HTTP JSON-RPC — check_balance, pay_bill, schedule_bill, pay_bill_batch and more. The same protocol Claude and any MCP client speak.",
+    body: "11 tools over Streamable HTTP JSON-RPC — check_balance, pay_bill, schedule_bill, pay_bill_batch and more. The same protocol Claude and any MCP client speak.",
   },
   {
     icon: Layers,
