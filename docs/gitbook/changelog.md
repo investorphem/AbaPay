@@ -19,6 +19,10 @@ GitHub](https://github.com/investorphem/AbaPay/commits/main).
   (a double-tap, or Telegram, WhatsApp or X redelivering a message), only the first one runs
   the payment; the second is told it's already being processed. Redelivered messages are
   also recognised by their platform id and ignored, so they no longer get a second reply.
+* **`cancel_schedule` no longer cancels everything by default (MCP server 1.1.0).** Cancelling
+  one schedule by `id` still needs no PIN. Cancelling several at once now needs the PIN: pass
+  `provider`, or `all: true` to cancel every schedule. A call with none of `id`, `provider` or
+  `all` is refused. Before, it quietly cancelled every schedule on the wallet.
 
 ## 2026-09-29
 

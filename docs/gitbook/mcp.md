@@ -34,7 +34,7 @@ Claude Desktop / Code: Settings → Connectors → Add custom connector → past
 | `pay_bill_batch` | Up to 20 recipients under one PIN. |
 | `schedule_bill` | Recurring or delayed payments. |
 | `list_schedules` | What automations are currently set up. |
-| `cancel_schedule` | Cancel one. |
+| `cancel_schedule` | Cancel one by `id` (no PIN), or several by `provider` / `all: true` (PIN required). |
 
 {% hint style="info" %}
 **Same PIN rules as A2A.** MCP and A2A share one execution engine, one linking flow, and one PIN model — set entirely by API, never through a browser. See [A2A](a2a.md) for the exact request that does it.

@@ -137,11 +137,13 @@ export const TOOLS: ToolDef[] = [
     name: "cancel_schedule",
     title: "Cancel Schedule",
     access: "write",
-    description: "Cancel one or more active schedules. Pass id for exactly one, provider for all of that provider's, or neither to cancel everything. No PIN required.",
+    description: "Cancel active schedules. Pass id for exactly one (no PIN). provider (all of that provider's) or all: true (every schedule) require the PIN. With none of these the call is refused.",
     params: [
       { name: "api_key", type: "string", required: false, description: "Not needed over OAuth." },
       { name: "id", type: "string", required: false, description: "Exact schedule id from list_schedules. Cancels only that one." },
-      { name: "provider", type: "string", required: false, description: 'Cancel every active schedule for this provider, e.g. "mtn". Ignored if id is set.' },
+      { name: "provider", type: "string", required: false, description: 'Cancel every active schedule for this provider, e.g. "mtn". Requires pin. Ignored if id is set.' },
+      { name: "all", type: "boolean", required: false, description: "true cancels every active schedule on the wallet. Requires pin." },
+      { name: "pin", type: "string", required: false, description: "Required with provider or all; not needed for a single id." },
     ],
   },
   {
