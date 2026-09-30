@@ -8,6 +8,11 @@ GitHub](https://github.com/investorphem/AbaPay/commits/main).
 
 ## 2026-09-30
 
+* **The in-app assistant checks who you are before touching your automations.** Listing
+  schedules, cancelling one, or proposing a scheduled or multi-recipient payment now requires
+  the same wallet sign-in the History tab uses. Cancelling is confirmed with its own wallet
+  signature. Help and form prefill work without signing in.
+
 * **SDK releases: `abapay-sdk` 0.3.0 (npm) and 0.2.0 (PyPI).**
   * Linking now requires a 6-digit PIN, matching the server.
   * `payBill` / `pay_bill` accept `idempotency_key`, so a retry never pays twice.
