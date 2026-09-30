@@ -1557,7 +1557,7 @@ The app ships with Farcaster frame metadata (`public/.well-known/farcaster.json`
 * **Internal-Only AI Routes:** The DeAI "brain" (`/api/deai/*`) is reachable only by the app's own bot webhooks via a signed internal-service token (`src/utils/internalAuth.ts`). This prevents the public internet from impersonating any user by their chat ID / phone number / X ID, or burning the Claude API budget.
 * **Bot Webhook Signatures:** The WhatsApp and X webhooks verify Meta's `X-Hub-Signature-256` / X's `x-twitter-webhooks-signature` HMAC on every inbound payload (when the corresponding secret is configured), and Telegram verifies its secret token — so message events can't be forged.
 * **Hashed Transaction PINs:** DeAI PINs are stored as salted scrypt hashes (`src/utils/pinSecurity.ts`), never plaintext, with legacy plaintext values transparently upgraded on next use and a 4-attempt lockout.
-* **Scoped Paymaster Proxy:** The gas-sponsorship proxy (`/api/paymaster`) allowlists only ERC-7677 paymaster JSON-RPC methods, so it can't be abused as a general-purpose RPC relay running on your CDP key.
+* **Scoped Paymaster Proxy:** The gas-sponsorship proxy (`/api/paymaster`) allowlists only ERC-7677 paymaster JSON-RPC methods, so it can't be abused as a general-purpose RPC relay running on your CDP key. It also decodes each UserOperation (the smart wallet's `execute`/`executeBatch`) and only sponsors AbaPay's own calls: a supported stablecoin's `approve(vault, …)`, and the vault's `payBill` / `setSpendingAllowance`, with no native value and on Base only. Anything else gets a `-32602` refusal and never reaches CDP. Requests are rate-limited per IP and per smart-wallet sender (`src/lib/paymasterPolicy.ts`).
 
 ### Rate Limiting
 
