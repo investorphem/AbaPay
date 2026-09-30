@@ -38,11 +38,13 @@ def test_link_signs_and_returns_agent(httpserver):
 
 def test_link_rejects_malformed_pin():
     account = Account.from_key(TEST_PRIVATE_KEY)
-    try:
-        AbaPayAgent.link(LinkParams(signer=account, pin="12"))
-        assert False, "expected AbaPayError"
-    except AbaPayError as e:
-        assert "4-6 digits" in e.message
+    # "1234" was valid before; an MCP key now needs exactly 6 digits.
+    for bad in ("12", "1234"):
+        try:
+            AbaPayAgent.link(LinkParams(signer=account, pin=bad))
+            assert False, "expected AbaPayError"
+        except AbaPayError as e:
+            assert "6 digits" in e.message
 
 
 def test_call_tool_round_trips(httpserver):
