@@ -37,10 +37,18 @@ interface ScheduleConfirm {
   totalNgn: number;
 }
 
+/** A schedule the chat matched for cancelling. Nothing is cancelled until the user taps the
+ *  button and signs DELETE /api/schedules. */
+interface CancelConfirm {
+  id: string;
+  label: string;
+}
+
 interface Msg {
   role: 'user' | 'assistant';
   text: string;
   scheduleConfirm?: ScheduleConfirm;
+  cancelConfirm?: CancelConfirm;
   /** Once the user taps Approve (or it fails), the card shows a final state instead of the button. */
   resolved?: 'approved' | 'failed';
 }
@@ -58,9 +66,13 @@ interface Props {
    *  allowance for scheduled/batched payments; irrelevant to the immediate "sign now" flow. */
   chain?: string;
   tokenSymbol?: string;
+  /** The page's verified wallet-session headers (the same sign-in proof the History tab uses),
+   *  or null while unproven. Anything that reads or changes this wallet's data — automations,
+   *  agent limits — is refused by /api/deai/chat without them. */
+  sessionHeaders?: Record<string, string> | null;
 }
 
-export function AIChat({ onPrefill, onNavigate, walletConnected, onRequireWallet, walletAddress, chain, tokenSymbol }: Props) {
+export function AIChat({ onPrefill, onNavigate, walletConnected, onRequireWallet, walletAddress, chain, tokenSymbol, sessionHeaders }: Props) {
   const { data: walletClient } = useWalletClient();
   const [open, setOpen] = useState(false);
   const [msgs, setMsgs] = useState<Msg[]>([
@@ -85,7 +97,9 @@ export function AIChat({ onPrefill, onNavigate, walletConnected, onRequireWallet
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          ...(walletAddress ? { 'X-Wallet-Address': walletAddress } : {}),
+          // The verified session when the page has one; otherwise just the address (used only as
+          // a rate-limit key; the server never trusts it for wallet data).
+          ...(sessionHeaders || (walletAddress ? { 'X-Wallet-Address': walletAddress } : {})),
         },
         body: JSON.stringify({ message: text, chain, tokenSymbol }),
       });
@@ -95,6 +109,7 @@ export function AIChat({ onPrefill, onNavigate, walletConnected, onRequireWallet
         role: 'assistant',
         text: data.reply || "Sorry, I couldn't process that.",
         scheduleConfirm: data.scheduleConfirm,
+        cancelConfirm: data.cancelConfirm,
       }]);
 
       // The chat never pays on its own — it only fills the form (user still signs) or, for
@@ -187,6 +202,45 @@ export function AIChat({ onPrefill, onNavigate, walletConnected, onRequireWallet
     }
   };
 
+  // Cancelling is a mutation, so it gets its own fresh signature for exactly this action, the
+  // same as every other wallet change (the read-only session never authorises one).
+  const cancelSchedule = async (msgIndex: number, confirm: CancelConfirm) => {
+    if (!walletAddress || !walletClient) {
+      setMsgs(m => [...m, { role: 'assistant', text: '⚠️ Wallet not ready — please try again.' }]);
+      return;
+    }
+    setBusy(true);
+    try {
+      const timestamp = Date.now().toString();
+      let signature: string;
+      try {
+        // Must match what DELETE /api/schedules verifies (walletAuth.ts: "METHOD:/api/path").
+        signature = await walletClient.signMessage({
+          account: walletAddress as `0x${string}`,
+          message: `AbaPay Agent Action: DELETE:/api/schedules: ${timestamp}`,
+        });
+      } catch {
+        setMsgs(m => [...m, { role: 'assistant', text: '⚠️ Signature request was rejected or failed — nothing was cancelled.' }]);
+        return;
+      }
+      const res = await fetch('/api/schedules', {
+        method: 'DELETE',
+        headers: { 'Content-Type': 'application/json', 'x-wallet-signature': signature, 'x-wallet-timestamp': timestamp },
+        body: JSON.stringify({ id: confirm.id, wallet_address: walletAddress }),
+      }).then(r => r.json());
+      setMsgs(m => m.map((msg, i) => i === msgIndex ? { ...msg, resolved: res.success ? 'approved' : 'failed' } : msg));
+      setMsgs(m => [...m, {
+        role: 'assistant',
+        text: res.success ? `✅ Cancelled your ${confirm.label} automation.` : `⚠️ ${res.message || "Couldn't cancel that — please try again."}`,
+      }]);
+    } catch {
+      setMsgs(m => m.map((msg, i) => i === msgIndex ? { ...msg, resolved: 'failed' } : msg));
+      setMsgs(m => [...m, { role: 'assistant', text: '⚠️ Something went wrong cancelling that. Please try again.' }]);
+    } finally {
+      setBusy(false);
+    }
+  };
+
   if (!open) {
     return (
       <button
@@ -248,6 +302,23 @@ export function AIChat({ onPrefill, onNavigate, walletConnected, onRequireWallet
                       className="w-full bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 text-white text-[11px] font-black py-2 rounded-xl transition-colors active:scale-95"
                     >
                       Approve
+                    </button>
+                  )}
+                </div>
+              )}
+              {m.cancelConfirm && (
+                <div className="mt-2.5 pt-2.5 border-t border-slate-200 dark:border-slate-700/60">
+                  {m.resolved ? (
+                    <div className={`flex items-center gap-1.5 text-[11px] font-black ${m.resolved === 'approved' ? 'text-emerald-600 dark:text-emerald-400' : 'text-red-500'}`}>
+                      {m.resolved === 'approved' ? <><Check size={12} /> Cancelled</> : 'Not cancelled'}
+                    </div>
+                  ) : (
+                    <button
+                      onClick={() => cancelSchedule(i, m.cancelConfirm!)}
+                      disabled={busy}
+                      className="w-full bg-red-600 hover:bg-red-700 disabled:opacity-50 text-white text-[11px] font-black py-2 rounded-xl transition-colors active:scale-95"
+                    >
+                      Cancel automation
                     </button>
                   )}
                 </div>

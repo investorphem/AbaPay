@@ -5758,6 +5758,7 @@ export default function Home() {
           walletAddress={address ?? undefined}
           chain={normalizeChainName(activeChain?.name)}
           tokenSymbol={selectedToken.symbol}
+          sessionHeaders={walletProofHeaders()}
         />
       </div>
 

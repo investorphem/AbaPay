@@ -7,6 +7,7 @@ import { getServiceRules } from '@/lib/serviceRules';
 import { getRemainingAllowance } from '@/lib/deai/relayer';
 import { humanizeReply } from '@/lib/deai/humanize';
 import { supabaseAdmin } from '@/utils/supabase';
+import { verifyWalletSession } from '@/utils/walletAuth';
 // Batch capacity/grouping now lives in a shared module so the social channels
 // (/api/deai/core) run the exact same maths rather than a second, drifting copy.
 import { checkAutonomousCapacity, groupByChainToken, type BatchItem } from '@/lib/deai/batch';
@@ -69,13 +70,30 @@ async function handleChat(req: Request, ctx: { lang?: string; userText?: string 
   const limited = await enforceRateLimit(req, 'deai-chat', 20, 60);
   if (limited) return limited;
 
-  // The chat is only reachable once a wallet is connected (gated client-side), so a
-  // connected wallet spamming from rotating IPs/networks still hits its own cap.
-  const walletAddr = req.headers.get('x-wallet-address') || '';
-  if (walletAddr) {
-    const walletLimited = await enforceRateLimitByKey(`deai-chat-wallet:${walletAddr.toLowerCase()}`, 20, 60);
+  // 🔴 THE HOLE THIS CLOSES: `x-wallet-address` used to be trusted as-is, so anyone could list,
+  // or CANCEL, another wallet's automations just by sending its (public) address. Every branch
+  // below that reads or changes wallet data now uses a VERIFIED wallet session instead: the same
+  // read-only sign-in proof the History tab uses (src/utils/walletAuth.ts verifyWalletSession),
+  // resolved once here. `walletAddr` is empty unless that proof checks out. Help, the capability
+  // menu and form prefill still work without one.
+  const claimed = req.headers.get('x-wallet-address') || '';
+  let walletAddr = '';
+  if (claimed && req.headers.get('x-wallet-signature')) {
+    const session = await verifyWalletSession(req);
+    if (session.ok) walletAddr = session.address.toLowerCase();
+  }
+  // Rate-limit by the claimed address too: a connected wallet spamming from rotating IPs still
+  // hits its own cap, whether or not its proof verifies.
+  if (claimed) {
+    const walletLimited = await enforceRateLimitByKey(`deai-chat-wallet:${claimed.toLowerCase()}`, 20, 60);
     if (walletLimited) return walletLimited;
   }
+  // What a wallet-scoped branch replies without a verified session. 401 + needsWalletSession so
+  // the client can ask the user to sign in and resend.
+  const needSession = (what: string) => NextResponse.json(
+    { success: false, needsWalletSession: true, reply: `Please verify your wallet first (a one-time signature, it doesn't approve any payment) so I can ${what}.` },
+    { status: 401 },
+  );
 
   try {
     // Operator can disable the in-app assistant from the admin dashboard.
@@ -123,9 +141,7 @@ async function handleChat(req: Request, ctx: { lang?: string; userText?: string 
     // ⚡ SCHEDULE MANAGEMENT — list or cancel existing automations (including ones created
     // from this very chat via scheduleConfirm below).
     if (ai.intent === 'LIST_SCHEDULES' || ai.intent === 'CANCEL_SCHEDULE') {
-      if (!walletAddr) {
-        return NextResponse.json({ success: true, reply: 'Connect your wallet first so I can look up your automations.' });
-      }
+      if (!walletAddr) return needSession('look up your automations');
 
       const { data } = await supabaseAdmin
         .from('scheduled_bills')
@@ -159,8 +175,15 @@ async function handleChat(req: Request, ctx: { lang?: string; userText?: string 
         if (byProvider.length) match = byProvider;
       }
       if (match.length === 1) {
-        await supabaseAdmin.from('scheduled_bills').update({ is_active: false }).eq('id', match[0].id);
-        return NextResponse.json({ success: true, reply: `✅ Cancelled your ${match[0].provider || ''} ${match[0].service_category} automation.` });
+        // Nothing is cancelled HERE. The chat only identifies which one; the client cancels it
+        // through DELETE /api/schedules, which requires a fresh per-action signature, the same
+        // rule every other wallet mutation follows (a read-only session never authorises one).
+        const label = `${match[0].provider || ''} ${match[0].service_category}`.trim();
+        return NextResponse.json({
+          success: true,
+          reply: `Cancel your ${label} automation (₦${Number(match[0].amount_ngn).toLocaleString()})? Tap Cancel automation to confirm with your wallet.`,
+          cancelConfirm: { id: match[0].id, label },
+        });
       }
       const list = schedules.map((s: any, i: number) => `${i + 1}. ${s.provider || ''} ${s.service_category} — ₦${Number(s.amount_ngn).toLocaleString()}`).join('\n');
       return NextResponse.json({ success: true, reply: `You have a few automations — which one? Name the provider, e.g. "cancel my MTN airtime automation":\n\n${list}` });
@@ -194,9 +217,7 @@ async function handleChat(req: Request, ctx: { lang?: string; userText?: string 
     // group that's perfectly fine. All-or-nothing across the whole batch: if any recipient or
     // any group comes up short, nothing is proposed until it's fixed.
     if (ai.recipients && ai.recipients.length >= 2) {
-      if (!walletAddr) {
-        return NextResponse.json({ success: true, reply: 'Connect your wallet first — sending to multiple people needs an approved agent limit.' });
-      }
+      if (!walletAddr) return needSession('check your approved agent limit for several recipients');
       if (effectiveIntent !== 'VEND_AIRTIME' && effectiveIntent !== 'VEND_DATA') {
         return NextResponse.json({ success: true, reply: 'Multiple recipients in one message is only supported for airtime and data right now — please send other bills one at a time.' });
       }
@@ -250,9 +271,7 @@ async function handleChat(req: Request, ctx: { lang?: string; userText?: string 
 
     // ⚡ ONE-OFF FUTURE ("in 10 minutes") OR RECURRING ("every Tuesday") — single recipient.
     if (ai.schedule_in_minutes || ai.is_recurring) {
-      if (!walletAddr) {
-        return NextResponse.json({ success: true, reply: 'Connect your wallet first — scheduling a payment needs an approved agent limit.' });
-      }
+      if (!walletAddr) return needSession('check your approved agent limit for a scheduled payment');
 
       const f = await assessFeasibility({
         intent: effectiveIntent, provider: ai.provider, amountNgn: ai.amount_ngn,
