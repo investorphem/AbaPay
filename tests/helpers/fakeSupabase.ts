@@ -74,9 +74,13 @@ class Query implements PromiseLike<{ data: any; error: any }> {
   private rows() { return this.db.tables[this.table]; }
   private matching() { return this.rows().filter((r) => this.filters.every((f) => f(r))); }
 
+  // Each entry is a column, or a comma-separated composite key ("source,external_id").
   private collides(row: Row, except?: Row) {
-    return (this.db.unique[this.table] || []).find((col) =>
-      row[col] != null && this.rows().some((r) => r !== except && r[col] === row[col]));
+    return (this.db.unique[this.table] || []).find((key) => {
+      const cols = key.split(',');
+      return cols.every((c) => row[c] != null)
+        && this.rows().some((r) => r !== except && cols.every((c) => r[c] === row[c]));
+    });
   }
 
   private shape(data: Row[]) {

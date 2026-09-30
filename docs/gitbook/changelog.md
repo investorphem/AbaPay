@@ -15,6 +15,10 @@ GitHub](https://github.com/investorphem/AbaPay/commits/main).
   checked, so a burst of simultaneous guesses gets no more than the 5 allowed before the
   lockout. If the attempt counter is unreachable, the payment is refused (nothing is charged)
   instead of being let through.
+* **A chat payment confirmed twice is paid once.** If the same PIN reply reaches AbaPay twice
+  (a double-tap, or Telegram, WhatsApp or X redelivering a message), only the first one runs
+  the payment; the second is told it's already being processed. Redelivered messages are
+  also recognised by their platform id and ignored, so they no longer get a second reply.
 
 ## 2026-09-29
 

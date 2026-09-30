@@ -2,6 +2,7 @@
 import { NextResponse } from 'next/server';
 import { internalAuthHeaders } from '@/utils/internalAuth';
 import { supabaseAdmin as supabase } from '@/utils/supabase';
+import { claimWebhookEvent, releaseWebhookEvent } from '@/lib/webhookEvents';
 
 // ⚡ CHANGED: Now explicitly uses the DEAI token, completely ignoring the Admin token
 const DEAI_BOT_TOKEN = process.env.DEAI_TELEGRAM_BOT_TOKEN as string;
@@ -11,6 +12,9 @@ const DEAI_BOT_TOKEN = process.env.DEAI_TELEGRAM_BOT_TOKEN as string;
 const BOT_USERNAME = 'abapayagentbot';
 
 export async function POST(req: Request) {
+  // Telegram's id for this delivery, set once the body is parsed, so a failure below can
+  // release it and let a retry through (see src/lib/webhookEvents.ts).
+  let updateId: number | undefined;
   try {
     // 🔐 WEBHOOK AUTH — FAIL CLOSED. Register the secret once with:
     // setWebhook?url=...&secret_token=<TELEGRAM_WEBHOOK_SECRET>
@@ -38,6 +42,15 @@ export async function POST(req: Request) {
     const CORE_ENGINE_URL = `${protocol}://${host}/api/deai/core`;
 
     const body = await req.json();
+
+    // ⚡ DE-DUPLICATION — Telegram redelivers an update it thinks failed, with the same
+    // update_id. Claimed before anything else (including the group log below), so a
+    // redelivery is answered 200 and does nothing at all.
+    updateId = body.update_id;
+    if (await claimWebhookEvent('TELEGRAM', updateId) === 'DUPLICATE') {
+      return NextResponse.json({ success: true, duplicate: true });
+    }
+
     let text = body.message?.text || "";
     const chatId = body.message?.chat?.id?.toString();
     const chatType = body.message?.chat?.type; // 'private' | 'group' | 'supergroup' | 'channel'
@@ -238,6 +251,7 @@ export async function POST(req: Request) {
 
   } catch (error) {
     console.error("Telegram Webhook Error:", error);
+    await releaseWebhookEvent('TELEGRAM', updateId);
     return NextResponse.json({ success: false });
   }
 }
