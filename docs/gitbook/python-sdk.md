@@ -48,7 +48,7 @@ from abapay import AbaPayAgent, LinkParams
 account = Account.from_key("0x...")
 
 # One-time -- no browser, PIN chosen right here.
-agent = AbaPayAgent.link(LinkParams(signer=account, pin="1234"))
+agent = AbaPayAgent.link(LinkParams(signer=account, pin="123456"))
 
 print(agent.check_balance())
 agent.pay_bill(pin="1234", service="AIRTIME", provider="mtn", account_number="08012345678", amount_ngn=1000)
@@ -66,7 +66,7 @@ agent = AbaPayAgent.from_api_key(saved_api_key, wallet_address)
 {% code title="Installed alongside the package" %}
 ```bash
 PRIVATE_KEY=0x... abapay pay --service AIRTIME --provider mtn --to 08012345678 --amount 1000
-PRIVATE_KEY=0x... abapay link --pin 1234
+PRIVATE_KEY=0x... abapay link --pin 123456
 abapay balance --api-key aba_mcp_xxxxx
 abapay history --api-key aba_mcp_xxxxx --limit 5
 ```

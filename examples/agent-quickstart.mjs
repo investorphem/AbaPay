@@ -16,7 +16,7 @@
 //   CHAIN             CELO (default) or BASE
 //   TOKEN             USD₮/USDC/USA₮ on Celo, USDC/USD₮ on Base — defaults to the chain's lead token
 //   ALLOWANCE         how much to approve, in the token's own units — default "2"
-//   PIN               4-6 digits, yours to pick — default "1234" — CHANGE THIS
+//   PIN               6 digits, yours to pick — default "123456" — CHANGE THIS
 //   PAY               set to "1" to actually place a tiny real payment at the end (see PAY_* below)
 //   PAY_SERVICE / PAY_PROVIDER / PAY_ACCOUNT / PAY_AMOUNT_NGN
 //                     only read when PAY=1 — defaults to a ₦100 MTN airtime top-up
@@ -98,8 +98,8 @@ async function main() {
   const token = cfg.tokens[tokenSymbol];
   if (!token) fail(`"${tokenSymbol}" is not offered on ${chainKey}. Options: ${Object.keys(cfg.tokens).join(', ')}`);
 
-  const pin = process.env.PIN || '1234';
-  if (!/^\d{4,6}$/.test(pin)) fail('PIN must be 4-6 digits.');
+  const pin = process.env.PIN || '123456';
+  if (!/^\d{6}$/.test(pin)) fail('PIN must be 6 digits.');
 
   const allowanceHuman = process.env.ALLOWANCE || '2';
   const allowanceRaw = parseUnits(allowanceHuman, token.decimals);

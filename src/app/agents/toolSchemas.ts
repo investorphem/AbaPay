@@ -80,13 +80,24 @@ export const TOOLS: ToolDef[] = [
     ],
   },
   {
+    name: "get_payment_status",
+    title: "Get Payment Status",
+    access: "read",
+    description: "Look up one payment by tx hash or request id: delivered, still confirming, failed or refunded, with refund state. Only the linked wallet's payments. No PIN required.",
+    params: [
+      { name: "api_key", type: "string", required: false, description: "Not needed over OAuth." },
+      { name: "reference", type: "string", required: true, description: "The transaction hash (0x…) or request id." },
+    ],
+  },
+  {
     name: "pay_bill",
     title: "Pay Bill",
     access: "destructive",
     description: "Pay a real bill — Nigerian (airtime, data, electricity, cable, WAEC/JAMB) or international airtime/data — from the linked wallet, settled on-chain. Executes immediately; no delay parameter exists.",
     params: [
       { name: "api_key", type: "string", required: false, description: "Not needed over OAuth." },
-      { name: "pin", type: "string", required: true, description: "4-6 digit PIN. Required on every payment, including over OAuth." },
+      { name: "pin", type: "string", required: true, description: "The key's PIN (6 digits for keys created now; older keys may have 4-6). Required on every payment, including over OAuth." },
+      { name: "idempotency_key", type: "string", required: false, description: "A unique id for this payment (8-128 chars). A retry with the same key returns the first result instead of paying again." },
       { name: "service", type: "string", required: true, enum: ["AIRTIME", "DATA", "ELECTRICITY", "CABLE", "EDUCATION", "INTERNATIONAL"], description: "Which kind of bill." },
       { name: "provider", type: "string", required: false, description: "e.g. mtn, ikeja-electric, dstv, waec. Not used for INTERNATIONAL." },
       { name: "account_number", type: "string", required: true, description: "Phone/meter/smartcard/JAMB ID/destination number, depending on service." },
@@ -109,6 +120,7 @@ export const TOOLS: ToolDef[] = [
     params: [
       { name: "api_key", type: "string", required: false, description: "Not needed over OAuth." },
       { name: "pin", type: "string", required: true, description: "Required to create a schedule." },
+      { name: "idempotency_key", type: "string", required: false, description: "A unique id for this payment (8-128 chars). A retry with the same key returns the first result instead of paying again." },
       { name: "service", type: "string", required: true, enum: ["AIRTIME", "DATA", "ELECTRICITY", "CABLE"], description: "Which kind of bill." },
       { name: "provider", type: "string", required: false, description: "e.g. mtn, ikeja-electric, dstv." },
       { name: "account_number", type: "string", required: true, description: "Phone/meter/smartcard number." },
@@ -137,11 +149,13 @@ export const TOOLS: ToolDef[] = [
     name: "cancel_schedule",
     title: "Cancel Schedule",
     access: "write",
-    description: "Cancel one or more active schedules. Pass id for exactly one, provider for all of that provider's, or neither to cancel everything. No PIN required.",
+    description: "Cancel active schedules. Pass id for exactly one (no PIN). provider (all of that provider's) or all: true (every schedule) require the PIN. With none of these the call is refused.",
     params: [
       { name: "api_key", type: "string", required: false, description: "Not needed over OAuth." },
       { name: "id", type: "string", required: false, description: "Exact schedule id from list_schedules. Cancels only that one." },
-      { name: "provider", type: "string", required: false, description: 'Cancel every active schedule for this provider, e.g. "mtn". Ignored if id is set.' },
+      { name: "provider", type: "string", required: false, description: 'Cancel every active schedule for this provider, e.g. "mtn". Requires pin. Ignored if id is set.' },
+      { name: "all", type: "boolean", required: false, description: "true cancels every active schedule on the wallet. Requires pin." },
+      { name: "pin", type: "string", required: false, description: "Required with provider or all; not needed for a single id." },
     ],
   },
   {
@@ -152,6 +166,7 @@ export const TOOLS: ToolDef[] = [
     params: [
       { name: "api_key", type: "string", required: false, description: "Not needed over OAuth." },
       { name: "pin", type: "string", required: true, description: "Authorizes the whole batch." },
+      { name: "idempotency_key", type: "string", required: false, description: "A unique id for this payment (8-128 chars). A retry with the same key returns the first result instead of paying again." },
       { name: "recipients", type: "array", required: true, description: "2-20 objects, each: service (AIRTIME|DATA), provider, account_number, amount_ngn, variation_code (DATA only), chain/token overrides." },
       { name: "chain", type: "string", required: false, enum: ["CELO"], description: "Default chain for recipients that don't set their own." },
       { name: "token", type: "string", required: false, enum: ["USD₮", "USDC", "USA₮"], description: "Default token for recipients that don't set their own." },

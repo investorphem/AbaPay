@@ -915,11 +915,12 @@ already backs Telegram/WhatsApp/X, not a parallel system with its own rules:
 | `list_international_options` | Browses the live international catalogue (140+ countries) one level at a time — country → product type → operator → priced plan | Nothing — public |
 | `check_balance` | Reads the linked wallet's live balance + approved agent limit, **per token**, on a chain | OAuth Bearer token *or* `api_key` |
 | `transaction_history` | Lists recent real transactions for the linked wallet — same data as the app's History tab | OAuth Bearer token *or* `api_key` |
+| `get_payment_status` | Looks up one payment by tx hash or request id: delivered, still confirming, failed or refunded, with refund state. Scoped to the linked wallet | OAuth Bearer token *or* `api_key` |
 | `pay_bill` | Pays a real bill (airtime, data, electricity, cable TV, **education PIN**, or **international airtime/data**) end-to-end, on-chain | (OAuth Bearer token *or* `api_key`) **+ `pin`, always** |
 | `pay_bill_batch` | Pays airtime/data to 2-20 recipients in one call, one PIN for the whole batch | (OAuth Bearer token *or* `api_key`) **+ `pin`, always** |
 | `schedule_bill` | Sets up a recurring/one-off airtime, data, electricity, or cable payment — same automation Telegram/WhatsApp/X support | (OAuth Bearer token *or* `api_key`) **+ `pin`, always** |
 | `list_schedules` | Lists active schedules for the linked wallet | OAuth Bearer token *or* `api_key` |
-| `cancel_schedule` | Cancels one, some, or all active schedules for the linked wallet | OAuth Bearer token *or* `api_key` |
+| `cancel_schedule` | Cancels one schedule by `id`, or several by `provider` / `all: true` (those need the PIN); a call with none of them is refused | OAuth Bearer token *or* `api_key` (+ PIN for bulk) |
 
 `list_plans` exists so `variation_code` is never something the agent has to invent.
 Its description, and the server-level `instructions`, both tell the client to call it before
@@ -996,8 +997,9 @@ button per schedule — all using the spec's "Interactive Updates" pattern (the 
 notification). Deliberately **not** extended to `pay_bill`/`pay_bill_batch`/`schedule_bill`: those
 need a PIN, and typing a spending PIN into a sandboxed third-party iframe is a weaker trust
 boundary than typing it directly into the chat, which is the boundary the rest of this doc is
-built around protecting. `cancel_schedule` needs no PIN already (same as calling it from chat),
-which is why it's the one write action the card exposes.
+built around protecting. `cancel_schedule` for a single schedule `id` needs no PIN, which is why it's the one write
+action the card exposes. Cancelling several at once (`provider`, or an explicit `all: true`)
+does need the PIN, so the card never offers it.
 
 **Already-connected clients pick up new/changed tools without a manual reconnect** — mostly.
 `initialize` declares `tools: { listChanged: true }`, and `GET /api/mcp` with
@@ -1555,7 +1557,7 @@ The app ships with Farcaster frame metadata (`public/.well-known/farcaster.json`
 * **Internal-Only AI Routes:** The DeAI "brain" (`/api/deai/*`) is reachable only by the app's own bot webhooks via a signed internal-service token (`src/utils/internalAuth.ts`). This prevents the public internet from impersonating any user by their chat ID / phone number / X ID, or burning the Claude API budget.
 * **Bot Webhook Signatures:** The WhatsApp and X webhooks verify Meta's `X-Hub-Signature-256` / X's `x-twitter-webhooks-signature` HMAC on every inbound payload (when the corresponding secret is configured), and Telegram verifies its secret token — so message events can't be forged.
 * **Hashed Transaction PINs:** DeAI PINs are stored as salted scrypt hashes (`src/utils/pinSecurity.ts`), never plaintext, with legacy plaintext values transparently upgraded on next use and a 4-attempt lockout.
-* **Scoped Paymaster Proxy:** The gas-sponsorship proxy (`/api/paymaster`) allowlists only ERC-7677 paymaster JSON-RPC methods, so it can't be abused as a general-purpose RPC relay running on your CDP key.
+* **Scoped Paymaster Proxy:** The gas-sponsorship proxy (`/api/paymaster`) allowlists only ERC-7677 paymaster JSON-RPC methods, so it can't be abused as a general-purpose RPC relay running on your CDP key. It also decodes each UserOperation (the smart wallet's `execute`/`executeBatch`) and only sponsors AbaPay's own calls: a supported stablecoin's `approve(vault, …)`, and the vault's `payBill` / `setSpendingAllowance`, with no native value and on Base only. Anything else gets a `-32602` refusal and never reaches CDP. Requests are rate-limited per IP and per smart-wallet sender (`src/lib/paymasterPolicy.ts`).
 
 ### Rate Limiting
 

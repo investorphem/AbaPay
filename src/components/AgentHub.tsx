@@ -170,7 +170,9 @@ export function AgentHub({ address, selectedToken, activeChainName, onApproveAll
 
   const startLink = async () => {
     if (!address) { setMsg('Connect your wallet first.'); return; }
-    if (!/^\d{4,6}$/.test(pin)) { setMsg('PIN must be 4-6 digits.'); return; }
+    if (channel === 'MCP' ? !/^\d{6}$/.test(pin) : !/^\d{4,6}$/.test(pin)) {
+      setMsg(channel === 'MCP' ? 'An MCP API key needs a 6-digit PIN.' : 'PIN must be 4-6 digits.'); return;
+    }
 
     setLoading(true); setMsg(''); setLinkCode(null); setApiKey(null);
     try {
@@ -233,7 +235,10 @@ export function AgentHub({ address, selectedToken, activeChainName, onApproveAll
 
   const savePin = async (id: string) => {
     if (!address) return;
-    if (!/^\d{4,6}$/.test(newPin)) { setPinMsg({ id, text: 'PIN must be 4-6 digits.', ok: false }); return; }
+    const isMcp = links.find((l: any) => l.id === id)?.channel === 'MCP';
+    if (isMcp ? !/^\d{6}$/.test(newPin) : !/^\d{4,6}$/.test(newPin)) {
+      setPinMsg({ id, text: isMcp ? 'An MCP API key needs a 6-digit PIN.' : 'PIN must be 4-6 digits.', ok: false }); return;
+    }
     setSavingPin(true);
     try {
       const authHeaders = await getAuthHeaders('PATCH:/api/agent/link');
@@ -468,7 +473,7 @@ export function AgentHub({ address, selectedToken, activeChainName, onApproveAll
               inputMode="numeric"
               value={pin}
               onChange={(e) => setPin(e.target.value.replace(/\D/g, '').slice(0, 6))}
-              placeholder="Set a 4-6 digit PIN"
+              placeholder={channel === 'MCP' ? 'Set a 6-digit PIN' : 'Set a 4-6 digit PIN'}
               className="w-full bg-slate-50 dark:bg-[#1a1a1f] border border-slate-100 dark:border-slate-800/80 rounded-2xl px-4 py-3 font-black tracking-[0.3em] text-center text-slate-900 dark:text-white outline-none focus:border-emerald-300 mb-2"
             />
             <button
@@ -578,7 +583,7 @@ export function AgentHub({ address, selectedToken, activeChainName, onApproveAll
                         inputMode="numeric"
                         value={newPin}
                         onChange={(e) => setNewPin(e.target.value.replace(/\D/g, '').slice(0, 6))}
-                        placeholder="New 4-6 digit PIN"
+                        placeholder={l.channel === 'MCP' ? 'New 6-digit PIN' : 'New 4-6 digit PIN'}
                         className="flex-1 px-3 py-2 rounded-xl bg-white dark:bg-[#111114] border border-slate-200 dark:border-slate-800 text-xs text-slate-900 dark:text-white outline-none focus:border-emerald-400"
                       />
                       <button

@@ -58,7 +58,7 @@ export default function SkillPage() {
         <div className="grid sm:grid-cols-2 gap-3">
           {[
             "Pay ₦1000 of MTN airtime to 08012345678 using AbaPay's x402 rail from my wallet.",
-            "Link my wallet to AbaPay with PIN 1234, then check my USDT balance on Celo.",
+            "Link my wallet to AbaPay with PIN 123456, then check my USDT balance on Celo.",
             "Using AbaPay, pay my DSTV cable bill and my electricity bill in one batch.",
             "Set up a monthly AbaPay schedule for ₦2000 MTN data on the 1st of each month.",
           ].map((prompt) => (
@@ -87,7 +87,7 @@ export default function SkillPage() {
         See it work — linked wallet (MCP)
       </h2>
       <p className="text-sm text-slate-500 dark:text-slate-400 mb-4 px-2 max-w-2xl">
-        For the fuller tool catalog, your agent calls these same 10 tools. Read-only ones below send for real; <code className="text-slate-500">pay_bill</code> and friends show the exact request instead — never fired from a public page.
+        For the fuller tool catalog, your agent calls these same 11 tools. Read-only ones below send for real; <code className="text-slate-500">pay_bill</code> and friends show the exact request instead — never fired from a public page.
       </p>
       <div className="mb-6">
         <MCPPlayground />

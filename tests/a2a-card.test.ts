@@ -22,6 +22,7 @@ vi.mock('@/lib/deai/mcpTools', () => ({
     { name: 'list_plans', description: 'List purchasable plans.', inputSchema: {} },
     { name: 'list_international_options', description: 'Browse international options.', inputSchema: {} },
     { name: 'transaction_history', description: 'Recent history.', inputSchema: {} },
+    { name: 'get_payment_status', description: 'Look up one payment.', inputSchema: {} },
     { name: 'pay_bill', description: 'Pay a bill.', inputSchema: {} },
     { name: 'pay_bill_batch', description: 'Pay multiple bills.', inputSchema: {} },
     { name: 'schedule_bill', description: 'Schedule a bill.', inputSchema: {} },
@@ -67,7 +68,7 @@ describe('A2A agent card', () => {
 
   it('derives skill descriptions from TOOLS so docs cannot drift between protocols', async () => {
     const card = await (await GET()).json();
-    expect(card.skills).toHaveLength(10);
+    expect(card.skills).toHaveLength(11);
 
     const describe_ = card.skills.find((s: any) => s.id === 'describe_capabilities');
     expect(describe_.description).toBe('List what AbaPay can pay for.'); // first line only
@@ -85,7 +86,7 @@ describe('A2A agent card', () => {
     const card = await (await GET()).json();
     const ids = card.skills.map((s: any) => s.id).sort();
     expect(ids).toEqual(
-      ['check_balance', 'describe_capabilities', 'list_international_options', 'list_plans', 'pay_bill', 'pay_bill_batch', 'transaction_history', 'schedule_bill', 'list_schedules', 'cancel_schedule'].sort(),
+      ['check_balance', 'describe_capabilities', 'list_international_options', 'list_plans', 'pay_bill', 'pay_bill_batch', 'transaction_history', 'get_payment_status', 'schedule_bill', 'list_schedules', 'cancel_schedule'].sort(),
     );
   });
 });
@@ -119,9 +120,9 @@ describe('MERGE GATE — the real mcpTools module still loads and exports its co
     // The tool surface must be intact — the extraction moved these verbatim, so any change in
     // count or naming means content was lost in the move.
     expect(Array.isArray(real.TOOLS)).toBe(true);
-    expect(real.TOOLS).toHaveLength(10);
+    expect(real.TOOLS).toHaveLength(11);
     expect(real.TOOLS.map((t: any) => t.name).sort()).toEqual(
-      ['check_balance', 'describe_capabilities', 'list_international_options', 'list_plans', 'pay_bill', 'pay_bill_batch', 'transaction_history', 'schedule_bill', 'list_schedules', 'cancel_schedule'].sort(),
+      ['check_balance', 'describe_capabilities', 'list_international_options', 'list_plans', 'pay_bill', 'pay_bill_batch', 'transaction_history', 'get_payment_status', 'schedule_bill', 'list_schedules', 'cancel_schedule'].sort(),
     );
     for (const tool of real.TOOLS as any[]) {
       expect(tool.description).toBeTruthy();

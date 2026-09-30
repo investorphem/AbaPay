@@ -1,4 +1,22 @@
 import { NextResponse } from 'next/server';
+import { enforceRateLimit, enforceRateLimitByKey } from '@/lib/rateLimit';
+import { checkUserOperation, type SponsorScope } from '@/lib/paymasterPolicy';
+import { vaultAddressFor } from '@/lib/paymentProof';
+import { tokenSymbolsForChain, resolveTokenOnChain } from '@/constants';
+import { isMainnetEnv } from '@/lib/chain';
+
+// Base mainnet (8453) and Base Sepolia (84532), as the hex chain ids ERC-7677 passes.
+const BASE_CHAIN_IDS = new Set(['0x2105', '0x14a34', '8453', '84532']);
+
+// The contracts a sponsored UserOperation may call: the Base vault and its stablecoins.
+function sponsorScope(): SponsorScope | null {
+  const vault = vaultAddressFor('BASE');
+  if (!vault) return null;
+  const tokens = tokenSymbolsForChain('BASE')
+    .map((s) => resolveTokenOnChain(s, 'BASE', isMainnetEnv())?.address?.toLowerCase())
+    .filter((a): a is string => !!a);
+  return { vault, tokens };
+}
 
 // ⚡ PAYMASTER PROXY (Base gas sponsorship) ⚡
 //
@@ -34,22 +52,49 @@ export async function POST(req: Request) {
       'pm_sponsorUserOperation',
       'pm_getAcceptedPaymentTokens',
     ]);
+    let requests: any[];
     try {
       const parsed = JSON.parse(body);
-      const requests = Array.isArray(parsed) ? parsed : [parsed];
-      for (const r of requests) {
-        if (!r || typeof r.method !== 'string' || !ALLOWED_METHODS.has(r.method)) {
-          return NextResponse.json(
-            { jsonrpc: '2.0', id: r?.id ?? null, error: { code: -32601, message: 'Method not allowed through this proxy' } },
-            { status: 403 }
-          );
-        }
-      }
+      requests = Array.isArray(parsed) ? parsed : [parsed];
     } catch {
       return NextResponse.json(
         { jsonrpc: '2.0', id: null, error: { code: -32700, message: 'Parse error' } },
         { status: 400 }
       );
+    }
+    if (requests.length === 0 || requests.length > 5) {
+      return NextResponse.json({ jsonrpc: '2.0', id: null, error: { code: -32600, message: 'Invalid batch' } }, { status: 400 });
+    }
+
+    // Per-IP ceiling first — cheap, and bounds how hard anyone can probe the policy below.
+    const ipLimited = await enforceRateLimit(req, 'paymaster', 60, 600);
+    if (ipLimited) return ipLimited;
+
+    // 🔐 SPONSORSHIP POLICY — only AbaPay's own calls get free gas. See src/lib/paymasterPolicy.ts.
+    const scope = sponsorScope();
+    for (const r of requests) {
+      if (!r || typeof r.method !== 'string' || !ALLOWED_METHODS.has(r.method)) {
+        return NextResponse.json(
+          { jsonrpc: '2.0', id: r?.id ?? null, error: { code: -32601, message: 'Method not allowed through this proxy' } },
+          { status: 403 }
+        );
+      }
+      if (r.method === 'pm_getAcceptedPaymentTokens') continue; // no UserOperation to check
+      const [userOp, , chainId] = Array.isArray(r.params) ? r.params : [];
+      const refuse = (message: string) => NextResponse.json(
+        { jsonrpc: '2.0', id: r.id ?? null, error: { code: -32602, message: `Not sponsored: ${message}` } },
+        { status: 403 }
+      );
+      if (!scope) return refuse('sponsorship is not configured for this chain');
+      if (chainId !== undefined && !BASE_CHAIN_IDS.has(String(chainId).toLowerCase())) return refuse('only Base is sponsored');
+      const policy = checkUserOperation(userOp, scope);
+      if (!policy.ok) return refuse(policy.reason);
+
+      const sender = String(userOp?.sender || '').toLowerCase();
+      if (!/^0x[0-9a-f]{40}$/.test(sender)) return refuse('missing sender');
+      // Stub + final data is 2 calls per payment, so 20 per 10 minutes is ~10 payments.
+      const senderLimited = await enforceRateLimitByKey(`paymaster:${sender}`, 20, 600);
+      if (senderLimited) return senderLimited;
     }
 
     const upstreamRes = await fetch(paymasterUrl, {

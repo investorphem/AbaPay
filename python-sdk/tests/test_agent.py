@@ -22,11 +22,11 @@ def test_link_signs_and_returns_agent(httpserver):
 
     httpserver.expect_request("/api/agent/link", method="POST").respond_with_handler(handler)
 
-    agent = AbaPayAgent.link(LinkParams(signer=account, pin="1234", base_url=httpserver.url_for("")))
+    agent = AbaPayAgent.link(LinkParams(signer=account, pin="123456", base_url=httpserver.url_for("")))
 
     assert agent.api_key == "aba_mcp_test123"
     assert agent.wallet_address == account.address
-    assert captured["body"]["pin"] == "1234"
+    assert captured["body"]["pin"] == "123456"
     assert captured["body"]["wallet_address"] == account.address
 
     # The signature really does verify against the message it claims to sign.
@@ -38,11 +38,13 @@ def test_link_signs_and_returns_agent(httpserver):
 
 def test_link_rejects_malformed_pin():
     account = Account.from_key(TEST_PRIVATE_KEY)
-    try:
-        AbaPayAgent.link(LinkParams(signer=account, pin="12"))
-        assert False, "expected AbaPayError"
-    except AbaPayError as e:
-        assert "4-6 digits" in e.message
+    # "1234" was valid before; an MCP key now needs exactly 6 digits.
+    for bad in ("12", "1234"):
+        try:
+            AbaPayAgent.link(LinkParams(signer=account, pin=bad))
+            assert False, "expected AbaPayError"
+        except AbaPayError as e:
+            assert "6 digits" in e.message
 
 
 def test_call_tool_round_trips(httpserver):

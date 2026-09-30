@@ -82,6 +82,13 @@ to any address. That line is not negotiable.
 **The top four are the real protection.** The rest are operational convenience — valuable, but
 they are not what you rely on when things go wrong.
 
+The PIN is 6 digits for a new MCP API key (chat channels still accept 4–6; keys made before
+this rule keep their PIN until it is changed). Five wrong PINs lock the credential, with an
+escalating ladder (1m, 5m, 30m, 2h, 24h). Each attempt is counted atomically before the PIN
+is checked (`pin_attempt_reserve`, migration 029), so parallel guessing gets no more tries
+than sequential guessing, and a database outage refuses the attempt instead of skipping the
+count.
+
 The per-transaction ceiling is the vault's `maxAgentPaymentPerTx`, currently **50 tokens** (≈ $50) per
 agent payment for USDC, USD₮ and USA₮ on both V4 vaults. The database cap
 (`agent_max_ngn_per_tx`) is checked too, and whichever is lower is the one that binds.

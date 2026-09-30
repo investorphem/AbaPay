@@ -63,6 +63,13 @@ const SKILLS = [
     examples: ['What bills were paid recently?'],
   },
   {
+    id: 'get_payment_status',
+    name: 'Check a payment',
+    description: toolDescription('get_payment_status'),
+    tags: ['history', 'status', 'refunds'],
+    examples: ['Did payment 0x3f2a… go through?'],
+  },
+  {
     id: 'pay_bill',
     name: 'Pay a bill',
     description: toolDescription('pay_bill'),

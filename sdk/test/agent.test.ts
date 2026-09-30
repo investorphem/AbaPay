@@ -23,7 +23,7 @@ describe("AbaPayAgent.link", () => {
     );
 
     const signer = fakeSigner();
-    const agent = await AbaPayAgent.link({ signer, pin: "1234" });
+    const agent = await AbaPayAgent.link({ signer, pin: "123456" });
 
     expect(agent.apiKey).toBe("aba_mcp_test123");
     expect(agent.walletAddress).toBe(signer.address);
@@ -34,7 +34,7 @@ describe("AbaPayAgent.link", () => {
     expect(init.headers["x-wallet-signature"]).toMatch(/^0xsigned:AbaPay Agent Action: POST:\/api\/agent\/link: \d+$/);
 
     const body = JSON.parse(init.body);
-    expect(body.pin).toBe("1234");
+    expect(body.pin).toBe("123456");
     expect(body.channel).toBe("MCP");
     expect(body.approved_chain).toBe("CELO");
   });
@@ -48,7 +48,7 @@ describe("AbaPayAgent.link", () => {
     fetchMock.mockResolvedValueOnce(
       new Response(JSON.stringify({ success: false, message: "Signature does not match wallet." }), { status: 401 }),
     );
-    await expect(AbaPayAgent.link({ signer: fakeSigner(), pin: "1234" })).rejects.toThrow(
+    await expect(AbaPayAgent.link({ signer: fakeSigner(), pin: "123456" })).rejects.toThrow(
       "Signature does not match wallet.",
     );
   });

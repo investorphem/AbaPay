@@ -19,7 +19,11 @@ included.
   cannot re-enable itself.
 - **Per-credential rate limiting** — every money-moving call is rate-limited per API key, on
   top of the PIN requirement. See [Rate limits](rate-limits.md) for the full numbers.
-- **PIN lockout** — escalating lockout on repeated failed PIN attempts.
+- **PIN lockout** — escalating lockout on repeated failed PIN attempts: the 5th wrong PIN
+  locks the credential for 1 minute, then 5 minutes, 30 minutes, 2 hours and 24 hours. Each
+  attempt is counted *before* the PIN is checked, so sending guesses in parallel doesn't get
+  more than 5 through. If the counter can't be reached, the attempt is refused rather than let
+  through uncounted.
 
 The two contract-level switches, verbatim:
 

@@ -6,6 +6,36 @@ test-tooling fixes are left out. Full history: [commits on
 GitHub](https://github.com/investorphem/AbaPay/commits/main).
 {% endhint %}
 
+## 2026-09-30
+
+* **Sponsored gas covers AbaPay payments only.** The Base gas-sponsorship proxy now checks
+  what each transaction does, and pays gas only for approving a stablecoin to the AbaPay vault,
+  paying a bill, and setting the agent limit. Payers are unaffected. Other transactions are
+  refused, and so is too many requests from one wallet.
+
+* **New MCP API keys need a 6-digit PIN.** Creating a key (or changing its PIN) with 4 or 5
+  digits now gets a `400`. Existing keys keep working with their current PIN. The TypeScript
+  and Python SDKs check this before sending.
+* **PIN lockouts hold under parallel guessing.** Every attempt is counted before the PIN is
+  checked, so a burst of simultaneous guesses gets no more than the 5 allowed before the
+  lockout. If the attempt counter is unreachable, the payment is refused (nothing is charged)
+  instead of being let through.
+* **A chat payment confirmed twice is paid once.** If the same PIN reply reaches AbaPay twice
+  (a double-tap, or Telegram, WhatsApp or X redelivering a message), only the first one runs
+  the payment; the second is told it's already being processed. Redelivered messages are
+  also recognised by their platform id and ignored, so they no longer get a second reply.
+* **`cancel_schedule` no longer cancels everything by default (MCP server 1.1.0).** Cancelling
+  one schedule by `id` still needs no PIN. Cancelling several at once now needs the PIN: pass
+  `provider`, or `all: true` to cancel every schedule. A call with none of `id`, `provider` or
+  `all` is refused. Before, it quietly cancelled every schedule on the wallet.
+* **MCP payments are safe to retry.** `pay_bill`, `pay_bill_batch` and `schedule_bill` accept
+  an `idempotency_key`. A retry with the same key returns the first result instead of paying
+  again, and an identical call without a key within 2 minutes is treated the same way. See
+  [Retries never pay twice](mcp.md#retries-never-pay-twice).
+* **New MCP tool: `get_payment_status`.** Look up one payment by its transaction hash or
+  request id and get its status in plain words: delivered, still being confirmed, failed, or
+  refunded, including where any refund stands. It only finds the linked wallet's own payments.
+
 ## 2026-09-29
 
 * **x402 records every payment before any money moves.** The payment is written down before

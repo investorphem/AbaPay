@@ -2,6 +2,7 @@
 import { NextResponse } from 'next/server';
 import crypto from 'crypto';
 import { internalAuthHeaders } from '@/utils/internalAuth';
+import { claimWebhookEvent, releaseWebhookEvent } from '@/lib/webhookEvents';
 
 const X_BEARER_TOKEN = process.env.X_BEARER_TOKEN as string;
 
@@ -20,6 +21,8 @@ export async function GET(req: Request) {
 }
 
 export async function POST(req: Request) {
+  // X's id for this DM event, so a failure below can release it for the retry.
+  let eventId: string | undefined;
   try {
     // Dynamically route to the Brain
     const host = req.headers.get('host');
@@ -65,6 +68,13 @@ export async function POST(req: Request) {
 
       if (!text || !senderId) return NextResponse.json({ success: true });
 
+      // ⚡ DE-DUPLICATION — X redelivers an event it thinks failed, with the same event id.
+      // A redelivery is answered 200 and does nothing (src/lib/webhookEvents.ts).
+      eventId = event.id;
+      if (await claimWebhookEvent('X', eventId) === 'DUPLICATE') {
+        return NextResponse.json({ success: true, duplicate: true });
+      }
+
       const response = await fetch(CORE_ENGINE_URL, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', ...internalAuthHeaders() },
@@ -106,6 +116,7 @@ export async function POST(req: Request) {
     return NextResponse.json({ success: true });
   } catch (error) {
     console.error("X Webhook Error:", error);
+    await releaseWebhookEvent('X', eventId);
     return NextResponse.json({ success: false });
   }
 }

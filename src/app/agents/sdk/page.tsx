@@ -70,11 +70,11 @@ import { AbaPayAgent } from "abapay-sdk";
 const account = privateKeyToAccount(process.env.PRIVATE_KEY);
 
 // One-time -- no browser, PIN chosen right here.
-const agent = await AbaPayAgent.link({ signer: account, pin: "1234" });
+const agent = await AbaPayAgent.link({ signer: account, pin: "123456" });
 
 console.log(await agent.checkBalance());
 await agent.payBill({
-  pin: "1234", service: "AIRTIME", provider: "mtn",
+  pin: "123456", service: "AIRTIME", provider: "mtn",
   account_number: "08012345678", amount_ngn: 1000,
 });`}
         />
@@ -96,7 +96,7 @@ await agent.payBill({
                 ["payBillViaX402", "(params: { signer, bill, baseUrl? }) => Promise<X402PayResult>", "Zero-setup path. Fetches the 402 challenge, signs it, retries, returns the settlement."],
                 ["AbaPayAgent.link", "static (params: LinkParams) => Promise<AbaPayAgent>", "Links a wallet with a plain signed message and mints an api_key. Does NOT grant any on-chain allowance itself — approve() + setSpendingAllowance() stay a separate, explicit step."],
                 ["AbaPayAgent.fromApiKey", "static (apiKey, walletAddress, baseUrl?) => AbaPayAgent", "Reattach to an api_key minted earlier — no new signature needed."],
-                ["agent.callTool", "(name: string, args?: object) => Promise<string>", "Low-level: call any of the 10 MCP tools by name. Every typed method below is a thin wrapper over this."],
+                ["agent.callTool", "(name: string, args?: object) => Promise<string>", "Low-level: call any of the 11 MCP tools by name. Every typed method below is a thin wrapper over this."],
                 ["agent.checkBalance", "(chain?: 'CELO') => Promise<string>", "Wraps check_balance."],
                 ["agent.payBill", "(args: { pin, service, provider, account_number, amount_ngn, chain?, token?, variation_code? }) => Promise<string>", "Wraps pay_bill."],
                 ["agent.scheduleBill", "(args: object) => Promise<string>", "Wraps schedule_bill — same fields as the MCP tool, see the Tools reference."],

@@ -65,6 +65,12 @@ export async function POST(req: Request) {
     if (!/^\d{4,6}$/.test(String(pin || ''))) {
       return NextResponse.json({ success: false, message: 'PIN must be 4-6 digits' }, { status: 400 });
     }
+    // An MCP key is the one credential that can leak on its own (a config file, a log), and
+    // then its PIN is all that stands between a stranger and the allowance: 6 digits, not 4.
+    // Keys created before this rule keep their PIN until it is next changed.
+    if (channel === 'MCP' && !/^\d{6}$/.test(String(pin))) {
+      return NextResponse.json({ success: false, message: 'An MCP API key needs a 6-digit PIN' }, { status: 400 });
+    }
 
     // A link the caller doesn't pin to a chain gets the app's default (Base), and the token
     // that chain leads with (USDC) rather than a hardcoded USD₮ — pairing "no chain given"
@@ -181,6 +187,20 @@ export async function PATCH(req: Request) {
     }
 
     // Scoped to the owning wallet — you can only reset the PIN on your own linked channel.
+    const { data: link } = await supabaseAdmin
+      .from('agent_links')
+      .select('channel')
+      .eq('id', id)
+      .ilike('wallet_address', wallet)
+      .maybeSingle();
+    if (!link) {
+      return NextResponse.json({ success: false, message: 'That link was not found for this wallet.' }, { status: 404 });
+    }
+    // Same 6-digit rule as creating an MCP key (see POST).
+    if ((link as any).channel === 'MCP' && !/^\d{6}$/.test(String(new_pin))) {
+      return NextResponse.json({ success: false, message: 'An MCP API key needs a 6-digit PIN' }, { status: 400 });
+    }
+
     const { data, error } = await supabaseAdmin
       .from('agent_links')
       .update({
