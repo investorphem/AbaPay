@@ -20,13 +20,14 @@ interface Row {
 // question: "I know WHAT I want to do — which rail actually exposes it, and what do I call?"
 // Blank cells are real, not omissions: the REST/SDK surfaces are deliberately narrower than
 // the full MCP/A2A tool catalog (x402 is one endpoint by design; the SDK wraps the two most
-// common paths, not all ten tools) — see each rail's own page for why.
+// common paths, not all eleven tools) — see each rail's own page for why.
 const ROWS: Row[] = [
   { capability: "Check what's payable / paused", mcpA2a: "describe_capabilities", rest: null, sdk: null },
   { capability: "Check balance + agent limit", mcpA2a: "check_balance", rest: null, sdk: "agent.checkBalance()" },
   { capability: "List DATA/CABLE/EDUCATION plans", mcpA2a: "list_plans", rest: null, sdk: null },
   { capability: "List international top-up options", mcpA2a: "list_international_options", rest: null, sdk: null },
   { capability: "Transaction history", mcpA2a: "transaction_history", rest: null, sdk: "agent.transactionHistory()" },
+  { capability: "Check one payment", mcpA2a: "get_payment_status", rest: null, sdk: null },
   { capability: "Pay one bill", mcpA2a: "pay_bill", rest: "POST /api/pay/x402", sdk: "agent.payBill() · payBillViaX402()" },
   { capability: "Pay 2-20 recipients in one call", mcpA2a: "pay_bill_batch", rest: null, sdk: null },
   { capability: "Schedule a recurring/future bill", mcpA2a: "schedule_bill", rest: null, sdk: "agent.scheduleBill()" },

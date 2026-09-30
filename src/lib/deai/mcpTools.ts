@@ -248,6 +248,23 @@ export const TOOLS = [
     _meta: { ui: { resourceUri: MCP_UI_CARD_URI } },
   },
   {
+    // An agent that lost a pay_bill response (timeout, crash) had no way to ask "did that go
+    // through?" short of paging transaction_history and guessing which row it was.
+    name: 'get_payment_status',
+    title: 'Get Payment Status',
+    description: 'Look up one payment by its reference — the transaction hash (0x…) or the request id a payment returned — and get its current status in plain words: delivered, still being confirmed, failed, or refunded, including where any refund stands. Only finds payments made by the linked wallet. Read-only, no PIN required. Use this instead of paying again when a pay_bill result was lost.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        api_key: { type: 'string', description: 'AbaPay MCP API key. NOT needed when the connector is authorized via OAuth — omit it entirely in that case.' },
+        reference: { type: 'string', description: 'The transaction hash (0x…) or request id of the payment.' },
+      },
+      required: ['reference'],
+      additionalProperties: false,
+    },
+    annotations: { title: 'Get Payment Status', readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: true },
+  },
+  {
     name: 'pay_bill',
     title: 'Pay Bill',
     description: 'Pay a real bill — Nigerian (airtime, data, electricity, cable TV, a WAEC/JAMB education PIN) or international airtime/data across 140+ countries — from the linked wallet, settled on-chain and delivered via the same pipeline as the AbaPay app. For DATA, CABLE (when changing package), and EDUCATION, call list_plans first and use a real variation_code from it. For service: INTERNATIONAL, call list_international_options first and pass back its exact country/product_type_id/operator_id/variation_code — never guess any of these. ALWAYS requires the PIN — including when this connector is authorized via OAuth; ask the human for it every time and never guess or reuse a remembered one. Money moves for real — only call this once the human has clearly confirmed the exact amount, provider, and account. EXECUTES IMMEDIATELY, with no delay/schedule parameter of any kind — there is no way to queue this call for later on this connection. If the human asks to pay "in N minutes", "later today", "tomorrow", or any other future time, do NOT call this now: ask them to confirm they want it sent immediately instead, or tell them delayed/recurring automations can only be set up from the AbaPay app or by messaging the AbaPay agent on Telegram/WhatsApp/X — never silently pay right away when a delay was requested.',
@@ -645,6 +662,67 @@ async function callTransactionHistory(args: any, oauthIdentity: McpIdentity | nu
     console.error('[MCP] Failed to render history image:', imgErr);
     return textResult(text);
   }
+}
+
+// What each transactions.status means to the person who paid.
+const STATUS_WORDS: Record<string, string> = {
+  SUCCESS: 'Delivered.',
+  PROCESSING: 'Paid — delivery is still being confirmed with the biller. Do not pay again; check back shortly.',
+  PENDING: 'Not paid yet — no on-chain payment has been recorded for it.',
+  FAILED_VENDING: 'Paid, but the biller could not deliver it. It is queued for a refund.',
+  REVERSED_NEEDS_REFUND: 'Paid, but the biller reversed the delivery. It is queued for a refund.',
+  REFUNDED: 'Refunded to the paying wallet.',
+  EXPIRED: 'Expired — it was never paid.',
+  FAILED_PAYMENT: 'The payment itself did not go through — nothing was charged.',
+};
+
+async function callGetPaymentStatus(args: any, oauthIdentity: McpIdentity | null) {
+  const resolved = await resolveIdentity(args, oauthIdentity);
+  if ('error' in resolved) {
+    if (resolved.error === 'missing') return NEEDS_AUTH;
+    return errorResult(INVALID_KEY_MSG);
+  }
+  const identity = resolved.identity;
+  const reference = String(args?.reference || '').trim();
+  if (!reference || reference.length > 200) return errorResult('reference is required — the transaction hash (0x…) or request id of the payment.');
+
+  // Scoped to the caller's own wallet: another wallet's payment is simply "not found", never
+  // distinguishable from one that doesn't exist.
+  const column = /^0x[0-9a-fA-F]{64}$/.test(reference) ? 'tx_hash' : 'request_id';
+  const byRef = supabaseAdmin
+    .from('transactions')
+    .select('*')
+    .ilike('wallet_address', identity.wallet_address);
+  // A hash is hex, so a case-insensitive match is exact (no wildcards in it).
+  const { data: tx, error } = await (column === 'tx_hash' ? byRef.ilike('tx_hash', reference) : byRef.eq('request_id', reference)).maybeSingle();
+
+  if (error) {
+    console.error('[MCP] get_payment_status query failed:', error.message);
+    return errorResult('Could not look that up right now — try again shortly.');
+  }
+  if (!tx) return errorResult(`No payment with reference ${reference} was found for this wallet.`);
+
+  const t = tx as any;
+  const lines = [
+    `${`${(t.network || '').toUpperCase()} ${t.service_category || ''}`.trim()} — ₦${Number(t.amount_naira || 0).toLocaleString()} to ${t.account_number || 'n/a'}`,
+    `Status: ${t.status} — ${STATUS_WORDS[t.status] || 'See the AbaPay app for details.'}`,
+  ];
+  if (String(t.tx_hash || '').startsWith('0x')) lines.push(`Transaction: ${explorerBaseFor(t.blockchain)}/tx/${t.tx_hash}`);
+  if (t.request_id) lines.push(`Request id: ${t.request_id}`);
+
+  if (String(t.tx_hash || '').startsWith('0x')) {
+    const { data: refund } = await supabaseAdmin
+      .from('refund_queue').select('status, refund_tx_hash').eq('tx_hash', t.tx_hash).maybeSingle();
+    const r = refund as any;
+    if (r) {
+      lines.push(r.status === 'COMPLETED' && r.refund_tx_hash
+        ? `Refund: sent — ${explorerBaseFor(t.blockchain)}/tx/${r.refund_tx_hash}`
+        : `Refund: ${r.status}`);
+    }
+  }
+  if (t.status === 'SUCCESS' && t.purchased_code) lines.push('The token/PIN for this purchase is in the AbaPay app\'s History tab.');
+
+  return textResult(lines.join('\n'));
 }
 
 // No auth required — read-only catalogue lookup, same trust level as list_plans. Drills down
@@ -1720,6 +1798,7 @@ async function dispatchTool(name: string, args: any, oauthIdentity: McpIdentity 
     case 'list_international_options': return callListInternationalOptions(args);
     case 'check_balance': return callCheckBalance(args, oauthIdentity);
     case 'transaction_history': return callTransactionHistory(args, oauthIdentity);
+    case 'get_payment_status': return callGetPaymentStatus(args, oauthIdentity);
     case 'pay_bill': return callPayBill(args, oauthIdentity);
     case 'schedule_bill': return callScheduleBill(args, oauthIdentity);
     case 'list_schedules': return callListSchedules(args, oauthIdentity);

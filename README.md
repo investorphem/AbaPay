@@ -915,6 +915,7 @@ already backs Telegram/WhatsApp/X, not a parallel system with its own rules:
 | `list_international_options` | Browses the live international catalogue (140+ countries) one level at a time — country → product type → operator → priced plan | Nothing — public |
 | `check_balance` | Reads the linked wallet's live balance + approved agent limit, **per token**, on a chain | OAuth Bearer token *or* `api_key` |
 | `transaction_history` | Lists recent real transactions for the linked wallet — same data as the app's History tab | OAuth Bearer token *or* `api_key` |
+| `get_payment_status` | Looks up one payment by tx hash or request id: delivered, still confirming, failed or refunded, with refund state. Scoped to the linked wallet | OAuth Bearer token *or* `api_key` |
 | `pay_bill` | Pays a real bill (airtime, data, electricity, cable TV, **education PIN**, or **international airtime/data**) end-to-end, on-chain | (OAuth Bearer token *or* `api_key`) **+ `pin`, always** |
 | `pay_bill_batch` | Pays airtime/data to 2-20 recipients in one call, one PIN for the whole batch | (OAuth Bearer token *or* `api_key`) **+ `pin`, always** |
 | `schedule_bill` | Sets up a recurring/one-off airtime, data, electricity, or cable payment — same automation Telegram/WhatsApp/X support | (OAuth Bearer token *or* `api_key`) **+ `pin`, always** |

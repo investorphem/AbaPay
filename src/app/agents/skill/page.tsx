@@ -87,7 +87,7 @@ export default function SkillPage() {
         See it work — linked wallet (MCP)
       </h2>
       <p className="text-sm text-slate-500 dark:text-slate-400 mb-4 px-2 max-w-2xl">
-        For the fuller tool catalog, your agent calls these same 10 tools. Read-only ones below send for real; <code className="text-slate-500">pay_bill</code> and friends show the exact request instead — never fired from a public page.
+        For the fuller tool catalog, your agent calls these same 11 tools. Read-only ones below send for real; <code className="text-slate-500">pay_bill</code> and friends show the exact request instead — never fired from a public page.
       </p>
       <div className="mb-6">
         <MCPPlayground />
