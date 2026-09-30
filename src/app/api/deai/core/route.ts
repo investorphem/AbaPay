@@ -1175,7 +1175,33 @@ async function handleCore(req: Request, ctx: HumanizeCtx): Promise<NextResponse>
             await supabase.from('deai_identities').update({ deai_pin: newHash }).eq(legacyColumn, platform_id);
           }
         }
-        await supabase.from('deai_sessions').delete().eq('chat_id', platform_id);
+
+        // 🔴 CLAIM THE SESSION — EXACTLY ONCE. This used to be an unconditional delete, so two
+        // messages carrying the right PIN that arrived together (a double-tap, a platform
+        // redelivering under a new id) both got past this point and both paid. The delete is
+        // now conditional on the very session version this request read (status +
+        // expires_at, which every session write resets) and returns the rows it removed:
+        // only the request that actually removed it goes on to execute. The other gets
+        // nothing back and stops. A session replaced in between by a newer request is not
+        // executed under the old one's intent either.
+        const claimQuery = supabase
+          .from('deai_sessions')
+          .delete()
+          .eq('chat_id', platform_id)
+          .eq('status', 'AWAITING_PIN');
+        const { data: claimed, error: claimErr } = await (session.expires_at
+          ? claimQuery.eq('expires_at', session.expires_at)
+          : claimQuery.is('expires_at', null)
+        ).select('chat_id');
+        if (claimErr || !claimed || claimed.length === 0) {
+          if (claimErr) console.error('[DeAI] Session claim failed:', claimErr.message);
+          return NextResponse.json({
+            action: 'REPLY',
+            message: claimErr
+              ? "⚠️ I couldn't confirm that just now, so nothing was charged. Please send your PIN again."
+              : "⏳ That request is already being processed — you'll get the result in a moment. Nothing extra was charged.",
+          });
+        }
 
         // 🔒 PIN-CONFIRMED BATCH — several recipients in one message. Executes sequentially,
         // NOT in parallel: each payBillFor decrements the same on-chain allowance, and firing

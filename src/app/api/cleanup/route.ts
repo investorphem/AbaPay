@@ -4,6 +4,7 @@ import { reconcileStuckProcessing } from '@/lib/reconcileStuck';
 import { checkProviderBalances } from '@/lib/balanceAlerts';
 import { reconcileRecordedRefunds } from '@/lib/refundVerify';
 import { reconcileX402Intents } from '@/lib/reconcileX402';
+import { pruneWebhookEvents } from '@/lib/webhookEvents';
 import { verifyCronRequest } from '@/utils/cronAuth';
 
 // ⚡ Manual / optional-cron trigger for the stale-preflight + stuck-PROCESSING sweeps.
@@ -36,6 +37,8 @@ async function handle(req: Request) {
     reconcileRecordedRefunds({ force: true }),
     // Finishes or closes x402 payments whose request died after the intent was recorded.
     reconcileX402Intents({ force: true }),
+    // Drops chat-webhook de-dup rows past every platform's retry window. Best-effort.
+    pruneWebhookEvents(),
   ]);
   const ok = preflightResult.ok && stuckResult.ok && balanceResult.ok && refundResult.ok && x402Result.ok;
   return NextResponse.json({ preflight: preflightResult, stuckProcessing: stuckResult, balances: balanceResult, refunds: refundResult, x402Intents: x402Result }, { status: ok ? 200 : 500 });

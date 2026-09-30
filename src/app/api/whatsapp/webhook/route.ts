@@ -2,6 +2,7 @@
 import { NextResponse } from 'next/server';
 import crypto from 'crypto';
 import { internalAuthHeaders } from '@/utils/internalAuth';
+import { claimWebhookEvent, releaseWebhookEvent } from '@/lib/webhookEvents';
 
 const WHATSAPP_TOKEN = process.env.WHATSAPP_ACCESS_TOKEN as string;
 const WHATSAPP_PHONE_ID = process.env.WHATSAPP_PHONE_NUMBER_ID as string;
@@ -20,6 +21,8 @@ export async function GET(req: Request) {
 }
 
 export async function POST(req: Request) {
+  // Meta's id for this message (wamid…), so a failure below can release it for the retry.
+  let messageId: string | undefined;
   try {
     // ⚡ THESE TWO FAILING SILENTLY IS EXACTLY WHY "sent the code, nothing happened" is so
     // hard to diagnose from the outside — `as string` is just a TypeScript assertion, not a
@@ -70,6 +73,13 @@ export async function POST(req: Request) {
       const senderNumber = messageObj.from;
 
       if (!text || !senderNumber) return NextResponse.json({ success: true });
+
+      // ⚡ DE-DUPLICATION — Meta redelivers a webhook it thinks failed, with the same message
+      // id. A redelivery is answered 200 and does nothing (src/lib/webhookEvents.ts).
+      messageId = messageObj.id;
+      if (await claimWebhookEvent('WHATSAPP', messageId) === 'DUPLICATE') {
+        return NextResponse.json({ success: true, duplicate: true });
+      }
 
       const response = await fetch(CORE_ENGINE_URL, {
         method: 'POST',
@@ -142,6 +152,7 @@ export async function POST(req: Request) {
     return NextResponse.json({ success: true });
   } catch (error) {
     console.error("WhatsApp Webhook Error:", error);
+    await releaseWebhookEvent('WHATSAPP', messageId);
     return NextResponse.json({ success: false });
   }
 }
