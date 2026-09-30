@@ -44,7 +44,7 @@ import { MCP_UI_CARD_URI } from '@/lib/deai/mcpUiTemplates';
 // case it was intermittently causing a 405 on the tool-call path itself, separate from — and
 // not a fix for — the actual MCP Apps rendering gap tracked in that issue, which is host-side.
 export const PROTOCOL_VERSION = '2026-07-28';
-export const SERVER_INFO = { name: 'abapay', version: '1.0.0' };
+export const SERVER_INFO = { name: 'abapay', version: '1.1.0' };
 
 export const APP_URL = process.env.NEXT_PUBLIC_APP_URL || 'https://abapays.com';
 
@@ -345,19 +345,22 @@ export const TOOLS = [
   {
     name: 'cancel_schedule',
     title: 'Cancel Schedule',
-    description: 'Cancel one or more active schedules for the linked wallet. Call list_schedules first to get a real id. Pass id to cancel exactly one; pass provider to cancel every active schedule for that provider; omit both to cancel ALL active schedules for this wallet. No PIN required, matching chat.',
+    description: 'Cancel active schedules for the linked wallet. Call list_schedules first to get a real id. Pass id to cancel exactly one (no PIN needed). Cancelling several at once — provider for every schedule of that provider, or all: true for every schedule on this wallet — requires the PIN, asked from the human each time. Calling with none of id/provider/all is refused rather than cancelling everything.',
     inputSchema: {
       type: 'object',
       properties: {
         api_key: { type: 'string', description: 'AbaPay MCP API key. NOT needed when the connector is authorized via OAuth — omit it entirely in that case.' },
-        id: { type: 'string', description: 'The exact schedule id from list_schedules. Cancels only that one schedule.' },
-        provider: { type: 'string', description: 'Cancel every active schedule for this provider, e.g. "mtn". Ignored if id is also given.' },
+        id: { type: 'string', description: 'The exact schedule id from list_schedules. Cancels only that one schedule. No PIN needed.' },
+        provider: { type: 'string', description: 'Cancel every active schedule for this provider, e.g. "mtn". Requires pin. Ignored if id is also given.' },
+        all: { type: 'boolean', description: 'Set true to cancel EVERY active schedule on this wallet. Requires pin. Never inferred — must be passed explicitly.' },
+        pin: { type: 'string', description: 'The PIN set when the API key was created. Required with provider or all; not needed for a single id.' },
       },
       required: [],
       additionalProperties: false,
     },
     // Deactivates rows rather than moving money, and cancelling an already-cancelled schedule
     // is a no-op — reversible in spirit (a new schedule_bill call recreates it) and idempotent.
+    // Bulk cancels (provider / all) need the PIN; a single id doesn't — see callCancelSchedule.
     annotations: { title: 'Cancel Schedule', readOnlyHint: false, destructiveHint: true, idempotentHint: true, openWorldHint: true },
   },
   {
@@ -1390,7 +1393,31 @@ async function callCancelSchedule(args: any, oauthIdentity: McpIdentity | null) 
   }
   const identity = resolved.identity;
   const id = args?.id ? String(args.id) : null;
-  const provider = args?.provider ? String(args.provider).toUpperCase() : null;
+  const provider = !id && args?.provider ? String(args.provider).toUpperCase() : null;
+  const all = !id && !provider && args?.all === true;
+
+  // 🔴 THIS USED TO CANCEL EVERYTHING WITH NO PIN — a call with no arguments deactivated every
+  // schedule on the wallet, so any holder of the API key (which can leak on its own: a config
+  // file, a log) could silently wipe someone's autopay. Now:
+  //   • one schedule by id stays PIN-free — bounded, visible, recreated with one schedule_bill,
+  //     and it is what the in-card Cancel button sends (a card can't collect a PIN);
+  //   • several at once (provider, or all: true) needs the PIN, through the same counted gate
+  //     as payments;
+  //   • no selector at all is refused instead of meaning "all".
+  if (!id && !provider && !all) {
+    return errorResult('Say which schedules to cancel: pass id (one schedule, from list_schedules), provider (all of that provider\'s, needs pin), or all: true (every schedule, needs pin).');
+  }
+  if (!id) {
+    const pin = String(args?.pin || '');
+    if (!pin) return errorResult('Cancelling several schedules at once needs the PIN — ask the human for it and pass pin. To cancel just one, pass its id instead.');
+    const pinGate = await checkPinAllowed(identity.id);
+    if (!pinGate.allowed) return errorResult(pinGate.message || 'Locked — too many incorrect PINs.');
+    if (!verifyPin(pin, identity.pin_hash)) {
+      const fail = await recordPinFailure(identity.id, identity.wallet_address, 'MCP', pinGate);
+      return errorResult(fail.message || 'Incorrect PIN.');
+    }
+    await clearPinFailures(identity.id);
+  }
 
   const { data: scheds, error } = await supabaseAdmin
     .from('scheduled_bills')
@@ -1406,8 +1433,7 @@ async function callCancelSchedule(args: any, oauthIdentity: McpIdentity | null) 
     return textResult('No active schedules to cancel.');
   }
 
-  // Same "no filter = cancel everything" parity as chat's CANCEL_SCHEDULE (core/route.ts) —
-  // documented in the tool description so a caller isn't surprised by it.
+  // `all` (explicit, PIN-checked above) matches every row; otherwise filter by id or provider.
   const target = (scheds as any[]).filter((sc) =>
     (!id || String(sc.id) === id) && (!provider || String(sc.provider || '').toUpperCase() === provider)
   );

@@ -919,7 +919,7 @@ already backs Telegram/WhatsApp/X, not a parallel system with its own rules:
 | `pay_bill_batch` | Pays airtime/data to 2-20 recipients in one call, one PIN for the whole batch | (OAuth Bearer token *or* `api_key`) **+ `pin`, always** |
 | `schedule_bill` | Sets up a recurring/one-off airtime, data, electricity, or cable payment — same automation Telegram/WhatsApp/X support | (OAuth Bearer token *or* `api_key`) **+ `pin`, always** |
 | `list_schedules` | Lists active schedules for the linked wallet | OAuth Bearer token *or* `api_key` |
-| `cancel_schedule` | Cancels one, some, or all active schedules for the linked wallet | OAuth Bearer token *or* `api_key` |
+| `cancel_schedule` | Cancels one schedule by `id`, or several by `provider` / `all: true` (those need the PIN); a call with none of them is refused | OAuth Bearer token *or* `api_key` (+ PIN for bulk) |
 
 `list_plans` exists so `variation_code` is never something the agent has to invent.
 Its description, and the server-level `instructions`, both tell the client to call it before
@@ -996,8 +996,9 @@ button per schedule — all using the spec's "Interactive Updates" pattern (the 
 notification). Deliberately **not** extended to `pay_bill`/`pay_bill_batch`/`schedule_bill`: those
 need a PIN, and typing a spending PIN into a sandboxed third-party iframe is a weaker trust
 boundary than typing it directly into the chat, which is the boundary the rest of this doc is
-built around protecting. `cancel_schedule` needs no PIN already (same as calling it from chat),
-which is why it's the one write action the card exposes.
+built around protecting. `cancel_schedule` for a single schedule `id` needs no PIN, which is why it's the one write
+action the card exposes. Cancelling several at once (`provider`, or an explicit `all: true`)
+does need the PIN, so the card never offers it.
 
 **Already-connected clients pick up new/changed tools without a manual reconnect** — mostly.
 `initialize` declares `tools: { listChanged: true }`, and `GET /api/mcp` with
