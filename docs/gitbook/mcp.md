@@ -36,6 +36,21 @@ Claude Desktop / Code: Settings → Connectors → Add custom connector → past
 | `list_schedules` | What automations are currently set up. |
 | `cancel_schedule` | Cancel one by `id` (no PIN), or several by `provider` / `all: true` (PIN required). |
 
+## Retries never pay twice
+
+`pay_bill`, `pay_bill_batch` and `schedule_bill` accept an optional `idempotency_key`: any
+unique id you pick for that one payment, 8–128 characters (a UUID is ideal).
+
+* **Retry with the same key** after a timeout and you get the first call's result back.
+  Nothing is charged again. The key is remembered for 24 hours.
+* **Same key, different arguments:** refused with a `409` conflict. Nothing is charged.
+* **Same key while the first call is still running:** you're told it's in progress. Wait,
+  then retry with the same key to get the result.
+* **A call that failed before any money moved** (wrong PIN, invalid account, paused service)
+  doesn't use the key up. Fix the request and retry with the same key.
+* **No key:** an identical call within 2 minutes is treated as a retry of the first. To pay
+  the same bill again on purpose within that window, pass a new key.
+
 {% hint style="info" %}
 **Same PIN rules as A2A.** MCP and A2A share one execution engine, one linking flow, and one PIN model — set entirely by API, never through a browser. See [A2A](a2a.md) for the exact request that does it.
 {% endhint %}

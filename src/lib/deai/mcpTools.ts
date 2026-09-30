@@ -18,6 +18,8 @@ import { explorerBaseFor } from '@/lib/chain';
 import { resolveCountry, fetchCountries, fetchProducts, fetchOperators, fetchIntlVariations } from '@/lib/deai/international';
 import { checkIntlMinimum } from '@/lib/parity';
 import { MCP_UI_CARD_URI } from '@/lib/deai/mcpUiTemplates';
+import { runIdempotent, markCommitted } from '@/lib/idempotency';
+import crypto from 'crypto';
 
 // ⚡ AGENT TOOL LAYER — the tools themselves (definitions + implementations), extracted from
 // src/app/api/mcp/route.ts so more than one transport can reach them. It is deliberately
@@ -254,6 +256,7 @@ export const TOOLS = [
       properties: {
         api_key: { type: 'string', description: 'AbaPay MCP API key. NOT needed when the connector is authorized via OAuth — omit it entirely in that case.' },
         pin: { type: 'string', description: 'The PIN set when the API key was created (6 digits for new keys). Required on EVERY payment, including over an OAuth connection — ask the human for it each time.' },
+        idempotency_key: { type: 'string', description: 'Optional, strongly recommended: a unique id you choose for THIS payment (8-128 chars, e.g. a UUID). Retrying with the same key returns the first result instead of paying again; reusing it with different arguments is refused (409). Without one, an identical call within 2 minutes is treated as a retry.' },
         service: { type: 'string', enum: ['AIRTIME', 'DATA', 'ELECTRICITY', 'CABLE', 'EDUCATION', 'INTERNATIONAL'], description: 'Which kind of bill' },
         // WAEC genuinely has no account of its own — the web app sends the buyer's phone as
         // the billers code (page.tsx: `payloadBillersCode = educationProvider === "jamb" ?
@@ -302,6 +305,7 @@ export const TOOLS = [
       properties: {
         api_key: { type: 'string', description: 'AbaPay MCP API key. NOT needed when the connector is authorized via OAuth — omit it entirely in that case.' },
         pin: { type: 'string', description: 'The PIN set when the API key was created (6 digits for new keys). Required to create a schedule, same as pay_bill.' },
+        idempotency_key: { type: 'string', description: 'Optional, strongly recommended: a unique id you choose for THIS payment (8-128 chars, e.g. a UUID). Retrying with the same key returns the first result instead of paying again; reusing it with different arguments is refused (409). Without one, an identical call within 2 minutes is treated as a retry.' },
         service: { type: 'string', enum: ['AIRTIME', 'DATA', 'ELECTRICITY', 'CABLE'], description: 'Which kind of bill to schedule. EDUCATION and INTERNATIONAL are not schedulable — use pay_bill directly for those.' },
         provider: { type: 'string', description: 'e.g. mtn, airtel, glo, 9mobile, ikeja-electric, dstv, gotv, startimes' },
         account_number: { type: 'string', description: 'Phone number (airtime/data), meter number (electricity), or smartcard/IUC number (cable)' },
@@ -382,6 +386,7 @@ export const TOOLS = [
       properties: {
         api_key: { type: 'string', description: 'AbaPay MCP API key. NOT needed when the connector is authorized via OAuth — omit it entirely in that case.' },
         pin: { type: 'string', description: 'The PIN set when the API key was created (6 digits for new keys). Required once for the whole batch.' },
+        idempotency_key: { type: 'string', description: 'Optional, strongly recommended: a unique id you choose for THIS payment (8-128 chars, e.g. a UUID). Retrying with the same key returns the first result instead of paying again; reusing it with different arguments is refused (409). Without one, an identical call within 2 minutes is treated as a retry.' },
         recipients: {
           type: 'array',
           minItems: 2,
@@ -1313,6 +1318,8 @@ async function callScheduleBill(args: any, oauthIdentity: McpIdentity | null) {
     console.error('[MCP] schedule_bill insert failed:', insertErr.message);
     return errorResult("Couldn't save that automation right now — try again shortly.");
   }
+  // Saved: a retry of this same request must not create a second schedule.
+  markCommitted();
 
   const when = frequency === 'once'
     ? `once, in about ${scheduleInMinutes} minute${scheduleInMinutes === 1 ? '' : 's'}`
@@ -1667,7 +1674,46 @@ async function callPayBillBatch(args: any, oauthIdentity: McpIdentity | null) {
 // serverless instance handles many requests and module state is shared between them, so a
 // module-level "current identity" would be a wallet-mixing bug waiting for two concurrent
 // users.
+// The three tools that move (or commit to moving) money. Each runs at most once per
+// idempotency key — see src/lib/idempotency.ts.
+const IDEMPOTENT_TOOLS = new Set(['pay_bill', 'pay_bill_batch', 'schedule_bill']);
+
 export async function callTool(name: string, args: any, oauthIdentity: McpIdentity | null) {
+  if (IDEMPOTENT_TOOLS.has(name)) return callIdempotent(name, args, oauthIdentity);
+  return dispatchTool(name, args, oauthIdentity);
+}
+
+async function callIdempotent(name: string, args: any, oauthIdentity: McpIdentity | null) {
+  const explicitKey = args?.idempotency_key === undefined || args?.idempotency_key === null ? null : String(args.idempotency_key);
+  if (explicitKey !== null && !/^[A-Za-z0-9._:-]{8,128}$/.test(explicitKey)) {
+    return errorResult('idempotency_key must be 8-128 characters of letters, digits, ".", "_", ":" or "-".');
+  }
+  // Scope = the credential. The raw api_key is never stored — only its hash.
+  const apiKey = String(args?.api_key || '');
+  const scope = apiKey ? `key:${crypto.createHash('sha256').update(apiKey).digest('hex')}` : oauthIdentity ? `link:${oauthIdentity.id}` : null;
+  if (!scope) return dispatchTool(name, args, oauthIdentity); // unauthenticated — it will just ask for auth
+
+  try {
+    const outcome = await runIdempotent(scope, name, args, explicitKey, () => dispatchTool(name, args, oauthIdentity));
+    if (outcome.kind === 'RAN') return outcome.result;
+    if (outcome.kind === 'MISMATCH') {
+      return errorResult('Conflict (409): this idempotency_key was already used for a DIFFERENT request. Nothing was charged. Use a new idempotency_key for a new payment.');
+    }
+    if (outcome.kind === 'IN_PROGRESS') {
+      return errorResult('This exact request is already being processed. Nothing extra was charged. Wait a few seconds, then retry with the same idempotency_key to get its result.');
+    }
+    const stored = outcome.result as any;
+    const note = `(Already processed ${outcome.ageSeconds}s ago. This is that result, and nothing was charged again. ${explicitKey ? 'To make a new payment, use a new idempotency_key.' : 'To pay the same bill again on purpose, pass a new idempotency_key.'})`;
+    return { ...stored, content: [...(stored?.content || []), { type: 'text', text: note }] };
+  } catch (err: any) {
+    if (err?.message === 'IDEMPOTENCY_UNAVAILABLE') {
+      return errorResult('Payments are briefly unavailable. Nothing was charged. Please try again in a minute.');
+    }
+    throw err;
+  }
+}
+
+async function dispatchTool(name: string, args: any, oauthIdentity: McpIdentity | null) {
   switch (name) {
     case 'describe_capabilities': return callDescribeCapabilities();
     case 'list_plans': return callListPlans(args);
