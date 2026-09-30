@@ -5,6 +5,7 @@ import { checkProviderBalances } from '@/lib/balanceAlerts';
 import { reconcileRecordedRefunds } from '@/lib/refundVerify';
 import { reconcileX402Intents } from '@/lib/reconcileX402';
 import { pruneWebhookEvents } from '@/lib/webhookEvents';
+import { pruneIdempotencyKeys } from '@/lib/idempotency';
 import { verifyCronRequest } from '@/utils/cronAuth';
 
 // ⚡ Manual / optional-cron trigger for the stale-preflight + stuck-PROCESSING sweeps.
@@ -39,6 +40,8 @@ async function handle(req: Request) {
     reconcileX402Intents({ force: true }),
     // Drops chat-webhook de-dup rows past every platform's retry window. Best-effort.
     pruneWebhookEvents(),
+    // Drops expired MCP idempotency keys (src/lib/idempotency.ts). Best-effort.
+    pruneIdempotencyKeys(),
   ]);
   const ok = preflightResult.ok && stuckResult.ok && balanceResult.ok && refundResult.ok && x402Result.ok;
   return NextResponse.json({ preflight: preflightResult, stuckProcessing: stuckResult, balances: balanceResult, refunds: refundResult, x402Intents: x402Result }, { status: ok ? 200 : 500 });

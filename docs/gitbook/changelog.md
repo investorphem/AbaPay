@@ -23,6 +23,10 @@ GitHub](https://github.com/investorphem/AbaPay/commits/main).
   one schedule by `id` still needs no PIN. Cancelling several at once now needs the PIN: pass
   `provider`, or `all: true` to cancel every schedule. A call with none of `id`, `provider` or
   `all` is refused. Before, it quietly cancelled every schedule on the wallet.
+* **MCP payments are safe to retry.** `pay_bill`, `pay_bill_batch` and `schedule_bill` accept
+  an `idempotency_key`. A retry with the same key returns the first result instead of paying
+  again, and an identical call without a key within 2 minutes is treated the same way. See
+  [Retries never pay twice](mcp.md#retries-never-pay-twice).
 
 ## 2026-09-29
 

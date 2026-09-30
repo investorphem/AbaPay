@@ -8,6 +8,7 @@ import { isMainnetEnv } from '@/lib/chain';
 import { isDuplicateElectricity } from '@/lib/parity';
 import { sendTelegramAlert } from '@/lib/telegram';
 import { computeServiceFee } from '@/lib/serviceRules';
+import { markCommitted } from '@/lib/idempotency';
 
 // ⚡ MULTI-RECIPIENT (BATCH) PAYMENTS — shared between the in-app chat (/api/deai/chat) and
 // the social channels (/api/deai/core). The intent engine emits `recipients` whenever a user
@@ -118,6 +119,10 @@ export async function executeAgentPayment(params: {
   variationCode?: string | null;
 }): Promise<AgentPaymentResult> {
   const { userWallet, item, exchangeRate, sourceChannel } = params;
+
+  // From here on a repeat of the calling request must not run again — see src/lib/idempotency.ts
+  // (a no-op for callers that don't run under a key, e.g. the scheduler and chat).
+  markCommitted();
 
   // ⚡ DUPLICATE ELECTRICITY GUARD — same check the interactive chat flow already enforces
   // (src/app/api/deai/core/route.ts), previously missing here, which meant MCP and the

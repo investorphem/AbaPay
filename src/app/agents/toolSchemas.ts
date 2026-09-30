@@ -87,6 +87,7 @@ export const TOOLS: ToolDef[] = [
     params: [
       { name: "api_key", type: "string", required: false, description: "Not needed over OAuth." },
       { name: "pin", type: "string", required: true, description: "The key's PIN (6 digits for keys created now; older keys may have 4-6). Required on every payment, including over OAuth." },
+      { name: "idempotency_key", type: "string", required: false, description: "A unique id for this payment (8-128 chars). A retry with the same key returns the first result instead of paying again." },
       { name: "service", type: "string", required: true, enum: ["AIRTIME", "DATA", "ELECTRICITY", "CABLE", "EDUCATION", "INTERNATIONAL"], description: "Which kind of bill." },
       { name: "provider", type: "string", required: false, description: "e.g. mtn, ikeja-electric, dstv, waec. Not used for INTERNATIONAL." },
       { name: "account_number", type: "string", required: true, description: "Phone/meter/smartcard/JAMB ID/destination number, depending on service." },
@@ -109,6 +110,7 @@ export const TOOLS: ToolDef[] = [
     params: [
       { name: "api_key", type: "string", required: false, description: "Not needed over OAuth." },
       { name: "pin", type: "string", required: true, description: "Required to create a schedule." },
+      { name: "idempotency_key", type: "string", required: false, description: "A unique id for this payment (8-128 chars). A retry with the same key returns the first result instead of paying again." },
       { name: "service", type: "string", required: true, enum: ["AIRTIME", "DATA", "ELECTRICITY", "CABLE"], description: "Which kind of bill." },
       { name: "provider", type: "string", required: false, description: "e.g. mtn, ikeja-electric, dstv." },
       { name: "account_number", type: "string", required: true, description: "Phone/meter/smartcard number." },
@@ -154,6 +156,7 @@ export const TOOLS: ToolDef[] = [
     params: [
       { name: "api_key", type: "string", required: false, description: "Not needed over OAuth." },
       { name: "pin", type: "string", required: true, description: "Authorizes the whole batch." },
+      { name: "idempotency_key", type: "string", required: false, description: "A unique id for this payment (8-128 chars). A retry with the same key returns the first result instead of paying again." },
       { name: "recipients", type: "array", required: true, description: "2-20 objects, each: service (AIRTIME|DATA), provider, account_number, amount_ngn, variation_code (DATA only), chain/token overrides." },
       { name: "chain", type: "string", required: false, enum: ["CELO"], description: "Default chain for recipients that don't set their own." },
       { name: "token", type: "string", required: false, enum: ["USD₮", "USDC", "USA₮"], description: "Default token for recipients that don't set their own." },
