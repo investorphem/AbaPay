@@ -7,6 +7,7 @@ import { reconcileX402Intents } from '@/lib/reconcileX402';
 import { pruneWebhookEvents } from '@/lib/webhookEvents';
 import { pruneIdempotencyKeys } from '@/lib/idempotency';
 import { verifyCronRequest } from '@/utils/cronAuth';
+import { pingDeadman } from '@/lib/deadman';
 
 // ⚡ Manual / optional-cron trigger for the stale-preflight + stuck-PROCESSING sweeps.
 //
@@ -44,6 +45,8 @@ async function handle(req: Request) {
     pruneIdempotencyKeys(),
   ]);
   const ok = preflightResult.ok && stuckResult.ok && balanceResult.ok && refundResult.ok && x402Result.ok;
+  // Dead-man ping: HEALTHCHECK_URL_CLEANUP (src/lib/deadman.ts).
+  await pingDeadman('CLEANUP', ok);
   return NextResponse.json({ preflight: preflightResult, stuckProcessing: stuckResult, balances: balanceResult, refunds: refundResult, x402Intents: x402Result }, { status: ok ? 200 : 500 });
 }
 

@@ -4,6 +4,7 @@ import { privateKeyToAccount } from 'viem/accounts';
 import { resolveChain, getPublicClient, getChainTransport, isMainnetEnv } from '@/lib/chain';
 import { resolveTokenOnChain, DEFAULT_CHAIN } from '@/constants';
 import { sendTelegramAlert } from '@/lib/telegram';
+import { metric } from '@/lib/log';
 import { celoAttributionSuffix, baseAttributionSuffix } from '@/lib/attribution';
 
 // ⚡ AGENT RELAYER
@@ -159,6 +160,7 @@ export async function checkRelayerGas(blockchain = 'CELO'): Promise<void> {
     const client = getPublicClient(blockchain);
     const balWei = (await client.getBalance({ address: account.address })) as bigint;
     const bal = Number(formatUnits(balWei, 18)); // native gas token is 18-decimals on both chains
+    metric('relayer_gas_balance', bal, { chain: chainKey, symbol: cfg.symbol }); // gauge (M5)
     if (bal >= cfg.limit) return;
     if (Date.now() - (lastGasAlertAt[chainKey] || 0) < GAS_ALERT_COOLDOWN_MS) return;
     lastGasAlertAt[chainKey] = Date.now();

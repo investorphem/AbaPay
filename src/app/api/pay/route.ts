@@ -11,6 +11,7 @@ import { checkWebPayment } from '@/lib/serviceRules';
 import { explorerBaseFor } from '@/lib/chain';
 import { verifyVaultPayment, UNDECIDED_PROOF_FAILURES } from '@/lib/paymentProof';
 import { normalizeChainName, LEGACY_RECORD_CHAIN } from '@/constants';
+import { metric } from '@/lib/log';
 
 // ⚡ /api/pay — THE WEB APP'S CONTRACT-CALL RAIL. Two calls per payment:
 //
@@ -207,6 +208,7 @@ async function createIntent(req: Request, body: PayRequest) {
     return NextResponse.json({ success: false, status: 'FAILED_VENDING', message: "Couldn't start this payment — please try again or contact support." }, { status: 500 });
   }
 
+  metric('payment_intents_total', 1, { rail: 'contract', service: String(serviceCategory || '').toUpperCase() });
   return NextResponse.json({ success: true, status: "PENDING", intent_id: intentId });
 }
 

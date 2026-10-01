@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 import { runScheduledBills } from '@/lib/scheduler';
 import { verifyCronRequest } from '@/utils/cronAuth';
+import { withDeadman } from '@/lib/deadman';
 
 // ⚡ ONE-OFF SCHEDULE RUNNER — "buy me MTN airtime in the next 10 minutes."
 //
@@ -16,7 +17,8 @@ async function handle(req: Request) {
   const unauthorized = verifyCronRequest(req);
   if (unauthorized) return unauthorized;
 
-  const result = await runScheduledBills({ scope: 'oneoff' });
+  // Pings HEALTHCHECK_URL_INSTANT so a cron that stops running gets noticed (src/lib/deadman.ts).
+  const result = await withDeadman('INSTANT', () => true, () => runScheduledBills({ scope: 'oneoff' }));
   return NextResponse.json({ success: true, ...result });
 }
 

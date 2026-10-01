@@ -2,6 +2,7 @@ import 'server-only';
 import { decodeEventLog, parseUnits, type PublicClient } from 'viem';
 import { ABAPAY_CONTRACT_ABI_EVENTS, LEGACY_RECORD_CHAIN, normalizeChainName, resolveTokenOnChain } from '@/constants';
 import { getPublicClient, isMainnetEnv } from '@/lib/chain';
+import { metric } from '@/lib/log';
 
 // ⚡ ONE ON-CHAIN PAYMENT VERIFIER — "did THIS vault receive THIS payment?"
 //
@@ -101,7 +102,19 @@ export type TokenTransferProof =
  * Only a log emitted BY the expected token contract counts; any other contract can emit a
  * Transfer-shaped event.
  */
+// Every check is counted (M5): payments_verified_total{check, chain, result}. A rising share of
+// NOT_FOUND / RPC_UNAVAILABLE is the early sign of an RPC problem; WRONG_* codes of tampering.
 export async function verifyTokenTransfer(
+  txHash: string,
+  expected: { blockchain: string | null | undefined; tokenSymbol: string; from: string; to: string; minAmountWei: bigint },
+  opts: { waitMs?: number; client?: PublicClient } = {},
+): Promise<TokenTransferProof> {
+  const proof = await verifyTokenTransferImpl(txHash, expected, opts);
+  metric('payments_verified_total', 1, { check: 'token_transfer', chain: normalizeChainName(expected.blockchain || LEGACY_RECORD_CHAIN), result: proof.ok ? 'ok' : proof.code });
+  return proof;
+}
+
+async function verifyTokenTransferImpl(
   txHash: string,
   expected: { blockchain: string | null | undefined; tokenSymbol: string; from: string; to: string; minAmountWei: bigint },
   opts: { waitMs?: number; client?: PublicClient } = {},
@@ -161,6 +174,16 @@ export async function verifyTokenTransfer(
  * client has only just broadcast). `waitMs = 0` reads it once (webhooks, reconcilers).
  */
 export async function verifyVaultPayment(
+  txHash: string,
+  expected: ExpectedVaultPayment,
+  opts: { waitMs?: number; client?: PublicClient } = {},
+): Promise<VaultPaymentProof> {
+  const proof = await verifyVaultPaymentImpl(txHash, expected, opts);
+  metric('payments_verified_total', 1, { check: 'vault_event', chain: normalizeChainName(expected.blockchain || LEGACY_RECORD_CHAIN), result: proof.ok ? 'ok' : proof.code });
+  return proof;
+}
+
+async function verifyVaultPaymentImpl(
   txHash: string,
   expected: ExpectedVaultPayment,
   opts: { waitMs?: number; client?: PublicClient } = {},

@@ -15,6 +15,7 @@ import { getPublicClient } from '@/lib/chain';
 import { verifyTokenTransfer, UNDECIDED_PROOF_FAILURES } from '@/lib/paymentProof';
 import { x402IntentKey, x402UnconfirmedKey } from '@/lib/reconcileX402';
 import { sigFingerprint } from '@/lib/redact';
+import { metric } from '@/lib/log';
 
 // ⚡ THE RAW ERC-1271 CHECK — deliberately not viem's `verifyTypedData`/`verifyHash`, which
 // falls back to ecrecover on any failure here (see the long comment where this is used). This
@@ -1207,6 +1208,7 @@ async function handleX402Request(req: Request) {
       );
     }
     intentRowId = intentRow.id;
+    metric('payment_intents_total', 1, { rail: 'x402', chain: chainKey });
 
     // ⚡ `resource` ON THE PAYLOAD, NOT ONLY ON THE REQUIREMENTS.
     //
@@ -1251,6 +1253,8 @@ async function handleX402Request(req: Request) {
     const attemptSettle = async () => {
       // A fresh CDP JWT per attempt — they are short-lived and bound to this exact request.
       const perAttemptAuth = (await chainCfg.authFor(CDP_FACILITATOR_SETTLE_PATH)) || authHeaders;
+      // facilitator_settle_latency_ms{chain, status} (M5): how long the facilitator takes to answer.
+      const settleStarted = Date.now();
       const res = await fetch(chainCfg.facilitatorSettleUrl, {
         method: 'POST',
         headers: { ...perAttemptAuth, 'Content-Type': 'application/json' },
@@ -1265,7 +1269,9 @@ async function handleX402Request(req: Request) {
       // facilitator returned a DIFFERENT error shape (or a non-JSON / non-200 body). That hid
       // the actual reason a settlement was rejected. Log status + full raw body so the real
       // cause is always visible.
-      return { status: res.status, ok: res.ok, text: await res.text() };
+      const text = await res.text();
+      metric('facilitator_settle_latency_ms', Date.now() - settleStarted, { chain: chainKey, status: res.status });
+      return { status: res.status, ok: res.ok, text };
     };
 
     let parsed: any = null;
