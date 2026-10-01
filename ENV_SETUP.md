@@ -485,6 +485,33 @@ Free — not issued by anyone, just protects the manual `/api/cleanup` endpoint.
 
 ---
 
+## 14c. Fulfilment worker (M6)
+
+```
+FULFILMENT_WORKER_ENABLED=true      # default; "false" makes /api/internal/jobs/run a no-op (rollback)
+JOBS_BATCH_SIZE=10                  # jobs per run, max 50
+HEALTHCHECK_URL_JOBS=https://hc-ping.com/<uuid>   # dead-man ping for the worker (see 14a)
+```
+Every proven payment gets one job in `fulfilment_jobs`, created by a database trigger in the
+same transaction as the claim (migration `034_fulfilment_jobs.sql`). Usually the request
+delivers the bill itself and the job just confirms it. If the request died, the worker
+finishes it:
+- it delivers a payment that was **never sent** to the biller;
+- otherwise it **requeries** the biller, and never re-sends.
+
+`executeVend` stamps `vend_dispatched_at` in one conditional update right before calling the
+biller, so a payment is sent at most once whoever tries.
+
+Schedule it **every minute** with the same external cron and `CRON_SECRET` as
+`/api/schedules/run-instant`:
+
+```
+GET https://<your-domain>/api/internal/jobs/run   (Authorization: Bearer <CRON_SECRET>, or x-cron-secret: <CRON_SECRET>)
+```
+
+Jobs that stay unresolved after 8 attempts are parked as `needs_review` and alerted once. See
+[docs/runbooks/README.md](docs/runbooks/README.md).
+
 ## 14a. Observability — optional
 
 ```

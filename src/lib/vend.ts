@@ -118,6 +118,41 @@ export async function executeVend(input: VendInput): Promise<VendResult> {
   return result;
 }
 
+/**
+ * 🔴 CLAIM THE RIGHT TO CALL THE PROVIDER, ONCE (migration 034).
+ *
+ * Sets `vend_dispatched_at` in one conditional update, immediately before the biller is called.
+ * Only one caller can win it, whether that's the inline request, a retried request or the
+ * fulfilment worker, so a payment is never sent to the biller twice. The flip side is what
+ * makes the worker safe: a PROCESSING row WITHOUT the stamp was provably never sent.
+ *
+ * Returns false only when a row with this tx hash exists AND was already dispatched. Anything
+ * else (no row matched, column missing before the migration, a database error) returns true,
+ * which is exactly today's behaviour, so the guard can never stop a legitimate first delivery.
+ */
+async function claimDispatch(txHash: string): Promise<boolean> {
+  if (!txHash || txHash.startsWith('preflight_')) return true;
+  try {
+    const { data, error } = await supabase
+      .from('transactions')
+      .update({ vend_dispatched_at: new Date().toISOString() })
+      .eq('tx_hash', txHash)
+      .is('vend_dispatched_at', null)
+      .select('id');
+    if (error) { log.warn('vend.dispatch_guard_unavailable', { tx_hash: txHash, error: error.message }); return true; }
+    if (data && data.length > 0) return true;
+    const { data: existing } = await supabase.from('transactions').select('vend_dispatched_at').eq('tx_hash', txHash).maybeSingle();
+    if (existing && (existing as { vend_dispatched_at?: string | null }).vend_dispatched_at) {
+      log.warn('vend.already_dispatched', { tx_hash: txHash });
+      return false;
+    }
+    return true;
+  } catch (err) {
+    log.warn('vend.dispatch_guard_unavailable', { tx_hash: txHash, error: err instanceof Error ? err.message : String(err) });
+    return true;
+  }
+}
+
 async function executeVendImpl(input: VendInput): Promise<VendResult> {
   const {
     serviceCategory,
@@ -127,6 +162,11 @@ async function executeVendImpl(input: VendInput): Promise<VendResult> {
   // (Moniepoint Inc.'s API), debiting the operator's Moniepoint business account. See
   // src/lib/monnifyVend.ts for why this rail is inherently async (submit now, confirm via
   // webhook/reconcile later) unlike VTpass's mostly-synchronous /pay.
+  // 🔴 AT MOST ONE PROVIDER CALL PER PAYMENT (M6). See claimDispatch below.
+  if (!(await claimDispatch(input.txHash))) {
+    return { success: true, status: 'TIMEOUT', message: 'This payment is already being delivered.' };
+  }
+
   if (serviceCategory === 'BANK') {
     return initiateMonnifyBankTransfer(input);
   }

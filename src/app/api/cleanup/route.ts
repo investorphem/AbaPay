@@ -6,6 +6,7 @@ import { reconcileRecordedRefunds } from '@/lib/refundVerify';
 import { reconcileX402Intents } from '@/lib/reconcileX402';
 import { pruneWebhookEvents } from '@/lib/webhookEvents';
 import { pruneIdempotencyKeys } from '@/lib/idempotency';
+import { pruneDoneJobs } from '@/lib/jobs';
 import { verifyCronRequest } from '@/utils/cronAuth';
 import { pingDeadman } from '@/lib/deadman';
 
@@ -43,6 +44,8 @@ async function handle(req: Request) {
     pruneWebhookEvents(),
     // Drops expired MCP idempotency keys (src/lib/idempotency.ts). Best-effort.
     pruneIdempotencyKeys(),
+    // Drops fulfilment jobs finished more than 30 days ago (src/lib/jobs.ts).
+    pruneDoneJobs(),
   ]);
   const ok = preflightResult.ok && stuckResult.ok && balanceResult.ok && refundResult.ok && x402Result.ok;
   // Dead-man ping: HEALTHCHECK_URL_CLEANUP (src/lib/deadman.ts).
