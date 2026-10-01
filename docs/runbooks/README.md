@@ -16,6 +16,14 @@ Vercel logs.
 **Do:** re-run the job by hand with the secret. Until `/api/cleanup` runs, stuck payments and x402
 intents aren't reconciled, and until `/run-instant` runs, one-off schedules don't fire.
 
+## Fulfilment job needs review (Telegram "FULFILMENT JOB NEEDS REVIEW")
+
+**Means:** a proven payment is still unresolved after 8 worker attempts (`fulfilment_jobs.status = 'needs_review'`, reason in `last_error`). The worker has stopped retrying it.
+
+**Check:** the transaction's row and the provider's own record of its `request_id` (requery from `/admin`).
+
+**Do:** settle it by hand: complete it if the biller delivered, or refund it if it failed. Then set the job to `done`. The worker never re-sends a payment it can't prove was unsent, so a parked job is never a double-delivery risk.
+
 ## Refund backlog (`refunds_pending`, `refund_age_max_hours`)
 
 **Means:** a paid order failed to deliver and its refund is waiting for an operator.

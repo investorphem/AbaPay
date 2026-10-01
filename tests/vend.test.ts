@@ -48,6 +48,34 @@ beforeEach(() => {
   enqueueRefund.mockClear();
 });
 
+describe('executeVend dispatch guard (M6)', () => {
+  it('two concurrent deliveries of the same payment call VTpass once', async () => {
+    let calls = 0;
+    vtpass = () => { calls++; return new Response(JSON.stringify({ code: '000', content: { transactions: { status: 'delivered' } } })); };
+    const [a, b] = await Promise.all([executeVend(input()), executeVend(input())]);
+    expect(calls).toBe(1);
+    expect([a.message, b.message]).toContain('This payment is already being delivered.');
+    expect(rowNow().vend_dispatched_at).toBeTruthy();
+  });
+
+  it('never re-sends a payment already dispatched', async () => {
+    db.tables.transactions[0].vend_dispatched_at = new Date().toISOString();
+    let calls = 0;
+    vtpass = () => { calls++; return new Response('{}'); };
+    const r = await executeVend(input());
+    expect(calls).toBe(0);
+    expect(r.status).toBe('TIMEOUT');
+  });
+
+  it('a payment with no matching row still delivers (the guard never blocks a first delivery)', async () => {
+    db.tables.transactions = [];
+    let calls = 0;
+    vtpass = () => { calls++; return new Response(JSON.stringify({ code: '000', content: { transactions: { status: 'delivered' } } })); };
+    await executeVend(input());
+    expect(calls).toBe(1);
+  });
+});
+
 describe('executeVend', () => {
   it('keeps the row PROCESSING when VTpass never answers — no reset to PENDING, no refund', async () => {
     vtpass = () => { throw new Error('ETIMEDOUT'); };
