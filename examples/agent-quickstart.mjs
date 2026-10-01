@@ -35,6 +35,7 @@
 
 import { createWalletClient, createPublicClient, http, parseUnits, formatUnits } from 'viem';
 import { privateKeyToAccount } from 'viem/accounts';
+import { createSiweMessage } from 'viem/siwe';
 import { celo, base } from 'viem/chains';
 
 const APP_URL = 'https://agents.abapays.com';
@@ -111,12 +112,26 @@ async function main() {
   console.log(`\nAbaPay agent quickstart — ${account.address} on ${chainKey}, ${tokenSymbol}\n`);
 
   // ─── Step 1: prove wallet ownership, mint an MCP api_key ──────────────────────
-  // Exactly what src/utils/walletAuth.ts verifies server-side: a plain personal_sign
-  // over "AbaPay Agent Action: <METHOD>:<PATH>: <timestamp>", sent as headers. No
-  // session, no OAuth, no browser.
-  console.log('→ Step 1/3: POST /api/agent/link (wallet-signature auth)');
-  const timestamp = String(Date.now());
-  const message = `AbaPay Agent Action: POST:/api/agent/link: ${timestamp}`;
+  // Exactly what src/utils/walletAuth.ts verifies server-side: a Sign-In with Ethereum
+  // (EIP-4361) message naming AbaPay's domain, carrying a single-use nonce from
+  // /api/auth/nonce and bound to this one action, sent as headers. No session, no
+  // OAuth, no browser.
+  console.log('→ Step 1/3: POST /api/agent/link (Sign-In with Ethereum)');
+  const { nonce } = await (await fetch(`${APP_URL}/api/auth/nonce?purpose=action`)).json();
+  if (!nonce) fail('Could not get a sign-in nonce from AbaPay.');
+  const now = new Date();
+  const message = createSiweMessage({
+    domain: new URL(APP_URL).host,
+    uri: APP_URL,
+    address: account.address,
+    chainId: cfg.chain.id,
+    nonce,
+    version: '1',
+    issuedAt: now,
+    expirationTime: new Date(now.getTime() + 5 * 60 * 1000),
+    statement: 'Link an AI agent or chat account to this wallet, protected by the PIN you chose. It does not move any money by itself.',
+    resources: ['abapay:action:POST:/api/agent/link'],
+  });
   const signature = await walletClient.signMessage({ message });
 
   const linkRes = await fetch(`${APP_URL}/api/agent/link`, {
@@ -125,7 +140,8 @@ async function main() {
       'Content-Type': 'application/json',
       'x-wallet-address': account.address,
       'x-wallet-signature': signature,
-      'x-wallet-timestamp': timestamp,
+      // base64, because a header can't carry the message's newlines.
+      'x-wallet-siwe': Buffer.from(message, 'utf8').toString('base64'),
     },
     body: JSON.stringify({
       wallet_address: account.address,

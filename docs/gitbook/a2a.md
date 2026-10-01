@@ -23,9 +23,10 @@ JSON-RPC.
 The PIN is a field in a JSON body, not something entered into a web form. Linking and every
 payment after it are both plain API calls:
 
-- `POST /api/agent/link` — a wallet-signature-authenticated call (the same `personal_sign`
-  scheme x402 signing uses elsewhere) that picks the PIN *in that same request* and mints an
-  Agent Hub api_key back. One HTTP call, no session, no browser.
+- `POST /api/agent/link` — a call authenticated with a
+  [Sign-In with Ethereum](https://eips.ethereum.org/EIPS/eip-4361) signature. It picks the PIN
+  *in that same request* and mints an Agent Hub api_key back. Fetch a single-use nonce from
+  `GET /api/auth/nonce?purpose=action` first. No session, no browser.
 - Every `pay_bill` / `pay_bill_batch` / `schedule_bill` call after that sends the same PIN
   back as another JSON field — still just an HTTP request.
 
@@ -33,8 +34,8 @@ payment after it are both plain API calls:
 ```
 headers: {
   "x-wallet-address": "0xYourAgentWallet...",
-  "x-wallet-signature": "<personal_sign over the request>",
-  "x-wallet-timestamp": "1234567890"
+  "x-wallet-signature": "<signature over the SIWE message>",
+  "x-wallet-siwe": "<the SIWE message, base64>"
 }
 body: {
   "wallet_address": "0xYourAgentWallet...",

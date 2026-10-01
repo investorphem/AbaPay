@@ -54,9 +54,18 @@ availability dependency, so monitor it. Confirm what's actually blocked with `/n
 before building the proxy: if a carrier filters by IP rather than by domain, a proxy on
 different infrastructure is required.
 
-### `ADMIN_WALLET_ADDRESS`
-Free — this is just the wallet address (yours) that's allowed to sign into `/admin`. No
-account needed, just paste your own `0x...` address.
+### `ADMIN_WALLET_ADDRESSES` (optional)
+Free. These are the ops wallet addresses (comma-separated) allowed to sign in to `/admin`. If
+unset, the built-in ops wallet `0x36787A2D3d114b35f687D946B9F248e48d37BA5c` is the admin.
+**Never put the vault owner here.** Day-to-day admin should not use the key that controls the
+funds. On-chain vault actions (refunds, withdrawals, pause, relayer, tokens) still need the
+owner wallet, because the contract enforces that.
+
+The old `ADMIN_WALLET_ADDRESS` is no longer read (a warning is logged if it's still set), and
+there is no fallback to the contract's on-chain owner any more. Sign-in is a Sign-In with
+Ethereum message. It issues an HttpOnly session cookie (2h idle, 8h max; change the max with
+`ADMIN_SESSION_TTL_MINUTES`), revocable from the dashboard's **Sign out everywhere**. This
+requires migration `033_admin_sessions.sql`.
 
 ### `PAYMASTER_URL` (Base sponsored gas — optional)
 **Paid** — you fund the gas being sponsored; Coinbase doesn't charge a platform fee on top, but
@@ -473,6 +482,22 @@ CRON_SECRET=<any long random string you generate yourself>
 ```
 Free — not issued by anyone, just protects the manual `/api/cleanup` endpoint. Generate with:
 `node -e "console.log(require('crypto').randomBytes(32).toString('hex'))"`
+
+---
+
+## 14b. Wallet sign-in (SIWE) — optional
+
+```
+LEGACY_WALLET_SIG_ACCEPT_UNTIL=2026-10-31T00:00:00Z   # default; when the old signature format stops working
+SIWE_ALLOWED_DOMAINS=                                  # extra hosts allowed in a SIWE message, comma-separated
+```
+Wallet-ownership proofs are Sign-In with Ethereum (EIP-4361) messages with single-use nonces
+from `/api/auth/nonce`. This requires migration `032_auth_nonces.sql`. The older
+`AbaPay Agent Action: …` format, still sent by SDKs before 0.4.0 (npm) / 0.3.0 (PyPI), is
+accepted until `LEGACY_WALLET_SIG_ACCEPT_UNTIL` and refused after it. Push the date later to
+give integrators more time. Every legacy use is logged (`legacy … signature accepted`), so
+the logs show who still hasn't upgraded. `abapays.com`, `www.`, `agents.` and `rails.` are
+always allowed, as are this project's Vercel previews, plus localhost outside production.
 
 ---
 

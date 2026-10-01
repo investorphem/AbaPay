@@ -3,6 +3,7 @@
 import React, { useState, useRef, useEffect } from "react";
 import { useWalletClient } from "wagmi";
 import { Sparkles, X, Send, Loader2, Check } from "lucide-react";
+import { signSiweHeaders, siweChainId } from "@/lib/siwe";
 
 // ⚡ IN-APP AI CHAT
 //
@@ -140,21 +141,22 @@ export function AIChat({ onPrefill, onNavigate, walletConnected, onRequireWallet
         setMsgs(m => [...m, { role: 'assistant', text: '⚠️ Wallet not ready — please try again.' }]);
         return;
       }
-      const timestamp = Date.now().toString();
-      let signature: string;
+      let authHeaders: Record<string, string>;
       try {
-        // Must match exactly what /api/schedules' POST verifies against (walletAuth.ts binds
-        // the signature to "METHOD:/api/path", not the full body — see that file for why: this
-        // one signature deliberately covers every fetch below, one per batch recipient).
-        signature = await walletClient.signMessage({
-          account: walletAddress as `0x${string}`,
-          message: `AbaPay Agent Action: POST:/api/schedules: ${timestamp}`,
+        // One Sign-In with Ethereum signature for the whole Approve click: its nonce is issued
+        // for exactly as many uses as there are recipients, one per POST below (src/lib/siwe.ts).
+        authHeaders = await signSiweHeaders({
+          purpose: 'action',
+          action: 'POST:/api/schedules',
+          address: walletAddress,
+          chainId: walletClient.chain?.id ?? siweChainId(chain),
+          uses: confirm.items.length,
+          sign: (message) => walletClient.signMessage({ account: walletAddress as `0x${string}`, message }),
         });
       } catch {
         setMsgs(m => [...m, { role: 'assistant', text: '⚠️ Signature request was rejected or failed — please try again.' }]);
         return;
       }
-      const authHeaders = { 'x-wallet-signature': signature, 'x-wallet-timestamp': timestamp };
 
       const batchId = confirm.items.length > 1 ? crypto.randomUUID() : undefined;
       const runOnceAt = confirm.runOnceInMinutes
@@ -211,13 +213,14 @@ export function AIChat({ onPrefill, onNavigate, walletConnected, onRequireWallet
     }
     setBusy(true);
     try {
-      const timestamp = Date.now().toString();
-      let signature: string;
+      let authHeaders: Record<string, string>;
       try {
-        // Must match what DELETE /api/schedules verifies (walletAuth.ts: "METHOD:/api/path").
-        signature = await walletClient.signMessage({
-          account: walletAddress as `0x${string}`,
-          message: `AbaPay Agent Action: DELETE:/api/schedules: ${timestamp}`,
+        authHeaders = await signSiweHeaders({
+          purpose: 'action',
+          action: 'DELETE:/api/schedules',
+          address: walletAddress,
+          chainId: walletClient.chain?.id ?? siweChainId(chain),
+          sign: (message) => walletClient.signMessage({ account: walletAddress as `0x${string}`, message }),
         });
       } catch {
         setMsgs(m => [...m, { role: 'assistant', text: '⚠️ Signature request was rejected or failed — nothing was cancelled.' }]);
@@ -225,7 +228,7 @@ export function AIChat({ onPrefill, onNavigate, walletConnected, onRequireWallet
       }
       const res = await fetch('/api/schedules', {
         method: 'DELETE',
-        headers: { 'Content-Type': 'application/json', 'x-wallet-signature': signature, 'x-wallet-timestamp': timestamp },
+        headers: { 'Content-Type': 'application/json', ...authHeaders },
         body: JSON.stringify({ id: confirm.id, wallet_address: walletAddress }),
       }).then(r => r.json());
       setMsgs(m => m.map((msg, i) => i === msgIndex ? { ...msg, resolved: res.success ? 'approved' : 'failed' } : msg));

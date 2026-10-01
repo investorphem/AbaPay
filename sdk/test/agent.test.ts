@@ -1,7 +1,10 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
+import { parseSiweMessage } from "viem/siwe";
 import { AbaPayAgent, AbaPayError } from "../src/index.js";
 
-function fakeSigner(address = "0xAgent0000000000000000000000000000000001") {
+const nonceResponse = () => new Response(JSON.stringify({ success: true, nonce: "n0nce12345abc" }), { status: 200 });
+
+function fakeSigner(address = "0xa9e00000000000000000000000000000000000a1") {
   return {
     address,
     signMessage: vi.fn(async ({ message }: { message: string }) => `0xsigned:${message}`),
@@ -17,10 +20,10 @@ describe("AbaPayAgent.link", () => {
     vi.stubGlobal("fetch", fetchMock);
   });
 
-  it("signs the exact message shape /api/agent/link expects and sends it as headers, not the body", async () => {
-    fetchMock.mockResolvedValueOnce(
-      new Response(JSON.stringify({ success: true, api_key: "aba_mcp_test123" }), { status: 200 }),
-    );
+  it("signs a SIWE (EIP-4361) message for /api/agent/link with the server's nonce, sent as headers", async () => {
+    fetchMock
+      .mockResolvedValueOnce(nonceResponse())
+      .mockResolvedValueOnce(new Response(JSON.stringify({ success: true, api_key: "aba_mcp_test123" }), { status: 200 }));
 
     const signer = fakeSigner();
     const agent = await AbaPayAgent.link({ signer, pin: "123456" });
@@ -28,10 +31,21 @@ describe("AbaPayAgent.link", () => {
     expect(agent.apiKey).toBe("aba_mcp_test123");
     expect(agent.walletAddress).toBe(signer.address);
 
-    const [url, init] = fetchMock.mock.calls[0];
+    expect(fetchMock.mock.calls[0][0]).toBe("https://agents.abapays.com/api/auth/nonce?purpose=action");
+    const [url, init] = fetchMock.mock.calls[1];
     expect(url).toBe("https://agents.abapays.com/api/agent/link");
     expect(init.headers["x-wallet-address"]).toBe(signer.address);
-    expect(init.headers["x-wallet-signature"]).toMatch(/^0xsigned:AbaPay Agent Action: POST:\/api\/agent\/link: \d+$/);
+
+    // The signed message is exactly the one carried in x-wallet-siwe, and is a valid SIWE
+    // message bound to this domain, nonce and action.
+    const message = Buffer.from(init.headers["x-wallet-siwe"], "base64").toString("utf8");
+    expect(init.headers["x-wallet-signature"]).toBe(`0xsigned:${message}`);
+    const siwe = parseSiweMessage(message);
+    expect(siwe.domain).toBe("agents.abapays.com");
+    expect(siwe.nonce).toBe("n0nce12345abc");
+    expect(siwe.address?.toLowerCase()).toBe(signer.address);
+    expect(siwe.resources).toEqual(["abapay:action:POST:/api/agent/link"]);
+    expect(siwe.expirationTime!.getTime() - siwe.issuedAt!.getTime()).toBe(5 * 60 * 1000);
 
     const body = JSON.parse(init.body);
     expect(body.pin).toBe("123456");
@@ -45,9 +59,9 @@ describe("AbaPayAgent.link", () => {
   });
 
   it("throws AbaPayError when the server refuses to link", async () => {
-    fetchMock.mockResolvedValueOnce(
-      new Response(JSON.stringify({ success: false, message: "Signature does not match wallet." }), { status: 401 }),
-    );
+    fetchMock
+      .mockResolvedValueOnce(nonceResponse())
+      .mockResolvedValueOnce(new Response(JSON.stringify({ success: false, message: "Signature does not match wallet." }), { status: 401 }));
     await expect(AbaPayAgent.link({ signer: fakeSigner(), pin: "123456" })).rejects.toThrow(
       "Signature does not match wallet.",
     );

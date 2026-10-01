@@ -5,17 +5,63 @@ https://agents.abapays.com/a2a for why this and x402.py have genuinely different
 
 from __future__ import annotations
 
+import base64
 import json
 import re
-import time
 import urllib.error
+import urllib.parse
 import urllib.request
+from datetime import datetime, timedelta, timezone
 from typing import Any, Optional
+
+from eth_utils import to_checksum_address
 
 from .types import AbaPayError, LinkParams
 from .x402 import DEFAULT_BASE_URL
 
 _PIN_RE = re.compile(r"^\d{6}$")
+
+_LINK_STATEMENT = (
+    "Link an AI agent or chat account to this wallet, protected by the PIN you chose. "
+    "It does not move any money by itself."
+)
+
+
+def _iso(dt: datetime) -> str:
+    """ISO-8601 UTC with milliseconds and a Z, the exact form viem/AbaPay's server writes."""
+    return dt.astimezone(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S.") + f"{dt.microsecond // 1000:03d}Z"
+
+
+def build_siwe_message(
+    *,
+    domain: str,
+    uri: str,
+    address: str,
+    chain_id: int,
+    nonce: str,
+    issued_at: datetime,
+    expiration_time: datetime,
+    statement: str,
+    resources: list,
+) -> str:
+    """An EIP-4361 (Sign-In with Ethereum) message, byte-for-byte what viem's createSiweMessage
+    produces for the same fields, which is what AbaPay's server parses (src/lib/siwe.ts)."""
+    lines = [
+        f"{domain} wants you to sign in with your Ethereum account:",
+        to_checksum_address(address),
+        "",
+        statement,
+        "",
+        f"URI: {uri}",
+        "Version: 1",
+        f"Chain ID: {chain_id}",
+        f"Nonce: {nonce}",
+        f"Issued At: {_iso(issued_at)}",
+        f"Expiration Time: {_iso(expiration_time)}",
+        "Resources:",
+        *[f"- {r}" for r in resources],
+    ]
+    return "\n".join(lines)
 
 
 def _http_json(url: str, method: str, body: Optional[dict] = None, headers: Optional[dict] = None) -> dict:
@@ -56,15 +102,34 @@ class AbaPayAgent:
         if not _PIN_RE.match(params.pin):
             raise AbaPayError("PIN must be 6 digits.")
 
-        timestamp = str(int(time.time() * 1000))
-        message = f"AbaPay Agent Action: POST:/api/agent/link: {timestamp}"
+        # Sign-In with Ethereum (EIP-4361): names AbaPay's domain, carries a single-use nonce from
+        # /api/auth/nonce, and states what's being approved, so the signature can't be replayed
+        # or reused on another site.
+        root = params.base_url.rstrip("/")
+        nonce_data = _http_json(f"{root}/api/auth/nonce?purpose=action", "GET")
+        nonce = nonce_data.get("nonce")
+        if not nonce:
+            raise AbaPayError(nonce_data.get("message") or "Could not start wallet verification.", response=nonce_data)
+        origin = urllib.parse.urlsplit(root)
+        now = datetime.now(timezone.utc)
+        message = build_siwe_message(
+            domain=origin.netloc,
+            uri=f"{origin.scheme}://{origin.netloc}",
+            address=params.signer.address,
+            chain_id=8453 if params.approved_chain == "BASE" else 42220,
+            nonce=nonce,
+            issued_at=now,
+            expiration_time=now + timedelta(minutes=5),
+            statement=_LINK_STATEMENT,
+            resources=["abapay:action:POST:/api/agent/link"],
+        )
         signed = params.signer.sign_message(_personal_sign_message(message))
         signature = signed.signature.hex()
         if not signature.startswith("0x"):
             signature = "0x" + signature
 
         data = _http_json(
-            f"{params.base_url.rstrip('/')}/api/agent/link",
+            f"{root}/api/agent/link",
             "POST",
             body={
                 "wallet_address": params.signer.address,
@@ -77,7 +142,8 @@ class AbaPayAgent:
             headers={
                 "x-wallet-address": params.signer.address,
                 "x-wallet-signature": signature,
-                "x-wallet-timestamp": timestamp,
+                # base64 because a header can't carry the message's newlines.
+                "x-wallet-siwe": base64.b64encode(message.encode("utf-8")).decode("ascii"),
             },
         )
         if not data.get("success") or not data.get("api_key"):

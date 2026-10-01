@@ -1,3 +1,5 @@
+import { getAddress } from "viem";
+import { createSiweMessage } from "viem/siwe";
 import type { Signer } from "./types.js";
 import { AbaPayError } from "./types.js";
 import { DEFAULT_BASE_URL } from "./x402.js";
@@ -60,17 +62,39 @@ export class AbaPayAgent {
       throw new AbaPayError("PIN must be 6 digits.");
     }
 
-    const timestamp = String(Date.now());
-    const message = `AbaPay Agent Action: POST:/api/agent/link: ${timestamp}`;
+    // Sign-In with Ethereum (EIP-4361): the message names AbaPay's domain, carries a single-use
+    // nonce from /api/auth/nonce, and states what's being approved, so the signature can't be
+    // replayed or reused on another site. Same message the AbaPay app signs (src/lib/siwe.ts).
+    const root = baseUrl.replace(/\/$/, "");
+    const nonceRes = await fetch(`${root}/api/auth/nonce?purpose=action`);
+    const nonceData = (await nonceRes.json().catch(() => ({}))) as { nonce?: string; message?: string };
+    if (!nonceRes.ok || !nonceData.nonce) {
+      throw new AbaPayError(nonceData.message || `Could not start wallet verification (HTTP ${nonceRes.status}).`);
+    }
+    const origin = new URL(root);
+    const now = new Date();
+    const message = createSiweMessage({
+      domain: origin.host,
+      uri: origin.origin,
+      address: getAddress(signer.address),
+      chainId: approvedChain === "BASE" ? 8453 : 42220,
+      nonce: nonceData.nonce,
+      version: "1",
+      issuedAt: now,
+      expirationTime: new Date(now.getTime() + 5 * 60 * 1000),
+      statement: "Link an AI agent or chat account to this wallet, protected by the PIN you chose. It does not move any money by itself.",
+      resources: ["abapay:action:POST:/api/agent/link"],
+    });
     const signature = await signer.signMessage({ message });
 
-    const res = await fetch(`${baseUrl.replace(/\/$/, "")}/api/agent/link`, {
+    const res = await fetch(`${root}/api/agent/link`, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
         "x-wallet-address": signer.address,
         "x-wallet-signature": signature,
-        "x-wallet-timestamp": timestamp,
+        // base64 because a header can't carry the message's newlines.
+        "x-wallet-siwe": Buffer.from(message, "utf8").toString("base64"),
       },
       body: JSON.stringify({
         wallet_address: signer.address,

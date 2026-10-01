@@ -3,6 +3,7 @@
 import React, { useState, useEffect, useCallback } from "react";
 import { Bot, Shield, Check, Copy, Trash2, Loader2, AlertTriangle, ExternalLink, KeyRound } from "lucide-react";
 import { normalizeChainName, tokensForChain, defaultTokenForChain, type ChainName } from "@/constants";
+import { signSiweHeaders, siweChainId } from "@/lib/siwe";
 
 const CHANNELS = [
   { id: 'TELEGRAM', name: 'Telegram', color: 'text-sky-500', bot: 'https://t.me/abapayagentbot' },
@@ -65,12 +66,25 @@ export function AgentHub({ address, selectedToken, activeChainName, onApproveAll
   // `action` must be the exact "METHOD:/api/path" string the server verifies against
   // (walletAuth.ts binds the signature to it) — a signature signed for one action/endpoint is
   // rejected if replayed against another, so this can't be a generic fixed string anymore.
+  // Signs a Sign-In with Ethereum (EIP-4361) message: it names this site, carries a single-use
+  // nonce, and says in plain words what's being approved (src/lib/siwe.ts).
   const getAuthHeaders = async (action: string): Promise<Record<string, string> | null> => {
     if (!address) return null;
-    const timestamp = Date.now().toString();
-    const signature = await onSignMessage(`AbaPay Agent Action: ${action}: ${timestamp}`);
-    if (!signature) return null;
-    return { 'x-wallet-signature': signature, 'x-wallet-timestamp': timestamp };
+    try {
+      return await signSiweHeaders({
+        purpose: 'action',
+        action,
+        address,
+        chainId: siweChainId(activeChainName),
+        sign: async (message) => {
+          const signature = await onSignMessage(message);
+          if (!signature) throw new Error('rejected');
+          return signature;
+        },
+      });
+    } catch {
+      return null;
+    }
   };
 
   const [links, setLinks] = useState<any[]>([]);

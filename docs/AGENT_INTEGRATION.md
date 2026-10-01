@@ -54,20 +54,30 @@ No session, no cookie, no CAPTCHA — just an ECDSA signature (EOA) or ERC-1271 
 contract wallet: Coinbase Smart Wallet / Base Account, Safe, etc.), verified server-side in
 `src/utils/walletAuth.ts`.
 
-Sign this exact message with the wallet that will hold the AbaPay spending allowance:
+The message is a [Sign-In with Ethereum](https://eips.ethereum.org/EIPS/eip-4361) (EIP-4361)
+message. First get a single-use nonce:
 
-```
-AbaPay Agent Action: POST:/api/agent/link: <unix-ms-timestamp>
+```http
+GET /api/auth/nonce?purpose=action
+-> { "success": true, "nonce": "..." }
 ```
 
-Then:
+Then sign, with the wallet that will hold the AbaPay spending allowance, a SIWE message with:
+
+- `domain`: the AbaPay host you call (e.g. `agents.abapays.com`), and `uri` its origin;
+- `nonce`: the one you just got;
+- `issuedAt`: now, and `expirationTime`: at most 5 minutes later;
+- `resources`: `["abapay:action:POST:/api/agent/link"]`.
+
+viem's `createSiweMessage` builds it. The SDKs and `examples/agent-quickstart.mjs` show the
+exact fields. Then:
 
 ```http
 POST /api/agent/link
 Content-Type: application/json
 x-wallet-address: 0xYourAgentWallet
-x-wallet-signature: 0x...           # signature over the message above
-x-wallet-timestamp: <same timestamp, must be within 5 minutes>
+x-wallet-signature: 0x...           # signature over the SIWE message
+x-wallet-siwe: <the SIWE message, base64-encoded>
 
 {
   "wallet_address": "0xYourAgentWallet",

@@ -12,7 +12,8 @@ import {
   RefreshCw, Tv, GraduationCap, Send, Globe, Sparkles, LogOut, Check
 } from "lucide-react";
 import { supabase } from "@/utils/supabase";
-import { walletSessionMessage, WALLET_SESSION_MAX_AGE_MS } from "@/lib/walletSession";
+import { WALLET_SESSION_MAX_AGE_MS } from "@/lib/walletSession";
+import { signSiweHeaders, siweChainId, SIWE_HEADER } from "@/lib/siwe";
 import { celoAttributionSuffix } from "@/lib/attribution";
 import { useProviders, useValidSelection, useProviderLimits } from "@/lib/useProviders";
 import { useAccount, useConnect, useDisconnect, useWalletClient, useSwitchChain } from 'wagmi';
@@ -286,7 +287,7 @@ export default function Home() {
   // Held in sessionStorage, not localStorage: it should not outlive the browser session, and it
   // is a bearer credential for its lifetime (see WALLET_SESSION_MAX_AGE_MS). Read-only scope —
   // every mutation keeps its own fresh, per-action signature.
-  const [walletProof, setWalletProof] = useState<{ address: string; signature: string; timestamp: string } | null>(null);
+  const [walletProof, setWalletProof] = useState<{ address: string; signature: string; timestamp: string; siwe?: string } | null>(null);
   const walletProofInFlight = useRef(false);
   // 🔴 WHICH ADDRESS THE APP CURRENTLY CARES ABOUT — read by the in-flight verification to decide
   // whether its result is still wanted. It replaces the per-run `cancelled` flag that used to make
@@ -307,6 +308,7 @@ export default function Home() {
       'x-wallet-address': walletProof.address,
       'x-wallet-signature': walletProof.signature,
       'x-wallet-timestamp': walletProof.timestamp,
+      ...(walletProof.siwe ? { [SIWE_HEADER]: walletProof.siwe } : {}),
     };
   }, [walletProof, address]);
   const [client, setClient] = useState<WalletClient | null>(null);
@@ -2823,9 +2825,11 @@ export default function Home() {
     try {
       const cached = sessionStorage.getItem(`abapay_wallet_proof_${proofAddress.toLowerCase()}`);
       if (cached) {
-        const parsed = JSON.parse(cached) as { address: string; signature: string; timestamp: string };
+        const parsed = JSON.parse(cached) as { address: string; signature: string; timestamp: string; siwe?: string };
         const age = Date.now() - parseInt(parsed.timestamp, 10);
-        if (parsed.signature && age >= 0 && age < WALLET_SESSION_MAX_AGE_MS) { setWalletProof(parsed); return; }
+        // A proof cached before sign-in moved to SIWE (no `siwe`) is discarded, so it's re-made in
+        // the new format instead of running out the legacy acceptance window.
+        if (parsed.signature && parsed.siwe && age >= 0 && age < WALLET_SESSION_MAX_AGE_MS) { setWalletProof(parsed); return; }
         sessionStorage.removeItem(`abapay_wallet_proof_${proofAddress.toLowerCase()}`);
       }
     } catch { /* an unreadable cache just means we ask again */ }
@@ -2875,11 +2879,20 @@ export default function Home() {
         // spinner reading "Verifying" before Connect reappears. 20s is still generous for
         // actually reading and tapping Approve; it just stops pretending a silent decline might
         // still resolve on its own past that point.
-        const signature = String(await withWalletTimeout(
-          proofSigner.signMessage({ account: proofAddress as `0x${string}`, message: walletSessionMessage(timestamp) }) as Promise<string>,
-          20_000,
-        ));
-        const proof = { address: proofAddress, signature, timestamp };
+        //
+        // The message is a Sign-In with Ethereum session (src/lib/siwe.ts): it names this site
+        // and carries a nonce from /api/auth/nonce, so a phishing page can't collect a signature
+        // that works here. The timeout wraps only the wallet prompt, not the nonce fetch.
+        const siweHeaders = await signSiweHeaders({
+          purpose: 'session',
+          address: proofAddress,
+          chainId: proofSigner.chain?.id ?? siweChainId(null),
+          sign: async (message) => String(await withWalletTimeout(
+            proofSigner.signMessage({ account: proofAddress as `0x${string}`, message }) as Promise<string>,
+            20_000,
+          )),
+        });
+        const proof = { address: proofAddress, signature: siweHeaders['x-wallet-signature'], timestamp, siwe: siweHeaders[SIWE_HEADER] };
         // Cached FIRST, before the still-wanted check: the cache is keyed by address, so storing a
         // proof the user just made is right even if they have since switched away — coming back to
         // that address in this session then costs no second prompt.

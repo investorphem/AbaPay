@@ -48,11 +48,14 @@ const LOOKS_LIKE_STATIC_FILE = /\.[a-zA-Z0-9]+$/;
 // link flow (no cookies either). Nothing session/cookie-based is in this set on purpose: e.g.
 // src/app/api/pay/route.ts (the logged-in-app checkout path) is a SEPARATE file from
 // src/app/api/pay/x402/route.ts and never matches this allowlist.
-const CORS_API_PATHS = new Set(['/api/mcp', '/api/pay/x402', '/api/a2a', '/api/agent/link']);
+// /api/auth/nonce: a browser-based agent needs a SIWE nonce before it can link (M4.4). Each
+// SIWE message names our domain, so a signature made for another site is refused even though
+// any origin may call these.
+const CORS_API_PATHS = new Set(['/api/mcp', '/api/pay/x402', '/api/a2a', '/api/agent/link', '/api/auth/nonce']);
 const CORS_HEADERS: Record<string, string> = {
   'Access-Control-Allow-Origin': '*',
   'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
-  'Access-Control-Allow-Headers': 'Content-Type, Authorization, X-PAYMENT, x-wallet-address, x-wallet-signature, x-wallet-timestamp',
+  'Access-Control-Allow-Headers': 'Content-Type, Authorization, X-PAYMENT, x-wallet-address, x-wallet-signature, x-wallet-timestamp, x-wallet-siwe',
   'Access-Control-Max-Age': '86400',
 };
 

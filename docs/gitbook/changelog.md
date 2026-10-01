@@ -6,6 +6,22 @@ test-tooling fixes are left out. Full history: [commits on
 GitHub](https://github.com/investorphem/AbaPay/commits/main).
 {% endhint %}
 
+## 2026-10-01
+
+* **Wallet sign-in uses Sign-In with Ethereum (EIP-4361).** Every wallet-ownership signature
+  (the app's sign-in, linking an agent, changing a PIN, creating or cancelling an automation)
+  is now a standard SIWE message. It names AbaPay's website, so your wallet warns you if
+  another site asks for it. It also carries a single-use code, so it can't be replayed, and
+  says in plain words what you're approving. Nonces come from the new
+  `GET /api/auth/nonce`.
+* **SDK releases: `abapay-sdk` 0.4.0 (npm) and 0.3.0 (PyPI)** sign the new format. The old
+  `AbaPay Agent Action: …` signature, used by earlier SDK versions, is still accepted
+  **until 2026-10-31**, then refused. Upgrade before then.
+* **Admin dashboard: separate ops wallet and revocable sessions.** Admins sign in with an ops
+  wallet, not the vault owner, and get a short-lived session (2h idle, 8h max) with **Sign
+  out** and **Sign out everywhere**. Vault operations still require the owner wallet, which
+  the contract enforces.
+
 ## 2026-09-30
 
 * **The in-app assistant checks who you are before touching your automations.** Listing

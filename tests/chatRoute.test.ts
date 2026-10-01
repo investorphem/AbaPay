@@ -5,7 +5,7 @@ import { createFakeDb, fakeSupabase, type FakeDb } from './helpers/fakeSupabase'
 // session. A bare x-wallet-address header (public data) is never enough.
 
 let db: FakeDb;
-let nextIntent: any = { intent: 'HELP' };
+let nextIntent: Record<string, unknown> = { intent: 'HELP' };
 // The signature a "real" signer would produce; anything else fails verification.
 const GOOD_SIG = '0xgood';
 
@@ -25,7 +25,7 @@ vi.mock('@/lib/deai/services', () => ({ resolveServiceId: () => 'mtn', fetchCryp
 vi.mock('@/lib/deai/relayer', () => ({ getRemainingAllowance: async () => 0 }));
 vi.mock('@/lib/deai/batch', () => ({
   checkAutonomousCapacity: async () => ({ ok: true, neededCrypto: 1, allowanceRemaining: 10, balance: 10 }),
-  groupByChainToken: (items: any[]) => new Map([['CELO|USD₮', items]]),
+  groupByChainToken: (items: unknown[]) => new Map([['CELO|USD₮', items]]),
 }));
 vi.mock('@/utils/walletAuth', () => ({
   verifyWalletSession: async (req: Request) => {
