@@ -1,8 +1,96 @@
 import 'server-only';
 import { verifyMessage as verifyMessageEOA } from 'viem';
 import { verifyMessage as verifyMessageOnChain } from 'viem/actions';
+import { parseSiweMessage } from 'viem/siwe';
 import { getPublicClient } from '@/lib/chain';
+import { supabaseAdmin } from '@/utils/supabase';
 import { walletSessionMessage, WALLET_SESSION_MAX_AGE_MS } from '@/lib/walletSession';
+import {
+  SIWE_HEADER, SIWE_ACTION_LIFETIME_MS, SIWE_SESSION_LIFETIME_MS, SIWE_SESSION_RESOURCE, siweActionResource,
+} from '@/lib/siwe';
+
+// 🔐 SIWE FIRST, LEGACY UNTIL A CUT-OFF (M4.4).
+//
+// Both verifiers below accept a Sign-In with Ethereum proof (src/lib/siwe.ts) whenever one is
+// sent, and check it properly: our domain, unexpired, bound to this exact action, a valid
+// signature (EOA or smart wallet), and a single-use nonce consumed atomically.
+//
+// The old bare-string format is still accepted so already-published SDKs and copied quickstart
+// code keep working, but ONLY until LEGACY_WALLET_SIG_ACCEPT_UNTIL (default below). Every legacy
+// use is logged, so the cut-off can be judged from real traffic. To extend it, set the env var.
+const LEGACY_DEFAULT_UNTIL = '2026-10-31T00:00:00Z';
+
+export function legacySignaturesAccepted(now = Date.now()): boolean {
+  const until = Date.parse(process.env.LEGACY_WALLET_SIG_ACCEPT_UNTIL || LEGACY_DEFAULT_UNTIL);
+  return Number.isFinite(until) ? now < until : false;
+}
+
+const DEFAULT_SIWE_DOMAINS = ['abapays.com', 'www.abapays.com', 'agents.abapays.com', 'rails.abapays.com'];
+
+/** Our own hosts, plus this project's Vercel previews and localhost outside production. */
+export function siweDomainAllowed(domain: string): boolean {
+  const host = String(domain || '').toLowerCase();
+  const configured = (process.env.SIWE_ALLOWED_DOMAINS || '').split(',').map((d) => d.trim().toLowerCase()).filter(Boolean);
+  if ([...DEFAULT_SIWE_DOMAINS, ...configured].includes(host)) return true;
+  if (/^abapay[a-z0-9-]*\.vercel\.app$/.test(host)) return true;
+  if (process.env.VERCEL_ENV !== 'production' && /^(localhost|127\.0\.0\.1)(:\d+)?$/.test(host)) return true;
+  return false;
+}
+
+type Verified = { ok: true; address: string } | { ok: false; message: string };
+
+/**
+ * Verify a SIWE proof if the request carries one; null when it doesn't (caller falls back to
+ * the legacy check, while that's still allowed).
+ */
+export async function verifySiweProof(
+  req: Request,
+  opts: { purpose: 'action' | 'session'; action?: string; expectedAddress?: string },
+): Promise<Verified | null> {
+  const encoded = req.headers.get(SIWE_HEADER);
+  if (!encoded) return null;
+  const signature = req.headers.get('x-wallet-signature') || '';
+
+  let raw: string;
+  try { raw = Buffer.from(encoded, 'base64').toString('utf8'); } catch { return { ok: false, message: 'Malformed sign-in message.' }; }
+  let msg: ReturnType<typeof parseSiweMessage>;
+  try { msg = parseSiweMessage(raw); } catch { return { ok: false, message: 'Malformed sign-in message.' }; }
+
+  const address = String(msg.address || '');
+  if (!/^0x[a-fA-F0-9]{40}$/.test(address)) return { ok: false, message: 'Sign-in message has no valid address.' };
+  if (opts.expectedAddress && address.toLowerCase() !== opts.expectedAddress.toLowerCase()) {
+    return { ok: false, message: 'This signature is for a different wallet.' };
+  }
+  if (!siweDomainAllowed(msg.domain || '')) return { ok: false, message: 'This signature was made for a different website.' };
+
+  const resource = opts.purpose === 'session' ? SIWE_SESSION_RESOURCE : siweActionResource(opts.action || '');
+  if (!msg.resources?.includes(resource)) return { ok: false, message: 'This signature was made for a different action.' };
+
+  const now = Date.now();
+  const issued = msg.issuedAt ? new Date(msg.issuedAt).getTime() : NaN;
+  const expires = msg.expirationTime ? new Date(msg.expirationTime).getTime() : NaN;
+  const maxLife = opts.purpose === 'session' ? SIWE_SESSION_LIFETIME_MS : SIWE_ACTION_LIFETIME_MS;
+  if (!Number.isFinite(issued) || !Number.isFinite(expires)) return { ok: false, message: 'Sign-in message must carry issue and expiry times.' };
+  if (issued > now + 60_000 || expires <= now || expires - issued > maxLife + 60_000) {
+    return { ok: false, message: 'Signature expired — please try again.' };
+  }
+  if (msg.notBefore && new Date(msg.notBefore).getTime() > now + 60_000) return { ok: false, message: 'Signature is not valid yet.' };
+  if (!msg.nonce) return { ok: false, message: 'Sign-in message has no nonce.' };
+
+  if (!signature || !(await verifySignatureAcrossChains(address, raw, signature))) {
+    return { ok: false, message: 'Invalid signature — could not verify wallet ownership.' };
+  }
+
+  // Last, so a bad signature can't spend someone's nonce: claim (or, for a session, check) it.
+  const { data: fresh, error } = await supabaseAdmin.rpc('consume_auth_nonce', { p_nonce: msg.nonce, p_purpose: opts.purpose });
+  if (error) {
+    console.error('[walletAuth] nonce check failed:', error.message);
+    return { ok: false, message: 'Could not verify the signature right now — please try again.' };
+  }
+  if (fresh !== true) return { ok: false, message: 'This signature was already used or has expired — please try again.' };
+
+  return { ok: true, address };
+}
 
 // 🔐 WALLET OWNERSHIP PROOF
 //
@@ -104,6 +192,12 @@ export async function verifySignatureAcrossChains(address: string, message: stri
  * on an address it never actually checked.
  */
 export async function verifyWalletSession(req: Request): Promise<{ ok: true; address: string } | { ok: false; message: string }> {
+  const siwe = await verifySiweProof(req, { purpose: 'session' });
+  if (siwe) return siwe;
+  if (!legacySignaturesAccepted()) {
+    return { ok: false, message: 'Please sign in again — this app version uses an outdated sign-in. Refresh the page.' };
+  }
+
   const address = req.headers.get('x-wallet-address');
   const signature = req.headers.get('x-wallet-signature');
   const timestamp = req.headers.get('x-wallet-timestamp');
@@ -125,12 +219,19 @@ export async function verifyWalletSession(req: Request): Promise<{ ok: true; add
   const valid = await verifySignatureAcrossChains(address, walletSessionMessage(timestamp), signature);
   if (!valid) return { ok: false, message: 'Invalid signature — could not verify wallet ownership.' };
 
+  console.warn(`[walletAuth] legacy session signature accepted for ${address} (refused after ${process.env.LEGACY_WALLET_SIG_ACCEPT_UNTIL || LEGACY_DEFAULT_UNTIL})`);
   return { ok: true, address };
 }
 
 export async function verifyWalletOwnership(req: Request, claimedWallet: string, action: string): Promise<{ ok: boolean; message?: string }> {
   if (!/^0x[a-fA-F0-9]{40}$/.test(claimedWallet)) {
     return { ok: false, message: 'Valid wallet address required.' };
+  }
+
+  const siwe = await verifySiweProof(req, { purpose: 'action', action, expectedAddress: claimedWallet });
+  if (siwe) return siwe.ok ? { ok: true } : { ok: false, message: siwe.message };
+  if (!legacySignaturesAccepted()) {
+    return { ok: false, message: 'This signature format is no longer accepted. Update the AbaPay app or SDK (sign-in now uses EIP-4361).' };
   }
 
   const signature = req.headers.get('x-wallet-signature');
@@ -147,5 +248,6 @@ export async function verifyWalletOwnership(req: Request, claimedWallet: string,
   const valid = await verifySignatureAcrossChains(claimedWallet, walletAuthMessage(timestamp, action), signature);
   if (!valid) return { ok: false, message: 'Invalid signature — could not verify wallet ownership.' };
 
+  console.warn(`[walletAuth] legacy action signature accepted: ${action} for ${claimedWallet} (refused after ${process.env.LEGACY_WALLET_SIG_ACCEPT_UNTIL || LEGACY_DEFAULT_UNTIL})`);
   return { ok: true };
 }

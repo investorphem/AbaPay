@@ -58,7 +58,7 @@ CHAIN=CELO TOKEN=USD₮ node agent-quickstart.mjs`}
               <div className="text-slate-300">AbaPay agent quickstart — 0xYourAgentWallet... on CELO, USD₮</div>
             </div>
             <div className="font-mono text-[12px]">
-              <div className="text-emerald-400">→ Step 1/3: POST /api/agent/link (wallet-signature auth)</div>
+              <div className="text-emerald-400">→ Step 1/3: POST /api/agent/link (Sign-In with Ethereum)</div>
               <div className="text-slate-500 pl-4">✓ api_key minted: aba_mcp_...</div>
               <div className="text-slate-600 pl-4 italic">Shown once — save it. No recovery flow other than minting a new one.</div>
             </div>
@@ -79,10 +79,19 @@ CHAIN=CELO TOKEN=USD₮ node agent-quickstart.mjs`}
 
       <section className="bg-white dark:bg-[#111114] border border-slate-100 dark:border-slate-800/60 rounded-[2rem] p-6 sm:p-8 mb-4">
         <h3 className="font-black text-slate-900 dark:text-white mb-1.5">Step 1 — link the wallet, mint an api_key</h3>
-        <p className="text-sm text-slate-500 dark:text-slate-400 mb-4">A plain <code className="text-slate-500">personal_sign</code>, verified server-side — no session, no cookie, no CAPTCHA.</p>
+        <p className="text-sm text-slate-500 dark:text-slate-400 mb-4">A <a href="https://eips.ethereum.org/EIPS/eip-4361" className="underline">Sign-In with Ethereum</a> message, verified server-side: it names AbaPay&apos;s domain, carries a single-use nonce and is bound to this one action. No session, no cookie, no CAPTCHA.</p>
         <CopyBlock
-          code={`const timestamp = String(Date.now());
-const message = \`AbaPay Agent Action: POST:/api/agent/link: \${timestamp}\`;
+          code={`import { createSiweMessage } from 'viem/siwe';
+
+const { nonce } = await (await fetch(\`\${APP_URL}/api/auth/nonce?purpose=action\`)).json();
+const now = new Date();
+const message = createSiweMessage({
+  domain: new URL(APP_URL).host, uri: APP_URL,
+  address: account.address, chainId: 42220, nonce, version: '1',
+  issuedAt: now, expirationTime: new Date(now.getTime() + 5 * 60 * 1000),
+  statement: 'Link an AI agent or chat account to this wallet, protected by the PIN you chose. It does not move any money by itself.',
+  resources: ['abapay:action:POST:/api/agent/link'],
+});
 const signature = await walletClient.signMessage({ message });
 
 const linkRes = await fetch(\`\${APP_URL}/api/agent/link\`, {
@@ -91,7 +100,7 @@ const linkRes = await fetch(\`\${APP_URL}/api/agent/link\`, {
     'Content-Type': 'application/json',
     'x-wallet-address': account.address,
     'x-wallet-signature': signature,
-    'x-wallet-timestamp': timestamp,
+    'x-wallet-siwe': Buffer.from(message).toString('base64'),
   },
   body: JSON.stringify({
     wallet_address: account.address, channel: 'MCP', pin,

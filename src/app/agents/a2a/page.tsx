@@ -56,7 +56,7 @@ export default function A2APage() {
           <div className="flex items-start gap-3 text-sm text-slate-700 dark:text-slate-300">
             <CheckCircle2 size={16} className="text-emerald-500 flex-shrink-0 mt-0.5" />
             <div>
-              <code className="text-emerald-600 dark:text-emerald-400 font-bold">POST /api/agent/link</code> — a wallet-signature-authenticated call (the same <code className="text-slate-500">personal_sign</code> scheme x402 signing uses elsewhere) that picks the PIN <em>in that same request</em> and mints an Agent Hub api_key back. One HTTP call, no session, no browser.
+              <code className="text-emerald-600 dark:text-emerald-400 font-bold">POST /api/agent/link</code> — a call authenticated with a Sign-In with Ethereum (EIP-4361) signature, using a single-use nonce from <code className="text-slate-500">GET /api/auth/nonce</code>. It picks the PIN <em>in that same request</em> and mints an Agent Hub api_key back. No session, no browser.
             </div>
           </div>
           <div className="flex items-start gap-3 text-sm text-slate-700 dark:text-slate-300">
@@ -70,8 +70,8 @@ export default function A2APage() {
           label="POST /api/agent/link — real fields, verified live 2026-09-11"
           code={`headers: {
   "x-wallet-address": "0xYourAgentWallet...",
-  "x-wallet-signature": "<personal_sign over the request>",
-  "x-wallet-timestamp": "1234567890"
+  "x-wallet-signature": "<signature over the SIWE message>",
+  "x-wallet-siwe": "<the SIWE message, base64>"
 }
 body: {
   "wallet_address": "0xYourAgentWallet...",

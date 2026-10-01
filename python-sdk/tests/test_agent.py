@@ -1,9 +1,11 @@
+import base64
 import json
+from datetime import datetime, timezone
 
 from eth_account import Account
 from eth_account.messages import encode_defunct
 
-from abapay.agent import AbaPayAgent
+from abapay.agent import AbaPayAgent, build_siwe_message
 from abapay.types import AbaPayError, LinkParams
 
 TEST_PRIVATE_KEY = "0x" + "22" * 32
@@ -20,6 +22,7 @@ def test_link_signs_and_returns_agent(httpserver):
         captured["headers"] = dict(request.headers)
         return Response(json.dumps({"success": True, "api_key": "aba_mcp_test123"}), status=200, content_type="application/json")
 
+    httpserver.expect_request("/api/auth/nonce", method="GET").respond_with_json({"success": True, "nonce": "n0nce12345abc"})
     httpserver.expect_request("/api/agent/link", method="POST").respond_with_handler(handler)
 
     agent = AbaPayAgent.link(LinkParams(signer=account, pin="123456", base_url=httpserver.url_for("")))
@@ -29,11 +32,39 @@ def test_link_signs_and_returns_agent(httpserver):
     assert captured["body"]["pin"] == "123456"
     assert captured["body"]["wallet_address"] == account.address
 
-    # The signature really does verify against the message it claims to sign.
-    timestamp = captured["headers"]["X-Wallet-Timestamp"]
-    message = encode_defunct(text=f"AbaPay Agent Action: POST:/api/agent/link: {timestamp}")
-    recovered = Account.recover_message(message, signature=captured["headers"]["X-Wallet-Signature"])
+    # The header carries a SIWE message bound to the server's nonce and this action, and the
+    # signature really does verify against exactly that message.
+    message = base64.b64decode(captured["headers"]["X-Wallet-Siwe"]).decode("utf-8")
+    assert "Nonce: n0nce12345abc" in message
+    assert message.endswith("Resources:\n- abapay:action:POST:/api/agent/link")
+    assert account.address in message
+    recovered = Account.recover_message(encode_defunct(text=message), signature=captured["headers"]["X-Wallet-Signature"])
     assert recovered.lower() == account.address.lower()
+
+
+def test_siwe_message_matches_viem_byte_for_byte():
+    # Reference produced by viem's createSiweMessage (what the AbaPay app and server use) for
+    # the same fields. Any drift here would make every Python-signed link fail to verify.
+    expected = (
+        "agents.abapays.com wants you to sign in with your Ethereum account:\n"
+        "0x1563915e194D8CfBA1943570603F7606A3115508\n\n"
+        "Link an AI agent or chat account to this wallet, protected by the PIN you chose. It does not move any money by itself.\n\n"
+        "URI: https://agents.abapays.com\nVersion: 1\nChain ID: 42220\nNonce: n0nce12345abc\n"
+        "Issued At: 2026-10-01T12:00:00.000Z\nExpiration Time: 2026-10-01T12:05:00.000Z\n"
+        "Resources:\n- abapay:action:POST:/api/agent/link"
+    )
+    built = build_siwe_message(
+        domain="agents.abapays.com",
+        uri="https://agents.abapays.com",
+        address="0x1563915e194d8cfba1943570603f7606a3115508",
+        chain_id=42220,
+        nonce="n0nce12345abc",
+        issued_at=datetime(2026, 10, 1, 12, 0, 0, tzinfo=timezone.utc),
+        expiration_time=datetime(2026, 10, 1, 12, 5, 0, tzinfo=timezone.utc),
+        statement="Link an AI agent or chat account to this wallet, protected by the PIN you chose. It does not move any money by itself.",
+        resources=["abapay:action:POST:/api/agent/link"],
+    )
+    assert built == expected
 
 
 def test_link_rejects_malformed_pin():

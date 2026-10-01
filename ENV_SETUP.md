@@ -476,6 +476,22 @@ Free — not issued by anyone, just protects the manual `/api/cleanup` endpoint.
 
 ---
 
+## 14b. Wallet sign-in (SIWE) — optional
+
+```
+LEGACY_WALLET_SIG_ACCEPT_UNTIL=2026-10-31T00:00:00Z   # default; when the old signature format stops working
+SIWE_ALLOWED_DOMAINS=                                  # extra hosts allowed in a SIWE message, comma-separated
+```
+Wallet-ownership proofs are Sign-In with Ethereum (EIP-4361) messages with single-use nonces
+from `/api/auth/nonce`. This requires migration `032_auth_nonces.sql`. The older
+`AbaPay Agent Action: …` format, still sent by SDKs before 0.4.0 (npm) / 0.3.0 (PyPI), is
+accepted until `LEGACY_WALLET_SIG_ACCEPT_UNTIL` and refused after it. Push the date later to
+give integrators more time. Every legacy use is logged (`legacy … signature accepted`), so
+the logs show who still hasn't upgraded. `abapays.com`, `www.`, `agents.` and `rails.` are
+always allowed, as are this project's Vercel previews, plus localhost outside production.
+
+---
+
 ## 15. Dune Analytics (dashboard refresh)
 
 ```
