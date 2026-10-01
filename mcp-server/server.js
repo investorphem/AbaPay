@@ -34,6 +34,8 @@ const PORT = process.env.PORT || 8080;
 // rather than importing the Next.js app's TypeScript module, since this package intentionally
 // has no dependency on that app at all. See docs.abapays.com or /agents/mcp for the same
 // catalog with full prose descriptions; this is the wire-format version a client consumes.
+// KEPT IN STEP BY tests/toolSchemaDrift.test.ts, which also requires this file, so a syntax
+// error here (one shipped once, unnoticed) now fails the build.
 // Chain/token enums mirror what production actually accepts — CELO and BASE both, USD₮/USDC/
 // USA₮ on Celo (USDC-only on Base) — not the Celo-only framing of the agent handbook, which
 // describes the newer x402/A2A rails specifically, not this tool catalog.
@@ -43,8 +45,8 @@ const TOOLS = [
   { name: 'list_plans', title: 'List Plans', description: 'List the REAL, currently purchasable plans for DATA, CABLE, or EDUCATION — exact codes and current prices. Always call before pay_bill for these three services.', inputSchema: { type: 'object', properties: { service: { type: 'string', enum: ['DATA', 'CABLE', 'EDUCATION'] }, provider: { type: 'string' } }, required: ['service', 'provider'], additionalProperties: false } },
   { name: 'list_international_options', title: 'List International Options', description: 'Browse the live international top-up catalogue (140+ countries) one level at a time: country → product type → operator → priced plan.', inputSchema: { type: 'object', properties: { country: { type: 'string' }, product_type_id: { type: 'string' }, operator_id: { type: 'string' } }, required: [], additionalProperties: false } },
   { name: 'transaction_history', title: 'Transaction History', description: 'List recent real transactions for the linked wallet — service, provider, amount, status, tx hash. No PIN required.', inputSchema: { type: 'object', properties: { api_key: { type: 'string' }, limit: { type: 'number' }, offset: { type: 'number' } }, required: [], additionalProperties: false } },
-  { name: 'get_payment_status', title: 'Get Payment Status', description: 'Look up one payment by tx hash or request id: delivered, still confirming, failed or refunded, including refund state. Only the linked wallet''s payments. No PIN required.', inputSchema: { type: 'object', properties: { api_key: { type: 'string' }, reference: { type: 'string' } }, required: ['reference'], additionalProperties: false } },
-  { name: 'pay_bill', title: 'Pay Bill', description: 'Pay a real bill — Nigerian (airtime, data, electricity, cable, WAEC/JAMB) or international airtime/data — from the linked wallet, settled on-chain. Executes immediately; no delay parameter exists.', inputSchema: { type: 'object', properties: { api_key: { type: 'string' }, pin: { type: 'string' }, idempotency_key: { type: 'string' }, service: { type: 'string', enum: ['AIRTIME', 'DATA', 'ELECTRICITY', 'CABLE', 'EDUCATION', 'INTERNATIONAL'] }, provider: { type: 'string' }, account_number: { type: 'string' }, amount_ngn: { type: 'number' }, chain: { type: 'string', enum: ['CELO', 'BASE'] }, token: { type: 'string', enum: ['USD₮', 'USDC', 'USA₮'], description: "USD₮ and USA₮ are Celo-only; Base supports USDC only." }, variation_code: { type: 'string' }, meter_type: { type: 'string', enum: ['prepaid', 'postpaid'] }, customer_email: { type: 'string' }, country: { type: 'string' }, product_type_id: { type: 'string' }, operator_id: { type: 'string' } }, required: ['pin', 'service', 'account_number'], additionalProperties: false } },
+  { name: 'get_payment_status', title: 'Get Payment Status', description: 'Look up one payment by tx hash or request id: delivered, still confirming, failed or refunded, including refund state. Only the linked wallet\'s payments. No PIN required.', inputSchema: { type: 'object', properties: { api_key: { type: 'string' }, reference: { type: 'string' } }, required: ['reference'], additionalProperties: false } },
+  { name: 'pay_bill', title: 'Pay Bill', description: 'Pay a real bill — Nigerian (airtime, data, electricity, cable, WAEC/JAMB) or international airtime/data — from the linked wallet, settled on-chain. Executes immediately; no delay parameter exists.', inputSchema: { type: 'object', properties: { api_key: { type: 'string' }, pin: { type: 'string' }, idempotency_key: { type: 'string' }, service: { type: 'string', enum: ['AIRTIME', 'DATA', 'ELECTRICITY', 'CABLE', 'EDUCATION', 'INTERNATIONAL'] }, provider: { type: 'string' }, account_number: { type: 'string' }, amount_ngn: { type: 'number' }, chain: { type: 'string', enum: ['CELO', 'BASE'] }, token: { type: 'string', enum: ['USD₮', 'USDC', 'USA₮'], description: "USD₮ and USA₮ are Celo-only; Base supports USDC only." }, variation_code: { type: 'string' }, meter_type: { type: 'string', enum: ['prepaid', 'postpaid'] }, customer_email: { type: 'string' }, customer_name: { type: 'string', description: 'Optional, used for the receipt if known.' }, country: { type: 'string' }, product_type_id: { type: 'string' }, operator_id: { type: 'string' } }, required: ['pin', 'service', 'account_number'], additionalProperties: false } },
   { name: 'schedule_bill', title: 'Schedule Bill', description: 'Set up a recurring or future one-off bill payment. Charges nothing when this runs — money only moves later, when the schedule fires and the allowance still covers it.', inputSchema: { type: 'object', properties: { api_key: { type: 'string' }, pin: { type: 'string' }, idempotency_key: { type: 'string' }, service: { type: 'string', enum: ['AIRTIME', 'DATA', 'ELECTRICITY', 'CABLE'] }, provider: { type: 'string' }, account_number: { type: 'string' }, amount_ngn: { type: 'number' }, variation_code: { type: 'string' }, meter_type: { type: 'string', enum: ['prepaid', 'postpaid'] }, frequency: { type: 'string', enum: ['daily', 'weekly', 'monthly', 'once'] }, day_of_week: { type: 'number' }, day_of_month: { type: 'number' }, schedule_in_minutes: { type: 'number' }, chain: { type: 'string', enum: ['CELO', 'BASE'] }, token: { type: 'string', enum: ['USD₮', 'USDC', 'USA₮'] }, customer_email: { type: 'string' } }, required: ['pin', 'service', 'account_number', 'amount_ngn', 'frequency'], additionalProperties: false } },
   { name: 'list_schedules', title: 'List Schedules', description: "List active recurring/one-off bill schedules for the linked wallet. No PIN required.", inputSchema: { type: 'object', properties: { api_key: { type: 'string' } }, required: [], additionalProperties: false } },
   { name: 'cancel_schedule', title: 'Cancel Schedule', description: "Cancel active schedules. Pass id to cancel exactly one (no PIN). provider (all of that provider's) or all: true (every schedule) require pin. With none of id/provider/all the call is refused.", inputSchema: { type: 'object', properties: { api_key: { type: 'string' }, id: { type: 'string' }, provider: { type: 'string' }, all: { type: 'boolean' }, pin: { type: 'string' } }, required: [], additionalProperties: false } },
@@ -145,8 +147,14 @@ function startStdio() {
   console.error(`abapay-mcp-gateway (stdio) ready — tools/list served locally, tools/call proxied to ${PROD_MCP_URL}`);
 }
 
-if (process.argv.includes('--stdio')) {
-  startStdio();
-} else {
-  startHttp();
+// Started only when run directly (`node server.js`, as Glama's Dockerfile does), so a test can
+// require() this file to compare its catalog with the real one (tests/toolSchemaDrift.test.ts).
+if (require.main === module) {
+  if (process.argv.includes('--stdio')) {
+    startStdio();
+  } else {
+    startHttp();
+  }
 }
+
+module.exports = { TOOLS, SERVER_INFO };

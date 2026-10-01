@@ -5,8 +5,10 @@ describe('pinSecurity', () => {
   describe('hashPin', () => {
     it('produces a scrypt-prefixed hash, never the plaintext', () => {
       const hash = hashPin('1234');
-      expect(hash).toMatch(/^scrypt\$/);
-      expect(hash).not.toContain('1234');
+      // scrypt$<salt hex>$<hash hex>, and no field is the PIN itself. (Not `not.toContain('1234')`:
+      // random hex contains "1234" by chance in about 1 run in 300, which made this test flaky.)
+      expect(hash).toMatch(/^scrypt\$[0-9a-f]+\$[0-9a-f]+$/);
+      expect(hash.split('$')).not.toContain('1234');
     });
 
     it('produces a different hash each time (unique salt per PIN)', () => {

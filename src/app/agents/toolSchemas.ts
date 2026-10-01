@@ -1,8 +1,11 @@
 // ⚡ SINGLE SOURCE OF TRUTH FOR TOOL DOCS — copied verbatim (name/description/inputSchema
 // shape) from src/lib/deai/mcpTools.ts's real TOOLS array, the same object the MCP server
-// itself serves via tools/list. A2A exposes the identical 10 skills over JSON-RPC instead of
+// itself serves via tools/list. A2A exposes the identical 11 skills over JSON-RPC instead of
 // MCP's Streamable HTTP — same execution engine, same schemas — so /agents/mcp and /agents/a2a
 // both render from this one file instead of maintaining two copies that could drift.
+//
+// 🔴 KEPT IN STEP BY tests/toolSchemaDrift.test.ts: the build fails if a tool, a parameter, a
+// required flag or an enum value here disagrees with mcpTools.ts. Wording here is free.
 //
 // CELO-ONLY, DOCUMENTED. The real backend schema's `chain`/`token` enums also accept BASE/
 // non-Celo tokens (this MCP server is shared infrastructure with the multi-chain consumer
@@ -107,6 +110,7 @@ export const TOOLS: ToolDef[] = [
       { name: "variation_code", type: "string", required: false, description: "Required for DATA, EDUCATION, INTERNATIONAL, and CABLE package changes." },
       { name: "meter_type", type: "string", required: false, enum: ["prepaid", "postpaid"], description: "Required for ELECTRICITY." },
       { name: "customer_email", type: "string", required: false, description: "Required for INTERNATIONAL (receipt destination)." },
+      { name: "customer_name", type: "string", required: false, description: "Optional, used for the receipt if known." },
       { name: "country", type: "string", required: false, description: "Required for INTERNATIONAL." },
       { name: "product_type_id", type: "string", required: false, description: "Required for INTERNATIONAL." },
       { name: "operator_id", type: "string", required: false, description: "Required for INTERNATIONAL." },

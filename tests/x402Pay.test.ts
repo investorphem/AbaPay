@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, afterEach } from 'vitest';
+import { describe, it, expect, vi, afterEach, beforeEach } from 'vitest';
 import { payWithX402, parseX402Challenge, X402PaymentError, X402ChallengeError } from '@/lib/x402Pay';
 
 /**
@@ -271,6 +271,12 @@ describe('payWithX402 — the duplicate guard', () => {
  * the window is what keeps it real however far the two clocks have drifted apart.
  */
 describe('payWithX402 — the signed validity window', () => {
+  // The code under test and these assertions each read the clock; a second ticking over between
+  // them produced 86401 vs a cap of 86400 in CI. Freeze Date (only Date, not timers) so both
+  // see the same instant.
+  beforeEach(() => { vi.useFakeTimers({ toFake: ['Date'] }); vi.setSystemTime(new Date('2026-10-01T12:00:00.500Z')); });
+  afterEach(() => { vi.useRealTimers(); });
+
   const windowFor = async (maxTimeoutSeconds: number | undefined) => {
     const wallet = fakeWallet();
     let n = 0;
