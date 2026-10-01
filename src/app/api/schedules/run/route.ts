@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 import { runScheduledBills } from '@/lib/scheduler';
 import { verifyCronRequest } from '@/utils/cronAuth';
+import { withDeadman } from '@/lib/deadman';
 
 // ⚡ Triggers the scheduled-bill check: reads on-chain balances, warns on shortfalls,
 // and sends one-tap payment links for bills due today.
@@ -16,7 +17,8 @@ async function handle(req: Request) {
 
   // One-off ("in 10 minutes") schedules are handled by the separate, minute-cadence
   // /api/schedules/run-instant — this daily/twice-daily cron only needs to scan recurring ones.
-  const result = await runScheduledBills({ scope: 'recurring' });
+  // Pings HEALTHCHECK_URL_SCHEDULES so a cron that stops running gets noticed (src/lib/deadman.ts).
+  const result = await withDeadman('SCHEDULES', () => true, () => runScheduledBills({ scope: 'recurring' }));
   return NextResponse.json({ success: true, ...result });
 }
 

@@ -3,6 +3,7 @@ import { NextResponse } from 'next/server';
 import baseChainQueryIds from '@/lib/dune/base-query-ids.json';
 import celoChainQueryIds from '@/lib/dune/celo-query-ids.json';
 import { verifyCronRequest } from '@/utils/cronAuth';
+import { pingDeadman } from '@/lib/deadman';
 
 // ⚡ DUNE DASHBOARD REFRESH — re-runs the AbaPay analytics queries so the public dashboards
 // stop going stale.
@@ -396,6 +397,8 @@ async function handle(req: Request) {
   // Those are different claims, and reporting the second while implying the first is what let
   // the Base dashboard go stale under a green tick.
   const ok = started.every((s) => s.completed);
+  // Dead-man ping: HEALTHCHECK_URL_DUNE_<DASHBOARD>, else HEALTHCHECK_URL_DUNE (src/lib/deadman.ts).
+  await pingDeadman(`DUNE_${dashboardKey.toUpperCase()}`, ok, 'DUNE');
   const okCount = started.filter((s) => s.completed).length;
 
   // 🔴 THE STATUS CODE MUST TRACK `ok`. This used to return 200 unconditionally, with the

@@ -485,6 +485,33 @@ Free — not issued by anyone, just protects the manual `/api/cleanup` endpoint.
 
 ---
 
+## 14a. Observability — optional
+
+```
+HEALTHCHECK_URL_CLEANUP=https://hc-ping.com/<uuid>     # /api/cleanup
+HEALTHCHECK_URL_SCHEDULES=https://hc-ping.com/<uuid>   # /api/schedules/run
+HEALTHCHECK_URL_INSTANT=https://hc-ping.com/<uuid>     # /api/schedules/run-instant
+HEALTHCHECK_URL_DUNE=https://hc-ping.com/<uuid>        # /api/cron/dune-refresh (or HEALTHCHECK_URL_DUNE_<DASHBOARD>)
+LOG_LEVEL=info                                         # debug | info | warn | error
+LOG_FORMAT=                                            # "plain" for readable text instead of JSON lines
+```
+
+**Dead-man switches.** Each cron pings its URL when it finishes, and `<url>/fail` when it
+finished with errors. Make a free check per job on [healthchecks.io](https://healthchecks.io)
+(or a Better Stack heartbeat) with the job's schedule plus a grace period. The monitor alerts
+when a ping is late, which catches a cron that has stopped running at all. With no URL set,
+nothing is sent.
+
+**Structured logs.** Money-path code logs one JSON object per line (`src/lib/log.ts`), with PINs,
+API keys, signatures, `X-PAYMENT`, OTPs and secrets redacted, and emails and phones masked. Metrics are
+log lines with `event: "metric"`: `payment_intents_total`, `payments_verified_total`,
+`vend_outcome_total`, `facilitator_settle_latency_ms`, `relayer_gas_balance`, `refunds_pending`,
+`refund_age_max_hours`, `unknown_outcome_rows` and `x402_intents_unresolved`. Add a Vercel log
+drain (Project → Settings → Log Drains) to graph and alert on them. What each signal means and
+what to do: [docs/runbooks/README.md](docs/runbooks/README.md).
+
+---
+
 ## 14b. Wallet sign-in (SIWE) — optional
 
 ```

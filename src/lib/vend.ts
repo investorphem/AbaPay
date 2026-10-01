@@ -11,6 +11,7 @@ import { checkProviderBalances } from '@/lib/balanceAlerts';
 import { tripCircuit } from '@/lib/circuitBreaker';
 import { Resend } from 'resend';
 import { normalizePurchasedCode, issuesTokenOrPin } from '@/lib/purchasedCode';
+import { log, metric } from '@/lib/log';
 
 const resend = new Resend(process.env.RESEND_API_KEY || 're_dummy_key_for_build');
 
@@ -103,8 +104,21 @@ export interface VendResult {
  * contract-call path (`/api/pay`) and the x402 path (`/api/pay/x402`) — a payment
  * verified through either rail ends up here, so there is exactly one vend/refund
  * implementation to keep correct.
+ *
+ * Every outcome is counted (M5): vend_outcome_total{provider, service, outcome}, outcome being
+ * the result's status (SUCCESS / TIMEOUT / PROCESSING / FAILED_VENDING …). A climbing
+ * FAILED_VENDING share is the earliest sign of a drained biller float.
  */
 export async function executeVend(input: VendInput): Promise<VendResult> {
+  const started = Date.now();
+  const result = await executeVendImpl(input);
+  const provider = String(input.serviceCategory || '').toUpperCase() === 'BANK' ? 'MONNIFY' : 'VTPASS';
+  metric('vend_outcome_total', 1, { provider, service: String(input.serviceCategory || 'UNKNOWN').toUpperCase(), outcome: String(result.status || (result.success ? 'SUCCESS' : 'FAILED')) });
+  log.info('vend.finished', { request_id: input.vtRequestId, tx_hash: input.txHash, provider, status: result.status, duration_ms: Date.now() - started });
+  return result;
+}
+
+async function executeVendImpl(input: VendInput): Promise<VendResult> {
   const {
     serviceCategory,
   } = input;
