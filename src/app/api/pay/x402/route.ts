@@ -14,6 +14,7 @@ import { verifyTypedData, recoverTypedDataAddress, hashTypedData } from 'viem';
 import { getPublicClient } from '@/lib/chain';
 import { verifyTokenTransfer, UNDECIDED_PROOF_FAILURES } from '@/lib/paymentProof';
 import { x402IntentKey, x402UnconfirmedKey } from '@/lib/reconcileX402';
+import { sigFingerprint } from '@/lib/redact';
 
 // ⚡ THE RAW ERC-1271 CHECK — deliberately not viem's `verifyTypedData`/`verifyHash`, which
 // falls back to ecrecover on any failure here (see the long comment where this is used). This
@@ -1107,6 +1108,10 @@ async function handleX402Request(req: Request) {
         // account whose 1271 refuses the signature is not a mismatched signature — the key that
         // signed is the payer's, and ecrecover proves it; the ACCOUNT simply will not vouch for
         // it. Saying "didn't match your wallet" about that sends everyone hunting the wrong thing.
+        // Full signature to the access-controlled server log only; Telegram gets a fingerprint
+        // (see sigFingerprint: with the auth fields below it, the whole value is a usable
+        // authorization).
+        console.error(`[Pay/x402] refused signature (${chainKey}, nonce ${auth.nonce}):`, signature);
         sendTelegramAlert(
           `⚠️ *x402 SIGNATURE REFUSED BY THE PAYER'S ACCOUNT (${chainKey})*\n\n` +
           (payerHasCode
@@ -1121,7 +1126,7 @@ async function handleX402Request(req: Request) {
           `simulated \`transferWithAuthorization\` reverted:\n\`${(debugRevert || 'n/a').slice(0, 300)}\`\n\n` +
           `*diagnostic*\n` +
           `digest \`${debugDigest || 'n/a'}\`\n` +
-          `signature \`${signature}\`\n` +
+          `signature \`${sigFingerprint(signature)}\` (full value in the server log)\n` +
           `erc-1271 (observation only) \`${debugMagicError || 'n/a'}\`\n` +
           `auth \`${JSON.stringify({ value: String(auth.value), validAfter: String(auth.validAfter), validBefore: String(auth.validBefore), nonce: auth.nonce, to: auth.to })}\`\n` +
           `client \`${JSON.stringify(body?._clientDiag || 'not sent')}\``,
@@ -1512,7 +1517,13 @@ async function handleX402Request(req: Request) {
         }
       } catch { /* diagnostics must never break the error path */ }
 
-      const sigForReplay = settledSignature;
+      // 🔴 THE FULL SIGNATURE NEVER GOES TO TELEGRAM. With the authorization's fields beside it
+      // (this alert prints value, window and nonce) it IS a valid EIP-3009 authorization: anyone
+      // reading the chat could submit it before validBefore. Funds would still only reach our
+      // vault, but the payer's authorization would be spent outside our records. It stays in
+      // the server log, which is access-controlled, for the operator replay it exists for.
+      if (settledSignature) console.error(`[Pay/x402] settle-rejected signature for replay (${chainKey}, nonce ${settledAuth?.nonce}):`, settledSignature);
+      const sigForReplay = settledSignature ? sigFingerprint(settledSignature) : '';
 
       const authLine = settledAuth
         ? `payer \`${settledAuth.from}\` -> \`${settledAuth.to}\`\n` +
@@ -1522,7 +1533,7 @@ async function handleX402Request(req: Request) {
           `validBefore \`${settledAuth.validBefore}\`${Number(settledAuth.validBefore) <= nowSec ? ' ⛔ EXPIRED' : ''} · now \`${nowSec}\`\n` +
           `maxTimeoutSeconds \`${acceptEntry.maxTimeoutSeconds}\` · window left \`${Number(settledAuth.validBefore) - nowSec}\`\n` +
           `nonce \`${settledAuth.nonce}\`\n` +
-          (sigForReplay ? `sig \`${sigForReplay}\`\n` : '')
+          (sigForReplay ? `sig \`${sigForReplay}\` (full value in the server log)\n` : '')
         : '';
 
       sendTelegramAlert(
