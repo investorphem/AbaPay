@@ -15,6 +15,7 @@ import { getPublicClient as getResilientPublicClient } from "@/lib/chain";
 import { AdminAgentPanel } from "@/components/AdminAgentPanel";
 import { AdminDiscountsPanel } from "@/components/AdminDiscountsPanel";
 import { AdminOpsPanel } from "@/components/AdminOpsPanel";
+import { signSiweHeaders } from "@/lib/siwe";
 
 import { useProviders } from "@/lib/useProviders";
 
@@ -96,6 +97,9 @@ export default function AdminDashboard() {
   const [client, setClient] = useState<any>(null);
 
   const [isOwner, setIsOwner] = useState<boolean | null>(null);
+  // Whether the connected wallet is the VAULT OWNER on-chain, which the contract requires for
+  // refunds, withdrawals and vault settings. Separate from being a signed-in admin.
+  const [isVaultOwner, setIsVaultOwner] = useState(false);
   const [isAuthenticating, setIsAuthenticating] = useState(true); 
   const [authError, setAuthError] = useState(""); 
 
@@ -172,35 +176,57 @@ export default function AdminDashboard() {
           setAddress(account);
           setClient(walletClient);
 
-          const publicClient = createPublicClient({ chain: tempChain, transport: http() });
-
-          // Fallback bypass if CELO_CONTRACT is not set yet, but BASE_CONTRACT is
-          const targetCheckContract = (CELO_CONTRACT && CELO_CONTRACT.length === 42) ? CELO_CONTRACT : BASE_CONTRACT;
-          const targetCheckChain = (CELO_CONTRACT && CELO_CONTRACT.length === 42) ? tempChain : (isMainnet ? base : baseSepolia);
-
-          const contractChecker = createPublicClient({ chain: targetCheckChain, transport: http() });
-
-          const contractOwner = await contractChecker.readContract({
-            address: targetCheckContract,
-            abi: ABAPAY_ADMIN_ABI,
-            functionName: 'owner',
-          }) as string;
-
-          if (account.toLowerCase() === contractOwner.toLowerCase()) {
-            setIsOwner(true);
-            // 🔐 Sign a one-time session message so backend admin APIs can verify us server-side
-            const timestamp = Date.now().toString();
-            const signature = await walletClient.signMessage({ account, message: `AbaPay Admin Login: ${timestamp}` });
-            const headers = { 'x-admin-address': account, 'x-admin-signature': signature, 'x-admin-timestamp': timestamp };
-            setAdminHeaders(headers);
-            refreshAllData(headers);
-          } else {
-            setIsOwner(false);
-            setAuthError("The connected wallet is not the owner of this contract.");
+          // 🔐 ADMIN SESSION (M4.5). Admins are ops wallets, not the vault owner, and sign in
+          // once: a Sign-In with Ethereum message -> /api/admin/login -> an HttpOnly session
+          // cookie (2h idle / 8h max, revocable). The cookie authenticates every admin API call
+          // from here on; nothing secret is held in page state. See src/utils/adminAuth.ts.
+          let signedIn = false;
+          try {
+            const existing = await fetch('/api/admin/session').then((r) => r.json());
+            signedIn = !!existing?.success && String(existing.address).toLowerCase() === account.toLowerCase();
+          } catch { /* sign in below */ }
+          if (!signedIn) {
+            const siweHeaders = await signSiweHeaders({
+              purpose: 'action',
+              action: 'POST:/api/admin/login',
+              address: account,
+              chainId: tempChain.id,
+              sign: (message) => walletClient.signMessage({ account, message }),
+            });
+            const login = await fetch('/api/admin/login', { method: 'POST', headers: siweHeaders });
+            const loginData = await login.json().catch(() => ({}));
+            if (!login.ok || !loginData.success) {
+              setIsOwner(false);
+              setAuthError(loginData.message || "This wallet can't sign in to the admin dashboard.");
+              return;
+            }
           }
-        } catch (error) { 
+          setIsOwner(true); // = signed-in admin (the name predates admin sessions)
+
+          // On-chain vault actions (refunds, withdrawals, pause, relayer, token support) are
+          // restricted by the CONTRACT to the vault owner, whoever is signed in here. Checked
+          // separately so the dashboard can say so instead of letting a transaction revert.
+          try {
+            const targetCheckContract = (CELO_CONTRACT && CELO_CONTRACT.length === 42) ? CELO_CONTRACT : BASE_CONTRACT;
+            const targetCheckChain = (CELO_CONTRACT && CELO_CONTRACT.length === 42) ? tempChain : (isMainnet ? base : baseSepolia);
+            const contractChecker = createPublicClient({ chain: targetCheckChain, transport: http() });
+            const contractOwner = await contractChecker.readContract({
+              address: targetCheckContract,
+              abi: ABAPAY_ADMIN_ABI,
+              functionName: 'owner',
+            }) as string;
+            setIsVaultOwner(account.toLowerCase() === contractOwner.toLowerCase());
+          } catch {
+            setIsVaultOwner(false);
+          }
+
+          // Not a credential any more (the cookie is); kept so panels re-fetch when it changes.
+          const headers = { 'x-admin-address': account };
+          setAdminHeaders(headers);
+          refreshAllData(headers);
+        } catch (error) {
           setIsOwner(false);
-          setAuthError("Failed to read Smart Contract. Are you on the right network?");
+          setAuthError("Admin sign-in was rejected or failed. Reconnect your wallet and try again.");
         } finally {
           setIsAuthenticating(false);
         }
@@ -1190,6 +1216,32 @@ export default function AdminDashboard() {
           </div>
         ) : (
           <div className="space-y-6">
+
+            {/* SESSION + VAULT-OWNER NOTICE */}
+            <div className="flex flex-col md:flex-row md:items-center gap-3 justify-between">
+              {!isVaultOwner ? (
+                <p className="text-amber-300 text-xs bg-amber-500/10 border border-amber-500/20 px-4 py-2.5 rounded-xl">
+                  Signed in as an ops admin. On-chain vault actions (sending refunds, withdrawals, pause, relayer and token settings) can only be signed by the vault owner wallet. Connect it to use those buttons.
+                </p>
+              ) : <span />}
+              <div className="flex gap-2 shrink-0">
+                <button
+                  onClick={async () => { await fetch('/api/admin/logout', { method: 'POST' }); window.location.reload(); }}
+                  className="px-3 py-2 rounded-xl text-[10px] font-black uppercase tracking-widest bg-slate-800 text-slate-300 hover:bg-slate-700"
+                >
+                  Sign out
+                </button>
+                <button
+                  onClick={async () => {
+                    await fetch('/api/admin/logout', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ all: true }) });
+                    window.location.reload();
+                  }}
+                  className="px-3 py-2 rounded-xl text-[10px] font-black uppercase tracking-widest bg-red-500/10 text-red-400 border border-red-500/20 hover:bg-red-500/20"
+                >
+                  Sign out everywhere
+                </button>
+              </div>
+            </div>
 
             {/* STATS */}
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-6 gap-4">

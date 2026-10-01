@@ -388,7 +388,7 @@ stay reliable on a filtered network, and are what the app recommends when a conn
 NEXT_PUBLIC_ABAPAY_ADDRESS=0xYourDefaultContractAddress
 NEXT_PUBLIC_ABAPAY_CELO_ADDRESS=0xYourCeloContractAddress
 NEXT_PUBLIC_ABAPAY_BASE_ADDRESS=0xYourBaseContractAddress
-ADMIN_WALLET_ADDRESS=0xYourAdminWalletAddress
+ADMIN_WALLET_ADDRESSES=0xYourOpsWallet              # optional; admins for /admin (never the vault owner). See ENV_SETUP.md
 CELO_PRIVATE_KEY=your_deployer_private_key         # Used only by Hardhat for deployment — never expose client-side
 ```
 
@@ -1553,7 +1553,7 @@ The app ships with Farcaster frame metadata (`public/.well-known/farcaster.json`
 * **Refund Verification:** `/api/admin/refund` verifies the refund on-chain (token, recipient, and amount all decoded from the transaction's ERC-20 Transfer logs) before marking a transaction `REFUNDED` — an admin cannot record a refund that never actually happened.
 * **RPC Failover:** On-chain reads use viem's `fallback()` transport across multiple RPC endpoints (`src/lib/chain.ts`), so a single downed provider doesn't halt payment verification.
 * **Content-Security-Policy:** Shipped in `Content-Security-Policy-Report-Only` mode (`next.config.ts`) — surfaces violations without risking breakage to wallet connections. Promote to enforcing (`Content-Security-Policy`) once verified against real wallet flows.
-* **Admin Auth:** Admin-only API routes and the `/admin` dashboard are gated behind dedicated authentication (`src/utils/adminAuth.ts`), separate from the public storefront. Auth is a wallet-signature challenge verified against the contract owner, with a 12-hour session expiry and timestamp replay protection.
+* **Admin Auth:** Admin-only API routes and the `/admin` dashboard are gated behind dedicated authentication (`src/utils/adminAuth.ts`), separate from the public storefront. An allowlisted ops wallet, never the vault owner, signs in once with a Sign-In with Ethereum message (domain-bound, single-use nonce). It gets an HttpOnly, Secure, SameSite=Strict session cookie that lasts 2h idle or 8h at most, and can be revoked with Sign out or Sign out everywhere. Only the session's hash is stored. State-changing admin requests also require a same-site `Origin`. On-chain vault actions still need the owner wallet, because the contract enforces it.
 * **Internal-Only AI Routes:** The DeAI "brain" (`/api/deai/*`) is reachable only by the app's own bot webhooks via a signed internal-service token (`src/utils/internalAuth.ts`). This prevents the public internet from impersonating any user by their chat ID / phone number / X ID, or burning the Claude API budget.
 * **Bot Webhook Signatures:** The WhatsApp and X webhooks verify Meta's `X-Hub-Signature-256` / X's `x-twitter-webhooks-signature` HMAC on every inbound payload (when the corresponding secret is configured), and Telegram verifies its secret token — so message events can't be forged.
 * **Hashed Transaction PINs:** DeAI PINs are stored as salted scrypt hashes (`src/utils/pinSecurity.ts`), never plaintext, with legacy plaintext values transparently upgraded on next use and a 4-attempt lockout.

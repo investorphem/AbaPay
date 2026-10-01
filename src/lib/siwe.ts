@@ -34,6 +34,7 @@ const ACTION_STATEMENTS: Record<string, string> = {
   'GET:/api/schedules': 'Show the automations set up for this wallet.',
   'POST:/api/schedules': 'Create an automated bill payment for this wallet.',
   'DELETE:/api/schedules': 'Cancel an automated bill payment for this wallet.',
+  'POST:/api/admin/login': 'Sign in to the AbaPay admin dashboard.',
 };
 
 export function siweStatement(purpose: 'action' | 'session', action?: string): string {

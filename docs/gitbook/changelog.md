@@ -17,6 +17,10 @@ GitHub](https://github.com/investorphem/AbaPay/commits/main).
 * **SDK releases: `abapay-sdk` 0.4.0 (npm) and 0.3.0 (PyPI)** sign the new format. The old
   `AbaPay Agent Action: …` signature, used by earlier SDK versions, is still accepted
   **until 2026-10-31**, then refused. Upgrade before then.
+* **Admin dashboard: separate ops wallet and revocable sessions.** Admins sign in with an ops
+  wallet, not the vault owner, and get a short-lived session (2h idle, 8h max) with **Sign
+  out** and **Sign out everywhere**. Vault operations still require the owner wallet, which
+  the contract enforces.
 
 ## 2026-09-30
 
