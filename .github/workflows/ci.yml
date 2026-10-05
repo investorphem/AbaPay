@@ -91,8 +91,10 @@ jobs:
         #      npm install && git add package-lock.json && git commit
         run: npm ci --no-audit --no-fund || (echo "::warning::package-lock.json is out of sync with package.json — falling back to 'npm install'. Please run 'npm install' locally and commit the updated lockfile." && npm install --no-audit --no-fund)
 
-      - name: Run tests
-        run: npm test
+      # With coverage, so the per-file line floors on the money paths (vitest.config.ts) block
+      # a merge that drops below them.
+      - name: Run tests (with coverage floors)
+        run: npm run test:coverage
 
   contracts:
     name: Contract Tests
