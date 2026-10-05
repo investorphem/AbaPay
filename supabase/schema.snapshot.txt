@@ -1,0 +1,524 @@
+column abapay_global_users.account_status text default 'ACTIVE'::text
+column abapay_global_users.country_code character varying(2) default 'NG'::character varying
+column abapay_global_users.created_at timestamp with time zone default now()
+column abapay_global_users.email text
+column abapay_global_users.fiat_balance_ngn numeric(15,2) default 0
+column abapay_global_users.id uuid not null default gen_random_uuid()
+column abapay_global_users.password_hash text
+column abapay_global_users.phone_number text
+column abapay_global_users.wallet_address text
+column abapay_users.created_at timestamp with time zone not null default timezone('utc'::text, now())
+column abapay_users.id uuid not null default gen_random_uuid()
+column abapay_users.total_points numeric(10,2) not null default 0
+column abapay_users.verified_phone text not null
+column admin_sessions.address text not null
+column admin_sessions.created_at timestamp with time zone not null default now()
+column admin_sessions.expires_at timestamp with time zone not null
+column admin_sessions.id_hash text not null
+column admin_sessions.ip text
+column admin_sessions.last_seen_at timestamp with time zone not null default now()
+column admin_sessions.revoked_at timestamp with time zone
+column admin_sessions.user_agent text
+column agent_links.approved_chain text default 'CELO'::text
+column agent_links.approved_token text default 'USD₮'::text
+column agent_links.channel text not null
+column agent_links.channel_user_id text not null
+column agent_links.created_at timestamp with time zone not null default timezone('utc'::text, now())
+column agent_links.failed_pin_attempts integer not null default 0
+column agent_links.id uuid not null default gen_random_uuid()
+column agent_links.is_active boolean not null default true
+column agent_links.link_code text
+column agent_links.link_verified boolean not null default false
+column agent_links.locked_until timestamp with time zone
+column agent_links.mcp_key_label text
+column agent_links.pin_hash text not null
+column agent_links.wallet_address text not null
+column auth_nonces.created_at timestamp with time zone not null default now()
+column auth_nonces.expires_at timestamp with time zone not null
+column auth_nonces.nonce text not null
+column auth_nonces.purpose text not null
+column auth_nonces.uses_remaining integer not null
+column deai_identities.created_at timestamp with time zone default now()
+column deai_identities.deai_pin text not null
+column deai_identities.id uuid not null default gen_random_uuid()
+column deai_identities.is_active boolean default true
+column deai_identities.pending_auth_token text
+column deai_identities.telegram_chat_id text
+column deai_identities.token_expires_at timestamp with time zone
+column deai_identities.user_id uuid not null
+column deai_identities.whatsapp_number text
+column deai_identities.x_twitter_id text
+column deai_sessions.chat_id text not null
+column deai_sessions.created_at timestamp with time zone default now()
+column deai_sessions.expires_at timestamp with time zone not null
+column deai_sessions.id uuid not null default gen_random_uuid()
+column deai_sessions.intent_data jsonb not null
+column deai_sessions.platform text default 'TELEGRAM'::text
+column deai_sessions.selected_token text
+column deai_sessions.status text default 'AWAITING_PIN'::text
+column discount_campaigns.created_at timestamp with time zone not null default now()
+column discount_campaigns.created_by text
+column discount_campaigns.ends_at timestamp with time zone
+column discount_campaigns.id uuid not null default gen_random_uuid()
+column discount_campaigns.is_active boolean not null default true
+column discount_campaigns.max_discount_ngn numeric
+column discount_campaigns.max_discount_per_destination_ngn numeric
+column discount_campaigns.max_discount_per_phone_ngn numeric
+column discount_campaigns.max_discount_per_wallet_ngn numeric
+column discount_campaigns.max_total_discount_ngn numeric
+column discount_campaigns.name text not null
+column discount_campaigns.services text[]
+column discount_campaigns.starts_at timestamp with time zone
+column discount_campaigns.type text not null
+column discount_campaigns.updated_at timestamp with time zone not null default now()
+column discount_campaigns.value numeric not null
+column discount_exclusions.account_number text
+column discount_exclusions.campaign_id uuid not null
+column discount_exclusions.created_at timestamp with time zone not null default now()
+column discount_exclusions.created_by text
+column discount_exclusions.id uuid not null default gen_random_uuid()
+column discount_exclusions.reason text
+column discount_exclusions.wallet_address text
+column fulfilment_jobs.attempts integer not null default 0
+column fulfilment_jobs.created_at timestamp with time zone not null default now()
+column fulfilment_jobs.id uuid not null default gen_random_uuid()
+column fulfilment_jobs.last_error text
+column fulfilment_jobs.locked_at timestamp with time zone
+column fulfilment_jobs.max_attempts integer not null default 8
+column fulfilment_jobs.next_run_at timestamp with time zone not null default (now() + '00:02:00'::interval)
+column fulfilment_jobs.status text not null default 'queued'::text
+column fulfilment_jobs.transaction_id uuid not null
+column fulfilment_jobs.updated_at timestamp with time zone not null default now()
+column idempotency_keys.created_at timestamp with time zone not null default now()
+column idempotency_keys.expires_at timestamp with time zone not null
+column idempotency_keys.key text not null
+column idempotency_keys.request_hash text not null
+column idempotency_keys.response jsonb
+column idempotency_keys.scope text not null
+column idempotency_keys.status text not null
+column mcp_oauth_clients.client_id text not null
+column mcp_oauth_clients.client_name text
+column mcp_oauth_clients.created_at timestamp with time zone not null default timezone('utc'::text, now())
+column mcp_oauth_clients.redirect_uris text[] not null
+column mcp_oauth_codes.agent_link_id uuid not null
+column mcp_oauth_codes.client_id text not null
+column mcp_oauth_codes.code text not null
+column mcp_oauth_codes.code_challenge text not null
+column mcp_oauth_codes.code_challenge_method text not null default 'S256'::text
+column mcp_oauth_codes.created_at timestamp with time zone not null default timezone('utc'::text, now())
+column mcp_oauth_codes.expires_at timestamp with time zone not null
+column mcp_oauth_codes.redirect_uri text not null
+column mcp_oauth_codes.used boolean not null default false
+column mcp_oauth_tokens.access_expires_at timestamp with time zone not null
+column mcp_oauth_tokens.access_token_hash text not null
+column mcp_oauth_tokens.agent_link_id uuid not null
+column mcp_oauth_tokens.client_id text
+column mcp_oauth_tokens.created_at timestamp with time zone not null default timezone('utc'::text, now())
+column mcp_oauth_tokens.id uuid not null default gen_random_uuid()
+column mcp_oauth_tokens.refresh_expires_at timestamp with time zone
+column mcp_oauth_tokens.refresh_token_hash text
+column mcp_oauth_tokens.revoked boolean not null default false
+column otp_requests.code text not null
+column otp_requests.created_at timestamp with time zone not null default timezone('utc'::text, now())
+column otp_requests.expires_at timestamp with time zone not null
+column otp_requests.phone text not null
+column platform_settings.agent_autonomous_enabled boolean not null default true
+column platform_settings.agent_daily_cap_ngn numeric not null default 100000
+column platform_settings.agent_enabled boolean not null default true
+column platform_settings.agent_max_ngn_per_tx numeric not null default 50000
+column platform_settings.ai_chat_enabled boolean not null default true
+column platform_settings.discount_fraud_flagging_enabled boolean not null default true
+column platform_settings.exchange_rate numeric not null
+column platform_settings.id integer not null
+column platform_settings.kill_switches jsonb default '{"BANK": true, "CABLE": true, "AIRTIME": true, "INTERNET": true, "EDUCATION": true, "ELECTRICITY": true, "MASTER_INTERNATIONAL": true}'::jsonb
+column platform_settings.provider_circuits jsonb not null default '{}'::jsonb
+column platform_settings.x402_facilitator_fee_usd numeric not null default 0.001
+column rate_limits.count integer not null default 0
+column rate_limits.key text not null
+column rate_limits.window_start timestamp with time zone not null default now()
+column refund_queue.amount_crypto numeric not null
+column refund_queue.amount_naira numeric
+column refund_queue.approved_at timestamp with time zone
+column refund_queue.approved_by text
+column refund_queue.blockchain text not null default 'CELO'::text
+column refund_queue.completed_at timestamp with time zone
+column refund_queue.created_at timestamp with time zone not null default timezone('utc'::text, now())
+column refund_queue.id uuid not null default gen_random_uuid()
+column refund_queue.notes text
+column refund_queue.reason text not null
+column refund_queue.refund_tx_hash text
+column refund_queue.service_category text
+column refund_queue.source_channel text default 'WEB'::text
+column refund_queue.status text not null default 'PENDING'::text
+column refund_queue.token_used text not null
+column refund_queue.transaction_id uuid
+column refund_queue.tx_hash text not null
+column refund_queue.user_notified boolean not null default false
+column refund_queue.vtpass_error text
+column refund_queue.wallet_address text not null
+column scheduled_bills.amount_ngn numeric not null
+column scheduled_bills.auto_execute boolean not null default false
+column scheduled_bills.batch_id uuid
+column scheduled_bills.billers_code text not null
+column scheduled_bills.blockchain text default 'CELO'::text
+column scheduled_bills.consecutive_failures integer not null default 0
+column scheduled_bills.created_at timestamp with time zone not null default timezone('utc'::text, now())
+column scheduled_bills.customer_address text
+column scheduled_bills.customer_name text
+column scheduled_bills.day_of_month integer
+column scheduled_bills.day_of_week integer
+column scheduled_bills.frequency text not null default 'monthly'::text
+column scheduled_bills.id uuid not null default gen_random_uuid()
+column scheduled_bills.is_active boolean not null default true
+column scheduled_bills.last_notified_at timestamp with time zone
+column scheduled_bills.last_paid_at timestamp with time zone
+column scheduled_bills.last_run_date date
+column scheduled_bills.last_tx_hash text
+column scheduled_bills.meter_type text
+column scheduled_bills.notify_channel text
+column scheduled_bills.notify_channel_id text
+column scheduled_bills.notify_email text
+column scheduled_bills.notify_telegram text
+column scheduled_bills.provider text
+column scheduled_bills.run_once_at timestamp with time zone
+column scheduled_bills.service_category text not null
+column scheduled_bills.service_id text not null
+column scheduled_bills.token_used text default 'USD₮'::text
+column scheduled_bills.variation_code text
+column scheduled_bills.wallet_address text not null
+column support_tickets.admin_reply text
+column support_tickets.channel text not null default 'WEB'::text
+column support_tickets.channel_user_id text
+column support_tickets.created_at timestamp with time zone not null default timezone('utc'::text, now())
+column support_tickets.customer_email text
+column support_tickets.id uuid not null default gen_random_uuid()
+column support_tickets.message text not null
+column support_tickets.replied_at timestamp with time zone
+column support_tickets.replied_by text
+column support_tickets.status text not null default 'OPEN'::text
+column support_tickets.subject text
+column support_tickets.tx_hash text
+column support_tickets.wallet_address text
+column telegram_group_messages.chat_id text not null
+column telegram_group_messages.created_at timestamp with time zone not null default now()
+column telegram_group_messages.id bigint not null default nextval('telegram_group_messages_id_seq'::regclass)
+column telegram_group_messages.sender_id text not null
+column telegram_group_messages.sender_name text
+column telegram_group_messages.text text not null
+column transactions.account_number text not null
+column transactions.amount_naira numeric not null
+column transactions.amount_usdt numeric not null
+column transactions.api_response text
+column transactions.blockchain text default 'CELO'::text
+column transactions.client_ip text
+column transactions.contact_details text
+column transactions.country_code text
+column transactions.created_at timestamp with time zone not null default timezone('utc'::text, now())
+column transactions.customer_address text
+column transactions.customer_email text
+column transactions.customer_name text
+column transactions.discount_campaign_id uuid
+column transactions.discount_ngn numeric not null default 0
+column transactions.discount_phone text
+column transactions.display_amount text
+column transactions.error_code text
+column transactions.fee_naira numeric not null
+column transactions.foreign_amount numeric
+column transactions.id uuid not null default gen_random_uuid()
+column transactions.meter_account_type text
+column transactions.network text not null
+column transactions.operator_id text
+column transactions.payment_method text
+column transactions.phone text
+column transactions.product_type_id text
+column transactions.purchased_code text
+column transactions.refund_hash text
+column transactions.request_id text
+column transactions.service_category text not null
+column transactions.service_id text
+column transactions.source_channel text default 'WEB'::text
+column transactions.stamp_duty_ngn numeric default 0
+column transactions.status text not null
+column transactions.subscription_type text
+column transactions.token_used text default 'USD₮'::text
+column transactions.tx_hash text not null
+column transactions.units text
+column transactions.variation_code text
+column transactions.vend_dispatched_at timestamp with time zone
+column transactions.wallet_address text not null
+column transactions.x402_nonce text
+column transactions.x402_payer text
+column transactions.x402_settle_tx text
+column transactions.x402_valid_before timestamp with time zone
+column wallet_links.linked_at timestamp with time zone
+column wallet_links.unclaimed_points numeric(10,2) not null default 0
+column wallet_links.user_id uuid
+column wallet_links.wallet_address text not null
+column webhook_events.external_id text not null
+column webhook_events.received_at timestamp with time zone not null default now()
+column webhook_events.source text not null
+constraint abapay_global_users.abapay_global_users_email_key UNIQUE (email)
+constraint abapay_global_users.abapay_global_users_phone_number_key UNIQUE (phone_number)
+constraint abapay_global_users.abapay_global_users_pkey PRIMARY KEY (id)
+constraint abapay_global_users.abapay_global_users_wallet_address_key UNIQUE (wallet_address)
+constraint abapay_global_users.must_have_identity CHECK (((wallet_address IS NOT NULL) OR (email IS NOT NULL) OR (phone_number IS NOT NULL)))
+constraint abapay_users.abapay_users_pkey PRIMARY KEY (id)
+constraint abapay_users.abapay_users_verified_phone_key UNIQUE (verified_phone)
+constraint admin_sessions.admin_sessions_pkey PRIMARY KEY (id_hash)
+constraint agent_links.agent_links_channel_check CHECK ((channel = ANY (ARRAY['TELEGRAM'::text, 'WHATSAPP'::text, 'X'::text, 'MCP'::text])))
+constraint agent_links.agent_links_channel_user_unique UNIQUE (channel, channel_user_id)
+constraint agent_links.agent_links_pkey PRIMARY KEY (id)
+constraint auth_nonces.auth_nonces_pkey PRIMARY KEY (nonce)
+constraint auth_nonces.auth_nonces_purpose_check CHECK ((purpose = ANY (ARRAY['action'::text, 'session'::text])))
+constraint auth_nonces.auth_nonces_uses_remaining_check CHECK ((uses_remaining >= 0))
+constraint deai_identities.deai_identities_pending_auth_token_key UNIQUE (pending_auth_token)
+constraint deai_identities.deai_identities_pkey PRIMARY KEY (id)
+constraint deai_identities.deai_identities_telegram_chat_id_key UNIQUE (telegram_chat_id)
+constraint deai_identities.deai_identities_user_id_fkey FOREIGN KEY (user_id) REFERENCES abapay_global_users(id)
+constraint deai_identities.deai_identities_whatsapp_number_key UNIQUE (whatsapp_number)
+constraint deai_identities.deai_identities_x_twitter_id_key UNIQUE (x_twitter_id)
+constraint deai_sessions.deai_sessions_chat_id_key UNIQUE (chat_id)
+constraint deai_sessions.deai_sessions_pkey PRIMARY KEY (id)
+constraint discount_campaigns.discount_campaigns_pkey PRIMARY KEY (id)
+constraint discount_campaigns.discount_campaigns_type_check CHECK ((type = ANY (ARRAY['PERCENT'::text, 'FIXED'::text])))
+constraint discount_campaigns.discount_campaigns_value_check CHECK ((value > (0)::numeric))
+constraint discount_exclusions.discount_exclusions_campaign_id_fkey FOREIGN KEY (campaign_id) REFERENCES discount_campaigns(id) ON DELETE CASCADE
+constraint discount_exclusions.discount_exclusions_pkey PRIMARY KEY (id)
+constraint discount_exclusions.discount_exclusions_target_check CHECK (((wallet_address IS NOT NULL) OR (account_number IS NOT NULL)))
+constraint fulfilment_jobs.fulfilment_jobs_pkey PRIMARY KEY (id)
+constraint fulfilment_jobs.fulfilment_jobs_status_check CHECK ((status = ANY (ARRAY['queued'::text, 'running'::text, 'done'::text, 'needs_review'::text])))
+constraint fulfilment_jobs.fulfilment_jobs_transaction_id_fkey FOREIGN KEY (transaction_id) REFERENCES transactions(id) ON DELETE CASCADE
+constraint fulfilment_jobs.fulfilment_jobs_transaction_id_key UNIQUE (transaction_id)
+constraint idempotency_keys.idempotency_keys_pkey PRIMARY KEY (scope, key)
+constraint idempotency_keys.idempotency_keys_status_check CHECK ((status = ANY (ARRAY['IN_PROGRESS'::text, 'DONE'::text])))
+constraint mcp_oauth_clients.mcp_oauth_clients_pkey PRIMARY KEY (client_id)
+constraint mcp_oauth_codes.mcp_oauth_codes_agent_link_id_fkey FOREIGN KEY (agent_link_id) REFERENCES agent_links(id) ON DELETE CASCADE
+constraint mcp_oauth_codes.mcp_oauth_codes_client_id_fkey FOREIGN KEY (client_id) REFERENCES mcp_oauth_clients(client_id) ON DELETE CASCADE
+constraint mcp_oauth_codes.mcp_oauth_codes_code_challenge_method_check CHECK ((code_challenge_method = 'S256'::text))
+constraint mcp_oauth_codes.mcp_oauth_codes_pkey PRIMARY KEY (code)
+constraint mcp_oauth_tokens.mcp_oauth_tokens_access_token_hash_key UNIQUE (access_token_hash)
+constraint mcp_oauth_tokens.mcp_oauth_tokens_agent_link_id_fkey FOREIGN KEY (agent_link_id) REFERENCES agent_links(id) ON DELETE CASCADE
+constraint mcp_oauth_tokens.mcp_oauth_tokens_client_id_fkey FOREIGN KEY (client_id) REFERENCES mcp_oauth_clients(client_id) ON DELETE CASCADE
+constraint mcp_oauth_tokens.mcp_oauth_tokens_pkey PRIMARY KEY (id)
+constraint mcp_oauth_tokens.mcp_oauth_tokens_refresh_token_hash_key UNIQUE (refresh_token_hash)
+constraint otp_requests.otp_requests_pkey PRIMARY KEY (phone)
+constraint platform_settings.platform_settings_pkey PRIMARY KEY (id)
+constraint rate_limits.rate_limits_pkey PRIMARY KEY (key)
+constraint refund_queue.refund_queue_pkey PRIMARY KEY (id)
+constraint refund_queue.refund_queue_transaction_id_fkey FOREIGN KEY (transaction_id) REFERENCES transactions(id)
+constraint refund_queue.refund_queue_tx_hash_key UNIQUE (tx_hash)
+constraint scheduled_bills.scheduled_bills_day_of_month_check CHECK (((day_of_month >= 1) AND (day_of_month <= 28)))
+constraint scheduled_bills.scheduled_bills_day_of_week_check CHECK (((day_of_week >= 0) AND (day_of_week <= 6)))
+constraint scheduled_bills.scheduled_bills_pkey PRIMARY KEY (id)
+constraint support_tickets.support_tickets_pkey PRIMARY KEY (id)
+constraint telegram_group_messages.telegram_group_messages_pkey PRIMARY KEY (id)
+constraint transactions.transactions_discount_campaign_id_fkey FOREIGN KEY (discount_campaign_id) REFERENCES discount_campaigns(id)
+constraint transactions.transactions_pkey PRIMARY KEY (id)
+constraint transactions.transactions_tx_hash_key UNIQUE (tx_hash)
+constraint wallet_links.wallet_links_pkey PRIMARY KEY (wallet_address)
+constraint wallet_links.wallet_links_user_id_fkey FOREIGN KEY (user_id) REFERENCES abapay_users(id)
+constraint webhook_events.webhook_events_pkey PRIMARY KEY (source, external_id)
+function award_transaction_points(target_wallet text, points_to_add numeric) returns void lang=plpgsql secdef=f config=search_path=public, pg_temp body=87b720db33a2d1531ce412192cfe4f96
+function claim_jobs(p_limit integer) returns SETOF fulfilment_jobs lang=sql secdef=f config=search_path=public, pg_temp body=9d4bca651913ae7c9e5907ffcf69fa9d
+function complete_job(p_id uuid) returns void lang=sql secdef=f config=search_path=public, pg_temp body=3428d94c2ed06263702c2890d824b2be
+function consume_auth_nonce(p_nonce text, p_purpose text) returns boolean lang=plpgsql secdef=f config=search_path=public, pg_temp body=0cd1c9c376d77600c20bf284581918bb
+function enqueue_fulfilment_job() returns trigger lang=plpgsql secdef=f config=search_path=public, pg_temp body=780e8972739061d912d439517964c130
+function fail_job(p_id uuid, p_error text, p_retry_seconds integer) returns text lang=plpgsql secdef=f config=search_path=public, pg_temp body=7e40fae56cde1c49da5bd5a2745f64ff
+function link_wallet_to_phone(target_wallet text, target_phone text) returns boolean lang=plpgsql secdef=f config=search_path=public, pg_temp body=517c8740ce963df0a9e5ab4c9f531a7a
+function pin_attempt_clear(p_link_id uuid) returns void lang=sql secdef=f config=search_path=public, pg_temp body=5a357b931f327adacacb856193deb8b9
+function pin_attempt_reserve(p_link_id uuid) returns TABLE(allowed boolean, attempts integer, locked_until timestamp with time zone, locked_now boolean) lang=plpgsql secdef=f config=search_path=public, pg_temp body=08886edaf04372b2311df48a7ec1858c
+function rate_limit_hit(p_key text, p_window_seconds integer) returns TABLE(used integer, window_start timestamp with time zone) lang=plpgsql secdef=f config=search_path=public, pg_temp body=8a129139739abfc2875cf458c3c21122
+function set_provider_circuit(p_provider text, p_open boolean, p_reason text) returns boolean lang=plpgsql secdef=f config=search_path=public, pg_temp body=a075d5fc919abe1f6f29bfe848c51f7a
+function transactions_state_guard() returns trigger lang=plpgsql secdef=f config=search_path=public, pg_temp body=4c5f0930d0ec9139b54628a01abd6016
+grant DELETE,INSERT,REFERENCES,SELECT,TRIGGER,TRUNCATE,UPDATE on abapay_global_users to anon
+grant DELETE,INSERT,REFERENCES,SELECT,TRIGGER,TRUNCATE,UPDATE on abapay_global_users to authenticated
+grant DELETE,INSERT,REFERENCES,SELECT,TRIGGER,TRUNCATE,UPDATE on abapay_global_users to service_role
+grant DELETE,INSERT,REFERENCES,SELECT,TRIGGER,TRUNCATE,UPDATE on abapay_users to anon
+grant DELETE,INSERT,REFERENCES,SELECT,TRIGGER,TRUNCATE,UPDATE on abapay_users to authenticated
+grant DELETE,INSERT,REFERENCES,SELECT,TRIGGER,TRUNCATE,UPDATE on abapay_users to service_role
+grant DELETE,INSERT,REFERENCES,SELECT,TRIGGER,TRUNCATE,UPDATE on admin_sessions to anon
+grant DELETE,INSERT,REFERENCES,SELECT,TRIGGER,TRUNCATE,UPDATE on admin_sessions to authenticated
+grant DELETE,INSERT,REFERENCES,SELECT,TRIGGER,TRUNCATE,UPDATE on admin_sessions to service_role
+grant DELETE,INSERT,REFERENCES,SELECT,TRIGGER,TRUNCATE,UPDATE on agent_links to anon
+grant DELETE,INSERT,REFERENCES,SELECT,TRIGGER,TRUNCATE,UPDATE on agent_links to authenticated
+grant DELETE,INSERT,REFERENCES,SELECT,TRIGGER,TRUNCATE,UPDATE on agent_links to service_role
+grant DELETE,INSERT,REFERENCES,SELECT,TRIGGER,TRUNCATE,UPDATE on auth_nonces to anon
+grant DELETE,INSERT,REFERENCES,SELECT,TRIGGER,TRUNCATE,UPDATE on auth_nonces to authenticated
+grant DELETE,INSERT,REFERENCES,SELECT,TRIGGER,TRUNCATE,UPDATE on auth_nonces to service_role
+grant DELETE,INSERT,REFERENCES,SELECT,TRIGGER,TRUNCATE,UPDATE on deai_identities to anon
+grant DELETE,INSERT,REFERENCES,SELECT,TRIGGER,TRUNCATE,UPDATE on deai_identities to authenticated
+grant DELETE,INSERT,REFERENCES,SELECT,TRIGGER,TRUNCATE,UPDATE on deai_identities to service_role
+grant DELETE,INSERT,REFERENCES,SELECT,TRIGGER,TRUNCATE,UPDATE on deai_sessions to anon
+grant DELETE,INSERT,REFERENCES,SELECT,TRIGGER,TRUNCATE,UPDATE on deai_sessions to authenticated
+grant DELETE,INSERT,REFERENCES,SELECT,TRIGGER,TRUNCATE,UPDATE on deai_sessions to service_role
+grant DELETE,INSERT,REFERENCES,SELECT,TRIGGER,TRUNCATE,UPDATE on discount_campaigns to anon
+grant DELETE,INSERT,REFERENCES,SELECT,TRIGGER,TRUNCATE,UPDATE on discount_campaigns to authenticated
+grant DELETE,INSERT,REFERENCES,SELECT,TRIGGER,TRUNCATE,UPDATE on discount_campaigns to service_role
+grant DELETE,INSERT,REFERENCES,SELECT,TRIGGER,TRUNCATE,UPDATE on discount_exclusions to anon
+grant DELETE,INSERT,REFERENCES,SELECT,TRIGGER,TRUNCATE,UPDATE on discount_exclusions to authenticated
+grant DELETE,INSERT,REFERENCES,SELECT,TRIGGER,TRUNCATE,UPDATE on discount_exclusions to service_role
+grant DELETE,INSERT,REFERENCES,SELECT,TRIGGER,TRUNCATE,UPDATE on fulfilment_jobs to anon
+grant DELETE,INSERT,REFERENCES,SELECT,TRIGGER,TRUNCATE,UPDATE on fulfilment_jobs to authenticated
+grant DELETE,INSERT,REFERENCES,SELECT,TRIGGER,TRUNCATE,UPDATE on fulfilment_jobs to service_role
+grant DELETE,INSERT,REFERENCES,SELECT,TRIGGER,TRUNCATE,UPDATE on idempotency_keys to anon
+grant DELETE,INSERT,REFERENCES,SELECT,TRIGGER,TRUNCATE,UPDATE on idempotency_keys to authenticated
+grant DELETE,INSERT,REFERENCES,SELECT,TRIGGER,TRUNCATE,UPDATE on idempotency_keys to service_role
+grant DELETE,INSERT,REFERENCES,SELECT,TRIGGER,TRUNCATE,UPDATE on mcp_oauth_clients to anon
+grant DELETE,INSERT,REFERENCES,SELECT,TRIGGER,TRUNCATE,UPDATE on mcp_oauth_clients to authenticated
+grant DELETE,INSERT,REFERENCES,SELECT,TRIGGER,TRUNCATE,UPDATE on mcp_oauth_clients to service_role
+grant DELETE,INSERT,REFERENCES,SELECT,TRIGGER,TRUNCATE,UPDATE on mcp_oauth_codes to anon
+grant DELETE,INSERT,REFERENCES,SELECT,TRIGGER,TRUNCATE,UPDATE on mcp_oauth_codes to authenticated
+grant DELETE,INSERT,REFERENCES,SELECT,TRIGGER,TRUNCATE,UPDATE on mcp_oauth_codes to service_role
+grant DELETE,INSERT,REFERENCES,SELECT,TRIGGER,TRUNCATE,UPDATE on mcp_oauth_tokens to anon
+grant DELETE,INSERT,REFERENCES,SELECT,TRIGGER,TRUNCATE,UPDATE on mcp_oauth_tokens to authenticated
+grant DELETE,INSERT,REFERENCES,SELECT,TRIGGER,TRUNCATE,UPDATE on mcp_oauth_tokens to service_role
+grant DELETE,INSERT,REFERENCES,SELECT,TRIGGER,TRUNCATE,UPDATE on otp_requests to anon
+grant DELETE,INSERT,REFERENCES,SELECT,TRIGGER,TRUNCATE,UPDATE on otp_requests to authenticated
+grant DELETE,INSERT,REFERENCES,SELECT,TRIGGER,TRUNCATE,UPDATE on otp_requests to service_role
+grant DELETE,INSERT,REFERENCES,SELECT,TRIGGER,TRUNCATE,UPDATE on platform_settings to anon
+grant DELETE,INSERT,REFERENCES,SELECT,TRIGGER,TRUNCATE,UPDATE on platform_settings to authenticated
+grant DELETE,INSERT,REFERENCES,SELECT,TRIGGER,TRUNCATE,UPDATE on platform_settings to service_role
+grant DELETE,INSERT,REFERENCES,SELECT,TRIGGER,TRUNCATE,UPDATE on rate_limits to anon
+grant DELETE,INSERT,REFERENCES,SELECT,TRIGGER,TRUNCATE,UPDATE on rate_limits to authenticated
+grant DELETE,INSERT,REFERENCES,SELECT,TRIGGER,TRUNCATE,UPDATE on rate_limits to service_role
+grant DELETE,INSERT,REFERENCES,SELECT,TRIGGER,TRUNCATE,UPDATE on refund_queue to anon
+grant DELETE,INSERT,REFERENCES,SELECT,TRIGGER,TRUNCATE,UPDATE on refund_queue to authenticated
+grant DELETE,INSERT,REFERENCES,SELECT,TRIGGER,TRUNCATE,UPDATE on refund_queue to service_role
+grant DELETE,INSERT,REFERENCES,SELECT,TRIGGER,TRUNCATE,UPDATE on scheduled_bills to anon
+grant DELETE,INSERT,REFERENCES,SELECT,TRIGGER,TRUNCATE,UPDATE on scheduled_bills to authenticated
+grant DELETE,INSERT,REFERENCES,SELECT,TRIGGER,TRUNCATE,UPDATE on scheduled_bills to service_role
+grant DELETE,INSERT,REFERENCES,SELECT,TRIGGER,TRUNCATE,UPDATE on support_tickets to anon
+grant DELETE,INSERT,REFERENCES,SELECT,TRIGGER,TRUNCATE,UPDATE on support_tickets to authenticated
+grant DELETE,INSERT,REFERENCES,SELECT,TRIGGER,TRUNCATE,UPDATE on support_tickets to service_role
+grant DELETE,INSERT,REFERENCES,SELECT,TRIGGER,TRUNCATE,UPDATE on telegram_group_messages to anon
+grant DELETE,INSERT,REFERENCES,SELECT,TRIGGER,TRUNCATE,UPDATE on telegram_group_messages to authenticated
+grant DELETE,INSERT,REFERENCES,SELECT,TRIGGER,TRUNCATE,UPDATE on telegram_group_messages to service_role
+grant DELETE,INSERT,REFERENCES,SELECT,TRIGGER,TRUNCATE,UPDATE on transactions to anon
+grant DELETE,INSERT,REFERENCES,SELECT,TRIGGER,TRUNCATE,UPDATE on transactions to authenticated
+grant DELETE,INSERT,REFERENCES,SELECT,TRIGGER,TRUNCATE,UPDATE on transactions to service_role
+grant DELETE,INSERT,REFERENCES,SELECT,TRIGGER,TRUNCATE,UPDATE on wallet_links to anon
+grant DELETE,INSERT,REFERENCES,SELECT,TRIGGER,TRUNCATE,UPDATE on wallet_links to authenticated
+grant DELETE,INSERT,REFERENCES,SELECT,TRIGGER,TRUNCATE,UPDATE on wallet_links to service_role
+grant DELETE,INSERT,REFERENCES,SELECT,TRIGGER,TRUNCATE,UPDATE on webhook_events to anon
+grant DELETE,INSERT,REFERENCES,SELECT,TRIGGER,TRUNCATE,UPDATE on webhook_events to authenticated
+grant DELETE,INSERT,REFERENCES,SELECT,TRIGGER,TRUNCATE,UPDATE on webhook_events to service_role
+grant execute on award_transaction_points(target_wallet text, points_to_add numeric) to PUBLIC
+grant execute on award_transaction_points(target_wallet text, points_to_add numeric) to anon
+grant execute on award_transaction_points(target_wallet text, points_to_add numeric) to authenticated
+grant execute on award_transaction_points(target_wallet text, points_to_add numeric) to service_role
+grant execute on claim_jobs(p_limit integer) to service_role
+grant execute on complete_job(p_id uuid) to service_role
+grant execute on consume_auth_nonce(p_nonce text, p_purpose text) to service_role
+grant execute on enqueue_fulfilment_job() to PUBLIC
+grant execute on enqueue_fulfilment_job() to anon
+grant execute on enqueue_fulfilment_job() to authenticated
+grant execute on enqueue_fulfilment_job() to service_role
+grant execute on fail_job(p_id uuid, p_error text, p_retry_seconds integer) to service_role
+grant execute on link_wallet_to_phone(target_wallet text, target_phone text) to PUBLIC
+grant execute on link_wallet_to_phone(target_wallet text, target_phone text) to anon
+grant execute on link_wallet_to_phone(target_wallet text, target_phone text) to authenticated
+grant execute on link_wallet_to_phone(target_wallet text, target_phone text) to service_role
+grant execute on pin_attempt_clear(p_link_id uuid) to service_role
+grant execute on pin_attempt_reserve(p_link_id uuid) to service_role
+grant execute on rate_limit_hit(p_key text, p_window_seconds integer) to service_role
+grant execute on set_provider_circuit(p_provider text, p_open boolean, p_reason text) to service_role
+grant execute on transactions_state_guard() to service_role
+index abapay_global_users.abapay_global_users_email_key CREATE UNIQUE INDEX abapay_global_users_email_key ON public.abapay_global_users USING btree (email)
+index abapay_global_users.abapay_global_users_phone_number_key CREATE UNIQUE INDEX abapay_global_users_phone_number_key ON public.abapay_global_users USING btree (phone_number)
+index abapay_global_users.abapay_global_users_pkey CREATE UNIQUE INDEX abapay_global_users_pkey ON public.abapay_global_users USING btree (id)
+index abapay_global_users.abapay_global_users_wallet_address_key CREATE UNIQUE INDEX abapay_global_users_wallet_address_key ON public.abapay_global_users USING btree (wallet_address)
+index abapay_users.abapay_users_pkey CREATE UNIQUE INDEX abapay_users_pkey ON public.abapay_users USING btree (id)
+index abapay_users.abapay_users_verified_phone_key CREATE UNIQUE INDEX abapay_users_verified_phone_key ON public.abapay_users USING btree (verified_phone)
+index admin_sessions.admin_sessions_address_idx CREATE INDEX admin_sessions_address_idx ON public.admin_sessions USING btree (address)
+index admin_sessions.admin_sessions_pkey CREATE UNIQUE INDEX admin_sessions_pkey ON public.admin_sessions USING btree (id_hash)
+index agent_links.agent_links_channel_user_unique CREATE UNIQUE INDEX agent_links_channel_user_unique ON public.agent_links USING btree (channel, channel_user_id)
+index agent_links.agent_links_pkey CREATE UNIQUE INDEX agent_links_pkey ON public.agent_links USING btree (id)
+index agent_links.idx_agent_links_lookup CREATE INDEX idx_agent_links_lookup ON public.agent_links USING btree (channel, channel_user_id)
+index agent_links.idx_agent_links_wallet CREATE INDEX idx_agent_links_wallet ON public.agent_links USING btree (wallet_address)
+index auth_nonces.auth_nonces_expires_at_idx CREATE INDEX auth_nonces_expires_at_idx ON public.auth_nonces USING btree (expires_at)
+index auth_nonces.auth_nonces_pkey CREATE UNIQUE INDEX auth_nonces_pkey ON public.auth_nonces USING btree (nonce)
+index deai_identities.deai_identities_pending_auth_token_key CREATE UNIQUE INDEX deai_identities_pending_auth_token_key ON public.deai_identities USING btree (pending_auth_token)
+index deai_identities.deai_identities_pkey CREATE UNIQUE INDEX deai_identities_pkey ON public.deai_identities USING btree (id)
+index deai_identities.deai_identities_telegram_chat_id_key CREATE UNIQUE INDEX deai_identities_telegram_chat_id_key ON public.deai_identities USING btree (telegram_chat_id)
+index deai_identities.deai_identities_whatsapp_number_key CREATE UNIQUE INDEX deai_identities_whatsapp_number_key ON public.deai_identities USING btree (whatsapp_number)
+index deai_identities.deai_identities_x_twitter_id_key CREATE UNIQUE INDEX deai_identities_x_twitter_id_key ON public.deai_identities USING btree (x_twitter_id)
+index deai_identities.idx_deai_telegram CREATE INDEX idx_deai_telegram ON public.deai_identities USING btree (telegram_chat_id)
+index deai_identities.idx_deai_whatsapp CREATE INDEX idx_deai_whatsapp ON public.deai_identities USING btree (whatsapp_number)
+index deai_identities.idx_deai_x CREATE INDEX idx_deai_x ON public.deai_identities USING btree (x_twitter_id)
+index deai_sessions.deai_sessions_chat_id_key CREATE UNIQUE INDEX deai_sessions_chat_id_key ON public.deai_sessions USING btree (chat_id)
+index deai_sessions.deai_sessions_pkey CREATE UNIQUE INDEX deai_sessions_pkey ON public.deai_sessions USING btree (id)
+index deai_sessions.idx_deai_sessions_chat_id CREATE INDEX idx_deai_sessions_chat_id ON public.deai_sessions USING btree (chat_id)
+index discount_campaigns.discount_campaigns_pkey CREATE UNIQUE INDEX discount_campaigns_pkey ON public.discount_campaigns USING btree (id)
+index discount_campaigns.idx_discount_campaigns_active CREATE INDEX idx_discount_campaigns_active ON public.discount_campaigns USING btree (is_active, starts_at, ends_at)
+index discount_exclusions.discount_exclusions_pkey CREATE UNIQUE INDEX discount_exclusions_pkey ON public.discount_exclusions USING btree (id)
+index discount_exclusions.idx_discount_exclusions_campaign CREATE INDEX idx_discount_exclusions_campaign ON public.discount_exclusions USING btree (campaign_id)
+index fulfilment_jobs.fulfilment_jobs_due_idx CREATE INDEX fulfilment_jobs_due_idx ON public.fulfilment_jobs USING btree (status, next_run_at)
+index fulfilment_jobs.fulfilment_jobs_pkey CREATE UNIQUE INDEX fulfilment_jobs_pkey ON public.fulfilment_jobs USING btree (id)
+index fulfilment_jobs.fulfilment_jobs_transaction_id_key CREATE UNIQUE INDEX fulfilment_jobs_transaction_id_key ON public.fulfilment_jobs USING btree (transaction_id)
+index idempotency_keys.idempotency_keys_expires_at_idx CREATE INDEX idempotency_keys_expires_at_idx ON public.idempotency_keys USING btree (expires_at)
+index idempotency_keys.idempotency_keys_pkey CREATE UNIQUE INDEX idempotency_keys_pkey ON public.idempotency_keys USING btree (scope, key)
+index mcp_oauth_clients.mcp_oauth_clients_pkey CREATE UNIQUE INDEX mcp_oauth_clients_pkey ON public.mcp_oauth_clients USING btree (client_id)
+index mcp_oauth_codes.idx_mcp_oauth_codes_client CREATE INDEX idx_mcp_oauth_codes_client ON public.mcp_oauth_codes USING btree (client_id)
+index mcp_oauth_codes.idx_mcp_oauth_codes_link CREATE INDEX idx_mcp_oauth_codes_link ON public.mcp_oauth_codes USING btree (agent_link_id)
+index mcp_oauth_codes.mcp_oauth_codes_pkey CREATE UNIQUE INDEX mcp_oauth_codes_pkey ON public.mcp_oauth_codes USING btree (code)
+index mcp_oauth_tokens.idx_mcp_oauth_tokens_access CREATE INDEX idx_mcp_oauth_tokens_access ON public.mcp_oauth_tokens USING btree (access_token_hash)
+index mcp_oauth_tokens.idx_mcp_oauth_tokens_link CREATE INDEX idx_mcp_oauth_tokens_link ON public.mcp_oauth_tokens USING btree (agent_link_id)
+index mcp_oauth_tokens.idx_mcp_oauth_tokens_refresh CREATE INDEX idx_mcp_oauth_tokens_refresh ON public.mcp_oauth_tokens USING btree (refresh_token_hash)
+index mcp_oauth_tokens.mcp_oauth_tokens_access_token_hash_key CREATE UNIQUE INDEX mcp_oauth_tokens_access_token_hash_key ON public.mcp_oauth_tokens USING btree (access_token_hash)
+index mcp_oauth_tokens.mcp_oauth_tokens_pkey CREATE UNIQUE INDEX mcp_oauth_tokens_pkey ON public.mcp_oauth_tokens USING btree (id)
+index mcp_oauth_tokens.mcp_oauth_tokens_refresh_token_hash_key CREATE UNIQUE INDEX mcp_oauth_tokens_refresh_token_hash_key ON public.mcp_oauth_tokens USING btree (refresh_token_hash)
+index otp_requests.otp_requests_pkey CREATE UNIQUE INDEX otp_requests_pkey ON public.otp_requests USING btree (phone)
+index platform_settings.platform_settings_pkey CREATE UNIQUE INDEX platform_settings_pkey ON public.platform_settings USING btree (id)
+index rate_limits.idx_rate_limits_window_start CREATE INDEX idx_rate_limits_window_start ON public.rate_limits USING btree (window_start)
+index rate_limits.rate_limits_pkey CREATE UNIQUE INDEX rate_limits_pkey ON public.rate_limits USING btree (key)
+index refund_queue.idx_refund_queue_status CREATE INDEX idx_refund_queue_status ON public.refund_queue USING btree (status, created_at)
+index refund_queue.idx_refund_queue_wallet CREATE INDEX idx_refund_queue_wallet ON public.refund_queue USING btree (wallet_address)
+index refund_queue.refund_queue_pkey CREATE UNIQUE INDEX refund_queue_pkey ON public.refund_queue USING btree (id)
+index refund_queue.refund_queue_tx_hash_key CREATE UNIQUE INDEX refund_queue_tx_hash_key ON public.refund_queue USING btree (tx_hash)
+index scheduled_bills.idx_scheduled_bills_batch CREATE INDEX idx_scheduled_bills_batch ON public.scheduled_bills USING btree (batch_id) WHERE (batch_id IS NOT NULL)
+index scheduled_bills.idx_scheduled_bills_due CREATE INDEX idx_scheduled_bills_due ON public.scheduled_bills USING btree (day_of_month, is_active)
+index scheduled_bills.idx_scheduled_bills_freq CREATE INDEX idx_scheduled_bills_freq ON public.scheduled_bills USING btree (frequency, is_active)
+index scheduled_bills.idx_scheduled_bills_run_once CREATE INDEX idx_scheduled_bills_run_once ON public.scheduled_bills USING btree (run_once_at) WHERE (frequency = 'once'::text)
+index scheduled_bills.idx_scheduled_bills_wallet CREATE INDEX idx_scheduled_bills_wallet ON public.scheduled_bills USING btree (wallet_address)
+index scheduled_bills.scheduled_bills_pkey CREATE UNIQUE INDEX scheduled_bills_pkey ON public.scheduled_bills USING btree (id)
+index support_tickets.idx_support_status CREATE INDEX idx_support_status ON public.support_tickets USING btree (status, created_at)
+index support_tickets.idx_support_wallet CREATE INDEX idx_support_wallet ON public.support_tickets USING btree (wallet_address)
+index support_tickets.support_tickets_pkey CREATE UNIQUE INDEX support_tickets_pkey ON public.support_tickets USING btree (id)
+index telegram_group_messages.idx_telegram_group_messages_chat_created CREATE INDEX idx_telegram_group_messages_chat_created ON public.telegram_group_messages USING btree (chat_id, created_at DESC)
+index telegram_group_messages.idx_telegram_group_messages_created CREATE INDEX idx_telegram_group_messages_created ON public.telegram_group_messages USING btree (created_at)
+index telegram_group_messages.telegram_group_messages_pkey CREATE UNIQUE INDEX telegram_group_messages_pkey ON public.telegram_group_messages USING btree (id)
+index transactions.idx_transactions_source_channel CREATE INDEX idx_transactions_source_channel ON public.transactions USING btree (source_channel)
+index transactions.idx_transactions_x402_open_intents CREATE INDEX idx_transactions_x402_open_intents ON public.transactions USING btree (created_at) WHERE ((x402_nonce IS NOT NULL) AND (status = 'PENDING'::text))
+index transactions.transactions_pkey CREATE UNIQUE INDEX transactions_pkey ON public.transactions USING btree (id)
+index transactions.transactions_tx_hash_key CREATE UNIQUE INDEX transactions_tx_hash_key ON public.transactions USING btree (tx_hash)
+index transactions.transactions_x402_authorization_key CREATE UNIQUE INDEX transactions_x402_authorization_key ON public.transactions USING btree (x402_payer, x402_nonce) WHERE (x402_nonce IS NOT NULL)
+index wallet_links.wallet_links_pkey CREATE UNIQUE INDEX wallet_links_pkey ON public.wallet_links USING btree (wallet_address)
+index webhook_events.webhook_events_pkey CREATE UNIQUE INDEX webhook_events_pkey ON public.webhook_events USING btree (source, external_id)
+index webhook_events.webhook_events_received_at_idx CREATE INDEX webhook_events_received_at_idx ON public.webhook_events USING btree (received_at)
+policy platform_settings.Allow public read-only access on settings PERMISSIVE SELECT to public using (true) check ()
+table abapay_global_users rls=t
+table abapay_users rls=t
+table admin_sessions rls=t
+table agent_links rls=t
+table auth_nonces rls=t
+table deai_identities rls=t
+table deai_sessions rls=t
+table discount_campaigns rls=t
+table discount_exclusions rls=t
+table fulfilment_jobs rls=t
+table idempotency_keys rls=t
+table mcp_oauth_clients rls=t
+table mcp_oauth_codes rls=t
+table mcp_oauth_tokens rls=t
+table otp_requests rls=t
+table platform_settings rls=t
+table rate_limits rls=t
+table refund_queue rls=t
+table scheduled_bills rls=t
+table support_tickets rls=t
+table telegram_group_messages rls=t
+table transactions rls=t
+table wallet_links rls=t
+table webhook_events rls=t
+trigger transactions.transactions_enqueue_fulfilment CREATE TRIGGER transactions_enqueue_fulfilment AFTER INSERT OR UPDATE OF status ON public.transactions FOR EACH ROW EXECUTE FUNCTION enqueue_fulfilment_job()
+trigger transactions.transactions_state_guard CREATE TRIGGER transactions_state_guard BEFORE UPDATE ON public.transactions FOR EACH ROW EXECUTE FUNCTION transactions_state_guard()

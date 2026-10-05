@@ -13,7 +13,8 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "test:coverage": "vitest run --coverage",
-    "test:contracts": "hardhat test"
+    "test:contracts": "hardhat test",
+    "db:schema": "node scripts/db-schema.mjs"
   },
   "engines": {
     "node": ">=22.0.0"
@@ -40,6 +41,7 @@
     "wagmi": "^2.0.0"
   },
   "devDependencies": {
+    "@electric-sql/pglite": "^0.5.8",
     "@nomicfoundation/hardhat-network-helpers": "^1.0.12",
     "@nomicfoundation/hardhat-toolbox": "^5.0.0",
     "@nomicfoundation/hardhat-verify": "^2.0.0",

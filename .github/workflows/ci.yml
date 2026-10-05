@@ -54,6 +54,12 @@ jobs:
       - name: Lint (ratchet)
         run: npm run lint:ratchet
 
+      # Builds 000_baseline → newest migration on a fresh Postgres (PGlite, in-process) and
+      # compares the schema with supabase/schema.snapshot.txt. Fails if a migration breaks on a
+      # clean database, or changes the schema without the snapshot being updated alongside it.
+      - name: DB schema (migrations vs snapshot)
+        run: npm run db:schema
+
       - name: Build
         run: npm run build
         env:
