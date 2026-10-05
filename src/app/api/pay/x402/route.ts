@@ -16,6 +16,7 @@ import { verifyTokenTransfer, UNDECIDED_PROOF_FAILURES } from '@/lib/paymentProo
 import { x402IntentKey, x402UnconfirmedKey } from '@/lib/reconcileX402';
 import { sigFingerprint } from '@/lib/redact';
 import { metric } from '@/lib/log';
+import { X402_DOMAINS_BY_CHAIN } from '@/lib/x402Domains';
 
 // ⚡ THE RAW ERC-1271 CHECK — deliberately not viem's `verifyTypedData`/`verifyHash`, which
 // falls back to ecrecover on any failure here (see the long comment where this is used). This
@@ -75,7 +76,7 @@ const TRANSFER_WITH_AUTHORIZATION_BYTES_ABI = [{
 //     X-API-Key auth, x402Version 1. Supports USDC and USD₮ (both have EIP-3009 on Celo).
 //   • BASE (opt-in): Coinbase's CDP facilitator, Bearer-JWT auth, x402Version 2. USDC only.
 //     Dormant until CDP_API_KEY_ID/SECRET + the Base vault address are configured.
-// Per-token EIP-712 domains are in X402_DOMAINS_BY_CHAIN below (that's how each was verified).
+// Per-token EIP-712 domains are in X402_DOMAINS_BY_CHAIN (src/lib/x402Domains.ts).
 // USDm is NOT supported on either — it's a Mento stable token (same family as cUSD) with only
 // EIP-2612 permit(), no transferWithAuthorization, and the "exact" scheme needs EIP-3009.
 //
@@ -126,23 +127,7 @@ const CELO_FACILITATOR_TESTNET = 'https://api.x402.sepolia.celo.org';
 const CDP_FACILITATOR_HOST = 'api.cdp.coinbase.com';
 const CDP_FACILITATOR_SETTLE_PATH = '/platform/v2/x402/settle';
 
-// Per-token EIP-712 domains, per chain. The name/version MUST match each token's own on-chain
-// EIP712Domain or the payer's signature won't verify. Base USDC's domain name is "USD Coin"
-// (not Celo USDC's "USDC") — a different token contract entirely.
-const X402_DOMAINS_BY_CHAIN: Record<'CELO' | 'BASE', Record<string, { name: string; version: string }>> = {
-  CELO: {
-    USDC: { name: 'USDC', version: '2' },
-    'USD₮': { name: 'Tether USD', version: '1' },
-    // ⚡ USA₮ (Tether America USD) — verified the same way every other entry here was: its
-    // on-chain DOMAIN_SEPARATOR (0xe6bbb792…) is reproduced exactly by this name/version pair
-    // against chainId 42220 and 0xD2ab3C9A…F771. Note the name is the TOKEN's full name, not
-    // its symbol — signing "USA₮" here would recover to an unrelated address and revert.
-    'USA₮': { name: 'Tether America USD', version: '1' },
-  },
-  BASE: {
-    USDC: { name: 'USD Coin', version: '2' },
-  },
-};
+// Per-token EIP-712 domains: src/lib/x402Domains.ts (checked nightly against the live tokens).
 
 type ChainKey = 'CELO' | 'BASE';
 
@@ -321,7 +306,7 @@ async function chainConfigFor(chainKey: ChainKey, isMainnet: boolean): Promise<X
 //     EIP-2612 permit(), no transferWithAuthorization function exists in its ABI at all.
 //     Genuinely incompatible with this facilitator's "exact" scheme — not wired in,
 //     and requesting it returns a clear error rather than silently falling back to USDC.
-// These per-token domains now live in X402_DOMAINS_BY_CHAIN above (Celo + Base).
+// These per-token domains now live in X402_DOMAINS_BY_CHAIN (src/lib/x402Domains.ts).
 
 interface CeloSettleResponse {
   success: boolean;
