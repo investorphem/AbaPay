@@ -324,7 +324,7 @@ function complete_job(p_id uuid) returns void lang=sql secdef=f config=search_pa
 function consume_auth_nonce(p_nonce text, p_purpose text) returns boolean lang=plpgsql secdef=f config=search_path=public, pg_temp body=0cd1c9c376d77600c20bf284581918bb
 function enqueue_fulfilment_job() returns trigger lang=plpgsql secdef=f config=search_path=public, pg_temp body=780e8972739061d912d439517964c130
 function fail_job(p_id uuid, p_error text, p_retry_seconds integer) returns text lang=plpgsql secdef=f config=search_path=public, pg_temp body=7e40fae56cde1c49da5bd5a2745f64ff
-function link_wallet_to_phone(target_wallet text, target_phone text) returns boolean lang=plpgsql secdef=f config=search_path=public, pg_temp body=517c8740ce963df0a9e5ab4c9f531a7a
+function link_wallet_to_phone(target_wallet text, target_phone text) returns boolean lang=plpgsql secdef=f config=search_path=public, pg_temp body=5c655c27f237ce1e98d69904a2cc2869
 function pin_attempt_clear(p_link_id uuid) returns void lang=sql secdef=f config=search_path=public, pg_temp body=5a357b931f327adacacb856193deb8b9
 function pin_attempt_reserve(p_link_id uuid) returns TABLE(allowed boolean, attempts integer, locked_until timestamp with time zone, locked_now boolean) lang=plpgsql secdef=f config=search_path=public, pg_temp body=08886edaf04372b2311df48a7ec1858c
 function rate_limit_hit(p_key text, p_window_seconds integer) returns TABLE(used integer, window_start timestamp with time zone) lang=plpgsql secdef=f config=search_path=public, pg_temp body=8a129139739abfc2875cf458c3c21122

@@ -9,6 +9,7 @@ import { requeryMonnifyTransfer, finalizeMonnifyTransfer } from '@/lib/monnifyVe
 import { classifyTransferStatus, extractMonnifyFailureReason } from '@/lib/monnify';
 import { Resend } from 'resend';
 import { normalizePurchasedCode, issuesTokenOrPin } from '@/lib/purchasedCode';
+import { pointsForPayment } from '@/lib/points';
 
 const resend = new Resend(process.env.RESEND_API_KEY || 're_dummy_key_for_build');
 
@@ -240,8 +241,7 @@ export async function reconcileStuckRow(record: any, baseUrl: string): Promise<S
         }));
       }
 
-      const effectiveRate = (Number(record.amount_naira) + Number(record.fee_naira || 0)) / Number(record.amount_usdt);
-      const points = Number.isFinite(effectiveRate) && effectiveRate > 0 ? Number((record.amount_naira / effectiveRate).toFixed(2)) : 0;
+      const points = pointsForPayment(record);
       if (points > 0 && record.wallet_address) {
         notifications.push(supabase.rpc('award_transaction_points', { target_wallet: record.wallet_address.toLowerCase(), points_to_add: points }));
       }

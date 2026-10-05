@@ -13,6 +13,7 @@ let pending: (() => Promise<void>) | null = null;
 const alerts: string[] = [];
 const sms: { to: string; msg: string }[] = [];
 const emails: { to: string; subject: string }[] = [];
+const awarded: { target_wallet: string; points_to_add: number }[] = [];
 const enqueueRefund = vi.fn<(p: { txHash: string }) => Promise<{ queued: boolean }>>(async (p) => {
   const exists = db.tables.refund_queue.some((r) => r.tx_hash === p.txHash);
   if (!exists) db.tables.refund_queue.push({ id: `rq-${p.txHash}`, tx_hash: p.txHash, status: 'PENDING', refund_tx_hash: null });
@@ -65,9 +66,9 @@ const rowNow = () => db.tables.transactions[0];
 
 beforeEach(() => {
   db = createFakeDb({ transactions: [], refund_queue: [] });
-  db.rpcHandlers = { award_transaction_points: () => ({ data: null, error: null }) };
+  db.rpcHandlers = { award_transaction_points: (args) => { awarded.push(args); return { data: null, error: null }; } };
   requery = {};
-  alerts.length = 0; sms.length = 0; emails.length = 0;
+  alerts.length = 0; sms.length = 0; emails.length = 0; awarded.length = 0;
   enqueueRefund.mockClear(); fetchMock.mockClear();
 });
 
@@ -125,6 +126,13 @@ describe('VTpass push: late delivery', () => {
     expect(rowNow().status).toBe('SUCCESS');
     expect(alerts).toEqual([expect.stringContaining('DELAYED SALE SUCCESS')]);
     expect(sms).toHaveLength(0); // airtime has no token to text
+  });
+
+  it('awards points worth the stablecoin paid, not naira / 1000', async () => {
+    row({ amount_usdt: 1.5, amount_naira: 2010, fee_naira: 0 }); // ₦2,010 at ₦1,340/$
+    confirmed('delivered');
+    await push({ requestId: RID });
+    expect(awarded).toEqual([{ target_wallet: '0xwallet', points_to_add: 1.5 }]); // was 2.01
   });
 
   it('a re-push of the same delivery sends nothing a second time', async () => {

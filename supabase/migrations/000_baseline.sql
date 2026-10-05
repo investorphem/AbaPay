@@ -173,9 +173,9 @@ DECLARE
                                                                                                         END;
 $function$;
 
--- NOTE (found while writing this baseline, reproduced as-is): `pending_points` is declared
--- integer but wallet_links.unclaimed_points is numeric(10,2), so linking a wallet truncates its
--- fractional points. Fix it in a numbered migration, not here.
+-- NOTE (reproduced as-is): `pending_points` is declared integer while unclaimed_points is
+-- numeric(10,2), so linking a wallet ROUNDS its points to a whole number. Fixed by 036; the
+-- baseline keeps production's original so 000 → 036 replays history faithfully.
 create or replace function public.link_wallet_to_phone(target_wallet text, target_phone text)
 returns boolean
 language plpgsql
