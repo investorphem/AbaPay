@@ -67,7 +67,7 @@ vi.stubGlobal('fetch', async (url: string, init?: RequestInit) => {
   throw new Error(`unexpected fetch ${url}`);
 });
 
-const { POST } = await import('@/app/api/pay/x402/route');
+const { POST, GET } = await import('@/app/api/pay/x402/route');
 const { reconcileX402Intents } = await import('@/lib/reconcileX402');
 const { cleanupStalePreflights } = await import('@/lib/cleanupPreflights');
 
@@ -117,6 +117,25 @@ beforeEach(() => {
   enqueueRefund.mockClear();
   sendTelegramAlert.mockClear();
   gate = { allowed: true };
+});
+
+describe('/api/pay/x402 — discovery probe (GET)', () => {
+  // x402 crawlers GET the resource to confirm it's a real x402 endpoint before ever paying.
+  it('answers with a 402 challenge, signs nothing and writes nothing', async () => {
+    const res = await GET(new Request('http://localhost/api/pay/x402'));
+    expect(res.status).toBe(402);
+    const json = await res.json();
+    expect(json.accepts.length).toBeGreaterThan(0);
+    expect(json.accepts[0]).toMatchObject({ scheme: 'exact', payTo: CELO_VAULT });
+    expect(facilitatorCalls).toBe(0);
+    expect(db.tables.transactions).toHaveLength(0);
+  });
+
+  it("carries each token's own EIP-712 domain, so a payer signs against the right contract", async () => {
+    const { accepts } = await (await GET(new Request('http://localhost/api/pay/x402'))).json();
+    const usdc = accepts.find((a: { asset: string }) => a.asset.toLowerCase() === CELO_TOKENS.USDC.address);
+    expect(usdc.extra).toMatchObject({ name: 'USDC', version: '2', primaryType: 'TransferWithAuthorization' });
+  });
 });
 
 describe('/api/pay/x402 — happy path', () => {

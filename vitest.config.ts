@@ -38,7 +38,7 @@ export default defineConfig({
         'src/lib/x402Settle.ts': { lines: 80 },
         'src/lib/jobs.ts': { lines: 80 },
         'src/app/api/pay/route.ts': { lines: 80 },
-        'src/app/api/pay/x402/route.ts': { lines: 75 }, // below target
+        'src/app/api/pay/x402/route.ts': { lines: 77 }, // below target
         'src/app/api/webhook/route.ts': { lines: 80 },
         'src/app/api/webhook/vtpass/route.ts': { lines: 80 },
       },
