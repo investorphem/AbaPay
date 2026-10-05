@@ -15,17 +15,22 @@ const enqueueRefund = vi.fn(async () => ({ queued: true }));
 
 vi.mock('@/utils/supabase', () => ({ get supabaseAdmin() { return fakeSupabase(db); } }));
 vi.mock('@/lib/telegram', () => ({ sendTelegramAlert: async () => {} }));
-vi.mock('@/lib/messaging', () => ({ sendAbaPaySms: async () => {} }));
+const sms: string[] = [];
+const emails: { to: string; subject: string }[] = [];
+let lastPayload: Record<string, unknown> = {};
+const bankTransfer = vi.fn<(...a: unknown[]) => Promise<{ success: boolean; status: string }>>(async () => ({ success: true, status: 'TIMEOUT' }));
+vi.mock('@/lib/messaging', () => ({ sendAbaPaySms: async (_to: string, m: string) => { sms.push(m); } }));
 vi.mock('@/lib/vtpass', () => ({ getHeaders: () => ({}) }));
 vi.mock('@/lib/refunds', () => ({ enqueueRefund: () => enqueueRefund() }));
-vi.mock('@/lib/monnifyVend', () => ({ initiateMonnifyBankTransfer: async () => ({ success: true, status: 'TIMEOUT' }) }));
+vi.mock('@/lib/monnifyVend', () => ({ initiateMonnifyBankTransfer: (...a: unknown[]) => bankTransfer(...a) }));
 vi.mock('@/lib/balanceAlerts', () => ({ checkProviderBalances: async () => ({ ok: true }) }));
-vi.mock('resend', () => ({ Resend: class { emails = { send: async () => ({}) }; } }));
+vi.mock('resend', () => ({ Resend: class { emails = { send: async (e: { to: string; subject: string }) => { emails.push({ to: e.to, subject: e.subject }); return {}; } }; } }));
 const tripCircuit = vi.fn(async (_p: string, _r: string) => {});
 vi.mock('@/lib/circuitBreaker', () => ({ tripCircuit: (p: string, r: string) => tripCircuit(p, r) }));
 
-vi.stubGlobal('fetch', async (url: string) => {
+vi.stubGlobal('fetch', async (url: string, init?: RequestInit) => {
   if (!String(url).endsWith('/pay')) throw new Error(`unexpected fetch ${url}`);
+  lastPayload = JSON.parse(String(init?.body || '{}'));
   if (!vtpass) throw new Error('no VTpass stub');
   return vtpass();
 });
@@ -46,6 +51,8 @@ beforeEach(() => {
   db = createFakeDb({ transactions: [{ id: 'r1', tx_hash: TX, status: 'PROCESSING', request_id: '202609291200vend000001' }] });
   vtpass = null;
   enqueueRefund.mockClear();
+  bankTransfer.mockClear();
+  sms.length = 0; emails.length = 0; lastPayload = {};
 });
 
 describe('executeVend dispatch guard (M6)', () => {
@@ -131,5 +138,80 @@ describe('executeVend', () => {
     vtpass = () => Response.json({ code: '011', response_description: 'INVALID ARGUMENTS' });
     await executeVend(input());
     expect(tripCircuit).not.toHaveBeenCalled();
+  });
+});
+
+// M7: what each kind of bill actually sends VTpass, and what the customer gets back.
+describe('executeVend per service', () => {
+  const delivered = (extra: Record<string, unknown> = {}) => () =>
+    new Response(JSON.stringify({ code: '000', content: { transactions: { status: 'delivered' } }, ...extra }));
+
+  it('a DStv plan change sends the subscription type, plan and quantity', async () => {
+    vtpass = delivered();
+    await executeVend({ ...input(), serviceID: 'dstv', serviceCategory: 'CABLE', billersCode: '7012345678', subscription_type: 'change', variation_code: 'dstv-padi' });
+    expect(lastPayload).toMatchObject({ serviceID: 'dstv', billersCode: '7012345678', subscription_type: 'change', variation_code: 'dstv-padi', quantity: 1 });
+  });
+
+  it('a DStv renewal sends no plan', async () => {
+    vtpass = delivered();
+    await executeVend({ ...input(), serviceID: 'dstv', serviceCategory: 'CABLE', billersCode: '7012345678', subscription_type: 'renew', variation_code: 'dstv-padi' });
+    expect(lastPayload.subscription_type).toBe('renew');
+    expect(lastPayload.variation_code).toBeUndefined();
+  });
+
+  it('Startimes sends the plan directly', async () => {
+    vtpass = delivered();
+    await executeVend({ ...input(), serviceID: 'startimes', serviceCategory: 'CABLE', billersCode: '0212345678', variation_code: 'nova' });
+    expect(lastPayload).toMatchObject({ variation_code: 'nova' });
+    expect(lastPayload.subscription_type).toBeUndefined();
+  });
+
+  it('prepaid electricity: the token is pulled from the reply, stored, texted and emailed', async () => {
+    vtpass = delivered({ purchased_code: 'Token : 1234-5678-9012-3456-7890', units: 42.1 });
+    const r = await executeVend({ ...input(), serviceID: 'ikeja-electric', serviceCategory: 'ELECTRICITY', billersCode: '45012345678', variation_code: 'prepaid', email: 'payer@example.com' });
+    expect(lastPayload).toMatchObject({ billersCode: '45012345678', variation_code: 'prepaid' });
+    expect(r).toMatchObject({ status: 'SUCCESS', units: '42.1' });
+    expect(rowNow()).toMatchObject({ status: 'SUCCESS', units: '42.1' });
+    expect(String(rowNow().purchased_code).replace(/\D/g, '')).toBe('12345678901234567890');
+    expect(sms).toHaveLength(1);
+    expect(emails).toEqual([expect.objectContaining({ to: 'payer@example.com' })]);
+  });
+
+  it('postpaid electricity gets no SMS (there is no token)', async () => {
+    vtpass = delivered();
+    await executeVend({ ...input(), serviceID: 'ikeja-electric', serviceCategory: 'ELECTRICITY', billersCode: '45012345678', variation_code: 'postpaid' });
+    expect(sms).toHaveLength(0);
+  });
+
+  it('a WAEC PIN is stored and texted', async () => {
+    vtpass = delivered({ purchased_code: 'Serial No:WRN123, pin: 0987654321' });
+    const r = await executeVend({ ...input(), serviceID: 'waec', serviceCategory: 'EDUCATION', variation_code: 'waecdirect' });
+    expect(r.purchased_code).toBeTruthy();
+    expect(lastPayload.billersCode).toBeUndefined();
+    expect(sms).toHaveLength(1);
+  });
+
+  it('JAMB sends the profile code', async () => {
+    vtpass = delivered({ Pin: '1234567890' });
+    await executeVend({ ...input(), serviceID: 'jamb', serviceCategory: 'EDUCATION', billersCode: '0123456789', variation_code: 'utme' });
+    expect(lastPayload).toMatchObject({ billersCode: '0123456789', variation_code: 'utme' });
+  });
+
+  it('Spectranet sends a quantity', async () => {
+    vtpass = delivered();
+    await executeVend({ ...input(), serviceID: 'spectranet', serviceCategory: 'INTERNET', billersCode: '08011111111', variation_code: 'spec-7' });
+    expect(lastPayload).toMatchObject({ quantity: 1, variation_code: 'spec-7' });
+  });
+
+  it('international airtime sends the operator, country and foreign amount', async () => {
+    vtpass = delivered();
+    await executeVend({ ...input(), serviceID: 'foreign-airtime', isForeign: true, foreignAmount: '5', operator_id: 12, country_code: 'GH', product_type_id: 1, billersCode: '233201234567' });
+    expect(lastPayload).toMatchObject({ amount: 5, operator_id: '12', country_code: 'GH', product_type_id: '1', billersCode: '233201234567' });
+  });
+
+  it('a bank transfer goes to Monnify, never to VTpass', async () => {
+    vtpass = () => { throw new Error('VTpass must not be called for BANK'); };
+    await executeVend({ ...input(), serviceCategory: 'BANK' });
+    expect(bankTransfer).toHaveBeenCalledTimes(1);
   });
 });
