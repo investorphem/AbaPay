@@ -10,9 +10,9 @@ let requery: Record<string, unknown> = {};
 let monnify: { status: string; raw: unknown } | null = null;
 const alerts: string[] = [];
 const sms: string[] = [];
-const enqueueRefund = vi.fn(async (..._a: unknown[]) => ({ queued: true }));
-const finalizeMonnifyTransfer = vi.fn(async (..._a: unknown[]) => undefined);
-const fetchMock = vi.fn(async (_url: string, _init?: RequestInit) => new Response(JSON.stringify(requery)));
+const enqueueRefund = vi.fn<(...a: unknown[]) => Promise<{ queued: boolean }>>(async () => ({ queued: true }));
+const finalizeMonnifyTransfer = vi.fn<(...a: unknown[]) => Promise<undefined>>(async () => undefined);
+const fetchMock = vi.fn<(url: string, init?: RequestInit) => Promise<Response>>(async () => new Response(JSON.stringify(requery)));
 
 vi.mock('server-only', () => ({}));
 vi.mock('@/utils/supabase', () => ({ get supabaseAdmin() { return fakeSupabase(db); } }));
