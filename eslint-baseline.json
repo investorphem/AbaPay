@@ -1,0 +1,381 @@
+{
+  "scripts/setAgentWallet.ts": {
+    "@typescript-eslint/no-explicit-any": 1
+  },
+  "scripts/update8004uri.ts": {
+    "@typescript-eslint/no-explicit-any": 1
+  },
+  "src/app/.well-known/agent-card.json/route.ts": {
+    "@typescript-eslint/no-explicit-any": 1
+  },
+  "src/app/admin/page.tsx": {
+    "@typescript-eslint/no-explicit-any": 47,
+    "@typescript-eslint/no-unused-vars": 9,
+    "react-hooks/exhaustive-deps": 1,
+    "react-hooks/immutability": 1,
+    "react-hooks/purity": 4,
+    "react-hooks/set-state-in-effect": 1,
+    "react/no-unescaped-entities": 1
+  },
+  "src/app/agents/ThemeToggle.tsx": {
+    "react-hooks/set-state-in-effect": 1
+  },
+  "src/app/api/a2a/route.ts": {
+    "@typescript-eslint/no-explicit-any": 7
+  },
+  "src/app/api/admin/action/route.ts": {
+    "@typescript-eslint/no-explicit-any": 1
+  },
+  "src/app/api/admin/agent/route.ts": {
+    "@typescript-eslint/no-explicit-any": 6
+  },
+  "src/app/api/admin/data/route.ts": {
+    "@typescript-eslint/no-explicit-any": 1
+  },
+  "src/app/api/admin/discounts/route.ts": {
+    "@typescript-eslint/no-explicit-any": 5
+  },
+  "src/app/api/admin/monnify-requery/route.ts": {
+    "@typescript-eslint/no-explicit-any": 1
+  },
+  "src/app/api/admin/rate/route.ts": {
+    "@typescript-eslint/no-explicit-any": 1
+  },
+  "src/app/api/admin/refund/route.ts": {
+    "@typescript-eslint/no-explicit-any": 3
+  },
+  "src/app/api/admin/refunds/route.ts": {
+    "@typescript-eslint/no-explicit-any": 1
+  },
+  "src/app/api/admin/support/route.ts": {
+    "@typescript-eslint/no-explicit-any": 3
+  },
+  "src/app/api/agent/link/route.ts": {
+    "@typescript-eslint/no-explicit-any": 1
+  },
+  "src/app/api/deai/chat/route.ts": {
+    "@typescript-eslint/no-explicit-any": 3,
+    "@typescript-eslint/no-unused-vars": 2
+  },
+  "src/app/api/deai/core/route.ts": {
+    "@typescript-eslint/no-explicit-any": 36,
+    "@typescript-eslint/no-unused-vars": 5,
+    "prefer-const": 8
+  },
+  "src/app/api/foreign/route.ts": {
+    "@typescript-eslint/no-explicit-any": 1
+  },
+  "src/app/api/intl/route.ts": {
+    "@typescript-eslint/no-explicit-any": 1,
+    "@typescript-eslint/no-unused-vars": 1
+  },
+  "src/app/api/mcp/route.ts": {
+    "@typescript-eslint/no-explicit-any": 2
+  },
+  "src/app/api/monnify/banks/route.ts": {
+    "@typescript-eslint/no-explicit-any": 1
+  },
+  "src/app/api/monnify/resolve/route.ts": {
+    "@typescript-eslint/no-explicit-any": 1
+  },
+  "src/app/api/monnify/verify/route.ts": {
+    "@typescript-eslint/no-explicit-any": 1
+  },
+  "src/app/api/monnify/webhook/route.ts": {
+    "@typescript-eslint/no-explicit-any": 1
+  },
+  "src/app/api/oauth/authorize/route.ts": {
+    "@typescript-eslint/no-explicit-any": 1
+  },
+  "src/app/api/oauth/register/route.ts": {
+    "@typescript-eslint/no-explicit-any": 2
+  },
+  "src/app/api/pay/x402/route.ts": {
+    "@typescript-eslint/no-explicit-any": 12
+  },
+  "src/app/api/paymaster/route.ts": {
+    "@typescript-eslint/no-explicit-any": 2
+  },
+  "src/app/api/requery/route.ts": {
+    "@typescript-eslint/no-explicit-any": 1,
+    "@typescript-eslint/no-unused-vars": 1,
+    "prefer-const": 1
+  },
+  "src/app/api/support/route.ts": {
+    "@typescript-eslint/no-explicit-any": 1
+  },
+  "src/app/api/user/points/route.ts": {
+    "@typescript-eslint/no-explicit-any": 2
+  },
+  "src/app/api/variations/route.ts": {
+    "@typescript-eslint/no-explicit-any": 1
+  },
+  "src/app/api/verify/confirm/route.ts": {
+    "@typescript-eslint/no-explicit-any": 1
+  },
+  "src/app/api/verify/request/route.ts": {
+    "@typescript-eslint/no-explicit-any": 1
+  },
+  "src/app/api/verify/route.ts": {
+    "@typescript-eslint/no-explicit-any": 2
+  },
+  "src/app/api/webhook/vtpass/route.ts": {
+    "@typescript-eslint/no-explicit-any": 4,
+    "@typescript-eslint/no-unused-vars": 1,
+    "prefer-const": 1
+  },
+  "src/app/docs/page.tsx": {
+    "@typescript-eslint/no-explicit-any": 1,
+    "react/no-unescaped-entities": 99
+  },
+  "src/app/network-check/page.tsx": {
+    "@typescript-eslint/no-explicit-any": 1,
+    "react-hooks/set-state-in-effect": 1
+  },
+  "src/app/page.tsx": {
+    "@next/next/no-img-element": 12,
+    "@typescript-eslint/no-explicit-any": 87,
+    "@typescript-eslint/no-unused-vars": 23,
+    "prefer-const": 2,
+    "react-hooks/exhaustive-deps": 3,
+    "react-hooks/immutability": 2,
+    "react-hooks/purity": 1,
+    "react-hooks/refs": 3,
+    "react-hooks/set-state-in-effect": 17,
+    "react/no-unescaped-entities": 1
+  },
+  "src/app/privacy/page.tsx": {
+    "@typescript-eslint/no-unused-vars": 2,
+    "react/no-unescaped-entities": 13
+  },
+  "src/app/receipt/[requestId]/opengraph-image.tsx": {
+    "@typescript-eslint/no-explicit-any": 1
+  },
+  "src/app/receipt/[requestId]/page.tsx": {
+    "@typescript-eslint/no-explicit-any": 1,
+    "react/no-unescaped-entities": 1
+  },
+  "src/app/terms/page.tsx": {
+    "react/no-unescaped-entities": 35
+  },
+  "src/components/AIChat.tsx": {
+    "@typescript-eslint/no-explicit-any": 1,
+    "react-hooks/purity": 1
+  },
+  "src/components/AdminAgentPanel.tsx": {
+    "@typescript-eslint/no-explicit-any": 4,
+    "react-hooks/set-state-in-effect": 1,
+    "react-hooks/static-components": 3
+  },
+  "src/components/AdminDiscountsPanel.tsx": {
+    "@typescript-eslint/no-explicit-any": 8,
+    "react-hooks/set-state-in-effect": 1,
+    "react/no-unescaped-entities": 3
+  },
+  "src/components/AdminOpsPanel.tsx": {
+    "@typescript-eslint/no-explicit-any": 10,
+    "react-hooks/set-state-in-effect": 1
+  },
+  "src/components/AgentHub.tsx": {
+    "@typescript-eslint/no-explicit-any": 4,
+    "react-hooks/set-state-in-effect": 1,
+    "react/no-unescaped-entities": 1
+  },
+  "src/components/AppFooter.tsx": {
+    "react-hooks/set-state-in-effect": 1
+  },
+  "src/components/AppTour.tsx": {
+    "react-hooks/refs": 1,
+    "react-hooks/set-state-in-effect": 1
+  },
+  "src/components/DataVariationsUI.tsx": {
+    "@typescript-eslint/no-explicit-any": 3
+  },
+  "src/components/HistoryTab.tsx": {
+    "@next/next/no-img-element": 1,
+    "@typescript-eslint/no-explicit-any": 3
+  },
+  "src/components/Modals.tsx": {
+    "@next/next/no-img-element": 4,
+    "@typescript-eslint/no-explicit-any": 12,
+    "@typescript-eslint/no-unused-vars": 3,
+    "react-hooks/immutability": 2,
+    "react-hooks/rules-of-hooks": 2,
+    "react-hooks/set-state-in-effect": 1,
+    "react/no-unescaped-entities": 2
+  },
+  "src/components/PointsBadge.tsx": {
+    "@typescript-eslint/no-explicit-any": 1
+  },
+  "src/constants/index.ts": {
+    "@typescript-eslint/no-explicit-any": 8
+  },
+  "src/lib/deai/batch.ts": {
+    "@typescript-eslint/no-explicit-any": 1
+  },
+  "src/lib/deai/capabilities.ts": {
+    "@typescript-eslint/no-unused-vars": 3
+  },
+  "src/lib/deai/deeplink.ts": {
+    "@typescript-eslint/no-unused-vars": 1
+  },
+  "src/lib/deai/humanize.ts": {
+    "@typescript-eslint/no-explicit-any": 2
+  },
+  "src/lib/deai/intentEngine.ts": {
+    "@typescript-eslint/no-explicit-any": 11
+  },
+  "src/lib/deai/international.ts": {
+    "@typescript-eslint/no-explicit-any": 4
+  },
+  "src/lib/deai/mcpOAuth.ts": {
+    "@typescript-eslint/no-explicit-any": 3
+  },
+  "src/lib/deai/mcpTools.ts": {
+    "@typescript-eslint/no-explicit-any": 26
+  },
+  "src/lib/deai/pinSecurity.ts": {
+    "@typescript-eslint/no-explicit-any": 5
+  },
+  "src/lib/deai/receiptCard.tsx": {
+    "@next/next/no-img-element": 2,
+    "@typescript-eslint/no-explicit-any": 2,
+    "jsx-a11y/alt-text": 2
+  },
+  "src/lib/deai/relayer.ts": {
+    "@typescript-eslint/no-explicit-any": 2
+  },
+  "src/lib/deai/selection.ts": {
+    "@typescript-eslint/no-explicit-any": 1,
+    "@typescript-eslint/no-unused-vars": 1
+  },
+  "src/lib/deai/services.ts": {
+    "@typescript-eslint/no-explicit-any": 4
+  },
+  "src/lib/discounts.ts": {
+    "@typescript-eslint/no-explicit-any": 13
+  },
+  "src/lib/idempotency.ts": {
+    "@typescript-eslint/no-explicit-any": 7
+  },
+  "src/lib/monnify.ts": {
+    "@typescript-eslint/no-explicit-any": 8
+  },
+  "src/lib/monnifyVend.ts": {
+    "@typescript-eslint/no-explicit-any": 3
+  },
+  "src/lib/parity.ts": {
+    "@typescript-eslint/no-explicit-any": 5
+  },
+  "src/lib/paymasterPolicy.ts": {
+    "@typescript-eslint/no-explicit-any": 1
+  },
+  "src/lib/rateLimit.ts": {
+    "@typescript-eslint/no-explicit-any": 2
+  },
+  "src/lib/reconcileStuck.ts": {
+    "@typescript-eslint/no-explicit-any": 4
+  },
+  "src/lib/refundVerify.ts": {
+    "@typescript-eslint/no-explicit-any": 6
+  },
+  "src/lib/refunds.ts": {
+    "@typescript-eslint/no-explicit-any": 7
+  },
+  "src/lib/scheduler.ts": {
+    "@typescript-eslint/no-explicit-any": 5
+  },
+  "src/lib/serviceRules.ts": {
+    "@typescript-eslint/no-explicit-any": 3
+  },
+  "src/lib/useProviders.ts": {
+    "react-hooks/set-state-in-effect": 1
+  },
+  "src/lib/vend.ts": {
+    "@typescript-eslint/no-explicit-any": 2,
+    "@typescript-eslint/no-unused-vars": 1,
+    "prefer-const": 1
+  },
+  "src/lib/vtpassCatalog.ts": {
+    "@typescript-eslint/no-explicit-any": 3
+  },
+  "src/lib/walletEnv.ts": {
+    "@typescript-eslint/no-explicit-any": 27
+  },
+  "src/lib/x402Settle.ts": {
+    "@typescript-eslint/no-explicit-any": 2
+  },
+  "test/AbaPayV2.test.ts": {
+    "@typescript-eslint/no-explicit-any": 1
+  },
+  "test/AbaPayV3.test.ts": {
+    "@typescript-eslint/no-explicit-any": 2,
+    "@typescript-eslint/no-unused-expressions": 1
+  },
+  "test/AbaPayV4.test.ts": {
+    "@typescript-eslint/no-explicit-any": 1
+  },
+  "tests/a2a-card.test.ts": {
+    "@typescript-eslint/no-explicit-any": 4
+  },
+  "tests/a2a.test.ts": {
+    "@typescript-eslint/no-explicit-any": 5
+  },
+  "tests/cancelSchedule.test.ts": {
+    "@typescript-eslint/no-explicit-any": 8
+  },
+  "tests/helpers/chain.ts": {
+    "@typescript-eslint/no-explicit-any": 4
+  },
+  "tests/helpers/fakeSupabase.ts": {
+    "@typescript-eslint/no-explicit-any": 22,
+    "@typescript-eslint/no-unused-vars": 1
+  },
+  "tests/idempotency.test.ts": {
+    "@typescript-eslint/no-explicit-any": 2
+  },
+  "tests/payRoute.test.ts": {
+    "@typescript-eslint/no-explicit-any": 5,
+    "@typescript-eslint/no-unused-vars": 1
+  },
+  "tests/paymaster.test.ts": {
+    "@typescript-eslint/no-explicit-any": 4
+  },
+  "tests/paymentProof.test.ts": {
+    "@typescript-eslint/no-explicit-any": 1
+  },
+  "tests/paymentStatus.test.ts": {
+    "@typescript-eslint/no-explicit-any": 6
+  },
+  "tests/providerOutcome.test.ts": {
+    "@typescript-eslint/no-unused-vars": 1
+  },
+  "tests/serviceGate.test.ts": {
+    "@typescript-eslint/no-unused-vars": 2
+  },
+  "tests/vend.test.ts": {
+    "@typescript-eslint/no-unused-vars": 2
+  },
+  "tests/walletEnv.test.ts": {
+    "@typescript-eslint/no-explicit-any": 2
+  },
+  "tests/webhookEvents.test.ts": {
+    "@typescript-eslint/no-explicit-any": 3
+  },
+  "tests/webhookRoute.test.ts": {
+    "@typescript-eslint/no-unused-vars": 2
+  },
+  "tests/whatsapp.test.ts": {
+    "@typescript-eslint/no-explicit-any": 4
+  },
+  "tests/x402Pay.test.ts": {
+    "@typescript-eslint/no-explicit-any": 8
+  },
+  "tests/x402Route.test.ts": {
+    "@typescript-eslint/no-unused-vars": 1
+  },
+  "tests/x402Settle.test.ts": {
+    "@typescript-eslint/no-explicit-any": 1,
+    "@typescript-eslint/no-unused-vars": 1
+  }
+}

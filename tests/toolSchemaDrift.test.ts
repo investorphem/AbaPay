@@ -24,10 +24,10 @@ const props = (s: Schema) => Object.keys(s.properties || {}).sort();
 const required = (s: Schema) => [...(s.required || [])].sort();
 
 describe('tool schema copies match the real MCP catalog', async () => {
-  const real = (await import('@/lib/deai/mcpTools')).TOOLS as { name: string; inputSchema: Schema }[];
+  const real = (await import('@/lib/deai/mcpTools')).TOOLS as unknown as { name: string; inputSchema: Schema }[];
   const docs = (await import('@/app/agents/toolSchemas')).TOOLS;
   // Requiring it also proves the gateway parses (a syntax error there breaks Glama's check).
-  const gateway = createRequire(import.meta.url)('../mcp-server/server.js').TOOLS as { name: string; inputSchema: Schema }[];
+  const gateway = createRequire(import.meta.url)('../mcp-server/server.js').TOOLS as unknown as { name: string; inputSchema: Schema }[];
   const byName = <T extends { name: string }>(xs: T[]) => new Map(xs.map((x) => [x.name, x]));
   const realBy = byName(real);
 

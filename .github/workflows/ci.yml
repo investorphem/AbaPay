@@ -43,14 +43,16 @@ jobs:
         run: npx tsc --noEmit
 
       # Tests and Hardhat scripts are excluded from the app's tsconfig (they are not part of
-      # the Next.js build), so they get their own pass to stay type-safe.
+      # the Next.js build), so they get their own pass to stay type-safe. Blocking since M7.
       - name: Typecheck (tests)
         run: npx tsc --noEmit -p tsconfig.test.json
-        continue-on-error: true
 
-      - name: Lint
-        run: npm run lint
-        continue-on-error: true # Don't block on lint style while the baseline is being cleaned up.
+      # Blocking since M7, via a ratchet: the existing backlog is frozen in
+      # eslint-baseline.json and no (file, rule) pair may exceed it, so new code can't add
+      # problems and the total only goes down. After fixing some, lock it in with
+      # `npm run lint:ratchet -- --update` and commit the baseline.
+      - name: Lint (ratchet)
+        run: npm run lint:ratchet
 
       - name: Build
         run: npm run build

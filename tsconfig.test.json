@@ -1,9 +1,10 @@
 {
   "extends": "./tsconfig.json",
   "compilerOptions": {
+    "target": "ES2020",
     "types": ["vitest/globals", "node"],
     "noEmit": true
   },
-  "include": ["tests/**/*.ts", "src/**/*.ts"],
+  "include": ["next-env.d.ts", "tests/**/*.ts", "src/**/*.ts"],
   "exclude": ["node_modules"]
 }
