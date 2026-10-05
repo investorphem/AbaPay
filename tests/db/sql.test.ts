@@ -55,3 +55,22 @@ describe('points', () => {
       .rejects.toThrow(/Maximum of 3 wallets/);
   });
 });
+
+describe('who may call what', () => {
+  // The anon key ships in the browser bundle, so anything anon can EXECUTE is public API.
+  const asRole = async (role: string, sql: string) => {
+    await db.exec(`set role ${role}`);
+    try { return await db.query(sql); } finally { await db.exec('reset role'); }
+  };
+
+  for (const role of ['anon', 'authenticated']) {
+    it(`${role} cannot award points or link a wallet`, async () => {
+      await expect(asRole(role, "select award_transaction_points('0xdead', 1000000)")).rejects.toThrow(/permission denied/);
+      await expect(asRole(role, "select link_wallet_to_phone('0xdead', '+2340000000000')")).rejects.toThrow(/permission denied/);
+    });
+  }
+
+  it('service_role still can', async () => {
+    await asRole('service_role', "select award_transaction_points('0xbeef', 1)");
+  });
+});

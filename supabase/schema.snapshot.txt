@@ -402,21 +402,12 @@ grant DELETE,INSERT,REFERENCES,SELECT,TRIGGER,TRUNCATE,UPDATE on wallet_links to
 grant DELETE,INSERT,REFERENCES,SELECT,TRIGGER,TRUNCATE,UPDATE on webhook_events to anon
 grant DELETE,INSERT,REFERENCES,SELECT,TRIGGER,TRUNCATE,UPDATE on webhook_events to authenticated
 grant DELETE,INSERT,REFERENCES,SELECT,TRIGGER,TRUNCATE,UPDATE on webhook_events to service_role
-grant execute on award_transaction_points(target_wallet text, points_to_add numeric) to PUBLIC
-grant execute on award_transaction_points(target_wallet text, points_to_add numeric) to anon
-grant execute on award_transaction_points(target_wallet text, points_to_add numeric) to authenticated
 grant execute on award_transaction_points(target_wallet text, points_to_add numeric) to service_role
 grant execute on claim_jobs(p_limit integer) to service_role
 grant execute on complete_job(p_id uuid) to service_role
 grant execute on consume_auth_nonce(p_nonce text, p_purpose text) to service_role
-grant execute on enqueue_fulfilment_job() to PUBLIC
-grant execute on enqueue_fulfilment_job() to anon
-grant execute on enqueue_fulfilment_job() to authenticated
 grant execute on enqueue_fulfilment_job() to service_role
 grant execute on fail_job(p_id uuid, p_error text, p_retry_seconds integer) to service_role
-grant execute on link_wallet_to_phone(target_wallet text, target_phone text) to PUBLIC
-grant execute on link_wallet_to_phone(target_wallet text, target_phone text) to anon
-grant execute on link_wallet_to_phone(target_wallet text, target_phone text) to authenticated
 grant execute on link_wallet_to_phone(target_wallet text, target_phone text) to service_role
 grant execute on pin_attempt_clear(p_link_id uuid) to service_role
 grant execute on pin_attempt_reserve(p_link_id uuid) to service_role
