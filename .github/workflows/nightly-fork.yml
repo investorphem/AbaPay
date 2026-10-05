@@ -1,0 +1,59 @@
+name: Nightly fork tests
+
+# 🍴 M7. Forks Celo and Base at their latest block and runs test/fork against the DEPLOYED vaults
+# and the REAL token contracts: live vault config vs config/vaults.json, payBill / payBillFor with
+# real USDC / USD₮ / USA₮, the USDm decimals attack refused, and every x402 EIP-712 domain
+# checked against the token's DOMAIN_SEPARATOR and settled for real.
+#
+# Nightly, because the chain changes under us (an owner transaction, a token upgrade) without any
+# commit here. Also on PRs that touch what these tests pin down, so a change is checked first.
+#
+# Needs repository secrets CELO_FORK_RPC_URL and BASE_FORK_RPC_URL (archive-capable endpoints,
+# e.g. Chainstack). A chain whose secret is missing is skipped with a warning.
+
+on:
+  schedule:
+    - cron: "17 2 * * *" # 02:17 UTC daily
+  workflow_dispatch:
+  pull_request:
+    branches: [main]
+    paths:
+      - "test/fork/**"
+      - "contracts/**"
+      - "config/vaults.json"
+      - "src/lib/x402Domains.ts"
+      - "hardhat.config.ts"
+      - "scripts/fork-tests.mjs"
+      - ".github/workflows/nightly-fork.yml"
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  fork:
+    name: Fork tests (Celo + Base)
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci --no-audit --no-fund || (echo "::warning::npm ci failed — falling back to 'npm install'." && npm install --no-audit --no-fund)
+
+      - name: Compile contracts
+        run: npx hardhat compile
+
+      - name: Run fork tests
+        run: npm run test:fork
+        env:
+          CELO_FORK_RPC_URL: ${{ secrets.CELO_FORK_RPC_URL }}
+          BASE_FORK_RPC_URL: ${{ secrets.BASE_FORK_RPC_URL }}

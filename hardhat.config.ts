@@ -4,9 +4,28 @@ import * as dotenv from "dotenv";
 
 dotenv.config({ path: ".env.local" });
 
+// 🍴 FORK MODE (M7 nightly). With FORK_CHAIN=celo|base and the matching *_FORK_RPC_URL set, the
+// in-process Hardhat network becomes a fork of that chain at its latest block, under the real
+// chain id, so EIP-712 domains, deployed vaults and token contracts are exactly production's.
+// scripts/fork-tests.mjs sets this per chain; without it, Hardhat behaves as before.
+const FORKS = {
+  celo: { chainId: 42220, url: process.env.CELO_FORK_RPC_URL },
+  base: { chainId: 8453, url: process.env.BASE_FORK_RPC_URL },
+} as const;
+const fork = FORKS[process.env.FORK_CHAIN as keyof typeof FORKS];
+
 const config: HardhatUserConfig = {
   solidity: "0.8.20",
   networks: {
+    ...(fork?.url
+      ? {
+          hardhat: {
+            chainId: fork.chainId,
+            hardfork: "cancun",
+            forking: { url: fork.url },
+          },
+        }
+      : {}),
     // TESTNET (The new Celo Sepolia Testnet)
     sepolia: {
       url: "https://forno.celo-sepolia.celo-testnet.org",

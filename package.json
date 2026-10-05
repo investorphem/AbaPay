@@ -14,6 +14,7 @@
     "test:watch": "vitest",
     "test:coverage": "vitest run --coverage",
     "test:contracts": "hardhat test",
+    "test:fork": "node scripts/fork-tests.mjs",
     "db:schema": "node scripts/db-schema.mjs"
   },
   "engines": {
