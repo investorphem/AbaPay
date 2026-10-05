@@ -7,6 +7,7 @@ import { Resend } from 'resend';
 import { normalizePurchasedCode, issuesTokenOrPin } from '@/lib/purchasedCode';
 import { buildReceiptEmail } from '@/lib/receiptEmail';
 import { recordLateDelivery, recordLateFailure } from '@/lib/providerOutcome';
+import { pointsForPayment } from '@/lib/points';
 
 const resend = new Resend(process.env.RESEND_API_KEY || "re_dummy_key_for_build");
 
@@ -174,7 +175,7 @@ async function processNotification(body: any) {
       }
 
       // Distribute AbaPoints
-      const earnedPoints = Number((txData.amount_naira / 1000).toFixed(2));
+      const earnedPoints = pointsForPayment(txData);
       if (earnedPoints > 0 && txData.wallet_address) {
           notifications.push(supabase.rpc('award_transaction_points', {
               target_wallet: txData.wallet_address.toLowerCase(),

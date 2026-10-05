@@ -14,11 +14,10 @@
 //   node scripts/db-schema.mjs --query   print the describe query. Run it against PRODUCTION
 //                                        (read-only) and diff the output with the snapshot to
 //                                        catch drift between the repo and the live database.
-import { PGlite } from '@electric-sql/pglite';
+import { buildDatabase, migrationFiles } from './lib/buildDb.mjs';
 import fs from 'node:fs';
 import path from 'node:path';
 
-const MIGRATIONS = path.resolve('supabase/migrations');
 const SNAPSHOT = path.resolve('supabase/schema.snapshot.txt');
 
 // One line per object, order-independent (column positions differ between a database built in
@@ -70,34 +69,18 @@ select line from (
 ) s order by line;
 `;
 
-// The parts of a Supabase project the migrations lean on but don't create: its API roles, and
-// the default privileges that hand every new table and function to them (RLS and the migrations'
-// own REVOKEs are what then lock things down, exactly as in production).
-const SUPABASE_BOOTSTRAP = `
-create role anon nologin;
-create role authenticated nologin;
-create role service_role nologin bypassrls;
-grant usage on schema public to anon, authenticated, service_role;
-alter default privileges in schema public grant all on tables to anon, authenticated, service_role;
-alter default privileges in schema public grant all on sequences to anon, authenticated, service_role;
-alter default privileges in schema public grant all on functions to anon, authenticated, service_role;
-`;
-
 if (process.argv.includes('--query')) {
   process.stdout.write(DESCRIBE.trim() + '\n');
   process.exit(0);
 }
 
-const db = new PGlite();
-await db.exec(SUPABASE_BOOTSTRAP);
-const files = fs.readdirSync(MIGRATIONS).filter((f) => /^\d{3}.*\.sql$/.test(f)).sort();
-for (const f of files) {
-  try {
-    await db.exec(fs.readFileSync(path.join(MIGRATIONS, f), 'utf8'));
-  } catch (e) {
-    console.error(`::error file=supabase/migrations/${f}::migration failed on a fresh database: ${e.message}`);
-    process.exit(1);
-  }
+const files = migrationFiles();
+let db;
+try {
+  db = await buildDatabase();
+} catch (e) {
+  console.error(`::error file=supabase/migrations/${e.migration}::migration failed on a fresh database: ${e.message}`);
+  process.exit(1);
 }
 const { rows } = await db.query(DESCRIBE);
 const current = rows.map((r) => r.line).join('\n') + '\n';

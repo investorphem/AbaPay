@@ -9,6 +9,7 @@ import { buildReceiptEmail } from '@/lib/receiptEmail';
 import { Resend } from 'resend';
 import { normalizePurchasedCode, issuesTokenOrPin } from '@/lib/purchasedCode';
 import { recordLateDelivery, recordLateFailure } from '@/lib/providerOutcome';
+import { pointsForPayment } from '@/lib/points';
 
 const resend = new Resend(process.env.RESEND_API_KEY || "re_dummy_key_for_build");
 
@@ -159,7 +160,7 @@ export async function POST(req: Request) {
           }));
       }
 
-      const points = Number((record.amount_naira / 1000).toFixed(2));
+      const points = pointsForPayment(record);
       if (points > 0 && record.wallet_address) {
           notifications.push(supabase.rpc('award_transaction_points', { target_wallet: record.wallet_address.toLowerCase(), points_to_add: points }));
       }
