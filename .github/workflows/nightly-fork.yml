@@ -8,8 +8,10 @@ name: Nightly fork tests
 # Nightly, because the chain changes under us (an owner transaction, a token upgrade) without any
 # commit here. Also on PRs that touch what these tests pin down, so a change is checked first.
 #
-# Needs repository secrets CELO_FORK_RPC_URL and BASE_FORK_RPC_URL (archive-capable endpoints,
-# e.g. Chainstack). A chain whose secret is missing is skipped with a warning.
+# Uses the chains' public RPCs (forno.celo.org, mainnet.base.org), which serve the archive reads a
+# fork needs. Optional secrets CELO_FORK_RPC_URL / BASE_FORK_RPC_URL point it at a faster provider
+# instead; one that fails the runner's preflight (e.g. a plan without archive access) is reported
+# as a warning and the public RPC is used.
 
 on:
   schedule:
