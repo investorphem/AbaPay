@@ -8,8 +8,8 @@ import { celo, celoSepolia, base, baseSepolia } from "viem/chains";
 import Link from "next/link";
 import {
   ShieldCheck, Zap, AlertTriangle, CheckCircle2, ChevronDown,
-  Loader2, Coins, Briefcase, ListPlus, Users, Landmark, XCircle,
-  RefreshCw, Tv, GraduationCap, Send, Globe, Sparkles, LogOut, Check
+  Loader2, Coins, ListPlus, Landmark, XCircle,
+  RefreshCw, Tv, GraduationCap, Sparkles, LogOut, Check
 } from "lucide-react";
 import { supabase } from "@/utils/supabase";
 import { WALLET_SESSION_MAX_AGE_MS } from "@/lib/walletSession";
@@ -141,7 +141,7 @@ export default function Home() {
   const [connectError, setConnectError] = useState<string | null>(null);
   const [isConnecting, setIsConnecting] = useState(false);
   // What the browser's injected wallet actually is — see the silent probe effect below.
-  const [injectedProbe, setInjectedProbe] = useState<InjectedProbe | null>(null);
+  const [, setInjectedProbe] = useState<InjectedProbe | null>(null);
   // Every injected wallet wagmi discovered (EIP-6963 included), each with what it answered
   // when asked about this site. Drives auto-connect and the Connect button's routing.
   const [injectedCandidates, setInjectedCandidates] = useState<InjectedCandidate[]>([]);
@@ -899,7 +899,7 @@ export default function Home() {
         try {
             const txDateStr = new Date(tx.date).toLocaleDateString();
             return txDateStr === todayStr;
-        } catch (e) {
+        } catch {
             return false;
         }
     });
@@ -1072,8 +1072,8 @@ export default function Home() {
 
   const handleShareReceipt = async () => {
     const receiptText = `🧾 AbaPay Receipt\n\nDate: ${selectedReceipt?.date}\nStatus: ${selectedReceipt?.status}\nProduct: ${selectedReceipt?.network} ${selectedReceipt?.service}\nRecipient: ${selectedReceipt?.account}\nAmount Paid: ${isNaN(Number(selectedReceipt?.amountNaira)) ? selectedReceipt?.amountNaira : `₦${Number(selectedReceipt?.amountNaira).toLocaleString()}`}\nCrypto Used: ${selectedReceipt?.amountCrypto} ${selectedReceipt?.tokenUsed}\nTx Hash: ${selectedReceipt?.txHash}\n\nSecured by ${selectedReceipt?.blockchain || activeChain.name} Network`;
-    if (navigator.share) { try { await navigator.share({ title: 'Receipt', text: receiptText }); } catch (err) {} } 
-    else { try { await navigator.clipboard.writeText(receiptText); showToast("Copied!", "Receipt details copied to clipboard.", "success"); } catch (err) {} }
+    if (navigator.share) { try { await navigator.share({ title: 'Receipt', text: receiptText }); } catch { /* best-effort */ } } 
+    else { try { await navigator.clipboard.writeText(receiptText); showToast("Copied!", "Receipt details copied to clipboard.", "success"); } catch { /* best-effort */ } }
   };
 
     const handleSendSupport = async () => {
@@ -1102,7 +1102,7 @@ export default function Home() {
         showToast("Ticket Sent", data.message, "success");
         setIsSupportOpen(false); setSupportMessage(""); setSupportChain(null); setSupportEmail(""); setSupportFile(null);
       } else { showToast("Error", data.message || "Failed to send ticket", "error"); }
-    } catch (e) { showToast("Error", "Network error. Failed to send ticket.", "error"); } 
+    } catch { showToast("Error", "Network error. Failed to send ticket.", "error"); } 
     finally { setIsSendingSupport(false); }
   };
 
@@ -1117,7 +1117,7 @@ export default function Home() {
       if (data.success && Array.isArray(data.banks) && data.banks.length > 0) {
         setBankVariations(data.banks.map((b: any) => ({ variation_code: b.code, name: b.name })));
       } else throw new Error("Empty");
-    } catch (e) {
+    } catch {
       setBankVariations([{ variation_code: '044', name: 'Access Bank' }, { variation_code: '058', name: 'Guaranty Trust Bank' }, { variation_code: '999992', name: 'OPay' }, { variation_code: '50515', name: 'Moniepoint Microfinance Bank' }, { variation_code: '057', name: 'Zenith Bank' }]);
     } finally { setIsFetchingBanks(false); }
   };
@@ -1145,9 +1145,10 @@ export default function Home() {
       if (bankVerifyGenerationRef.current !== myGeneration) return; // superseded — discard
       if (data.success) setCustomerName(data.accountName);
       else showToast("Verification Failed", data.message || "Could not verify this account.", "error");
-    } catch (e: any) {
+    } catch (e) {
       if (bankVerifyGenerationRef.current !== myGeneration) return;
-      const timedOut = e?.name === 'TimeoutError' || e?.name === 'AbortError';
+      const name = (e as { name?: unknown } | null)?.name;
+      const timedOut = name === 'TimeoutError' || name === 'AbortError';
       showToast("Verification Failed", timedOut ? "This is taking too long — check your connection and try again." : "Network error — check your connection and try again.", "error");
     }
     if (bankVerifyGenerationRef.current === myGeneration) setIsVerifying(false);
@@ -1202,9 +1203,10 @@ export default function Home() {
       } else if (!data.success) {
         showToast("Couldn't Detect Bank", data.message || "Please select your bank manually.", "error");
       }
-    } catch (e: any) {
+    } catch (e) {
       if (bankVerifyGenerationRef.current !== myGeneration) return;
-      const timedOut = e?.name === 'TimeoutError' || e?.name === 'AbortError';
+      const name = (e as { name?: unknown } | null)?.name;
+      const timedOut = name === 'TimeoutError' || name === 'AbortError';
       showToast("Couldn't Detect Bank", timedOut ? "This is taking too long — please select your bank manually." : "Network error — please select your bank manually.", "error");
     }
     if (bankVerifyGenerationRef.current === myGeneration) setIsVerifying(false);
@@ -1253,8 +1255,9 @@ export default function Home() {
             }
           }
         } else { setStatus("Account could not be verified."); }
-    } catch (e: any) {
-      const timedOut = e?.name === 'TimeoutError' || e?.name === 'AbortError';
+    } catch (e) {
+      const name = (e as { name?: unknown } | null)?.name;
+      const timedOut = name === 'TimeoutError' || name === 'AbortError';
       showToast("Verification Failed", timedOut ? "This is taking too long — check your connection and try again." : "Network error — check your connection and try again.", "error");
     }
     setIsVerifying(false);
@@ -1503,7 +1506,7 @@ export default function Home() {
             await withWalletTimeout(client.switchChain({ id: activeChain.id }), 30_000);
             await new Promise(resolve => setTimeout(resolve, 1500));
         }
-      } catch (switchError) {
+      } catch {
         // A wallet that won't switch may still accept the chain being added. If THAT is also
         // ignored, stop and say so: sending a transaction for a chain the wallet has not
         // acknowledged is how a payment disappears with no prompt and no error.
@@ -1520,10 +1523,10 @@ export default function Home() {
       const valueInWei = parseUnits(cryptoToCharge, selectedToken.decimals);
 
       let tokenAddress;
-      if (activeChain.id === base.id) tokenAddress = (selectedToken as any).baseMainnet || selectedToken.mainnet;
-      else if (activeChain.id === baseSepolia.id) tokenAddress = (selectedToken as any).baseSepolia || selectedToken.sepolia;
-      else if (activeChain.id === celo.id) tokenAddress = (selectedToken as any).celoMainnet || selectedToken.mainnet;
-      else tokenAddress = (selectedToken as any).celoSepolia || selectedToken.sepolia;
+      if (activeChain.id === base.id) tokenAddress = selectedToken.mainnet;
+      else if (activeChain.id === baseSepolia.id) tokenAddress = selectedToken.sepolia;
+      else if (activeChain.id === celo.id) tokenAddress = selectedToken.celoMainnet || selectedToken.mainnet;
+      else tokenAddress = selectedToken.celoSepolia || selectedToken.sepolia;
 
       const publicClient = createPublicClient({ chain: activeChain, transport: http(undefined, { fetchOptions: { cache: 'no-store' } }), pollingInterval: 4000 });
       const txConfig: any = { account: address as `0x${string}` };
@@ -1557,7 +1560,7 @@ export default function Home() {
               const capabilities: any = await withWalletTimeout(client.getCapabilities({ account: address as `0x${string}` }), 8_000);
               const chainCaps = capabilities?.[activeChain.id] || capabilities?.[`0x${activeChain.id.toString(16)}`];
               usingBasePaymaster = !!chainCaps?.paymasterService?.supported;
-          } catch (capError) {
+          } catch {
               usingBasePaymaster = false; // Wallet doesn't support capability discovery — fall back safely
           }
       }
@@ -1633,7 +1636,7 @@ export default function Home() {
       // ==========================================
       // ⚡ PREFLIGHT INTENT (Only runs if approval is successful or wasn't needed)
       // ==========================================
-      const realNonce = await publicClient.getTransactionCount({ address: address as `0x${string}`, blockTag: 'latest' });
+
 
       // 3. TRUE PRE-FLIGHT INTENT
       //
@@ -2142,10 +2145,10 @@ export default function Home() {
   const getAgentTokenAddress = useCallback((chainOverride?: any): string | undefined => {
     const chain = chainOverride || activeChain;
     if (!chain) return undefined;
-    if (chain.id === base.id) return (selectedToken as any).baseMainnet || selectedToken.mainnet;
-    if (chain.id === baseSepolia.id) return (selectedToken as any).baseSepolia || selectedToken.sepolia;
-    if (chain.id === celo.id) return (selectedToken as any).celoMainnet || selectedToken.mainnet;
-    return (selectedToken as any).celoSepolia || selectedToken.sepolia;
+    if (chain.id === base.id) return selectedToken.mainnet;
+    if (chain.id === baseSepolia.id) return selectedToken.sepolia;
+    if (chain.id === celo.id) return selectedToken.celoMainnet || selectedToken.mainnet;
+    return selectedToken.celoSepolia || selectedToken.sepolia;
   }, [activeChain, selectedToken]);
 
   // ⚡ AGENT HUB — INDEPENDENT CHAIN/TOKEN RESOLUTION ⚡
@@ -2448,7 +2451,7 @@ export default function Home() {
 
   // ⚡ 1. THE SETTINGS INTERVAL ⚡
   useEffect(() => {
-    let intervalId: NodeJS.Timeout;
+
     async function fetchSettings() {
         try { 
             const { data: settingsData } = await supabase.from('platform_settings').select('exchange_rate, kill_switches').eq('id', 1).single(); 
@@ -2456,10 +2459,10 @@ export default function Home() {
                 if (settingsData.exchange_rate) setExchangeRate(Number(settingsData.exchange_rate)); 
                 if (settingsData.kill_switches) setKillSwitches(settingsData.kill_switches);
             }
-        } catch (e) {}
+        } catch {}
     }
     fetchSettings(); 
-    intervalId = setInterval(fetchSettings, 15000); 
+    const intervalId = setInterval(fetchSettings, 15000); 
     return () => { if (intervalId) clearInterval(intervalId); };
   }, []);
 
@@ -2470,7 +2473,7 @@ export default function Home() {
         if (typeof window !== "undefined") {
           sdk.actions.ready();
         }
-      } catch (error) { }
+      } catch { }
     };
     notifyFarcaster();
   }, []);
@@ -3418,7 +3421,7 @@ export default function Home() {
     if (environmentDetectionStarted.current) return;
     environmentDetectionStarted.current = true;
 
-    let timeoutId: NodeJS.Timeout;
+
 
     const detectAndConnect = async () => {
       try {
@@ -3447,7 +3450,7 @@ export default function Home() {
                  setAddress(addresses[0]); 
                  setClient(farcasterClient);
              }
-          } catch(e) {
+          } catch {
              console.log("Silent check returned empty. Waiting for user to click Connect.");
           }
           return;
@@ -3464,12 +3467,12 @@ export default function Home() {
         // Option 3: Wagmi Web Bridge
         setEnvironment('WEB');
 
-      } catch (error) {
+      } catch {
         setEnvironment('WEB');
       }
     };
 
-    timeoutId = setTimeout(() => {
+    const timeoutId = setTimeout(() => {
         if (environmentRef.current === 'LOADING') setEnvironment('WEB');
     }, 2000);
 
@@ -3496,7 +3499,7 @@ export default function Home() {
     // payments on screen — "I cancel the verify wallet pop up and I am still seeing my history".
     // Proof first, then anything that reveals what this wallet has paid for.
     if (!walletProofHeaders()) { setTransactions([]); return; }
-    try { const savedLocalHistory = localStorage.getItem(`abapay_history_${address}`); if (savedLocalHistory) setTransactions(JSON.parse(savedLocalHistory)); } catch (e) {}
+    try { const savedLocalHistory = localStorage.getItem(`abapay_history_${address}`); if (savedLocalHistory) setTransactions(JSON.parse(savedLocalHistory)); } catch { /* best-effort */ }
 
     async function fetchCloudHistory() {
       try {
@@ -3547,14 +3550,14 @@ export default function Home() {
           }));
           setTransactions(cloudHistory); localStorage.setItem(`abapay_history_${address}`, JSON.stringify(cloudHistory));
         }
-      } catch (e) {}
+      } catch {}
     }
     fetchCloudHistory();
   }, [address, walletProofHeaders]);
 
   useEffect(() => {
     if (!address) { setBeneficiaries({}); return; }
-    try { const saved = localStorage.getItem(`abapay_beneficiaries_${address}`); if (saved) setBeneficiaries(JSON.parse(saved)); else setBeneficiaries({}); } catch (e) {}
+    try { const saved = localStorage.getItem(`abapay_beneficiaries_${address}`); if (saved) setBeneficiaries(JSON.parse(saved)); else setBeneficiaries({}); } catch { /* best-effort */ }
   }, [address]);
 
   // 🔴 DELIBERATELY NOT CLEARED ON DISCONNECT — AN ALLOWANCE IS AN ON-CHAIN FACT.
@@ -3619,13 +3622,13 @@ export default function Home() {
         // ⚡ DYNAMIC TOKEN SELECTION
         let tokenAddress;
         if (activeChain.id === base.id) {
-            tokenAddress = (selectedToken as any).baseMainnet || selectedToken.mainnet;
+            tokenAddress = selectedToken.mainnet;
         } else if (activeChain.id === baseSepolia.id) {
-            tokenAddress = (selectedToken as any).baseSepolia || selectedToken.sepolia;
+            tokenAddress = selectedToken.sepolia;
         } else if (activeChain.id === celo.id) {
-            tokenAddress = (selectedToken as any).celoMainnet || selectedToken.mainnet;
+            tokenAddress = selectedToken.celoMainnet || selectedToken.mainnet;
         } else {
-            tokenAddress = (selectedToken as any).celoSepolia || selectedToken.sepolia;
+            tokenAddress = selectedToken.celoSepolia || selectedToken.sepolia;
         }
 
         if (!tokenAddress) {
@@ -3735,7 +3738,7 @@ export default function Home() {
           const data = await res.json();
           if (data.code === '011') setEducationVariations([]); 
           else setEducationVariations(extractVtpassArray(data) || []);
-        } catch (e) { setEducationVariations([]); }
+        } catch { setEducationVariations([]); }
       };
       fetchEducation();
     }
@@ -3750,7 +3753,7 @@ export default function Home() {
           const data = await res.json(); 
           if (data.code === '011') setCableVariations([]); 
           else setCableVariations(extractVtpassArray(data) || []); 
-        } catch (e) { setCableVariations([]); } 
+        } catch { setCableVariations([]); } 
       }; 
       fetchVariations();
     } else if (activeService.id === "INTERNET") {
@@ -3761,7 +3764,7 @@ export default function Home() {
           const data = await res.json(); 
           if (data.code === '011' || data.error) setInternetVariations([]); 
           else setInternetVariations(extractVtpassArray(data) || []); 
-        } catch (e) { setInternetVariations([]); } 
+        } catch { setInternetVariations([]); } 
       }; 
       fetchInternetVariations();
     }
