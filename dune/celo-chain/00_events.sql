@@ -57,7 +57,11 @@
 -- remembering if another legacy token surfaces the same way later: an UNKNOWN token
 -- with an implausible amount means "decimals mismatch," not "harmless unclassified row."
 --
--- ⚠️ THE DATE FLOOR IS TIGHTER THAN BASE'S, AND VERIFIED, NOT GUESSED. A probe query
+-- ⚠️ THE DATE FLOOR IS 2026-04-01: one week before the FIRST AbaPay contract on Celo, the V1
+-- vault 0x1d12…eaa, was deployed (2026-04-07 11:46:59 UTC, block 63661661, read from its
+-- creation transaction on Blockscout). V1 carries most of Celo's history (7,625 txs vs 338 on
+-- V3 and 183 on V4 as of 2026-10-06), and the earlier 2026-07-01 floor, set before V1 was known
+-- to the dashboard, cut all of its first three months. History of that earlier floor: a probe query
 -- against celo.logs for these two contract addresses (no date floor at all) timed out
 -- at the free tier's 2-minute ceiling — Celo's chain history predates AbaPay by a lot
 -- more than Base's does, so an unfloored scan is far more expensive here. Re-run with
@@ -90,7 +94,7 @@ WITH abapay_logs AS (
           0x8c69ba65ac630960f1d90c9a12eb143096fa71019450181b7fb5c299f03a6357, -- PaymentReceived(address,address,string,string,uint256)
           0x90619b8207d57f0cc87c98e7c2fdb86c6f12683d8a29412b02d558b3be68e6cd  -- AgentPayment(address,address,uint256,uint256)
       )
-      AND block_time >= TIMESTAMP '2026-07-01 00:00:00'
+      AND block_time >= TIMESTAMP '2026-04-01 00:00:00'
 ),
 
 -- AgentPayment is emitted *in addition to* PaymentReceived in the same transaction
@@ -169,8 +173,8 @@ vault_inflows AS (
       -- 🔴 WITHOUT THIS FLOOR THIS SCAN READS EVERY TRANSFER OF THESE THREE TOKENS ON
       -- CELO SINCE GENESIS before narrowing to the vault — the token contracts are used
       -- by the entire chain, not just AbaPay. See the header note above for how
-      -- 2026-07-01 was verified rather than guessed.
-      AND t.evt_block_time >= TIMESTAMP '2026-07-01 00:00:00'
+      -- 2026-04-01 was chosen rather than guessed.
+      AND t.evt_block_time >= TIMESTAMP '2026-04-01 00:00:00'
 ),
 
 -- A transaction that emitted PaymentReceived is already counted by rail 1; its inbound
