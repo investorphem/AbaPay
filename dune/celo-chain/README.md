@@ -33,17 +33,24 @@ Base — so that floor would be wrong; an *unfloored* probe query against `celo.
 two contract addresses actually **timed out** at the free tier's 2-minute ceiling, which is
 its own data point about how much more chain history sits before AbaPay existed here than on
 Base. A follow-up probe with `block_date >= '2026-01-01'` found the real first contract-call
-payment: **2026-07-18 09:55:06 UTC** (85 logs as of 2026-09-11). `2026-07-01` is that date
+payment on V3/V4: **2026-07-18 09:55:06 UTC** (85 logs as of 2026-09-11). The floor is now **`2026-04-01`**, a week before V1 (the first Celo contract, missing from the dashboard until 2026-10-06) was deployed on 2026-04-07. The earlier `2026-07-01` was that July date
 minus ~17 days of buffer. If this ever looks like it's clipping real x402 history from before
 the contract-call rail existed, re-run the same kind of probe rather than assuming the floor
 is still right — don't just copy Base's `2026-04-01`, it isn't verified for this chain.
 
-## Two contracts, same reasoning as Base
+## Three contracts, same reasoning as Base
 
 | Address | Contract |
 |---|---|
 | `0x5df8aE2B963165b735B18Ca86B1ea448d2AA032C` | AbaPayV4 — current |
-| `0x42Fa463798Ed129a9B5Ee51721CB6db1bfCBe3b9` | AbaPayV3 — original, retired 2026-09-29 (no tokens, paused; kept for history) |
+| `0x42Fa463798Ed129a9B5Ee51721CB6db1bfCBe3b9` | AbaPayV3 — retired 2026-09-29 (no tokens, paused; kept for history) |
+| `0x1d12519876a116fc92236bb6cb8eff6243d65eaa` | AbaPay V1 — the original, deployed 2026-04-07; no tokens supported now, but most of Celo's history (7,625 txs as of 2026-10-06) |
+
+The value that deploys all three:
+
+```
+ABAPAY_CELO_CONTRACTS="0x5df8aE2B963165b735B18Ca86B1ea448d2AA032C=AbaPayV4 (current),0x42Fa463798Ed129a9B5Ee51721CB6db1bfCBe3b9=AbaPayV3,0x1d12519876a116fc92236bb6cb8eff6243d65eaa=AbaPay V1 (original)"
+```
 
 Configured via `ABAPAY_CELO_CONTRACTS` in `.env.local` (`address=label`, comma-separated), not
 hardcoded in the SQL — see `scripts/dune-celo-setup.mjs`.

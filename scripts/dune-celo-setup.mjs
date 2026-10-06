@@ -121,7 +121,8 @@ async function loadEnv() {
 // Deliberately NOT inferred from NEXT_PUBLIC_ABAPAY_CELO_ADDRESS alone — see
 // scripts/dune-base-setup.mjs's identical reasoning for ABAPAY_BASE_CONTRACTS.
 //
-//   ABAPAY_CELO_CONTRACTS="0x5df8aE2B…=AbaPayV4 (current),0x42Fa4637…=AbaPayV3 (original)"
+//   ABAPAY_CELO_CONTRACTS="0x5df8aE2B…=AbaPayV4 (current),0x42Fa4637…=AbaPayV3,0x1d125198…=AbaPay V1 (original)"
+//   (all three; dune/celo-chain/README.md has the full value)
 //
 // Order matters only for readability; labels are what appear on the dashboard.
 function readContracts() {
