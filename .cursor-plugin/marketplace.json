@@ -1,0 +1,17 @@
+{
+  "name": "abapay",
+  "owner": {
+    "name": "Masonode Technologies Limited",
+    "email": "support@abapays.com"
+  },
+  "metadata": {
+    "description": "AbaPay's Cursor plugin: pay real-world bills with stablecoins over MCP."
+  },
+  "plugins": [
+    {
+      "name": "abapay",
+      "source": "integrations/cursor-plugin",
+      "description": "Pay bills with stablecoins: Nigerian airtime, data, electricity, cable TV and education, plus international airtime and data in 140+ countries."
+    }
+  ]
+}
