@@ -301,8 +301,8 @@ async function callAnthropic(message: string, maxTokens: number): Promise<{ text
 
   const data = await res.json();
   const text = (data?.content ?? [])
-    .filter((b: any) => b.type === 'text')
-    .map((b: any) => b.text)
+    .filter((b: ContentBlock): b is { type: 'text'; text?: unknown } => b?.type === 'text')
+    .map((b: { text?: unknown }) => b.text)
     .join('');
 
   return { text, truncated: data?.stop_reason === 'max_tokens' };
@@ -372,22 +372,39 @@ const MAX_SCHEDULE_MINUTES = 10080; // 7 days — beyond that, this isn't a "nea
 // must not offer a token new payments are no longer taken in.
 const VALID_TOKENS = ['USDC', 'USD₮', 'USA₮'];
 
-function normalizeChain(raw: any): 'CELO' | 'BASE' | null {
+/** An Anthropic Messages API content block, as far as this file reads one. */
+type ContentBlock = { type?: unknown; text?: unknown } | null | undefined;
+
+/**
+ * The model's JSON, before it is trusted: every field it might send, each `unknown`, so each
+ * one has to be checked before use. normalize() is the only way out of this type.
+ */
+type RawIntent = {
+  intent?: unknown; provider?: unknown; amount_ngn?: unknown; destination_account?: unknown;
+  meter_type?: unknown; confidence_score?: unknown; missing?: unknown; country?: unknown;
+  is_recurring?: unknown; frequency?: unknown; day_of_week?: unknown; day_of_month?: unknown;
+  schedule_in_minutes?: unknown; recipients?: unknown; group_recipient_count?: unknown;
+  group_lookback_minutes?: unknown; group_amount_ngn?: unknown; group_service?: unknown;
+  chain?: unknown; token?: unknown; language?: unknown;
+} | null | undefined;
+type RawRecipient = { provider?: unknown; amount_ngn?: unknown; destination_account?: unknown; chain?: unknown; token?: unknown } | null | undefined;
+
+function normalizeChain(raw: unknown): 'CELO' | 'BASE' | null {
   const v = typeof raw === 'string' ? raw.toUpperCase() : null;
   return v === 'CELO' || v === 'BASE' ? v : null;
 }
 
-function normalizeToken(raw: any): string | null {
+function normalizeToken(raw: unknown): string | null {
   if (typeof raw !== 'string') return null;
   const match = VALID_TOKENS.find((t) => t.toUpperCase() === raw.toUpperCase());
   return match || null;
 }
 
-function normalizeRecipients(raw: any): ParsedRecipient[] | null {
+function normalizeRecipients(raw: unknown): ParsedRecipient[] | null {
   if (!Array.isArray(raw)) return null;
   const cleaned = raw
-    .filter((r: any) => r && typeof r === 'object')
-    .map((r: any) => {
+    .filter((r: unknown) => r && typeof r === 'object')
+    .map((r: RawRecipient) => {
       const amt = Number(r?.amount_ngn);
       const chain = normalizeChain(r?.chain);
       const token = normalizeToken(r?.token);
@@ -409,8 +426,10 @@ function normalizeRecipients(raw: any): ParsedRecipient[] | null {
   return cleaned.length >= 2 ? cleaned : null;
 }
 
-// Defensive normalisation — never trust model output shape blindly.
-function normalize(p: any): ParsedIntent {
+// Defensive normalisation — never trust model output shape blindly. Exported for its tests.
+export function normalize(input: unknown): ParsedIntent {
+  // Arrays and primitives have none of these fields; reading them yields undefined, as before.
+  const p = input as RawIntent;
   const validIntents: DeAIIntent[] = [
     'VEND_AIRTIME', 'VEND_DATA', 'PAY_ELECTRICITY', 'PAY_CABLE',
     'CHECK_BALANCE', 'TRANSACTION_HISTORY', 'SCHEDULE_BILL', 'LIST_SCHEDULES',
@@ -418,7 +437,7 @@ function normalize(p: any): ParsedIntent {
     'GROUP_BULK_RECHARGE', 'HELP', 'UNKNOWN',
   ];
 
-  const intent: DeAIIntent = validIntents.includes(p?.intent) ? p.intent : 'UNKNOWN';
+  const intent: DeAIIntent = validIntents.includes(p?.intent as DeAIIntent) ? (p?.intent as DeAIIntent) : 'UNKNOWN';
   const amount = Number(p?.amount_ngn);
 
   return {
@@ -427,29 +446,29 @@ function normalize(p: any): ParsedIntent {
     amount_ngn: Number.isFinite(amount) && amount > 0 ? amount : null,
     destination_account: typeof p?.destination_account === 'string' ? p.destination_account.replace(/\s+/g, '') : null,
     meter_type: p?.meter_type === 'prepaid' || p?.meter_type === 'postpaid' ? p.meter_type : null,
-    confidence_score: Number.isFinite(Number(p?.confidence_score)) ? Number(p.confidence_score) : 0,
-    missing: Array.isArray(p?.missing) ? p.missing.filter((m: any) => typeof m === 'string') : [],
+    confidence_score: Number.isFinite(Number(p?.confidence_score)) ? Number(p?.confidence_score) : 0,
+    missing: Array.isArray(p?.missing) ? p.missing.filter((m: unknown): m is string => typeof m === 'string') : [],
     country: typeof p?.country === 'string' ? p.country.toUpperCase().slice(0, 2) : null,
     is_recurring: p?.is_recurring === true,
-    frequency: ['daily', 'weekly', 'monthly'].includes(p?.frequency) ? p.frequency : null,
-    day_of_week: Number.isInteger(p?.day_of_week) && p.day_of_week >= 0 && p.day_of_week <= 6 ? p.day_of_week : null,
+    frequency: p?.frequency === 'daily' || p?.frequency === 'weekly' || p?.frequency === 'monthly' ? p.frequency : null,
+    day_of_week: typeof p?.day_of_week === 'number' && Number.isInteger(p.day_of_week) && p.day_of_week >= 0 && p.day_of_week <= 6 ? p.day_of_week : null,
     // Clamp to 28 so a schedule exists in every month (no 30th-of-February surprises).
-    day_of_month: Number.isInteger(p?.day_of_month) && p.day_of_month >= 1 ? Math.min(p.day_of_month, 28) : null,
+    day_of_month: typeof p?.day_of_month === 'number' && Number.isInteger(p.day_of_month) && p.day_of_month >= 1 ? Math.min(p.day_of_month, 28) : null,
     // A one-off request is never also "recurring" — if the model somehow set both, the
     // recurring fields win (schedule_in_minutes is the less common, narrower feature).
-    schedule_in_minutes: p?.is_recurring !== true && Number.isFinite(Number(p?.schedule_in_minutes)) && Number(p.schedule_in_minutes) > 0
-      ? Math.min(Math.round(Number(p.schedule_in_minutes)), MAX_SCHEDULE_MINUTES)
+    schedule_in_minutes: p?.is_recurring !== true && Number.isFinite(Number(p?.schedule_in_minutes)) && Number(p?.schedule_in_minutes) > 0
+      ? Math.min(Math.round(Number(p?.schedule_in_minutes)), MAX_SCHEDULE_MINUTES)
       : null,
     recipients: normalizeRecipients(p?.recipients),
     // Clamped here (not just downstream) so a wildly wrong model output — "500 numbers", "3
     // days back" — can never even reach core/route.ts's own clamp as a starting point that's
     // already implausible. Downstream still applies the real defaults when these are null.
-    group_recipient_count: Number.isFinite(Number(p?.group_recipient_count)) && Number(p.group_recipient_count) > 0
-      ? Math.min(Math.round(Number(p.group_recipient_count)), 5) : null,
-    group_lookback_minutes: Number.isFinite(Number(p?.group_lookback_minutes)) && Number(p.group_lookback_minutes) > 0
-      ? Math.min(Math.round(Number(p.group_lookback_minutes)), 360) : null,
-    group_amount_ngn: Number.isFinite(Number(p?.group_amount_ngn)) && Number(p.group_amount_ngn) > 0
-      ? Math.min(Math.round(Number(p.group_amount_ngn)), 500) : null,
+    group_recipient_count: Number.isFinite(Number(p?.group_recipient_count)) && Number(p?.group_recipient_count) > 0
+      ? Math.min(Math.round(Number(p?.group_recipient_count)), 5) : null,
+    group_lookback_minutes: Number.isFinite(Number(p?.group_lookback_minutes)) && Number(p?.group_lookback_minutes) > 0
+      ? Math.min(Math.round(Number(p?.group_lookback_minutes)), 360) : null,
+    group_amount_ngn: Number.isFinite(Number(p?.group_amount_ngn)) && Number(p?.group_amount_ngn) > 0
+      ? Math.min(Math.round(Number(p?.group_amount_ngn)), 500) : null,
     group_service: p?.group_service === 'AIRTIME' || p?.group_service === 'DATA' ? p.group_service : null,
     chain: normalizeChain(p?.chain),
     token: (() => {
@@ -554,8 +573,8 @@ export async function classifyPivot(args: {
 
     const data = await res.json();
     const raw = '{' + (data?.content ?? [])
-      .filter((b: any) => b.type === 'text')
-      .map((b: any) => b.text)
+      .filter((b: ContentBlock): b is { type: 'text'; text?: unknown } => b?.type === 'text')
+      .map((b: { text?: unknown }) => b.text)
       .join('');
     const parsed = JSON.parse(raw.slice(0, raw.lastIndexOf('}') + 1));
 

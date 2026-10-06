@@ -11,6 +11,7 @@ import { getActiveDiscountForService, computeDiscountNgn } from '@/lib/discounts
 import { isMainnetEnv } from '@/lib/chain';
 import { isDuplicateElectricity } from '@/lib/parity';
 import { Resend } from 'resend';
+import type { ScheduledBillRow } from '@/lib/rows';
 
 const resend = new Resend(process.env.RESEND_API_KEY || 're_dummy_key_for_build');
 
@@ -47,7 +48,7 @@ function baseUrl(): string {
   return process.env.NEXT_PUBLIC_APP_URL || 'https://abapays.com';
 }
 
-function isDueToday(bill: any, now: Date): boolean {
+function isDueToday(bill: ScheduledBillRow, now: Date): boolean {
   const freq = (bill.frequency || 'monthly').toLowerCase();
   // One-off: fires exactly once, the moment its target time has passed — not tied to any
   // day-of-week/month. Deactivated immediately after its single attempt (see runScheduledBills).
@@ -58,7 +59,7 @@ function isDueToday(bill: any, now: Date): boolean {
 }
 
 // Early shortfall warnings only make sense for monthly schedules; weekly/daily are too near.
-function isApproaching(bill: any, now: Date): boolean {
+function isApproaching(bill: ScheduledBillRow, now: Date): boolean {
   const freq = (bill.frequency || 'monthly').toLowerCase();
   if (freq !== 'monthly' || !bill.day_of_month) return false;
   for (let i = 1; i <= WARN_DAYS_AHEAD; i++) {
@@ -69,7 +70,7 @@ function isApproaching(bill: any, now: Date): boolean {
   return false;
 }
 
-async function notify(bill: any, message: string, payUrl?: string) {
+async function notify(bill: ScheduledBillRow, message: string, payUrl?: string) {
   // ⚡ Report back on whatever channel created the schedule. Previously only telegram/email
   // were handled, so a schedule set up from WhatsApp or X ran completely silently — the user
   // had no idea whether it succeeded or failed until they happened to check History.
@@ -130,13 +131,13 @@ export async function runScheduledBills(opts: { scope?: 'recurring' | 'oneoff' |
   // gas isn't about to run dry. This is the "fails silently at 3am" guard — check each chain
   // that has an auto-execute schedule and ping Telegram (throttled) if it's below the floor.
   const autoChains = Array.from(new Set(
-    (bills as any[]).filter(b => b.auto_execute).map(b => String(b.blockchain || 'CELO').toUpperCase())
+    (bills as ScheduledBillRow[]).filter(b => b.auto_execute).map(b => String(b.blockchain || 'CELO').toUpperCase())
   ));
   await Promise.all(autoChains.map(c => checkRelayerGas(c)));
 
   const rules = await getServiceRules();
 
-  for (const bill of bills as any[]) {
+  for (const bill of bills as ScheduledBillRow[]) {
     r.checked++;
     try {
       // Idempotence: at most one run per schedule per day. A double-firing cron cannot double-charge.

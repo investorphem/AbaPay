@@ -1,4 +1,5 @@
 import 'server-only';
+import type { SupabaseClient } from '@supabase/supabase-js';
 
 // ⚡ THE PARITY CONTRACT — the COMPLETE set of rules the web form enforces.
 //
@@ -15,7 +16,7 @@ export interface FieldRequirement {
   field: string;
   label: string;
   ask: string;
-  validate: (v: any) => boolean;
+  validate: (v: string) => boolean;
   error: string;
 }
 
@@ -376,7 +377,7 @@ export function checkParity(
  * amount) — double-vending a token is a common and expensive user error.
  */
 export async function isDuplicateElectricity(
-  supabase: any,
+  supabase: SupabaseClient,
   walletAddress: string,
   meterNumber: string,
   amountNgn: number
@@ -399,14 +400,14 @@ export async function isDuplicateElectricity(
     if (!Array.isArray(data) || data.length === 0) return false;
 
     // A completed sale always blocks a same-day repeat — that's a real double-vend risk.
-    if (data.some((row: any) => row.status === 'SUCCESS')) return true;
+    if (data.some((row: { status: string }) => row.status === 'SUCCESS')) return true;
 
     // PENDING/PROCESSING only blocks while genuinely in flight (executeVend normally
     // finishes in seconds). Anything older is an orphaned row — an abandoned pre-flight
     // intent or a crashed vend — that reconciliation cleans up separately; it must not
     // trap a legitimate retry into a false "already paid" error indefinitely.
     const recentCutoff = Date.now() - 10 * 60 * 1000;
-    return data.some((row: any) => new Date(row.created_at).getTime() > recentCutoff);
+    return data.some((row: { created_at: string }) => new Date(row.created_at).getTime() > recentCutoff);
   } catch {
     return false;   // never block a legitimate payment because of a lookup failure
   }

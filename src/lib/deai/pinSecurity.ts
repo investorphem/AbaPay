@@ -100,8 +100,8 @@ export async function recordPinFailure(linkId: string, chatId: string, channel: 
       .eq('id', linkId)
       .maybeSingle();
 
-    const attempts = gate?.attempts ?? Number((data as any)?.failed_pin_attempts || 0);
-    const lockedUntil = (data as any)?.locked_until;
+    const attempts = gate?.attempts ?? Number(data?.failed_pin_attempts || 0);
+    const lockedUntil = data?.locked_until;
     const isLocked = !!lockedUntil && new Date(lockedUntil).getTime() > Date.now();
 
     if (gate?.lockedMinutes || isLocked) {
@@ -128,7 +128,7 @@ export async function recordPinFailure(linkId: string, chatId: string, channel: 
       // And tell the operator — repeated lockouts on one identity is an attack signal.
       try {
         await sendTelegramAlert(
-          `🔒 *PIN LOCKOUT*\n📲 ${channel}\n👤 \`${String((data as any)?.wallet_address || '').slice(0, 10)}...\`\n🔢 ${attempts} failed attempts\n⏱ Locked ${minutes}m`
+          `🔒 *PIN LOCKOUT*\n📲 ${channel}\n👤 \`${String(data?.wallet_address || '').slice(0, 10)}...\`\n🔢 ${attempts} failed attempts\n⏱ Locked ${minutes}m`
         );
       } catch { /* best-effort */ }
 
@@ -211,7 +211,7 @@ export async function notifySpendOutOfBand(walletAddress: string, alert: SpendAl
       .eq('link_verified', true)
       .eq('is_active', true);
 
-    for (const l of (links || []) as any[]) {
+    for (const l of (links || []) as { channel: string; channel_user_id: string }[]) {
       if (l.channel === alert.channel) continue;   // don't echo back to the source
       if (l.channel === 'TELEGRAM') {
         try { await sendTelegramToUser(l.channel_user_id, body); } catch { /* best-effort */ }
@@ -230,7 +230,7 @@ export async function notifySpendOutOfBand(walletAddress: string, alert: SpendAl
       .limit(1)
       .maybeSingle();
 
-    const email = (tx as any)?.customer_email;
+    const email = tx?.customer_email;
     if (!email) return;
 
     await resend.emails.send({
