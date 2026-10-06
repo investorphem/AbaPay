@@ -14,7 +14,7 @@ const enqueueRefund = vi.fn(async (p: { txHash: string }) => {
   if (!exists) db.tables.refund_queue.push({ id: `rq-${p.txHash}`, tx_hash: p.txHash, status: 'PENDING', refund_tx_hash: null });
   return { queued: !exists };
 });
-const sendTelegramAlert = vi.fn(async (_t: string) => {});
+const sendTelegramAlert = vi.fn<(text: string) => Promise<void>>(async () => {});
 
 vi.mock('@/utils/supabase', () => ({ get supabaseAdmin() { return fakeSupabase(db); } }));
 vi.mock('@/lib/telegram', () => ({ sendTelegramAlert: (t: string) => sendTelegramAlert(t) }));

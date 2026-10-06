@@ -26,8 +26,8 @@ beforeEach(() => {
   db.rpcHandlers = {
     consume_auth_nonce: ({ p_nonce, p_purpose }) => {
       const row = db.tables.auth_nonces.find((r) => r.nonce === p_nonce && r.purpose === p_purpose);
-      if (!row || row.uses_remaining <= 0) return false;
-      row.uses_remaining -= 1;
+      if (!row || Number(row.uses_remaining) <= 0) return false;
+      row.uses_remaining = Number(row.uses_remaining) - 1;
       return true;
     },
   };

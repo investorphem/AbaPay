@@ -25,7 +25,7 @@ vi.mock('@/lib/refunds', () => ({ enqueueRefund: () => enqueueRefund() }));
 vi.mock('@/lib/monnifyVend', () => ({ initiateMonnifyBankTransfer: (...a: unknown[]) => bankTransfer(...a) }));
 vi.mock('@/lib/balanceAlerts', () => ({ checkProviderBalances: async () => ({ ok: true }) }));
 vi.mock('resend', () => ({ Resend: class { emails = { send: async (e: { to: string; subject: string }) => { emails.push({ to: e.to, subject: e.subject }); return {}; } }; } }));
-const tripCircuit = vi.fn(async (_p: string, _r: string) => {});
+const tripCircuit = vi.fn<(provider: string, reason: string) => Promise<void>>(async () => {});
 vi.mock('@/lib/circuitBreaker', () => ({ tripCircuit: (p: string, r: string) => tripCircuit(p, r) }));
 
 vi.stubGlobal('fetch', async (url: string, init?: RequestInit) => {

@@ -92,7 +92,7 @@ describe('isUserRejection', () => {
 
   // A self-referencing cause would otherwise spin forever inside the click handler.
   it('terminates on a circular cause chain', () => {
-    const err: any = { message: 'boom' };
+    const err: { message: string; cause?: unknown } = { message: 'boom' };
     err.cause = err;
     expect(isUserRejection(err)).toBe(false);
   });
@@ -294,7 +294,7 @@ describe('walletApprovedChainIds', () => {
  * because nothing rejected.
  */
 describe('walletConnectSessionLive', () => {
-  const wc = (provider: any) => ({ type: 'walletConnect', id: 'walletConnect', getProvider: async () => provider });
+  const wc = (provider: unknown) => ({ type: 'walletConnect', id: 'walletConnect', getProvider: async () => provider });
 
   it('is live when a session exists and the relay socket is connected', async () => {
     expect(await walletConnectSessionLive(wc({ session: {}, client: { core: { relayer: { connected: true } } } }))).toBe(true);

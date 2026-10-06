@@ -27,10 +27,10 @@ const PIN_HASH = hashPin('482915');
 function reserve({ p_link_id }: { p_link_id: string }) {
   const row = db.tables.agent_links.find((r) => r.id === p_link_id);
   if (!row) return [{ allowed: false, attempts: 0, locked_until: null, locked_now: false }];
-  if (row.locked_until && new Date(row.locked_until).getTime() > Date.now()) {
+  if (row.locked_until && new Date(String(row.locked_until)).getTime() > Date.now()) {
     return [{ allowed: false, attempts: row.failed_pin_attempts, locked_until: row.locked_until, locked_now: false }];
   }
-  const next = (row.failed_pin_attempts || 0) + 1;
+  const next = Number(row.failed_pin_attempts || 0) + 1;
   let until: string | null = null;
   if (next % 5 === 0) until = new Date(Date.now() + LADDER[Math.min(next / 5, LADDER.length) - 1] * 60_000).toISOString();
   row.failed_pin_attempts = next;
@@ -71,7 +71,7 @@ describe('PIN attempt accounting', () => {
     expect(results.filter((r) => r.outcome === 'refused')).toHaveLength(15);
     const row = db.tables.agent_links[0];
     expect(row.failed_pin_attempts).toBe(5);
-    expect(new Date(row.locked_until).getTime()).toBeGreaterThan(Date.now());
+    expect(new Date(String(row.locked_until)).getTime()).toBeGreaterThan(Date.now());
   });
 
   it('sends the lockout alert exactly once, from the attempt that started it', async () => {
@@ -97,7 +97,7 @@ describe('PIN attempt accounting', () => {
     row.failed_pin_attempts = 9; // one lockout already served
     const r = await attempt('111111');
     expect(r.outcome).toBe('wrong');
-    const mins = (new Date(row.locked_until).getTime() - Date.now()) / 60000;
+    const mins = (new Date(String(row.locked_until)).getTime() - Date.now()) / 60000;
     expect(Math.round(mins)).toBe(5);
   });
 

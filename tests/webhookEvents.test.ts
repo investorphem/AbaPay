@@ -66,7 +66,7 @@ describe('Telegram webhook de-duplication', () => {
     const [a, b] = await Promise.all([telegramPOST(update(100, '482915')), telegramPOST(update(100, '482915'))]);
     expect(coreCalls).toHaveLength(1);
     const bodies = await Promise.all([a.json(), b.json()]);
-    expect(bodies.filter((x: any) => x.duplicate)).toHaveLength(1);
+    expect(bodies.filter((x: { duplicate?: boolean }) => x.duplicate)).toHaveLength(1);
   });
 
   it('different updates are both processed', async () => {

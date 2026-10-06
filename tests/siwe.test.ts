@@ -28,8 +28,8 @@ beforeEach(() => {
   db.rpcHandlers = {
     consume_auth_nonce: ({ p_nonce, p_purpose }) => {
       const row = db.tables.auth_nonces.find((r) => r.nonce === p_nonce && r.purpose === p_purpose);
-      if (!row || new Date(row.expires_at).getTime() <= Date.now() || row.uses_remaining <= 0) return false;
-      if (row.purpose === 'action') row.uses_remaining -= 1;
+      if (!row || new Date(String(row.expires_at)).getTime() <= Date.now() || Number(row.uses_remaining) <= 0) return false;
+      if (row.purpose === 'action') row.uses_remaining = Number(row.uses_remaining) - 1;
       return true;
     },
   };
@@ -162,6 +162,6 @@ describe('GET /api/auth/nonce', () => {
     expect(a).toMatchObject({ purpose: 'action', uses_remaining: 1 });
     expect(b).toMatchObject({ purpose: 'action', uses_remaining: 20 });
     expect(s).toMatchObject({ purpose: 'session', uses_remaining: 1 });
-    expect(new Date(s.expires_at).getTime() - Date.now()).toBeGreaterThan(12 * 3600_000);
+    expect(new Date(String(s.expires_at)).getTime() - Date.now()).toBeGreaterThan(12 * 3600_000);
   });
 });

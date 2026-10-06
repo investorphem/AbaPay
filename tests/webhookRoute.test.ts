@@ -20,8 +20,8 @@ process.env.NEXT_PUBLIC_ABAPAY_CELO_ADDRESS = CELO_VAULT;
 
 let db: FakeDb;
 let receipts: Record<string, FakeReceipt | Error> = {};
-const executeVend = vi.fn(async (_input: unknown) => ({ success: true, status: 'SUCCESS' }));
-const sendTelegramAlert = vi.fn(async (_text: string) => {});
+const executeVend = vi.fn<(input: unknown) => Promise<{ success: boolean; status: string }>>(async () => ({ success: true, status: 'SUCCESS' }));
+const sendTelegramAlert = vi.fn<(text: string) => Promise<void>>(async () => {});
 
 vi.mock('@/utils/supabase', () => ({ get supabaseAdmin() { return fakeSupabase(db); } }));
 vi.mock('@/lib/telegram', () => ({ sendTelegramAlert: (t: string) => sendTelegramAlert(t) }));

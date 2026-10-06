@@ -185,28 +185,8 @@
   "test/AbaPayV4.test.ts": {
     "@typescript-eslint/no-explicit-any": 1
   },
-  "tests/a2a-card.test.ts": {
-    "@typescript-eslint/no-explicit-any": 4
-  },
-  "tests/a2a.test.ts": {
-    "@typescript-eslint/no-explicit-any": 5
-  },
-  "tests/cancelSchedule.test.ts": {
-    "@typescript-eslint/no-explicit-any": 8
-  },
   "tests/helpers/chain.ts": {
     "@typescript-eslint/no-explicit-any": 4
-  },
-  "tests/helpers/fakeSupabase.ts": {
-    "@typescript-eslint/no-explicit-any": 22,
-    "@typescript-eslint/no-unused-vars": 1
-  },
-  "tests/idempotency.test.ts": {
-    "@typescript-eslint/no-explicit-any": 2
-  },
-  "tests/payRoute.test.ts": {
-    "@typescript-eslint/no-explicit-any": 5,
-    "@typescript-eslint/no-unused-vars": 1
   },
   "tests/paymaster.test.ts": {
     "@typescript-eslint/no-explicit-any": 4
@@ -214,35 +194,11 @@
   "tests/paymentProof.test.ts": {
     "@typescript-eslint/no-explicit-any": 1
   },
-  "tests/paymentStatus.test.ts": {
-    "@typescript-eslint/no-explicit-any": 6
-  },
-  "tests/providerOutcome.test.ts": {
-    "@typescript-eslint/no-unused-vars": 1
-  },
-  "tests/serviceGate.test.ts": {
-    "@typescript-eslint/no-unused-vars": 2
-  },
-  "tests/vend.test.ts": {
-    "@typescript-eslint/no-unused-vars": 2
-  },
-  "tests/walletEnv.test.ts": {
+  "tests/webhookEvents.test.ts": {
     "@typescript-eslint/no-explicit-any": 2
   },
-  "tests/webhookEvents.test.ts": {
-    "@typescript-eslint/no-explicit-any": 3
-  },
-  "tests/webhookRoute.test.ts": {
-    "@typescript-eslint/no-unused-vars": 2
-  },
   "tests/whatsapp.test.ts": {
-    "@typescript-eslint/no-explicit-any": 4
-  },
-  "tests/x402Pay.test.ts": {
-    "@typescript-eslint/no-explicit-any": 8
-  },
-  "tests/x402Route.test.ts": {
-    "@typescript-eslint/no-unused-vars": 1
+    "@typescript-eslint/no-explicit-any": 3
   },
   "tests/x402Settle.test.ts": {
     "@typescript-eslint/no-explicit-any": 1,

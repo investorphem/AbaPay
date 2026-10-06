@@ -70,7 +70,7 @@ describe('A2A agent card', () => {
     const card = await (await GET()).json();
     expect(card.skills).toHaveLength(11);
 
-    const describe_ = card.skills.find((s: any) => s.id === 'describe_capabilities');
+    const describe_ = card.skills.find((s: { id: string }) => s.id === 'describe_capabilities');
     expect(describe_.description).toBe('List what AbaPay can pay for.'); // first line only
     expect(describe_.description).not.toContain('Second line');
 
@@ -84,7 +84,7 @@ describe('A2A agent card', () => {
 
   it('exposes every skill the A2A endpoint can dispatch', async () => {
     const card = await (await GET()).json();
-    const ids = card.skills.map((s: any) => s.id).sort();
+    const ids = card.skills.map((s: { id: string }) => s.id).sort();
     expect(ids).toEqual(
       ['check_balance', 'describe_capabilities', 'list_international_options', 'list_plans', 'pay_bill', 'pay_bill_batch', 'transaction_history', 'get_payment_status', 'schedule_bill', 'list_schedules', 'cancel_schedule'].sort(),
     );
@@ -121,10 +121,10 @@ describe('MERGE GATE — the real mcpTools module still loads and exports its co
     // count or naming means content was lost in the move.
     expect(Array.isArray(real.TOOLS)).toBe(true);
     expect(real.TOOLS).toHaveLength(11);
-    expect(real.TOOLS.map((t: any) => t.name).sort()).toEqual(
+    expect(real.TOOLS.map((t) => t.name).sort()).toEqual(
       ['check_balance', 'describe_capabilities', 'list_international_options', 'list_plans', 'pay_bill', 'pay_bill_batch', 'transaction_history', 'get_payment_status', 'schedule_bill', 'list_schedules', 'cancel_schedule'].sort(),
     );
-    for (const tool of real.TOOLS as any[]) {
+    for (const tool of real.TOOLS) {
       expect(tool.description).toBeTruthy();
       expect(tool.inputSchema).toBeTruthy();
     }
