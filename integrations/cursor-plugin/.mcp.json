@@ -1,0 +1,8 @@
+{
+  "mcpServers": {
+    "abapay": {
+      "url": "https://agents.abapays.com/api/mcp",
+      "type": "http"
+    }
+  }
+}

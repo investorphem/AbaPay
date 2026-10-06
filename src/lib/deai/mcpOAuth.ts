@@ -90,7 +90,17 @@ export interface OAuthClient {
  * host, custom schemes, javascript:, data: — is refused at registration, so an attacker can
  * never register a client that redirects an authorization code somewhere unencrypted.
  */
+// Native-app callbacks allowed by EXACT match only, never by scheme. Cursor's IDE (through at
+// least 3.14) registers this custom-scheme redirect in Dynamic Client Registration, so without it
+// "Add AbaPay to Cursor" failed at the OAuth step. A custom scheme can be claimed by another app
+// on the same machine, which is why RFC 8252 makes PKCE mandatory for native clients; AbaPay
+// requires PKCE S256 on every authorization (createAuthCode refuses anything else), so an
+// intercepted code is useless without the verifier only Cursor holds. Newer Cursor builds use
+// http://localhost:8787/callback, which the loopback rule below already allows.
+const NATIVE_APP_REDIRECTS = new Set(['cursor://anysphere.cursor-mcp/oauth/callback']);
+
 export function isAllowedRedirectUri(uri: string): boolean {
+  if (NATIVE_APP_REDIRECTS.has(uri)) return true;
   let u: URL;
   try {
     u = new URL(uri);
