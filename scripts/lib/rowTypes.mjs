@@ -7,6 +7,8 @@ export const ROW_TYPES_FILE = 'src/lib/rows.ts';
 const TABLES = [
   ['transactions', 'TransactionRow', 'A row of public.transactions.'],
   ['refund_queue', 'RefundQueueRow', 'A row of public.refund_queue.'],
+  ['discount_campaigns', 'DiscountCampaignRow', 'A row of public.discount_campaigns.'],
+  ['scheduled_bills', 'ScheduledBillRow', 'A row of public.scheduled_bills.'],
 ];
 
 export function rowTypesFromSnapshot(snapshot) {
@@ -16,7 +18,12 @@ export function rowTypesFromSnapshot(snapshot) {
     if (!m) continue;
     const [, table, column, rest] = m;
     const sqlType = rest.replace(/ not null.*| default .*/, '').trim();
-    const ts = /^numeric/.test(sqlType) ? 'number' : sqlType === 'boolean' ? 'boolean' : 'string';
+    const base = sqlType.replace(/\[\]$/, '');
+    const scalar = /^(numeric|integer|smallint|bigint|real|double precision)/.test(base) ? 'number'
+      : base === 'boolean' ? 'boolean'
+      : /^jsonb?$/.test(base) ? 'unknown'
+      : 'string'; // text, uuid, timestamptz, date: all strings over PostgREST
+    const ts = sqlType.endsWith('[]') ? `${scalar}[]` : scalar;
     (columns[table] ??= []).push(`  ${column}: ${ts}${/ not null/.test(rest) ? '' : ' | null'};`);
   }
   const blocks = TABLES.map(([table, name, doc]) => `/** ${doc} */\nexport interface ${name} {\n${columns[table].join('\n')}\n}\n`);

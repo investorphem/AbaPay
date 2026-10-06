@@ -10,8 +10,8 @@ import { assessFeasibility, describeCapabilities, getCapability, capabilityForIn
 import { checkParity, checkAccountNumber, checkAmountLive, isDuplicateElectricity, formatConversion, REQ, requiresVariation, supportsRenew, requiresVerifiedName } from '@/lib/parity';
 import { sendTelegramAlert } from '@/lib/telegram';
 import { checkPinAllowed, recordPinFailure, clearPinFailures, notifySpendOutOfBand } from '@/lib/deai/pinSecurity';
-import { SUPPORTED_TOKENS, tokenSymbolsForChain, normalizeChainName, defaultTokenForChain, LEGACY_RECORD_CHAIN } from '@/constants';
-import { providersFor, hasProviderList, renderOptions, matchProvider, needsVariation, variationServiceId, fetchVariations, matchVariation, groupDataPlans, renderCategoryMenu, matchCategory, renderOptionsPage, isNextPageRequest, matchPagedOption, type Option } from '@/lib/deai/selection';
+import { tokenSymbolsForChain, normalizeChainName, defaultTokenForChain, LEGACY_RECORD_CHAIN } from '@/constants';
+import { providersFor, hasProviderList, renderOptions, matchProvider, variationServiceId, fetchVariations, groupDataPlans, renderCategoryMenu, matchCategory, renderOptionsPage, isNextPageRequest, matchPagedOption, type Option } from '@/lib/deai/selection';
 import { createClient } from '@supabase/supabase-js';
 import { verifyInternalRequest } from '@/utils/internalAuth';
 import { verifyPin, isHashedPin, hashPin } from '@/utils/pinSecurity';
@@ -65,7 +65,7 @@ const NETWORK_PREFIXES: Record<string, string[]> = {
   etisalat:["0809","0817","0818","0909","0908"],
 };
 
-const detectNetwork = (phone: any): string | null => {
+const detectNetwork = (phone: unknown): string | null => {
   if (!phone) return null;
   const phoneStr = String(phone).replace(/\D/g, '').replace(/^234/, '0');
   const prefix = phoneStr.padStart(11, '0').substring(0, 4);
@@ -276,7 +276,7 @@ async function pivotIsGenuine(
 
 // ⚡ INDESTRUCTIBLE REGEX SWEEP ⚡
 function extractEntities(text: string, currentData: any = {}) {
-    let data = { ...currentData };
+    const data = { ...currentData };
     const cleanText = text.trim().toLowerCase();
     
     // 1. Force Extract Email
@@ -376,11 +376,11 @@ function extractEntities(text: string, currentData: any = {}) {
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const EMAIL_SKIP_WORDS = new Set(['no', 'skip', 'none', 'nope', 'no thanks', 'nothanks', 'n/a', 'na', 'nah']);
 
-function alreadyHasEmail(d: any): boolean {
+function alreadyHasEmail(d: { email?: unknown; customer_email?: unknown }): boolean {
     return !!(d.email || d.customer_email);
 }
 
-function needsEmailOptIn(d: any): boolean {
+function needsEmailOptIn(d: { email?: unknown; customer_email?: unknown; email_choice_made?: unknown }): boolean {
     if (d.email_choice_made) return false;
     if (alreadyHasEmail(d)) return false; // already mandatory for this category, or already answered
     return true;
@@ -410,7 +410,7 @@ const tokensForChain = tokenSymbolsForChain;
 async function getExchangeRate(): Promise<number> {
     try {
         const { data } = await supabase.from('platform_settings').select('exchange_rate').eq('id', 1).single();
-        const rate = Number((data as any)?.exchange_rate);
+        const rate = Number(data?.exchange_rate);
         if (Number.isFinite(rate) && rate > 0) return rate;
     } catch {}
     return Number(process.env.NEXT_PUBLIC_FIXED_RATE) || 1550;
@@ -753,7 +753,9 @@ async function handleCore(req: Request, ctx: HumanizeCtx): Promise<NextResponse>
       return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
     }
 
-    let { platform, platform_id, text, chat_type, chat_id } = await req.json();
+    const reqBody = await req.json();
+    const { platform, platform_id, chat_type, chat_id } = reqBody;
+    let { text } = reqBody; // normalized below
     ctx.userText = typeof text === 'string' ? text : '';
     ctx.channel = platform;
 
@@ -768,7 +770,7 @@ async function handleCore(req: Request, ctx: HumanizeCtx): Promise<NextResponse>
     // rate-limited by Meta, or is mid-maintenance) without touching Telegram/X/MCP users.
     // Checked before anything else so a paused channel never reaches intent parsing, PIN
     // handling, or spending.
-    if (!(await isChannelEnabled(channel as any))) {
+    if (!(await isChannelEnabled(channel))) {
       return NextResponse.json({
         action: 'REPLY',
         message: `${channel === 'WHATSAPP' ? 'WhatsApp' : channel === 'TELEGRAM' ? 'Telegram' : 'X'} payments are temporarily paused for maintenance. Please try again shortly, or use the AbaPay app.`,
@@ -819,7 +821,7 @@ async function handleCore(req: Request, ctx: HumanizeCtx): Promise<NextResponse>
 
       let wasRelink = false;
       if (existingLink) {
-        const sameWallet = String((existingLink as any).wallet_address).toLowerCase() === String((pendingLink as any).wallet_address).toLowerCase();
+        const sameWallet = String(existingLink.wallet_address).toLowerCase() === String(pendingLink.wallet_address).toLowerCase();
         if (sameWallet) {
           // Re-linking the same channel to the same wallet (e.g. refreshing a PIN or the
           // approved token/chain) — replace the stale row rather than erroring. Flagged so
@@ -827,10 +829,10 @@ async function handleCore(req: Request, ctx: HumanizeCtx): Promise<NextResponse>
           // was replaced, instead of a plain "Linked!" that looks like a silent first-time
           // link (which is confusing, and — if the user DIDN'T initiate this — a signal
           // their wallet may be compromised that they'd otherwise never see).
-          await supabase.from('agent_links').delete().eq('id', (existingLink as any).id);
+          await supabase.from('agent_links').delete().eq('id', existingLink.id);
           wasRelink = true;
         } else {
-          const otherWallet = String((existingLink as any).wallet_address);
+          const otherWallet = String(existingLink.wallet_address);
           const channelLabel = channel === 'TELEGRAM' ? 'Telegram' : channel === 'WHATSAPP' ? 'WhatsApp' : 'X';
           return NextResponse.json({
             action: 'REPLY',
@@ -842,14 +844,14 @@ async function handleCore(req: Request, ctx: HumanizeCtx): Promise<NextResponse>
       const { error: claimErr } = await supabase
         .from('agent_links')
         .update({ channel_user_id: platform_id, link_verified: true, link_code: null })
-        .eq('id', (pendingLink as any).id);
+        .eq('id', pendingLink.id);
 
       if (claimErr) {
         console.error('[DeAI] link claim failed:', claimErr.message);
         return NextResponse.json({ action: 'REPLY', message: "⚠️ Couldn't complete linking — that account may already be linked elsewhere. Check the Agent Hub tab in the app, or try generating a fresh code." });
       }
 
-      const w = (pendingLink as any).wallet_address;
+      const w = pendingLink.wallet_address;
       return NextResponse.json({
         action: 'REPLY',
         message: wasRelink
@@ -872,18 +874,18 @@ async function handleCore(req: Request, ctx: HumanizeCtx): Promise<NextResponse>
       .eq('link_verified', true)
       .maybeSingle();
 
-    if (link && (link as any).is_active) {
-      identity = { deai_pin: (link as any).pin_hash, is_active: true, _source: 'agent_links', _linkId: (link as any).id };
+    if (link && link.is_active) {
+      identity = { deai_pin: link.pin_hash, is_active: true, _source: 'agent_links', _linkId: link.id };
       globalUser = {
-        wallet_address: (link as any).wallet_address,
+        wallet_address: link.wallet_address,
         country_code: 'NG',
         // What the user actually approved an on-chain allowance for when they linked (see
         // AgentHub.tsx's startLink) — the relay-vs-link decision below must default to THIS,
         // not a hardcoded token/chain, or an allowance approved in e.g. USDC would never be
         // found (checked under the wrong token) and every payment would silently fall back
         // to the deep-link path even though the user has a working allowance.
-        approved_token: (link as any).approved_token || 'USD₮',
-        approved_chain: (link as any).approved_chain || 'CELO',
+        approved_token: link.approved_token || 'USD₮',
+        approved_chain: link.approved_chain || 'CELO',
       };
     } else {
       // Legacy path
@@ -895,9 +897,9 @@ async function handleCore(req: Request, ctx: HumanizeCtx): Promise<NextResponse>
 
       if (legacy) {
         identity = { ...legacy, _source: 'deai_identities' };
-        globalUser = Array.isArray((legacy as any).abapay_global_users)
-          ? (legacy as any).abapay_global_users[0]
-          : (legacy as any).abapay_global_users;
+        globalUser = Array.isArray(legacy.abapay_global_users)
+          ? legacy.abapay_global_users[0]
+          : legacy.abapay_global_users;
       }
     }
 
@@ -1471,7 +1473,6 @@ async function handleCore(req: Request, ctx: HumanizeCtx): Promise<NextResponse>
         }
 
         const userWallet = spendGate.allowed ? globalUser?.wallet_address : null;
-        let relayed = false;
         // Set specifically when the reason we're about to fall back to Path B is "no/not
         // enough allowance for THIS chain/token" — as opposed to being unlinked, the operator
         // gate blocking, or the relay call itself failing. Lets the deep-link message below
@@ -1552,7 +1553,6 @@ async function handleCore(req: Request, ctx: HumanizeCtx): Promise<NextResponse>
               });
 
               if (res.success) {
-                relayed = true;
                 const left = (allowance.remaining - Number(amountCrypto)).toFixed(2);
                 const txHash = res.txHash as string;
 
@@ -1837,7 +1837,7 @@ async function handleCore(req: Request, ctx: HumanizeCtx): Promise<NextResponse>
     // Entered when the parity gate found a required field the app would demand.
     else if (session?.status === 'AWAITING_FIELD') {
       const fieldName = session.intent_data.awaiting_field;
-      const spec = Object.values(REQ).find((r: any) => r.field === fieldName) as any;
+      const spec = Object.values(REQ).find((r) => r.field === fieldName);
 
       if (!spec) {
         await supabase.from('deai_sessions').delete().eq('chat_id', platform_id);
@@ -2431,7 +2431,7 @@ async function handleCore(req: Request, ctx: HumanizeCtx): Promise<NextResponse>
                 // conversation (including short "1"/PIN turns) can be localized too.
                 ...(aiParsed.language && aiParsed.language !== 'en' ? { language: aiParsed.language } : {}),
             };
-        } catch (e) {
+        } catch {
             // Ignore AI errors — the regex sweep below still catches the common cases.
         }
 
@@ -2970,7 +2970,7 @@ async function handleCore(req: Request, ctx: HumanizeCtx): Promise<NextResponse>
             }
 
             const ordinalDay = (n: number) => `${n}${n === 1 ? 'st' : n === 2 ? 'nd' : n === 3 ? 'rd' : 'th'}`;
-            const lines = (scheds as any[]).map((sc) => {
+            const lines = scheds.map((sc) => {
                 // 🔴 "on the nullth monthly" bug: a one-off ('once') schedule has no
                 // day_of_month, so the default branch rendered "nullth". Handle 'once'
                 // explicitly with its run_once_at time.
@@ -2999,11 +2999,11 @@ async function handleCore(req: Request, ctx: HumanizeCtx): Promise<NextResponse>
             }
 
             // If they named a service, cancel that one; otherwise cancel all (they asked to stop).
-            const target = (scheds as any[]).filter((sc) =>
+            const target = scheds.filter((sc) =>
                 !aiParsed.provider || String(sc.provider || '').toUpperCase() === String(aiParsed.provider).toUpperCase()
             );
 
-            await supabase.from('scheduled_bills').update({ is_active: false }).in('id', target.map((t: any) => t.id));
+            await supabase.from('scheduled_bills').update({ is_active: false }).in('id', target.map((t: { id: string }) => t.id));
             return NextResponse.json({ action: 'REPLY', message: `✅ Cancelled ${target.length} automation${target.length === 1 ? '' : 's'}.` });
         }
 
@@ -3101,7 +3101,7 @@ async function handleCore(req: Request, ctx: HumanizeCtx): Promise<NextResponse>
           channel,
           channel_user_id: platform_id,
           message: text.trim(),
-          tx_hash: (recentFail as any)?.tx_hash || null,
+          tx_hash: recentFail?.tx_hash || null,
           status: 'OPEN',
         });
 
@@ -3115,7 +3115,7 @@ async function handleCore(req: Request, ctx: HumanizeCtx): Promise<NextResponse>
             `🎫 *NEW SUPPORT TICKET*\n` +
             `📲 *Channel:* ${channel}\n` +
             `👤 *Wallet:* \`${(globalUser?.wallet_address || 'unknown').slice(0, 10)}...\`\n` +
-            `${(recentFail as any)?.tx_hash ? `🔗 *Tx:* \`${(recentFail as any).tx_hash}\`\n` : ''}` +
+            `${recentFail?.tx_hash ? `🔗 *Tx:* \`${recentFail.tx_hash}\`\n` : ''}` +
             `💬 _${text.trim().slice(0, 300)}_\n\n` +
             `_Reply in Admin → Support._`
           );
@@ -3267,7 +3267,7 @@ async function handleCore(req: Request, ctx: HumanizeCtx): Promise<NextResponse>
             return '❌';
         };
 
-        const lines = (recentTxs as any[]).map((tx, i) => {
+        const lines = recentTxs.map((tx, i) => {
             const dateStr = new Date(tx.created_at).toLocaleDateString('en-NG', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' });
 
             // International transactions store a pre-formatted local-currency amount.
@@ -3549,7 +3549,7 @@ async function handleCore(req: Request, ctx: HumanizeCtx): Promise<NextResponse>
 
     const rules = SERVICE_RULES[intentData.intent];
     if (rules) {
-        let missing = [];
+        const missing = [];
         
         for (const field of rules.required) {
             if (!intentData[field]) {
@@ -3565,7 +3565,7 @@ async function handleCore(req: Request, ctx: HumanizeCtx): Promise<NextResponse>
             await supabase.from('deai_sessions').upsert({ chat_id: platform_id, platform, intent_data: intentData, status: 'AWAITING_DETAILS', expires_at: new Date(Date.now() + 300000).toISOString() }, { onConflict: 'chat_id' });
             
             // ⚡ THE "GHOST MESSAGE" FIX: Dynamic Echo
-            let savedItems = [];
+            const savedItems = [];
             if (intentData.amount_ngn) savedItems.push(`₦${intentData.amount_ngn}`);
             if (intentData.destination_account) savedItems.push(`${intentData.destination_account}`);
             // 🔴 THE GAP: the echo listed amount/account/email but never the PROVIDER, even
@@ -3581,7 +3581,7 @@ async function handleCore(req: Request, ctx: HumanizeCtx): Promise<NextResponse>
             if (intentData.provider) savedItems.push(`${intentData.provider_label || String(intentData.provider).toUpperCase()}`);
             if (intentData.email) savedItems.push(`Email Saved`);
 
-            let echoMsg = savedItems.length > 0 ? `💡 *Got it! (${savedItems.join(" | ")})*\n\n` : "";
+            const echoMsg = savedItems.length > 0 ? `💡 *Got it! (${savedItems.join(" | ")})*\n\n` : "";
 
             // ⚡ CLARIFYING-QUESTION DETECTION — "Did you mean the meter number?" is a question
             // ABOUT what we're asking, not an attempt to answer it. Repeating the exact same

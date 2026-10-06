@@ -7,6 +7,7 @@ import { resolveMcpIdentity, type McpIdentity } from '@/lib/deai/mcpAuth';
 import { validateAccessToken } from '@/lib/deai/mcpOAuth';
 import { TOOLS, NEEDS_AUTH, WWW_AUTH_MISSING, WWW_AUTH_INVALID, callTool } from '@/lib/deai/mcpTools';
 import { getAgentAppUrl } from '@/lib/agentAppUrl';
+import { errorMessage } from '@/lib/errors';
 
 // ⚡ A2A SERVER — AbaPay over the Agent2Agent protocol (a2a-protocol.org), a FIFTH way in to
 // the same execution engine behind WhatsApp/Telegram/X/MCP. Discovery document lives at
@@ -67,9 +68,11 @@ function agentMessage(parts: unknown[], contextId?: string) {
  * rides along as a DataPart so a peer agent can act on structured output instead of re-parsing
  * prose — the whole reason to prefer A2A over scraping a chat reply.
  */
-function partsFromToolResult(result: any): unknown[] {
+type ToolResultBlock = { type?: string; text?: string; mimeType?: string; data?: string };
+
+function partsFromToolResult(result: unknown): unknown[] {
   const parts: unknown[] = [];
-  for (const block of result?.content ?? []) {
+  for (const block of (result as { content?: ToolResultBlock[] } | null)?.content ?? []) {
     if (block?.type === 'text') {
       parts.push({ kind: 'text', text: block.text });
     } else if (block?.type === 'image') {
@@ -79,7 +82,7 @@ function partsFromToolResult(result: any): unknown[] {
       });
     }
   }
-  parts.push({ kind: 'data', data: { isError: result?.isError === true, raw: result } });
+  parts.push({ kind: 'data', data: { isError: (result as { isError?: unknown } | null)?.isError === true, raw: result } });
   return parts;
 }
 
@@ -97,7 +100,7 @@ function catalogueParts(): unknown[] {
     {
       kind: 'data',
       data: {
-        skills: (TOOLS as any[]).map((t) => ({
+        skills: TOOLS.map((t) => ({
           id: t.name,
           description: t.description,
           inputSchema: t.inputSchema,
@@ -136,7 +139,12 @@ export async function POST(req: Request) {
     return unauthorized(null, WWW_AUTH_INVALID, 'Invalid or expired credential. Re-authorize the AbaPay A2A connection.');
   }
 
-  let body: any;
+  // A JSON-RPC 2.0 request. Everything in it came from the caller, so each part is checked before use.
+  let body: {
+    id?: string | number | null;
+    method?: unknown;
+    params?: { message?: { contextId?: string; parts?: unknown } };
+  } | null;
   try {
     body = await req.json();
   } catch {
@@ -172,18 +180,23 @@ export async function POST(req: Request) {
 
         // A structured invocation is a DataPart naming a skill. Anything else is prose.
         const invocation = message.parts.find(
-          (p: any) => p?.kind === 'data' && typeof p?.data?.skill === 'string'
+          (p: unknown): p is { kind: 'data'; data: { skill: string; args?: unknown } } =>
+            (p as { kind?: unknown })?.kind === 'data' && typeof (p as { data?: { skill?: unknown } })?.data?.skill === 'string'
         );
         if (!invocation) {
           return rpcResult(id, agentMessage(catalogueParts(), contextId));
         }
 
         const skill = invocation.data.skill;
-        if (!(TOOLS as any[]).some((t) => t.name === skill)) {
+        if (!TOOLS.some((t) => t.name === skill)) {
           return rpcError(id, ERR_INVALID_PARAMS, `Unknown skill: ${skill}`);
         }
 
-        const result = await callTool(skill, invocation.data.args || {}, identity ?? null);
+        // Only a plain object is an argument list; a string or array from the caller becomes {} so
+        // the tool reports its missing fields instead of reading properties off something else.
+        const rawArgs = invocation.data.args;
+        const args = rawArgs && typeof rawArgs === 'object' && !Array.isArray(rawArgs) ? (rawArgs as Record<string, unknown>) : {};
+        const result = await callTool(skill, args, identity ?? null);
         if (result === NEEDS_AUTH) {
           return unauthorized(
             id,
@@ -212,8 +225,8 @@ export async function POST(req: Request) {
       default:
         return rpcError(id, ERR_METHOD_NOT_FOUND, `Method not found: ${method}`);
     }
-  } catch (err: any) {
-    console.error('[A2A] request failed:', err?.message);
+  } catch (err) {
+    console.error('[A2A] request failed:', errorMessage(err));
     return rpcError(id, ERR_INTERNAL, 'Internal error.');
   }
 }
@@ -228,7 +241,7 @@ export async function GET() {
     protocolVersion: '0.3.0',
     transport: 'JSONRPC',
     agentCard: `${appUrl}/.well-known/agent-card.json`,
-    skills: (TOOLS as any[]).map((t) => t.name),
+    skills: TOOLS.map((t) => t.name),
     hint: 'POST JSON-RPC 2.0 here. Supported method: message/send.',
   });
 }

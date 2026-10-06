@@ -1,5 +1,6 @@
 import 'server-only';
 import { supabaseAdmin } from '@/utils/supabase';
+import type { DiscountCampaignRow } from '@/lib/rows';
 
 // ⚡ SHARED DISCOUNT ENGINE — one source of truth for both the web app's /api/pay verification
 // and the chat/agent path (src/app/api/deai/core/route.ts), mirroring the exact pattern
@@ -22,10 +23,10 @@ export interface ActiveDiscount {
   maxTotalDiscountNgn: number | null;          // lifetime cap across the whole campaign
 }
 
-let cache: { rows: any[]; at: number } | null = null;
+let cache: { rows: DiscountCampaignRow[]; at: number } | null = null;
 const CACHE_MS = 30_000;
 
-async function loadActiveCampaigns(): Promise<any[]> {
+async function loadActiveCampaigns(): Promise<DiscountCampaignRow[]> {
   if (cache && Date.now() - cache.at < CACHE_MS) return cache.rows;
 
   const nowIso = new Date().toISOString();
@@ -61,7 +62,7 @@ async function totalGivenForCampaign(campaignId: string): Promise<number> {
     .select('discount_ngn')
     .eq('discount_campaign_id', campaignId)
     .in('status', COUNTED_STATUSES);
-  return (data || []).reduce((sum: number, r: any) => sum + Number(r.discount_ngn || 0), 0);
+  return (data || []).reduce((sum: number, r: { discount_ngn: number | null }) => sum + Number(r.discount_ngn || 0), 0);
 }
 
 async function totalGivenForWallet(campaignId: string, walletAddress: string): Promise<number> {
@@ -71,7 +72,7 @@ async function totalGivenForWallet(campaignId: string, walletAddress: string): P
     .eq('discount_campaign_id', campaignId)
     .eq('wallet_address', walletAddress.toLowerCase())
     .in('status', COUNTED_STATUSES);
-  return (data || []).reduce((sum: number, r: any) => sum + Number(r.discount_ngn || 0), 0);
+  return (data || []).reduce((sum: number, r: { discount_ngn: number | null }) => sum + Number(r.discount_ngn || 0), 0);
 }
 
 /** Rolling 24h window, not a calendar day — a destination that used its allowance at 11pm can
@@ -85,7 +86,7 @@ async function totalGivenForDestination(campaignId: string, accountNumber: strin
     .eq('account_number', accountNumber)
     .in('status', COUNTED_STATUSES)
     .gte('created_at', sinceIso);
-  return (data || []).reduce((sum: number, r: any) => sum + Number(r.discount_ngn || 0), 0);
+  return (data || []).reduce((sum: number, r: { discount_ngn: number | null }) => sum + Number(r.discount_ngn || 0), 0);
 }
 
 /** The wallet's VERIFIED phone number, if any (wallet_links.user_id -> abapay_users.verified_phone
@@ -99,7 +100,8 @@ async function resolveVerifiedPhone(walletAddress: string): Promise<string | nul
     .eq('wallet_address', walletAddress.toLowerCase())
     .maybeSingle();
   if (!data) return null;
-  const profile: any = Array.isArray((data as any).abapay_users) ? (data as any).abapay_users[0] : (data as any).abapay_users;
+  // PostgREST returns an embedded to-one relation as an object, or as a one-element array.
+  const profile: { verified_phone?: string | null } | undefined = Array.isArray(data.abapay_users) ? data.abapay_users[0] : data.abapay_users;
   return profile?.verified_phone || null;
 }
 
@@ -112,7 +114,7 @@ async function totalGivenForPhone(campaignId: string, phone: string): Promise<nu
     .eq('discount_campaign_id', campaignId)
     .eq('discount_phone', phone)
     .in('status', COUNTED_STATUSES);
-  return (data || []).reduce((sum: number, r: any) => sum + Number(r.discount_ngn || 0), 0);
+  return (data || []).reduce((sum: number, r: { discount_ngn: number | null }) => sum + Number(r.discount_ngn || 0), 0);
 }
 
 /** Manual admin override — set from the "Suspicious activity" panel in the admin Discounts tab
@@ -155,11 +157,11 @@ async function isExcluded(campaignId: string, walletAddress?: string | null, des
 export async function getActiveDiscountForService(serviceKey: string | null): Promise<ActiveDiscount | null> {
   const campaigns = await loadActiveCampaigns();
   const matches = campaigns.filter(
-    (c: any) => !c.services || c.services.length === 0 || (serviceKey && c.services.includes(serviceKey))
+    (c) => !c.services || c.services.length === 0 || (serviceKey && c.services.includes(serviceKey))
   );
   if (matches.length === 0) return null;
 
-  matches.sort((a: any, b: any) => {
+  matches.sort((a, b) => {
     const aSpecific = a.services && a.services.length > 0 ? 1 : 0;
     const bSpecific = b.services && b.services.length > 0 ? 1 : 0;
     if (aSpecific !== bSpecific) return bSpecific - aSpecific;
@@ -174,7 +176,7 @@ export async function getActiveDiscountForService(serviceKey: string | null): Pr
     return {
       id: c.id,
       name: c.name,
-      type: c.type,
+      type: c.type as 'PERCENT' | 'FIXED', // guaranteed by the discount_campaigns_type_check constraint
       value: Number(c.value),
       maxDiscountNgn: c.max_discount_ngn != null ? Number(c.max_discount_ngn) : null,
       maxDiscountPerWalletNgn: c.max_discount_per_wallet_ngn != null ? Number(c.max_discount_per_wallet_ngn) : null,

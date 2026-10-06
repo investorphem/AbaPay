@@ -20,9 +20,6 @@
   "src/app/agents/ThemeToggle.tsx": {
     "react-hooks/set-state-in-effect": 1
   },
-  "src/app/api/a2a/route.ts": {
-    "@typescript-eslint/no-explicit-any": 7
-  },
   "src/app/api/admin/action/route.ts": {
     "@typescript-eslint/no-explicit-any": 1
   },
@@ -58,9 +55,7 @@
     "@typescript-eslint/no-unused-vars": 2
   },
   "src/app/api/deai/core/route.ts": {
-    "@typescript-eslint/no-explicit-any": 36,
-    "@typescript-eslint/no-unused-vars": 5,
-    "prefer-const": 8
+    "@typescript-eslint/no-explicit-any": 7
   },
   "src/app/api/foreign/route.ts": {
     "@typescript-eslint/no-explicit-any": 1
@@ -187,7 +182,6 @@
     "@typescript-eslint/no-explicit-any": 12,
     "@typescript-eslint/no-unused-vars": 3,
     "react-hooks/immutability": 2,
-    "react-hooks/rules-of-hooks": 2,
     "react-hooks/set-state-in-effect": 1,
     "react/no-unescaped-entities": 2
   },
@@ -218,9 +212,6 @@
   "src/lib/deai/mcpOAuth.ts": {
     "@typescript-eslint/no-explicit-any": 3
   },
-  "src/lib/deai/mcpTools.ts": {
-    "@typescript-eslint/no-explicit-any": 26
-  },
   "src/lib/deai/pinSecurity.ts": {
     "@typescript-eslint/no-explicit-any": 5
   },
@@ -239,14 +230,8 @@
   "src/lib/deai/services.ts": {
     "@typescript-eslint/no-explicit-any": 4
   },
-  "src/lib/discounts.ts": {
-    "@typescript-eslint/no-explicit-any": 13
-  },
-  "src/lib/idempotency.ts": {
-    "@typescript-eslint/no-explicit-any": 7
-  },
   "src/lib/monnify.ts": {
-    "@typescript-eslint/no-explicit-any": 8
+    "@typescript-eslint/no-explicit-any": 1
   },
   "src/lib/parity.ts": {
     "@typescript-eslint/no-explicit-any": 5

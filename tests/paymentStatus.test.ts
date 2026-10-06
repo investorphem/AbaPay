@@ -12,7 +12,14 @@ vi.mock('@/lib/deai/receiptCard', () => ({ renderReceiptImage: async () => null,
 vi.mock('@/lib/deai/relayer', () => ({ getRemainingAllowance: async () => 0, getMaxAgentPayment: async () => 0 }));
 vi.mock('@/lib/deai/batch', () => ({ checkAutonomousCapacity: async () => ({}), groupByChainToken: () => [], executeAgentPayment: async () => ({}) }));
 
-import { callTool } from '@/lib/deai/mcpTools';
+import { callTool as callToolRaw, NEEDS_AUTH, type ToolResult } from '@/lib/deai/mcpTools';
+
+// Every case here supplies an identity, so NEEDS_AUTH would itself be a failure.
+const callTool = async (...a: Parameters<typeof callToolRaw>): Promise<ToolResult> => {
+  const r = await callToolRaw(...a);
+  if (r === NEEDS_AUTH) throw new Error('unexpected NEEDS_AUTH');
+  return r;
+};
 
 const MINE = '0xabc0000000000000000000000000000000000001';
 const OTHER = '0xdef0000000000000000000000000000000000002';
@@ -62,5 +69,13 @@ describe('get_payment_status', () => {
 
   it('requires a reference', async () => {
     expect((await callTool('get_payment_status', {}, identity as any))?.isError).toBe(true);
+  });
+});
+
+describe('unknown tools', () => {
+  it('get an error result naming the tool, not a null result', async () => {
+    const r = await callTool('no_such_tool', {}, identity as Parameters<typeof callToolRaw>[2]);
+    expect(r.isError).toBe(true);
+    expect((r.content[0] as { text: string }).text).toContain('Unknown tool "no_such_tool"');
   });
 });
