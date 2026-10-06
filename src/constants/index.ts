@@ -108,11 +108,11 @@ export function normalizeChainName(chain: string | null | undefined): ChainName 
  * Agent Hub, the MCP tools and the chat agent, which each used to filter SUPPORTED_TOKENS
  * themselves and could therefore disagree about which stablecoin came first.
  */
-export function tokensForChain(chain: string | null | undefined): any[] {
+export function tokensForChain(chain: string | null | undefined): SupportedToken[] {
   const name = normalizeChainName(chain);
   const key = name.toLowerCase();
   const order = TOKEN_ORDER_BY_CHAIN[name];
-  return (SUPPORTED_TOKENS as any[])
+  return SUPPORTED_TOKENS
     .filter((t) => !t.supportedNetworks || t.supportedNetworks.includes(key))
     .filter((t) => order.includes(t.symbol))
     .sort((a, b) => order.indexOf(a.symbol) - order.indexOf(b.symbol));
@@ -124,11 +124,27 @@ export function tokenSymbolsForChain(chain: string | null | undefined): string[]
 }
 
 /** The stablecoin a chain leads with: USDC on Base, USD₮ on Celo. */
-export function defaultTokenForChain(chain: string | null | undefined): any {
+export function defaultTokenForChain(chain: string | null | undefined): SupportedToken {
   return tokensForChain(chain)[0];
 }
 
-export const SUPPORTED_TOKENS = [
+/**
+ * A stablecoin AbaPay knows about. `mainnet`/`sepolia` are the Base addresses for Base tokens
+ * and the Celo addresses for the Celo-only legacy USDm; `celoMainnet`/`celoSepolia` are the
+ * explicit Celo addresses. There is no `baseMainnet` field: Base reads `mainnet`.
+ */
+export interface SupportedToken {
+  symbol: string;
+  logo: string;
+  decimals: number;
+  mainnet?: string;
+  sepolia?: string;
+  celoMainnet?: string;
+  celoSepolia?: string;
+  supportedNetworks: string[];
+}
+
+export const SUPPORTED_TOKENS: SupportedToken[] = [
   {
     // ⚠️ NOT in TOKEN_ORDER_BY_CHAIN any more, so it is never offered for a new payment — see
     // the note there. Kept because the admin vault still holds, displays and withdraws USDm,
@@ -194,7 +210,7 @@ export const SUPPORTED_TOKENS = [
 // the pending record, so a manually-sent transfer of a DIFFERENT token/amount can't be
 // matched to an unrelated pending intent.
 export function resolveTokenOnChain(symbol: string, blockchain: string, isMainnet: boolean): { address: string; decimals: number } | null {
-  const token = SUPPORTED_TOKENS.find(t => t.symbol === symbol) as any;
+  const token = SUPPORTED_TOKENS.find(t => t.symbol === symbol);
   if (!token) return null;
   const isBase = (blockchain || '').toUpperCase() === 'BASE';
   let address: string | undefined;

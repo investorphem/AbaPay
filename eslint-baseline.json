@@ -114,9 +114,7 @@
   },
   "src/app/page.tsx": {
     "@next/next/no-img-element": 12,
-    "@typescript-eslint/no-explicit-any": 87,
-    "@typescript-eslint/no-unused-vars": 23,
-    "prefer-const": 2,
+    "@typescript-eslint/no-explicit-any": 72,
     "react-hooks/exhaustive-deps": 3,
     "react-hooks/immutability": 2,
     "react-hooks/purity": 1,
@@ -178,7 +176,7 @@
     "@typescript-eslint/no-explicit-any": 1
   },
   "src/constants/index.ts": {
-    "@typescript-eslint/no-explicit-any": 8
+    "@typescript-eslint/no-explicit-any": 4
   },
   "src/lib/deai/batch.ts": {
     "@typescript-eslint/no-explicit-any": 1
