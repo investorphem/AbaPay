@@ -184,9 +184,6 @@
   "src/lib/vtpassCatalog.ts": {
     "@typescript-eslint/no-explicit-any": 3
   },
-  "src/lib/walletEnv.ts": {
-    "@typescript-eslint/no-explicit-any": 27
-  },
   "test/AbaPayV2.test.ts": {
     "@typescript-eslint/no-explicit-any": 1
   },

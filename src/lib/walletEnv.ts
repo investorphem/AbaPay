@@ -38,6 +38,43 @@ export type InjectedProbe =
 
 export const INJECTED_PROBE_TIMEOUT_MS = 3_000;
 
+// The wallet objects inspected below come from code AbaPay doesn't control: injected extensions,
+// WalletConnect's SignClient, wagmi connectors. So they're typed as exactly the fields this file
+// reads, all optional, rather than as `any`; every read already guards for absence.
+type Eip1193Like = { request?: (args: { method: string; params?: unknown }) => Promise<unknown> };
+type InjectedEthereum = Eip1193Like & {
+  providers?: unknown;
+  isMiniPay?: unknown;
+  isBaseApp?: unknown;
+  isCoinbaseWallet?: unknown;
+  isValora?: unknown;
+  isValoraApp?: unknown;
+  [flag: string]: unknown;
+};
+type Relayer = { core?: { relayer?: { connected?: unknown } } };
+type WalletConnectProvider = {
+  session?: {
+    namespaces?: { eip155?: { chains?: unknown; methods?: unknown } };
+    peer?: { metadata?: { name?: unknown } };
+  };
+  signer?: { client?: Relayer };
+  client?: Relayer;
+};
+/** A wagmi connector, as far as these helpers read one. */
+export type ConnectorLike = {
+  id?: string;
+  type?: string;
+  name?: string;
+  icon?: string;
+  getProvider?(): Promise<unknown>;
+  emitter?: { on?(event: string, fn: (message: unknown) => void): void; off?(event: string, fn: (message: unknown) => void): void };
+} | null | undefined;
+
+const injectedEthereum = (): InjectedEthereum | undefined =>
+  typeof window === 'undefined' ? undefined : (window as unknown as { ethereum?: InjectedEthereum }).ethereum;
+const walletConnectProvider = async (connector: ConnectorLike) =>
+  (await connector?.getProvider?.()) as WalletConnectProvider | null | undefined;
+
 /**
  * Silently ask the injected provider whether it already has accounts for this site.
  *
@@ -53,7 +90,7 @@ export async function probeInjectedProvider(
   timeoutMs: number = INJECTED_PROBE_TIMEOUT_MS,
 ): Promise<InjectedProbe> {
   if (typeof window === 'undefined') return { status: 'none' };
-  return probeProvider((window as any).ethereum, timeoutMs);
+  return probeProvider(injectedEthereum(), timeoutMs);
 }
 
 /**
@@ -71,15 +108,16 @@ export async function probeInjectedProvider(
  * exposes one connector per wallet; this lets us ask each of them the same silent question.
  */
 export async function probeProvider(
-  provider: any,
+  provider: unknown,
   timeoutMs: number = INJECTED_PROBE_TIMEOUT_MS,
 ): Promise<InjectedProbe> {
-  if (!provider || typeof provider.request !== 'function') return { status: 'none' };
+  const p = provider as Eip1193Like | null | undefined;
+  if (!p || typeof p.request !== 'function') return { status: 'none' };
 
   let timer: ReturnType<typeof setTimeout>;
   try {
     const accounts = (await Promise.race([
-      Promise.resolve(provider.request({ method: 'eth_accounts' })).finally(() => clearTimeout(timer)),
+      Promise.resolve(p.request({ method: 'eth_accounts' })).finally(() => clearTimeout(timer)),
       new Promise<never>((_, reject) => {
         timer = setTimeout(() => reject(new Error('injected probe timed out')), timeoutMs);
       }),
@@ -111,12 +149,15 @@ export async function probeProvider(
  * (viem wraps, wagmi wraps, thirdweb wraps again) buries it at a different depth, so the cause
  * chain is walked and the message checked as a backstop.
  */
-export function isUserRejection(e: any): boolean {
-  for (let node = e, depth = 0; node && depth < 6; node = node.cause, depth++) {
+type ErrorNode = { code?: unknown; data?: { code?: unknown }; cause?: unknown; shortMessage?: unknown; message?: unknown } | null | undefined;
+
+export function isUserRejection(e: unknown): boolean {
+  for (let node = e as ErrorNode, depth = 0; node && depth < 6; node = node.cause as ErrorNode, depth++) {
     const code = node.code ?? node.data?.code;
     if (code === 4001 || code === 'ACTION_REJECTED') return true;
   }
-  const message = String(e?.shortMessage || e?.message || '').toLowerCase();
+  const err = e as ErrorNode;
+  const message = String(err?.shortMessage || err?.message || '').toLowerCase();
   return /user rejected|user denied|user cancell?ed|rejected the request|request rejected|denied transaction|denied message|cancell?ed by user/.test(
     message,
   );
@@ -141,13 +182,13 @@ export function isUserRejection(e: any): boolean {
  * Returns null when the answer is unknowable (an injected wallet, which can usually be asked to
  * switch anyway) — callers must treat null as "no constraint", never as "supports nothing".
  */
-export async function walletApprovedChainIds(connector: any): Promise<number[] | null> {
+export async function walletApprovedChainIds(connector: ConnectorLike): Promise<number[] | null> {
   try {
-    const provider: any = await connector?.getProvider?.();
+    const provider = await walletConnectProvider(connector);
     const chains = provider?.session?.namespaces?.eip155?.chains;
     if (!Array.isArray(chains) || chains.length === 0) return null;
     const ids = chains
-      .map((c: string) => Number(String(c).split(':')[1]))
+      .map((c: unknown) => Number(String(c).split(':')[1]))
       .filter((n: number) => Number.isFinite(n));
     return ids.length > 0 ? ids : null;
   } catch {
@@ -175,10 +216,10 @@ export async function walletApprovedChainIds(connector: any): Promise<number[] |
  * into a void". Returns null for anything that is not a WalletConnect connector (an injected
  * wallet is in-process and has no socket to lose).
  */
-export async function walletConnectSessionLive(connector: any): Promise<boolean | null> {
+export async function walletConnectSessionLive(connector: ConnectorLike): Promise<boolean | null> {
   try {
     if (connector?.type !== 'walletConnect' && connector?.id !== 'walletConnect') return null;
-    const provider: any = await connector?.getProvider?.();
+    const provider = await walletConnectProvider(connector);
     if (!provider) return false;
     // No session at all — nothing was restored, so there is nothing to be stale.
     if (!provider.session) return false;
@@ -195,9 +236,9 @@ export async function walletConnectSessionLive(connector: any): Promise<boolean 
 }
 
 /** One injected wallet wagmi found, plus what it answered when asked about this site. */
-export interface InjectedCandidate {
+export interface InjectedCandidate<C extends ConnectorLike = ConnectorLike> {
   /** wagmi connector — `id` is the EIP-6963 rdns ('io.metamask'), or 'injected' for the generic one. */
-  connector: any;
+  connector: NonNullable<C>;
   name: string;
   icon?: string;
   status: InjectedProbe['status'];
@@ -212,17 +253,17 @@ export interface InjectedCandidate {
  * A connector whose provider doesn't answer is reported as `none` rather than dropped, so the
  * caller can tell "no wallets here" apart from "a wallet that is wedged".
  */
-export async function probeInjectedConnectors(
-  connectors: readonly any[],
+export async function probeInjectedConnectors<C extends ConnectorLike>(
+  connectors: readonly C[],
   timeoutMs: number = INJECTED_PROBE_TIMEOUT_MS,
-): Promise<InjectedCandidate[]> {
+): Promise<InjectedCandidate<C>[]> {
   // EIP-6963-discovered connectors and the generic injected() connector both report
   // type 'injected'. Everything else (walletConnect, baseAccount) is a different rail.
-  const injected = connectors.filter((c) => c?.type === 'injected');
+  const injected = connectors.filter((c): c is NonNullable<C> => c?.type === 'injected');
 
   const probed = await Promise.all(
-    injected.map(async (connector): Promise<InjectedCandidate> => {
-      let provider: any = null;
+    injected.map(async (connector): Promise<InjectedCandidate<C>> => {
+      let provider: unknown = null;
       try {
         provider = await connector.getProvider?.();
       } catch {
@@ -259,7 +300,7 @@ export async function probeInjectedConnectors(
  */
 export function looksLikeRealInjectedWallet(): boolean {
   if (typeof window === 'undefined') return false;
-  const eth = (window as any).ethereum;
+  const eth = injectedEthereum();
   if (!eth || typeof eth.request !== 'function') return false;
 
   if (Array.isArray(eth.providers) && eth.providers.length > 0) return true;
@@ -270,7 +311,7 @@ export function looksLikeRealInjectedWallet(): boolean {
 /** True when we're inside MiniPay's browser — one of the paths that touches no blockable host. */
 export function isMiniPayBrowser(): boolean {
   if (typeof window === 'undefined') return false;
-  return Boolean((window as any).ethereum?.isMiniPay);
+  return Boolean(injectedEthereum()?.isMiniPay);
 }
 
 /**
@@ -291,7 +332,8 @@ export function isMiniPayBrowser(): boolean {
  * ordinary web page, and auto-connecting it is exactly what the Connect button exists to
  * prevent. The mobile-webview check is what separates the two.
  */
-export function looksLikeBaseApp(userAgent: string | undefined, ethereum: any): boolean {
+export function looksLikeBaseApp(userAgent: string | undefined, eth: unknown): boolean {
+  const ethereum = eth as InjectedEthereum | null | undefined;
   const ua = String(userAgent ?? '');
   if (ethereum && ethereum.isBaseApp === true) return true;
   if (/\bbase ?app\b/i.test(ua)) return true;
@@ -308,7 +350,7 @@ export function isBaseAppBrowser(): boolean {
   if (typeof window === 'undefined') return false;
   return looksLikeBaseApp(
     typeof navigator !== 'undefined' ? navigator.userAgent : undefined,
-    (window as any).ethereum,
+    injectedEthereum(),
   );
 }
 
@@ -346,7 +388,8 @@ export const AUTO_CONNECT_SURFACES = ['MiniPay', 'Base App', 'Farcaster'] as con
  * what Valora's own bridge sets, and the webview stamps its name into the user agent. Either
  * is enough — both point at the same host.
  */
-export function looksLikeValora(userAgent: string | undefined, ethereum: any): boolean {
+export function looksLikeValora(userAgent: string | undefined, eth: unknown): boolean {
+  const ethereum = eth as InjectedEthereum | null | undefined;
   if (ethereum && (ethereum.isValora === true || ethereum.isValoraApp === true)) return true;
   // Word-bounded so a substring inside some unrelated token can't drag a working wallet off
   // the injected path — a false positive here costs a real user their in-browser wallet.
@@ -358,7 +401,7 @@ export function isValoraBrowser(): boolean {
   if (typeof window === 'undefined') return false;
   return looksLikeValora(
     typeof navigator !== 'undefined' ? navigator.userAgent : undefined,
-    (window as any).ethereum,
+    injectedEthereum(),
   );
 }
 
@@ -375,10 +418,10 @@ export function isValoraBrowser(): boolean {
  * Available only AFTER a session exists, which is the trade: this can shape what happens next,
  * but it cannot pre-empt the connection. Returns null for injected wallets, which have no peer.
  */
-export async function walletConnectPeerName(connector: any): Promise<string | null> {
+export async function walletConnectPeerName(connector: ConnectorLike): Promise<string | null> {
   try {
     if (connector?.type !== 'walletConnect' && connector?.id !== 'walletConnect') return null;
-    const provider: any = await connector?.getProvider?.();
+    const provider = await walletConnectProvider(connector);
     const name = provider?.session?.peer?.metadata?.name;
     return typeof name === 'string' && name.trim() ? name.trim() : null;
   } catch {
@@ -387,7 +430,7 @@ export async function walletConnectPeerName(connector: any): Promise<string | nu
 }
 
 /** Is the wallet on the other end of this session Valora? */
-export async function connectedWalletIsValora(connector: any): Promise<boolean> {
+export async function connectedWalletIsValora(connector: ConnectorLike): Promise<boolean> {
   const name = await walletConnectPeerName(connector);
   return name !== null && /\bvalora\b/i.test(name);
 }
@@ -402,11 +445,11 @@ export async function connectedWalletIsValora(connector: any): Promise<boolean> 
  * Returns null when unknowable (an injected wallet has no session), which callers must read as
  * "no constraint", never as "supports nothing".
  */
-export async function walletApprovedMethods(connector: any): Promise<string[] | null> {
+export async function walletApprovedMethods(connector: ConnectorLike): Promise<string[] | null> {
   try {
-    const provider: any = await connector?.getProvider?.();
+    const provider = await walletConnectProvider(connector);
     const methods = provider?.session?.namespaces?.eip155?.methods;
-    return Array.isArray(methods) && methods.length > 0 ? methods.map((m: any) => String(m)) : null;
+    return Array.isArray(methods) && methods.length > 0 ? methods.map((m: unknown) => String(m)) : null;
   } catch {
     return null;
   }
@@ -441,7 +484,7 @@ export async function walletApprovedMethods(connector: any): Promise<string[] | 
  * Injected wallets (MetaMask, Zerion, Base App, MiniPay, Farcaster) answer in-process and are
  * verified working, so an absent session reads as capable.
  */
-export async function walletCanSignTypedData(connector: any): Promise<boolean> {
+export async function walletCanSignTypedData(connector: ConnectorLike): Promise<boolean> {
   const methods = await walletApprovedMethods(connector);
   if (!methods) return true; // injected / unknowable — no constraint
   return methods.some((m) => /^eth_signTypedData(_v4|_v3)?$/.test(m));
@@ -459,7 +502,7 @@ export async function walletCanSignTypedData(connector: any): Promise<boolean> {
  */
 export type WalletRoute = 'injected' | 'walletconnect' | 'minipay' | 'farcaster' | 'base-app' | 'unknown';
 
-export function walletRouteFor(connector: any, environment: string): WalletRoute {
+export function walletRouteFor(connector: ConnectorLike, environment: string): WalletRoute {
   if (environment === 'MINIPAY') return 'minipay';
   if (environment === 'FARCASTER') return 'farcaster';
   if (environment === 'BASE') return 'base-app';
@@ -503,7 +546,7 @@ export const RELAY_HANDSHAKE_TIMEOUT_MS = 12_000;
  * Resolves true once the connector emits a WalletConnect pairing URI (relay reachable),
  * false if none arrives in time (relay filtered or down).
  */
-export function waitForRelayHandshake(connector: any, ms: number): Promise<boolean> {
+export function waitForRelayHandshake(connector: ConnectorLike, ms: number): Promise<boolean> {
   return new Promise((resolve) => {
     const emitter = connector?.emitter;
     if (!emitter?.on) {
@@ -518,8 +561,8 @@ export function waitForRelayHandshake(connector: any, ms: number): Promise<boole
       resolve(result);
     };
 
-    const onMessage = (message: any) => {
-      if (message?.type === 'display_uri') finish(true);
+    const onMessage = (message: unknown) => {
+      if ((message as { type?: unknown } | null)?.type === 'display_uri') finish(true);
     };
 
     const timer = setTimeout(() => finish(false), ms);
@@ -583,7 +626,7 @@ export function describeConnectFailure(error: unknown): string {
     return 'Connection request was cancelled.';
   }
 
-  const message = String((error as any)?.message || error || '');
+  const message = String((error as { message?: unknown } | null)?.message || error || '');
 
   if (/rejected|denied|user cancel/i.test(message)) {
     return 'Connection request was cancelled.';

@@ -16,7 +16,7 @@ import { WALLET_SESSION_MAX_AGE_MS } from "@/lib/walletSession";
 import { signSiweHeaders, siweChainId, SIWE_HEADER } from "@/lib/siwe";
 import { celoAttributionSuffix } from "@/lib/attribution";
 import { useProviders, useValidSelection, useProviderLimits } from "@/lib/useProviders";
-import { useAccount, useConnect, useDisconnect, useWalletClient, useSwitchChain } from 'wagmi';
+import { useAccount, useConnect, useDisconnect, useWalletClient, useSwitchChain, type Connector } from 'wagmi';
 import { payWithX402, X402PaymentError } from "@/lib/x402Pay";
 
 import { ReceiptModal, SelectionModal } from "@/components/Modals";
@@ -47,6 +47,9 @@ import {
   INJECTED_CONNECT_TIMEOUT_MS,
   RELAY_HANDSHAKE_TIMEOUT_MS,
 } from "@/lib/walletEnv";
+
+// Injected wallets found by walletEnv, carrying wagmi's own Connector so they can be passed to connect().
+type WalletCandidate = InjectedCandidate<Connector>;
 import {
   ABAPAY_ABI, ERC20_ABI, SERVICES,
   SUPPORTED_TOKENS, SUPPORTED_COUNTRIES, PRE_SELECT_AMOUNTS,
@@ -144,12 +147,12 @@ export default function Home() {
   const [, setInjectedProbe] = useState<InjectedProbe | null>(null);
   // Every injected wallet wagmi discovered (EIP-6963 included), each with what it answered
   // when asked about this site. Drives auto-connect and the Connect button's routing.
-  const [injectedCandidates, setInjectedCandidates] = useState<InjectedCandidate[]>([]);
+  const [injectedCandidates, setInjectedCandidates] = useState<WalletCandidate[]>([]);
   // Open only while the user is picking between multiple installed wallets. `resolve` is the
   // waiting handleConnectClick — calling it with a candidate continues the connect, calling
   // it with null cancels cleanly (no error banner, no WalletConnect fallback).
   const [walletChoice, setWalletChoice] = useState<
-    { options: InjectedCandidate[]; resolve: (c: InjectedCandidate | null) => void } | null
+    { options: WalletCandidate[]; resolve: (c: WalletCandidate | null) => void } | null
   >(null);
 
   /**
@@ -160,8 +163,8 @@ export default function Home() {
    * that flow, not a second flow.
    */
   const askWhichWallet = useCallback(
-    (options: InjectedCandidate[]) =>
-      new Promise<InjectedCandidate | null>((resolve) => {
+    (options: WalletCandidate[]) =>
+      new Promise<WalletCandidate | null>((resolve) => {
         setWalletChoice({
           options,
           resolve: (choice) => { setWalletChoice(null); resolve(choice); },
@@ -3037,7 +3040,7 @@ export default function Home() {
       // ERC-1271 signatures it produces (see verifySignatureAcrossChains).
       const baseAccountConnector = connectors.find(c => c.id === 'baseAccount' || c.type === 'baseAccount');
 
-      const options: InjectedCandidate[] = [
+      const options: WalletCandidate[] = [
         ...usable,
         ...(baseAccountConnector ? [{ connector: baseAccountConnector, name: 'Base Account', status: 'available' as const }] : []),
         ...(wcConnector ? [{ connector: wcConnector, name: 'WalletConnect', status: 'available' as const }] : []),
@@ -3045,7 +3048,7 @@ export default function Home() {
 
       // One option is not a decision — a browser with no injected wallet still goes straight to
       // WalletConnect without a pointless one-item modal.
-      let chosen: InjectedCandidate | null | undefined = options[0];
+      let chosen: WalletCandidate | null | undefined = options[0];
 
       if (options.length > 1) {
         chosen = await askWhichWallet(options);
