@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { createFakeDb, fakeSupabase, type FakeDb } from './helpers/fakeSupabase';
+import type { TransactionRow } from '@/lib/rows';
 
 // M7: the stuck-payment reconciler. Paid on-chain, never finished. It may only ever ASK the
 // provider (requery); it never re-sends. Delivered → complete, failed → refund, no record →
@@ -28,7 +29,9 @@ vi.mock('@/lib/monnifyVend', () => ({
 vi.mock('resend', () => ({ Resend: class { emails = { send: async () => ({}) }; } }));
 vi.stubGlobal('fetch', fetchMock);
 
-const { reconcileStuckRow, reconcileStuckProcessing } = await import('@/lib/reconcileStuck');
+const { reconcileStuckRow: reconcileRow, reconcileStuckProcessing } = await import('@/lib/reconcileStuck');
+// Fixtures carry only the columns each case needs; the full row type is asserted here, once.
+const reconcileStuckRow = (r: object, base: string) => reconcileRow(r as TransactionRow, base);
 
 const BASE = 'https://sandbox.vtpass.com/api';
 const row = (over: Record<string, unknown> = {}) => ({

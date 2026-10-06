@@ -1,5 +1,4 @@
 import 'server-only';
-import crypto from 'crypto';
 import { supabaseAdmin as supabase } from '@/utils/supabase';
 import { sendTelegramAlert } from '@/lib/telegram';
 import { sendAbaPaySms } from '@/lib/messaging';
@@ -12,6 +11,7 @@ import { tripCircuit } from '@/lib/circuitBreaker';
 import { Resend } from 'resend';
 import { normalizePurchasedCode, issuesTokenOrPin } from '@/lib/purchasedCode';
 import { log, metric } from '@/lib/log';
+import { errorMessage } from '@/lib/errors';
 
 const resend = new Resend(process.env.RESEND_API_KEY || 're_dummy_key_for_build');
 
@@ -185,7 +185,8 @@ async function executeVendImpl(input: VendInput): Promise<VendResult> {
   const safeAmount = isForeign ? parseFloat(String(foreignAmount || '1')) : vendAmount;
   const safePhone = isForeign ? '08168811821' : (phone || billersCode);
 
-  let vtpassPayload: any = {
+  // Only the fields this bill type needs are set below; JSON.stringify drops the undefined ones.
+  const vtpassPayload: Record<string, string | number | null | undefined> = {
     request_id: vtRequestId,
     serviceID: serviceID,
     amount: safeAmount,
@@ -221,16 +222,16 @@ async function executeVendImpl(input: VendInput): Promise<VendResult> {
   try {
     payRes = await fetch(`${baseUrl}/pay`, { method: 'POST', headers: getHeaders(), body: JSON.stringify(vtpassPayload) });
     payData = await payRes.json();
-  } catch (e: any) {
+  } catch (e) {
     // 🔴 AN UNANSWERED /pay IS AN UNKNOWN OUTCOME, NOT A FAILED ONE (ABAPAY_FULL_AUDIT.md P-4).
     // This used to put the row back to PENDING — which let the next settle or webhook re-claim
     // it and send VTpass a SECOND order for a bill the first one may already have delivered.
     // The row stays PROCESSING (nothing can re-lock it), the request_id VTpass was sent stays
     // put, and src/lib/reconcileStuck.ts resolves it by REQUERY — never by paying again.
-    console.warn('[Vend] VTpass /pay unanswered — left PROCESSING for requery:', txHash, e?.message);
+    console.warn('[Vend] VTpass /pay unanswered — left PROCESSING for requery:', txHash, errorMessage(e));
     await supabase.from('transactions').update({
       error_code: 'PROVIDER_NO_RESPONSE',
-      api_response: `VTpass /pay did not answer (${String(e?.message || 'no response').slice(0, 200)}). Outcome unknown — resolve by requery, never by re-sending.`,
+      api_response: `VTpass /pay did not answer (${errorMessage(e).slice(0, 200) || 'no response'}). Outcome unknown — resolve by requery, never by re-sending.`,
     }).eq('tx_hash', txHash);
     return { success: true, status: 'TIMEOUT', message: 'Network slow. Finishing in background.' };
   }

@@ -10,6 +10,8 @@ import { Resend } from 'resend';
 import { normalizePurchasedCode, issuesTokenOrPin } from '@/lib/purchasedCode';
 import { recordLateDelivery, recordLateFailure } from '@/lib/providerOutcome';
 import { pointsForPayment } from '@/lib/points';
+import { errorMessage } from '@/lib/errors';
+import type { VtpassReply } from '@/lib/vtpassReply';
 
 const resend = new Resend(process.env.RESEND_API_KEY || "re_dummy_key_for_build");
 
@@ -73,7 +75,7 @@ export async function POST(req: Request) {
       body: JSON.stringify({ request_id })
     });
 
-    const requeryData = await requeryRes.json();
+    const requeryData: VtpassReply = await requeryRes.json();
     const actualStatus = requeryData.content?.transactions?.status;
 
     if (actualStatus === 'delivered' || actualStatus === 'successful') {
@@ -93,7 +95,7 @@ export async function POST(req: Request) {
           if (tokenMatch) dbPurchasedCode = tokenMatch[1].replace(/[-\s]/g, '');
       }
 
-      let vendedUnits = requeryData.units || requeryData.content?.transactions?.units || null;
+      const vendedUnits = requeryData.units || requeryData.content?.transactions?.units || null;
 
       // STRICT TOKEN REQUIREMENT FOR REQUERY
       const serviceCategory = record.service_category;
@@ -176,7 +178,7 @@ export async function POST(req: Request) {
       const queued = await recordLateFailure(record, `VTpass ${actualStatus} (requery): ${requeryData.response_description || ''}`.trim());
 
       if (queued === 'QUEUED') {
-        try { await sendTelegramAlert(`🚨 *DELAYED TX FAILED (REQUERY)*\n⛓️ *Chain:* ${record.blockchain || 'CELO'}\n🛒 *Product:* ${record.network} ${record.service_category}\n👤 *User:* ${record.account_number}\nVTpass finally rejected this transaction. A refund has been queued — approve it in Admin → Refunds.`); } catch (e) {}
+        try { await sendTelegramAlert(`🚨 *DELAYED TX FAILED (REQUERY)*\n⛓️ *Chain:* ${record.blockchain || 'CELO'}\n🛒 *Product:* ${record.network} ${record.service_category}\n👤 *User:* ${record.account_number}\nVTpass finally rejected this transaction. A refund has been queued — approve it in Admin → Refunds.`); } catch { /* the refund is queued either way */ }
       }
 
       return NextResponse.json({ success: true, status: record.status === 'SUCCESS' ? 'REVERSED_NEEDS_REFUND' : 'FAILED_VENDING' });
@@ -185,8 +187,8 @@ export async function POST(req: Request) {
       return NextResponse.json({ success: true, status: 'PENDING', message: 'Transaction is still processing at the provider.' });
     }
 
-  } catch (error: any) {
-    console.error("Requery Error:", error.message);
+  } catch (error) {
+    console.error("Requery Error:", errorMessage(error));
     return NextResponse.json({ success: false, message: "Server error while querying status" }, { status: 500 });
   }
 }

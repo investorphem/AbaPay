@@ -8,6 +8,7 @@ import { checkProviderBalances } from '@/lib/balanceAlerts';
 import { tripCircuit } from '@/lib/circuitBreaker';
 import type { VendInput, VendResult } from '@/lib/vend';
 import { Resend } from 'resend';
+import { errorMessage } from '@/lib/errors';
 
 const resend = new Resend(process.env.RESEND_API_KEY || 're_dummy_key_for_build');
 
@@ -45,7 +46,7 @@ export async function initiateMonnifyBankTransfer(input: VendInput): Promise<Ven
       destinationAccountNumber: billersCode,
       destinationAccountName: customer_name,
     });
-  } catch (e: any) {
+  } catch (e) {
     // 🔴 THE BUG THIS FIXES: this used to silently reset the row to PENDING and tell the user
     // "finishing in background" for ANY failure here — a genuine network blip AND an outright
     // rejection from Monnify (bad request, insufficient float, whatever reason) got IDENTICAL
@@ -56,14 +57,14 @@ export async function initiateMonnifyBankTransfer(input: VendInput): Promise<Ven
     // delay before the stuck-sweep's generic "Monnify has no record" alert, with none of the
     // actual rejection reason attached. Alerting immediately, with the real error, gets the
     // operator to a manual retry-or-refund decision faster and better-informed.
-    console.error('[Monnify] initiateTransfer threw:', e.message);
+    console.error('[Monnify] initiateTransfer threw:', errorMessage(e));
     // 🔴 THE BUG THIS FIXES: this only ever told the OPERATOR the real reason (Telegram +
     // console) — the DATABASE row got nothing but a bare status reset, leaving error_code and
     // api_response empty until the reconcile sweep's generic "no record" guess caught up
     // 5+ minutes later, if ever. Persist the real error immediately so "Check Status"/the
     // admin ledger reflects what actually happened from the very first attempt, not just
     // after a delay.
-    const initiateError = String(e?.message || 'Monnify did not confirm receiving this transfer request').slice(0, 300);
+    const initiateError = (errorMessage(e) || 'Monnify did not confirm receiving this transfer request').slice(0, 300);
     await supabase.from('transactions').update({ status: 'PENDING', error_code: 'INITIATE_FAILED', api_response: initiateError }).eq('tx_hash', txHash);
     try {
       await sendTelegramAlert(
@@ -104,7 +105,7 @@ export interface FinalizeParams {
   txHash: string;
   reference: string;
   outcome: 'SUCCESS' | 'FAILED';
-  raw?: any;
+  raw?: unknown;
   failureReason?: string;
 }
 
@@ -166,7 +167,7 @@ export async function finalizeMonnifyTransfer(p: FinalizeParams): Promise<VendRe
     const rate = process.env.NEXT_PUBLIC_FIXED_RATE ? Number(process.env.NEXT_PUBLIC_FIXED_RATE) : (Number(record.amount_naira) / (Number(record.amount_usdt) || 1));
     const points = Number.isFinite(rate) && rate > 0 ? Number((Number(record.amount_naira) / rate).toFixed(2)) : 0;
     if (points > 0 && record.wallet_address) {
-      supabase.rpc('award_transaction_points', { target_wallet: record.wallet_address.toLowerCase(), points_to_add: points }).then(({ error }: any) => {
+      supabase.rpc('award_transaction_points', { target_wallet: record.wallet_address.toLowerCase(), points_to_add: points }).then(({ error }) => {
         if (error) console.error('[Monnify] Points error:', error.message);
       });
     }

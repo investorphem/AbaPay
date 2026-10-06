@@ -50,9 +50,11 @@ export interface X402Authorization {
  * strict about the authorization itself — a missing field here becomes an unreadable revert
  * later, which is the whole thing this file is trying to stop.
  */
-export function readAuthorization(decodedPayload: any): X402Authorization | null {
-  const auth = decodedPayload?.payload?.authorization ?? decodedPayload?.authorization;
-  if (!auth || typeof auth !== 'object') return null;
+export function readAuthorization(decodedPayload: unknown): X402Authorization | null {
+  const p = (decodedPayload ?? {}) as { payload?: { authorization?: unknown }; authorization?: unknown };
+  const found = p.payload?.authorization ?? p.authorization;
+  if (!found || typeof found !== 'object') return null;
+  const auth = found as Record<string, unknown>;
   const fields = ['from', 'to', 'value', 'validAfter', 'validBefore', 'nonce'] as const;
   if (fields.some((f) => auth[f] === undefined || auth[f] === null || auth[f] === '')) return null;
   return {
@@ -400,7 +402,8 @@ export function transferAuthorizationTypedData(params: {
  * not by the client, not on the contract-call rail. Checked independently of the reason text,
  * because a hash is evidence and a message is prose.
  */
-export function settleResponseNamesTransaction(parsed: any): boolean {
-  const tx = parsed?.transaction ?? parsed?.txHash ?? parsed?.tx_hash;
+export function settleResponseNamesTransaction(parsed: unknown): boolean {
+  const p = (parsed ?? {}) as { transaction?: unknown; txHash?: unknown; tx_hash?: unknown };
+  const tx = p.transaction ?? p.txHash ?? p.tx_hash;
   return typeof tx === 'string' && /^0x[0-9a-fA-F]{64}$/.test(tx.trim());
 }

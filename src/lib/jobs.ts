@@ -8,6 +8,7 @@ import { sendTelegramAlert } from '@/lib/telegram';
 import { log, metric } from '@/lib/log';
 import { getHeaders } from '@/lib/vtpass';
 import { requeryMonnifyTransfer } from '@/lib/monnifyVend';
+import type { TransactionRow } from '@/lib/rows';
 
 // 🧾 FULFILMENT JOBS (M6). See migration 034 for the why.
 //
@@ -34,10 +35,8 @@ export interface FulfilmentJob {
 
 export type JobOutcome = 'done' | 'retry' | 'needs_review';
 
-// A transactions row, untyped like everywhere else that reads one (vendInputFromRow and
-// reconcileStuckRow take the same shape).
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-type TxRow = Record<string, any>;
+// A transactions row (src/lib/rows.ts, generated from the schema).
+type TxRow = TransactionRow;
 
 const FINISHED = new Set(['SUCCESS', 'FAILED_VENDING', 'REFUNDED', 'EXPIRED', 'FAILED_PAYMENT', 'REVERSED_NEEDS_REFUND']);
 
