@@ -17,10 +17,12 @@ vi.mock('@/lib/deai/relayer', () => ({ getRemainingAllowance: async () => 0, get
 vi.mock('@/lib/deai/batch', () => ({ checkAutonomousCapacity: async () => ({}), groupByChainToken: () => [], executeAgentPayment: async () => ({}) }));
 
 import { callTool as callToolRaw, NEEDS_AUTH, type ToolResult } from '@/lib/deai/mcpTools';
+import type { McpIdentity } from '@/lib/deai/mcpAuth';
 
-// Every case here supplies an identity, so NEEDS_AUTH would itself be a failure.
-const callTool = async (...a: Parameters<typeof callToolRaw>): Promise<ToolResult> => {
-  const r = await callToolRaw(...a);
+// Every case here supplies an identity, so NEEDS_AUTH would itself be a failure. The fixture is a
+// partial identity (only the fields these tools read), asserted to the full type here, once.
+const callTool = async (name: string, args: Record<string, unknown>, identity: object): Promise<ToolResult> => {
+  const r = await callToolRaw(name, args, identity as McpIdentity);
   if (r === NEEDS_AUTH) throw new Error('unexpected NEEDS_AUTH');
   return r;
 };
@@ -43,7 +45,7 @@ beforeEach(() => {
   db.rpcHandlers = {
     pin_attempt_reserve: ({ p_link_id }) => {
       const row = db.tables.agent_links.find((r) => r.id === p_link_id)!;
-      row.failed_pin_attempts += 1;
+      row.failed_pin_attempts = Number(row.failed_pin_attempts) + 1;
       return [{ allowed: true, attempts: row.failed_pin_attempts, locked_until: null, locked_now: false }];
     },
     pin_attempt_clear: ({ p_link_id }) => { db.tables.agent_links.find((r) => r.id === p_link_id)!.failed_pin_attempts = 0; return null; },
@@ -51,45 +53,45 @@ beforeEach(() => {
 });
 
 const active = () => db.tables.scheduled_bills.filter((s) => s.is_active).map((s) => s.id);
-const text = (r: any) => r?.content?.[0]?.text as string;
+const text = (r: ToolResult) => (r.content[0] as { text?: string } | undefined)?.text as string;
 
 describe('cancel_schedule', () => {
   it('cancels a single schedule by id without a PIN', async () => {
-    const r = await callTool('cancel_schedule', { id: 's1' }, identity as any);
+    const r = await callTool('cancel_schedule', { id: 's1' }, identity);
     expect(r?.isError).toBeFalsy();
     expect(active()).toEqual(['s2', 's3']);
   });
 
   it('refuses a call with no selector instead of cancelling everything', async () => {
-    const r = await callTool('cancel_schedule', {}, identity as any);
+    const r = await callTool('cancel_schedule', {}, identity);
     expect(r?.isError).toBe(true);
     expect(active()).toEqual(['s1', 's2', 's3']);
   });
 
   it('requires the PIN to cancel all', async () => {
-    const r = await callTool('cancel_schedule', { all: true }, identity as any);
+    const r = await callTool('cancel_schedule', { all: true }, identity);
     expect(r?.isError).toBe(true);
     expect(text(r)).toMatch(/PIN/);
     expect(active()).toHaveLength(3);
   });
 
   it('a wrong PIN cancels nothing and is counted', async () => {
-    const r = await callTool('cancel_schedule', { all: true, pin: '000000' }, identity as any);
+    const r = await callTool('cancel_schedule', { all: true, pin: '000000' }, identity);
     expect(r?.isError).toBe(true);
     expect(active()).toHaveLength(3);
     expect(db.tables.agent_links[0].failed_pin_attempts).toBe(1);
   });
 
   it('all: true with the right PIN cancels every schedule', async () => {
-    const r = await callTool('cancel_schedule', { all: true, pin: '482915' }, identity as any);
+    const r = await callTool('cancel_schedule', { all: true, pin: '482915' }, identity);
     expect(r?.isError).toBeFalsy();
     expect(active()).toEqual([]);
   });
 
   it('provider needs the PIN, and cancels only that provider', async () => {
-    expect((await callTool('cancel_schedule', { provider: 'mtn' }, identity as any))?.isError).toBe(true);
+    expect((await callTool('cancel_schedule', { provider: 'mtn' }, identity))?.isError).toBe(true);
     expect(active()).toHaveLength(3);
-    await callTool('cancel_schedule', { provider: 'mtn', pin: '482915' }, identity as any);
+    await callTool('cancel_schedule', { provider: 'mtn', pin: '482915' }, identity);
     expect(active()).toEqual(['s3']);
   });
 });

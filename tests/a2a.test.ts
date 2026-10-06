@@ -1,5 +1,8 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 
+/** One part of an A2A agent message, as these tests read it. */
+type Part = { kind: string; text?: string; data?: { isError?: boolean; [key: string]: unknown }; file?: { mimeType?: string; bytes?: string } };
+
 // ⚡ A2A TRANSPORT TESTS
 //
 // These cover the code added for /api/a2a — JSON-RPC framing, part mapping, the auth branch and
@@ -84,11 +87,11 @@ describe('message/send — structured invocation', () => {
     expect(body.result.kind).toBe('message');
     expect(body.result.role).toBe('agent');
 
-    const text = body.result.parts.find((p: any) => p.kind === 'text');
+    const text = body.result.parts.find((p: Part) => p.kind === 'text');
     expect(text.text).toContain('airtime');
 
     // The raw tool result rides along so a peer agent can act on structure, not prose.
-    const data = body.result.parts.find((p: any) => p.kind === 'data');
+    const data = body.result.parts.find((p: Part) => p.kind === 'data');
     expect(data.data.isError).toBe(false);
     expect(data.data.raw).toBeTruthy();
   });
@@ -102,7 +105,7 @@ describe('message/send — structured invocation', () => {
     });
 
     const body = await (await POST(rpc('message/send', message([dataPart('pay_bill')])))).json();
-    const file = body.result.parts.find((p: any) => p.kind === 'file');
+    const file = body.result.parts.find((p: Part) => p.kind === 'file');
 
     expect(file.file.mimeType).toBe('image/png');
     expect(file.file.bytes).toBe('aGVsbG8=');
@@ -116,7 +119,7 @@ describe('message/send — structured invocation', () => {
 
     expect(res.status).toBe(200); // a refused payment is a normal answer, not a broken call
     expect(body.error).toBeUndefined();
-    expect(body.result.parts.find((p: any) => p.kind === 'data').data.isError).toBe(true);
+    expect(body.result.parts.find((p: Part) => p.kind === 'data').data.isError).toBe(true);
   });
 
   it('echoes contextId back to the caller', async () => {
@@ -136,7 +139,7 @@ describe('message/send — prose gets the catalogue, never a guess', () => {
     expect(callTool).not.toHaveBeenCalled();
     expect(res.status).toBe(200);
 
-    const data = body.result.parts.find((p: any) => p.kind === 'data');
+    const data = body.result.parts.find((p: Part) => p.kind === 'data');
     expect(data.data.skills).toHaveLength(6);
     expect(data.data.skills[0].inputSchema).toBeTruthy();
   });

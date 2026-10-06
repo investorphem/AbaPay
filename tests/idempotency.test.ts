@@ -35,7 +35,7 @@ describe('runIdempotent', () => {
     expect(c.n).toBe(1);
     expect(a.kind).toBe('RAN');
     expect(b.kind).toBe('REPLAY');
-    expect((b as any).result).toEqual((a as any).result);
+    expect((b as { result?: unknown }).result).toEqual((a as { result?: unknown }).result);
   });
 
   it('the same key with different arguments is refused', async () => {

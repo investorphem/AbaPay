@@ -6,17 +6,18 @@
 // Every builder is thenable, so `await supabase.from(t).update(...).eq(...)` resolves the same
 // way the real client does: { data, error }.
 
-type Row = Record<string, any>;
+type Row = Record<string, unknown>;
 type Filter = (row: Row) => boolean;
 
 export interface FakeDb {
   tables: Record<string, Row[]>;
   unique: Record<string, string[]>;
-  log: { table: string; op: string; payload?: any }[];
+  log: { table: string; op: string; payload?: unknown }[];
   /** When set, the next insert into this table fails with a generic database error. */
   failNextInsert?: string;
   /** Test-supplied implementations of Postgres functions called via `.rpc(name, args)`. */
-  rpcHandlers?: Record<string, (args: any, db: FakeDb) => any>;
+  // `never` lets each test declare its handler with the exact argument shape it expects.
+  rpcHandlers?: Record<string, (args: never, db: FakeDb) => unknown>;
 }
 
 export function createFakeDb(seed: Record<string, Row[]> = {}): FakeDb {
@@ -29,10 +30,13 @@ export function createFakeDb(seed: Record<string, Row[]> = {}): FakeDb {
 
 let nextId = 1;
 
-class Query implements PromiseLike<{ data: any; error: any }> {
+/** What a PostgREST call resolves to: rows (or one row), or an error with a Postgres code. */
+type Result = { data: unknown; error: { code: string; message: string } | null };
+
+class Query implements PromiseLike<Result> {
   private filters: Filter[] = [];
   private op: 'select' | 'insert' | 'upsert' | 'update' | 'delete' = 'select';
-  private payload: any = null;
+  private payload: Row | Row[] | null = null;
   private onConflict: string | null = null;
   private returning = false;
   private cardinality: 'many' | 'single' | 'maybeSingle' = 'many';
@@ -42,32 +46,32 @@ class Query implements PromiseLike<{ data: any; error: any }> {
     db.tables[table] ??= [];
   }
 
-  select(_cols?: string) { if (this.op === 'select') this.op = 'select'; else this.returning = true; return this; }
-  insert(p: any) { this.op = 'insert'; this.payload = p; return this; }
-  upsert(p: any, o?: { onConflict?: string }) { this.op = 'upsert'; this.payload = p; this.onConflict = o?.onConflict ?? null; return this; }
-  update(p: any) { this.op = 'update'; this.payload = p; return this; }
+  select() { if (this.op === 'select') this.op = 'select'; else this.returning = true; return this; }
+  insert(p: Row | Row[]) { this.op = 'insert'; this.payload = p; return this; }
+  upsert(p: Row | Row[], o?: { onConflict?: string }) { this.op = 'upsert'; this.payload = p; this.onConflict = o?.onConflict ?? null; return this; }
+  update(p: Row) { this.op = 'update'; this.payload = p; return this; }
   delete() { this.op = 'delete'; return this; }
 
-  eq(col: string, v: any) { this.filters.push((r) => r[col] === v); return this; }
-  neq(col: string, v: any) { this.filters.push((r) => r[col] !== v); return this; }
-  in(col: string, vs: any[]) { this.filters.push((r) => vs.includes(r[col])); return this; }
+  eq(col: string, v: unknown) { this.filters.push((r) => r[col] === v); return this; }
+  neq(col: string, v: unknown) { this.filters.push((r) => r[col] !== v); return this; }
+  in(col: string, vs: readonly unknown[]) { this.filters.push((r) => vs.includes(r[col])); return this; }
   like(col: string, pat: string) { const re = likeToRegex(pat, false); this.filters.push((r) => re.test(String(r[col] ?? ''))); return this; }
   ilike(col: string, pat: string) { const re = likeToRegex(pat, true); this.filters.push((r) => re.test(String(r[col] ?? ''))); return this; }
   is(col: string, v: null | boolean) { this.filters.push((r) => (v === null ? r[col] == null : r[col] === v)); return this; }
-  not(col: string, op: string, v: any) {
-    if (op === 'like') { const re = likeToRegex(v, false); this.filters.push((r) => !re.test(String(r[col] ?? ''))); }
+  not(col: string, op: string, v: unknown) {
+    if (op === 'like') { const re = likeToRegex(String(v), false); this.filters.push((r) => !re.test(String(r[col] ?? ''))); }
     else if (op === 'is') this.filters.push((r) => (v === null ? r[col] != null : r[col] !== v));
     else throw new Error(`fakeSupabase: .not(${op}) not modelled`);
     return this;
   }
-  gte(col: string, v: any) { this.filters.push((r) => r[col] >= v); return this; }
-  lt(col: string, v: any) { this.filters.push((r) => r[col] < v); return this; }
+  gte(col: string, v: number | string) { this.filters.push((r) => (r[col] as number | string) >= v); return this; }
+  lt(col: string, v: number | string) { this.filters.push((r) => (r[col] as number | string) < v); return this; }
   order() { return this; }
   limit(n: number) { this.limitN = n; return this; }
   single() { this.cardinality = 'single'; return this; }
   maybeSingle() { this.cardinality = 'maybeSingle'; return this; }
 
-  then<A, B>(ok?: ((v: { data: any; error: any }) => A | PromiseLike<A>) | null, bad?: ((e: any) => B | PromiseLike<B>) | null) {
+  then<A, B>(ok?: ((v: Result) => A | PromiseLike<A>) | null, bad?: ((e: unknown) => B | PromiseLike<B>) | null) {
     return Promise.resolve(this.run()).then(ok, bad);
   }
 
@@ -95,7 +99,7 @@ class Query implements PromiseLike<{ data: any; error: any }> {
     return { data: { ...limited[0] }, error: null };
   }
 
-  private run(): { data: any; error: any } {
+  private run(): Result {
     this.db.log.push({ table: this.table, op: this.op, payload: this.payload });
     switch (this.op) {
       case 'select':
@@ -105,7 +109,7 @@ class Query implements PromiseLike<{ data: any; error: any }> {
           this.db.failNextInsert = undefined;
           return { data: null, error: { code: 'XX000', message: 'simulated database failure' } };
         }
-        const incoming = [].concat(this.payload).map((r: Row) => ({ id: `row-${nextId++}`, created_at: new Date().toISOString(), ...r }));
+        const incoming = ([] as Row[]).concat(this.payload ?? []).map((r: Row) => ({ id: `row-${nextId++}`, created_at: new Date().toISOString(), ...r }));
         for (const r of incoming) {
           const col = this.collides(r);
           if (col) return { data: null, error: { code: '23505', message: `duplicate key value violates unique constraint "${this.table}_${col}_key"` } };
@@ -114,7 +118,7 @@ class Query implements PromiseLike<{ data: any; error: any }> {
         return this.returning ? this.shape(incoming) : { data: null, error: null };
       }
       case 'upsert': {
-        const incoming = [].concat(this.payload) as Row[];
+        const incoming = ([] as Row[]).concat(this.payload ?? []);
         const out: Row[] = [];
         for (const r of incoming) {
           const key = this.onConflict;
@@ -127,10 +131,10 @@ class Query implements PromiseLike<{ data: any; error: any }> {
       case 'update': {
         const hits = this.matching();
         for (const r of hits) {
-          const col = this.collides({ ...r, ...this.payload }, r);
+          const col = this.collides({ ...r, ...(this.payload as Row) }, r);
           if (col) return { data: null, error: { code: '23505', message: `duplicate key value violates unique constraint "${this.table}_${col}_key"` } };
         }
-        hits.forEach((r) => Object.assign(r, this.payload));
+        hits.forEach((r) => Object.assign(r, this.payload as Row));
         return this.returning ? this.shape(hits) : { data: null, error: null };
       }
       case 'delete': {
@@ -150,9 +154,9 @@ function likeToRegex(pattern: string, insensitive: boolean) {
 export function fakeSupabase(db: FakeDb) {
   return {
     from: (table: string) => new Query(db, table),
-    rpc: async (name: string, args: any) => {
+    rpc: async (name: string, args: unknown) => {
       const handler = db.rpcHandlers?.[name];
-      return handler ? { data: handler(args, db), error: null } : { data: null, error: null };
+      return handler ? { data: handler(args as never, db), error: null } : { data: null, error: null };
     },
   };
 }

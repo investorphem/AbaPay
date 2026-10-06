@@ -11,8 +11,8 @@ vi.mock('server-only', () => ({}));
 
 let db: FakeDb;
 let liveLimits: { min: number | null; max: number | null } = { min: null, max: null };
-const probe = vi.fn(async (_p: string) => {});
-const sendTelegramAlert = vi.fn(async (_t: string) => {});
+const probe = vi.fn<(provider: string) => Promise<void>>(async () => {});
+const sendTelegramAlert = vi.fn<(text: string) => Promise<void>>(async () => {});
 
 vi.mock('@/utils/supabase', () => ({ get supabaseAdmin() { return fakeSupabase(db); } }));
 vi.mock('@/lib/telegram', () => ({ sendTelegramAlert: (t: string) => sendTelegramAlert(t) }));
@@ -33,7 +33,7 @@ function settings(kill_switches: Record<string, boolean> = {}, provider_circuits
   db.rpcHandlers = {
     set_provider_circuit: ({ p_provider, p_open, p_reason }: { p_provider: string; p_open: boolean; p_reason: string }, d: FakeDb) => {
       const row = d.tables.platform_settings[0];
-      const was = row.provider_circuits?.[p_provider]?.open === true;
+      const was = (row.provider_circuits as Record<string, { open?: boolean }> | undefined)?.[p_provider]?.open === true;
       if (was === p_open) return false;
       row.provider_circuits = { ...(row.provider_circuits || {}), [p_provider]: { open: p_open, since: new Date().toISOString(), reason: p_reason } };
       return true;

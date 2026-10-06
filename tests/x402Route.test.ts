@@ -18,7 +18,7 @@ let facilitatorCalls = 0;
 let intentRowsAtSettle: number[] = [];
 const executeVend = vi.fn(async (input: { vtRequestId: string }) => ({ success: true, status: 'SUCCESS', request_id: input.vtRequestId }));
 const enqueueRefund = vi.fn(async () => ({ queued: true }));
-const sendTelegramAlert = vi.fn(async (_text: string) => {});
+const sendTelegramAlert = vi.fn<(text: string) => Promise<void>>(async () => {});
 
 vi.mock('@/utils/supabase', () => ({ get supabaseAdmin() { return fakeSupabase(db); } }));
 vi.mock('@/lib/telegram', () => ({ sendTelegramAlert: (t: string) => sendTelegramAlert(t) }));

@@ -14,8 +14,8 @@ vi.mock('server-only', () => ({}));
 
 let db: FakeDb;
 let receipts: Record<string, FakeReceipt | Error> = {};
-const executeVend = vi.fn(async (input: any) => ({ success: true, status: 'SUCCESS', request_id: input.vtRequestId, purchased_code: null }));
-const sendTelegramAlert = vi.fn(async (_text: string) => {});
+const executeVend = vi.fn(async (input: { vtRequestId: string }) => ({ success: true, status: 'SUCCESS', request_id: input.vtRequestId, purchased_code: null }));
+const sendTelegramAlert = vi.fn<(text: string) => Promise<void>>(async () => {});
 let rateLimited = false;
 
 vi.mock('@/utils/supabase', () => ({ get supabaseAdmin() { return fakeSupabase(db); } }));
@@ -23,7 +23,7 @@ vi.mock('@/lib/telegram', () => ({ sendTelegramAlert: (t: string) => sendTelegra
 vi.mock('@/lib/vend', () => {
   let n = 0;
   return {
-    executeVend: (input: any) => executeVend(input),
+    executeVend: (input: { vtRequestId: string }) => executeVend(input),
     getStrictRequestId: () => `202609281200req${String(++n).padStart(6, '0')}`,
   };
 });
@@ -38,7 +38,7 @@ vi.mock('@/lib/rateLimit', () => ({
   enforceRateLimit: async () => (rateLimited ? new Response('{}', { status: 429 }) : null),
 }));
 vi.mock('@/lib/chain', async (importOriginal) => {
-  const actual: any = await importOriginal();
+  const actual = await importOriginal<typeof import('@/lib/chain')>();
   return { ...actual, getPublicClient: () => fakeClient(receipts) };
 });
 
@@ -49,7 +49,7 @@ beforeAll(() => {
 
 const { POST } = await import('@/app/api/pay/route');
 
-const post = async (body: any) => {
+const post = async (body: Record<string, unknown>) => {
   const res = await POST(new Request('http://localhost/api/pay', { method: 'POST', body: JSON.stringify(body) }));
   return { status: res.status, json: await res.json() };
 };
@@ -64,7 +64,7 @@ const bill = {
 
 const goodReceipt = (): FakeReceipt => ({ status: 'success', logs: [celoPayment('USDC', '1.0', 'mtn', '08012345678')] });
 
-async function intent(extra: any = {}) {
+async function intent(extra: Record<string, unknown> = {}) {
   const r = await post({ ...bill, intent_only: true, ...extra });
   return r;
 }

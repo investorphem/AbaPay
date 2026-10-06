@@ -36,11 +36,11 @@ beforeEach(() => {
   });
   // JS models of claim_jobs / complete_job / fail_job (migration 034).
   db.rpcHandlers = {
-    claim_jobs: () => db.tables.fulfilment_jobs.filter((j) => j.status === 'queued').map((j) => Object.assign(j, { status: 'running', attempts: j.attempts + 1 })).map((j) => ({ ...j })),
+    claim_jobs: () => db.tables.fulfilment_jobs.filter((j) => j.status === 'queued').map((j) => Object.assign(j, { status: 'running', attempts: Number(j.attempts) + 1 })).map((j) => ({ ...j })),
     complete_job: ({ p_id }) => { db.tables.fulfilment_jobs.find((j) => j.id === p_id)!.status = 'done'; return null; },
     fail_job: ({ p_id, p_error }) => {
       const j = db.tables.fulfilment_jobs.find((x) => x.id === p_id)!;
-      j.status = j.attempts >= j.max_attempts ? 'needs_review' : 'queued';
+      j.status = Number(j.attempts) >= Number(j.max_attempts) ? 'needs_review' : 'queued';
       j.last_error = p_error;
       return j.status;
     },

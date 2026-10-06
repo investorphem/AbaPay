@@ -154,6 +154,6 @@ describe('toTemplateParameter', () => {
 
   it('handles empty and nullish input without throwing', () => {
     expect(toTemplateParameter('')).toBe('');
-    expect(toTemplateParameter(undefined as any)).toBe('');
+    expect(toTemplateParameter(undefined as unknown as string)).toBe('');
   });
 });

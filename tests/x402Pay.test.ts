@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, afterEach, beforeEach } from 'vitest';
 import { payWithX402, parseX402Challenge, X402PaymentError, X402ChallengeError } from '@/lib/x402Pay';
+import type { WalletClient } from 'viem';
 
 /**
  * The double-charge this file exists to prevent.
@@ -30,12 +31,13 @@ const accept = {
 
 /** A wallet that signs whatever it's handed, and records what that was. */
 function fakeWallet() {
-  const calls: any[] = [];
+  // Each call is the EIP-712 typed data the payer was asked to sign.
+  const calls: { message: Record<string, unknown>; [key: string]: unknown }[] = [];
   return {
     calls,
     client: {
-      signTypedData: async (args: any) => { calls.push(args); return '0xdeadbeef'; },
-    } as any,
+      signTypedData: async (args: { message: Record<string, unknown> }) => { calls.push(args); return '0xdeadbeef'; },
+    } as unknown as WalletClient,
   };
 }
 
@@ -64,8 +66,8 @@ describe('payWithX402', () => {
     expect(wallet.calls[0].message.to).toBe(PAY_TO);
     expect(wallet.calls[0].message.value).toBe(BigInt('74627'));
     // The retry carries the signature; the first request must not.
-    expect((seen[0].headers as any)['X-PAYMENT']).toBeUndefined();
-    expect((seen[1].headers as any)['X-PAYMENT']).toBeTruthy();
+    expect((seen[0].headers as Record<string, string>)['X-PAYMENT']).toBeUndefined();
+    expect((seen[1].headers as Record<string, string>)['X-PAYMENT']).toBeTruthy();
   });
 
   /**
@@ -81,7 +83,7 @@ describe('payWithX402', () => {
     const events: string[] = [];
     let requestsSeenAtSignTime = -1;
     vi.stubGlobal('fetch', vi.fn(async (_url: string, init: RequestInit) => {
-      events.push((init.headers as any)?.['X-PAYMENT'] ? 'settle-request' : 'challenge-request');
+      events.push((init.headers as Record<string, string> | undefined)?.['X-PAYMENT'] ? 'settle-request' : 'challenge-request');
       return events.length === 1
         ? jsonResponse({ accepts: [accept] }, 402)
         : jsonResponse({ success: true, status: 'SUCCESS', tx_hash: '0xabc' }, 200);
@@ -123,7 +125,7 @@ describe('payWithX402', () => {
 
     await payWithX402({ url: '/api/pay/x402', body: {}, client: wallet.client, account: ACCOUNT });
 
-    const sentHeader = (seen[1].headers as any)['X-PAYMENT'];
+    const sentHeader = (seen[1].headers as Record<string, string>)['X-PAYMENT'];
     const decoded = JSON.parse(atob(sentHeader));
     expect(decoded.extensions).toEqual(bazaarBlock);
   });
@@ -179,7 +181,7 @@ describe('payWithX402', () => {
   it('uses a fresh nonce per payment, so two bills can never collide on-chain', async () => {
     const wallet = fakeWallet();
     vi.stubGlobal('fetch', vi.fn(async (_u: string, init: RequestInit) =>
-      ((init.headers as any)?.['X-PAYMENT'] ? jsonResponse({ success: true }, 200) : jsonResponse({ accepts: [accept] }, 402))));
+      ((init.headers as Record<string, string> | undefined)?.['X-PAYMENT'] ? jsonResponse({ success: true }, 200) : jsonResponse({ accepts: [accept] }, 402))));
 
     await payWithX402({ url: '/api/pay/x402', body: {}, client: wallet.client, account: ACCOUNT });
     await payWithX402({ url: '/api/pay/x402', body: {}, client: wallet.client, account: ACCOUNT });
