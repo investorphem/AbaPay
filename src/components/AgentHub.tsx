@@ -589,7 +589,7 @@ export function AgentHub({ address, selectedToken, activeChainName, onApproveAll
                 {pinEditId === l.id && (
                   <div className="mt-3 pt-3 border-t border-slate-200 dark:border-slate-800 flex flex-col gap-2">
                     <p className="text-[10px] text-slate-400 leading-relaxed">
-                      Forgot your PIN or just want to change it — set a new one below. Your wallet connection here is all the verification needed; the old PIN isn't required.
+                      Forgot your PIN or just want to change it — set a new one below. Your wallet connection here is all the verification needed; the old PIN isn&apos;t required.
                     </p>
                     <div className="flex gap-2">
                       <input

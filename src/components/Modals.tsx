@@ -457,7 +457,7 @@ export function SelectionModal({
              {filteredOptions.length === 0 && !isFetchingBanks && (
                 <div className="p-6 text-center text-slate-400 dark:text-slate-500 font-bold text-xs flex flex-col items-center gap-2">
                    <Search size={24} className="text-slate-300 dark:text-slate-600 mb-1" />
-                   No results found for "{searchQuery}"
+                   No results found for &quot;{searchQuery}&quot;
                 </div>
              )}
 

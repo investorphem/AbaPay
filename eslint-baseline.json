@@ -14,8 +14,7 @@
     "react-hooks/exhaustive-deps": 1,
     "react-hooks/immutability": 1,
     "react-hooks/purity": 4,
-    "react-hooks/set-state-in-effect": 1,
-    "react/no-unescaped-entities": 1
+    "react-hooks/set-state-in-effect": 1
   },
   "src/app/agents/ThemeToggle.tsx": {
     "react-hooks/set-state-in-effect": 1
@@ -107,8 +106,7 @@
     "@typescript-eslint/no-explicit-any": 2
   },
   "src/app/docs/page.tsx": {
-    "@typescript-eslint/no-explicit-any": 1,
-    "react/no-unescaped-entities": 99
+    "@typescript-eslint/no-explicit-any": 1
   },
   "src/app/network-check/page.tsx": {
     "@typescript-eslint/no-explicit-any": 1,
@@ -123,22 +121,16 @@
     "react-hooks/immutability": 2,
     "react-hooks/purity": 1,
     "react-hooks/refs": 3,
-    "react-hooks/set-state-in-effect": 17,
-    "react/no-unescaped-entities": 1
+    "react-hooks/set-state-in-effect": 17
   },
   "src/app/privacy/page.tsx": {
-    "@typescript-eslint/no-unused-vars": 2,
-    "react/no-unescaped-entities": 13
+    "@typescript-eslint/no-unused-vars": 2
   },
   "src/app/receipt/[requestId]/opengraph-image.tsx": {
     "@typescript-eslint/no-explicit-any": 1
   },
   "src/app/receipt/[requestId]/page.tsx": {
-    "@typescript-eslint/no-explicit-any": 1,
-    "react/no-unescaped-entities": 1
-  },
-  "src/app/terms/page.tsx": {
-    "react/no-unescaped-entities": 35
+    "@typescript-eslint/no-explicit-any": 1
   },
   "src/components/AIChat.tsx": {
     "@typescript-eslint/no-explicit-any": 1,
@@ -151,8 +143,7 @@
   },
   "src/components/AdminDiscountsPanel.tsx": {
     "@typescript-eslint/no-explicit-any": 8,
-    "react-hooks/set-state-in-effect": 1,
-    "react/no-unescaped-entities": 3
+    "react-hooks/set-state-in-effect": 1
   },
   "src/components/AdminOpsPanel.tsx": {
     "@typescript-eslint/no-explicit-any": 10,
@@ -160,8 +151,7 @@
   },
   "src/components/AgentHub.tsx": {
     "@typescript-eslint/no-explicit-any": 4,
-    "react-hooks/set-state-in-effect": 1,
-    "react/no-unescaped-entities": 1
+    "react-hooks/set-state-in-effect": 1
   },
   "src/components/AppFooter.tsx": {
     "react-hooks/set-state-in-effect": 1
@@ -182,8 +172,7 @@
     "@typescript-eslint/no-explicit-any": 12,
     "@typescript-eslint/no-unused-vars": 3,
     "react-hooks/immutability": 2,
-    "react-hooks/set-state-in-effect": 1,
-    "react/no-unescaped-entities": 2
+    "react-hooks/set-state-in-effect": 1
   },
   "src/components/PointsBadge.tsx": {
     "@typescript-eslint/no-explicit-any": 1

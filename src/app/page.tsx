@@ -4582,7 +4582,7 @@ export default function Home() {
                         <ChevronDown size={18} className="text-slate-400 dark:text-slate-500"/>
                     </button>
                     {!selectedBank && (
-                        <p className="text-[10px] font-bold text-slate-400 dark:text-slate-500 mt-2">Or just type the account number below — we'll detect the bank automatically.</p>
+                        <p className="text-[10px] font-bold text-slate-400 dark:text-slate-500 mt-2">Or just type the account number below — we&apos;ll detect the bank automatically.</p>
                     )}
                 </div>
 
