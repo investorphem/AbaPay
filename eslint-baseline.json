@@ -19,26 +19,14 @@
   "src/app/agents/ThemeToggle.tsx": {
     "react-hooks/set-state-in-effect": 1
   },
-  "src/app/api/admin/action/route.ts": {
-    "@typescript-eslint/no-explicit-any": 1
-  },
   "src/app/api/admin/agent/route.ts": {
     "@typescript-eslint/no-explicit-any": 6
-  },
-  "src/app/api/admin/data/route.ts": {
-    "@typescript-eslint/no-explicit-any": 1
   },
   "src/app/api/admin/discounts/route.ts": {
     "@typescript-eslint/no-explicit-any": 5
   },
-  "src/app/api/admin/monnify-requery/route.ts": {
-    "@typescript-eslint/no-explicit-any": 1
-  },
-  "src/app/api/admin/rate/route.ts": {
-    "@typescript-eslint/no-explicit-any": 1
-  },
   "src/app/api/admin/refund/route.ts": {
-    "@typescript-eslint/no-explicit-any": 3
+    "@typescript-eslint/no-explicit-any": 2
   },
   "src/app/api/admin/refunds/route.ts": {
     "@typescript-eslint/no-explicit-any": 1
@@ -50,32 +38,12 @@
     "@typescript-eslint/no-explicit-any": 1
   },
   "src/app/api/deai/chat/route.ts": {
-    "@typescript-eslint/no-explicit-any": 3,
-    "@typescript-eslint/no-unused-vars": 2
+    "@typescript-eslint/no-explicit-any": 3
   },
   "src/app/api/deai/core/route.ts": {
     "@typescript-eslint/no-explicit-any": 7
   },
-  "src/app/api/foreign/route.ts": {
-    "@typescript-eslint/no-explicit-any": 1
-  },
-  "src/app/api/intl/route.ts": {
-    "@typescript-eslint/no-explicit-any": 1,
-    "@typescript-eslint/no-unused-vars": 1
-  },
   "src/app/api/mcp/route.ts": {
-    "@typescript-eslint/no-explicit-any": 2
-  },
-  "src/app/api/monnify/banks/route.ts": {
-    "@typescript-eslint/no-explicit-any": 1
-  },
-  "src/app/api/monnify/resolve/route.ts": {
-    "@typescript-eslint/no-explicit-any": 1
-  },
-  "src/app/api/monnify/verify/route.ts": {
-    "@typescript-eslint/no-explicit-any": 1
-  },
-  "src/app/api/monnify/webhook/route.ts": {
     "@typescript-eslint/no-explicit-any": 1
   },
   "src/app/api/oauth/authorize/route.ts": {
@@ -85,25 +53,13 @@
     "@typescript-eslint/no-explicit-any": 2
   },
   "src/app/api/paymaster/route.ts": {
-    "@typescript-eslint/no-explicit-any": 2
-  },
-  "src/app/api/support/route.ts": {
     "@typescript-eslint/no-explicit-any": 1
   },
   "src/app/api/user/points/route.ts": {
-    "@typescript-eslint/no-explicit-any": 2
-  },
-  "src/app/api/variations/route.ts": {
-    "@typescript-eslint/no-explicit-any": 1
-  },
-  "src/app/api/verify/confirm/route.ts": {
-    "@typescript-eslint/no-explicit-any": 1
-  },
-  "src/app/api/verify/request/route.ts": {
     "@typescript-eslint/no-explicit-any": 1
   },
   "src/app/api/verify/route.ts": {
-    "@typescript-eslint/no-explicit-any": 2
+    "@typescript-eslint/no-explicit-any": 1
   },
   "src/app/docs/page.tsx": {
     "@typescript-eslint/no-explicit-any": 1
@@ -178,15 +134,6 @@
   "src/constants/index.ts": {
     "@typescript-eslint/no-explicit-any": 4
   },
-  "src/lib/deai/batch.ts": {
-    "@typescript-eslint/no-explicit-any": 1
-  },
-  "src/lib/deai/capabilities.ts": {
-    "@typescript-eslint/no-unused-vars": 3
-  },
-  "src/lib/deai/deeplink.ts": {
-    "@typescript-eslint/no-unused-vars": 1
-  },
   "src/lib/deai/humanize.ts": {
     "@typescript-eslint/no-explicit-any": 2
   },
@@ -207,12 +154,8 @@
     "@typescript-eslint/no-explicit-any": 2,
     "jsx-a11y/alt-text": 2
   },
-  "src/lib/deai/relayer.ts": {
-    "@typescript-eslint/no-explicit-any": 2
-  },
   "src/lib/deai/selection.ts": {
-    "@typescript-eslint/no-explicit-any": 1,
-    "@typescript-eslint/no-unused-vars": 1
+    "@typescript-eslint/no-explicit-any": 1
   },
   "src/lib/deai/services.ts": {
     "@typescript-eslint/no-explicit-any": 4

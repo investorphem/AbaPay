@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 import { validateAccountRaw } from '@/lib/monnify';
 import { enforceRateLimit } from '@/lib/rateLimit';
+import { errorMessage } from '@/lib/errors';
 
 // Manual single-bank verify — used when auto-detect (/api/monnify/resolve) found no match
 // and the user picks a bank themselves, or overrides an auto-detected suggestion.
@@ -24,8 +25,8 @@ export async function POST(req: Request) {
     }
 
     return NextResponse.json({ success: true, accountName: raw.result.accountName });
-  } catch (error: any) {
-    console.error('[Monnify] verify route failed:', error.message);
+  } catch (error) {
+    console.error('[Monnify] verify route failed:', errorMessage(error));
     return NextResponse.json({ success: false, code: 'SERVER_ERROR', message: 'Verification failed.' }, { status: 500 });
   }
 }

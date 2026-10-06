@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server';
 import { supabaseAdmin as supabase } from '@/utils/supabase'; 
+import { errorMessage } from '@/lib/errors';
 
 export async function GET(req: Request) {
     try {
@@ -53,8 +54,8 @@ export async function GET(req: Request) {
             isLinked: false 
         });
 
-    } catch (error: any) {
-        console.error("Points Fetch Error:", error.message);
+    } catch (error) {
+        console.error("Points Fetch Error:", errorMessage(error));
         return NextResponse.json({ error: "Internal Server Error" }, { status: 500 });
     }
 }

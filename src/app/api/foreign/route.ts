@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 import { enforceRateLimit } from '@/lib/rateLimit';
 import { getHeaders } from '@/lib/vtpass'; 
+import { errorMessage } from '@/lib/errors';
 
 export async function GET(req: Request) {
   // 🛡️ Each call proxies a billable VTpass request — throttle abuse (60/min per IP).
@@ -55,8 +56,8 @@ export async function GET(req: Request) {
     
     return NextResponse.json({ success: false, message: "Invalid action type." }, { status: 400 });
     
-  } catch (error: any) { 
-    console.error("Foreign API Engine Failure:", error.message);
+  } catch (error) { 
+    console.error("Foreign API Engine Failure:", errorMessage(error));
     return NextResponse.json({ success: false, message: "Internal Server Error" }, { status: 500 }); 
   }
 }

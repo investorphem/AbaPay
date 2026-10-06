@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server';
 import crypto from 'crypto';
 import { supabaseAdmin as supabase } from '@/utils/supabase'; // ⚡ FIXED IMPORT
 import { enforceRateLimit } from '@/lib/rateLimit';
+import { errorMessage } from '@/lib/errors';
 
 
 export async function POST(req: Request) {
@@ -62,9 +63,9 @@ export async function POST(req: Request) {
         await supabase.from('otp_requests').delete().eq('phone', phone);
 
         return NextResponse.json({ success: true, message: "Wallet successfully linked!" });
-    } catch (error: any) {
+    } catch (error) {
         // Don't leak internals to the client; log server-side instead.
-        console.error('[verify/confirm] error:', error?.message);
+        console.error('[verify/confirm] error:', errorMessage(error));
         return NextResponse.json({ error: "Could not verify code. Please try again." }, { status: 500 });
     }
 }

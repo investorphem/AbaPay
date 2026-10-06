@@ -6,6 +6,7 @@ import { resolveTokenOnChain, DEFAULT_CHAIN } from '@/constants';
 import { sendTelegramAlert } from '@/lib/telegram';
 import { metric } from '@/lib/log';
 import { celoAttributionSuffix, baseAttributionSuffix } from '@/lib/attribution';
+import { errorMessage } from '@/lib/errors';
 
 // ⚡ AGENT RELAYER
 //
@@ -283,8 +284,8 @@ export async function relayPayBillFor(params: {
     let receipt;
     try {
       receipt = await wallet.waitForTransactionReceipt({ hash, confirmations: 1 });
-    } catch (waitErr: any) {
-      console.error('[Relayer] Could not confirm payBillFor receipt (tx may still be in flight):', hash, waitErr?.message);
+    } catch (waitErr) {
+      console.error('[Relayer] Could not confirm payBillFor receipt (tx may still be in flight):', hash, errorMessage(waitErr));
       return {
         success: false,
         pending: true,
@@ -320,8 +321,8 @@ export async function relayPayBillFor(params: {
     void checkRelayerGas(blockchain);
 
     return { success: true, txHash: hash };
-  } catch (err: any) {
-    const msg: string = err?.shortMessage || err?.message || 'Agent payment failed.';
+  } catch (err) {
+    const msg: string = errorMessage(err) || 'Agent payment failed.';
     console.error('[Relayer] payBillFor failed:', msg);
 
     // Translate the contract's custom errors into something a user can act on.

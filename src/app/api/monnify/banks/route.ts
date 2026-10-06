@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 import { getBanks } from '@/lib/monnify';
 import { enforceRateLimit } from '@/lib/rateLimit';
+import { errorMessage } from '@/lib/errors';
 
 // Same caching contract as /api/providers (VTpass): a cache miss here proxies a live Monnify
 // call, so a fresh answer is cacheable at the edge, while a stale one (degraded to the
@@ -17,8 +18,8 @@ export async function GET(req: Request) {
       { success: true, banks, stale },
       { headers: { 'Cache-Control': stale ? 'no-store' : CACHE_HEADER } }
     );
-  } catch (error: any) {
-    console.error('[Monnify] banks route failed:', error.message);
+  } catch (error) {
+    console.error('[Monnify] banks route failed:', errorMessage(error));
     return NextResponse.json({ success: false, banks: [], stale: true }, { status: 500 });
   }
 }

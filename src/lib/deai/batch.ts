@@ -9,6 +9,7 @@ import { isDuplicateElectricity } from '@/lib/parity';
 import { sendTelegramAlert } from '@/lib/telegram';
 import { computeServiceFee } from '@/lib/serviceRules';
 import { markCommitted } from '@/lib/idempotency';
+import { errorMessage } from '@/lib/errors';
 
 // ⚡ MULTI-RECIPIENT (BATCH) PAYMENTS — shared between the in-app chat (/api/deai/chat) and
 // the social channels (/api/deai/core). The intent engine emits `recipients` whenever a user
@@ -264,9 +265,9 @@ export async function executeAgentPayment(params: {
       preflightTxHash = null;
     }
     return { success: false, message: res.message || 'Payment failed' };
-  } catch (err: any) {
+  } catch (err) {
     if (preflightTxHash) {
-      const failMessage = String(err?.message || 'Payment failed unexpectedly.').slice(0, 500);
+      const failMessage = String(errorMessage(err) || 'Payment failed unexpectedly.').slice(0, 500);
       try {
         await supabase.from('transactions').update({
           status: 'FAILED_PAYMENT', error_code: 'AGENT_PREFLIGHT_FAILED', api_response: failMessage,
@@ -278,7 +279,7 @@ export async function executeAgentPayment(params: {
         );
       } catch { /* best-effort */ }
     }
-    console.error('[Batch] payment errored:', err?.message);
+    console.error('[Batch] payment errored:', errorMessage(err));
     return { success: false, message: 'Payment failed unexpectedly.' };
   }
 }

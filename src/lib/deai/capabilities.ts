@@ -1,7 +1,6 @@
 import 'server-only';
 import { getServiceRules, killSwitchKeysFor, minAmountFor } from '@/lib/serviceRules';
 import { maxAmountFor } from '@/lib/parity';
-import { verifyAccount, fetchDataVariations, resolveServiceId } from '@/lib/deai/services';
 import { resolveCountry, fetchCountries } from '@/lib/deai/international';
 import { tokenSymbolsForChain } from '@/constants';
 

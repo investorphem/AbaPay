@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server';
 import { supabaseAdmin } from '@/utils/supabase';
 import { verifyAdminRequest } from '@/utils/adminAuth';
 import { verifyRefundOnChain, rememberRefundHash, refundHashAlreadyUsed } from '@/lib/refundVerify';
+import { errorMessage } from '@/lib/errors';
 
 export async function POST(req: Request) {
   // 🔐 SECURITY: only the contract owner may mark transactions as refunded
@@ -167,8 +168,8 @@ export async function POST(req: Request) {
     }
 
     return NextResponse.json({ success: true });
-  } catch (error: any) {
-    console.error("Server Error:", error?.message);
+  } catch (error) {
+    console.error("Server Error:", errorMessage(error));
     return NextResponse.json({ success: false, message: "Internal server error" }, { status: 500 });
   }
 }

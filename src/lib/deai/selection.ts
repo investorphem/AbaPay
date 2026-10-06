@@ -232,7 +232,7 @@ export async function fetchVariations(serviceID: string): Promise<Option[]> {
  * Does this service need the user to pick a variation (plan/package), or is it
  * free-amount (like airtime and prepaid electricity)?
  */
-export function needsVariation(intent: string, provider?: string | null): boolean {
+export function needsVariation(intent: string): boolean {
   switch (intent) {
     case 'VEND_DATA':
     case 'INTERNET':

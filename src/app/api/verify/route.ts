@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 import { getHeaders } from '@/lib/vtpass';
 import { enforceRateLimit } from '@/lib/rateLimit';
+import { errorMessage } from '@/lib/errors';
 
 export async function POST(req: Request) {
   // 🛡️ Each call hits VTpass and costs money — throttle abuse (20 per minute per IP).
@@ -35,8 +36,8 @@ export async function POST(req: Request) {
     const data = await res.json();
     return NextResponse.json(data);
 
-  } catch (error: any) {
-    console.error("Verification Engine Failure:", error.message);
+  } catch (error) {
+    console.error("Verification Engine Failure:", errorMessage(error));
     return NextResponse.json({ code: "500", message: "Verification Failed" }, { status: 500 });
   }
 }

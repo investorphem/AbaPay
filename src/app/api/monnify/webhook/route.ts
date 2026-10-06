@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server';
 import { supabaseAdmin as supabase } from '@/utils/supabase';
 import { verifyWebhookSignature, extractMonnifyFailureReason } from '@/lib/monnify';
 import { finalizeMonnifyTransfer } from '@/lib/monnifyVend';
+import { errorMessage } from '@/lib/errors';
 
 // ⚡ MONNIFY DISBURSEMENT WEBHOOK — the async completion signal for a bank transfer submitted
 // with async: true (see initiateTransfer in src/lib/monnify.ts). Every field here comes from
@@ -41,8 +42,8 @@ export async function POST(req: Request) {
     // Other event types (e.g. SETTLEMENT) aren't relevant to a single transfer's lifecycle — acknowledged, ignored.
 
     return NextResponse.json({ received: true });
-  } catch (error: any) {
-    console.error('[Monnify Webhook] handler failed:', error.message);
+  } catch (error) {
+    console.error('[Monnify Webhook] handler failed:', errorMessage(error));
     return NextResponse.json({ error: 'Webhook handler failed' }, { status: 500 });
   }
 }

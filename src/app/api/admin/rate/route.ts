@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 import { supabaseAdmin } from '@/utils/supabase';
 import { verifyAdminRequest } from '@/utils/adminAuth';
+import { errorMessage } from '@/lib/errors';
 
 export async function POST(req: Request) {
   // 🔐 SECURITY: the exchange rate prices all crypto payments (/api/pay trusts it)
@@ -21,7 +22,7 @@ export async function POST(req: Request) {
     if (error) throw error;
     
     return NextResponse.json({ success: true });
-  } catch (error: any) {
-    return NextResponse.json({ success: false, message: error.message }, { status: 500 });
+  } catch (error) {
+    return NextResponse.json({ success: false, message: errorMessage(error) }, { status: 500 });
   }
 }

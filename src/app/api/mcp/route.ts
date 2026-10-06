@@ -15,6 +15,7 @@ import {
   errorResult,
 } from '@/lib/deai/mcpTools';
 import { MCP_UI_CARD_URI, MCP_UI_CARD_RESOURCE, MCP_UI_CARD_HTML } from '@/lib/deai/mcpUiTemplates';
+import { errorMessage } from '@/lib/errors';
 
 // ⚡ MCP SERVER — lets an AI agent (Claude, or any MCP-speaking client) check a balance or
 // pay a bill on behalf of a wallet that has explicitly linked and PIN-protected an API key
@@ -180,8 +181,8 @@ export async function POST(req: Request) {
       default:
         return rpcError(id, -32601, `Method not found: ${method}`);
     }
-  } catch (err: any) {
-    console.error('[MCP] request failed:', err?.message);
+  } catch (err) {
+    console.error('[MCP] request failed:', errorMessage(err));
     return rpcError(id, -32603, 'Internal error.');
   }
 }

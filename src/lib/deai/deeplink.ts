@@ -98,7 +98,7 @@ export function verifyDeepLink(payload: string, sig: string): VerifyResult {
     }
 
     return { valid: true, intent };
-  } catch (err) {
+  } catch {
     return { valid: false, reason: 'Malformed payment link.' };
   }
 }
