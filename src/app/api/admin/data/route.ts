@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 import { supabaseAdmin as supabase } from '@/utils/supabase';
 import { verifyAdminRequest } from '@/utils/adminAuth';
+import { errorMessage } from '@/lib/errors';
 
 export const dynamic = 'force-dynamic';
 
@@ -28,7 +29,7 @@ export async function GET(req: Request) {
             allWallets: allWalletsRes.data || [], // ⚡ PASS TO FRONTEND
             settings: settingsRes.data || {}
         });
-    } catch (e: any) {
-        return NextResponse.json({ success: false, message: e.message }, { status: 500 });
+    } catch (e) {
+        return NextResponse.json({ success: false, message: errorMessage(e) }, { status: 500 });
     }
 }

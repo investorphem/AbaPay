@@ -109,7 +109,7 @@ export async function POST(req: Request) {
       status: upstreamRes.status,
       headers: { 'Content-Type': 'application/json' },
     });
-  } catch (error: any) {
+  } catch (error) {
     console.error('Paymaster proxy error:', error);
     return NextResponse.json(
       { jsonrpc: '2.0', id: null, error: { code: -32603, message: 'Paymaster proxy failed' } },

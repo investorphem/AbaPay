@@ -3,6 +3,7 @@ import { getBanks, validateAccountRaw } from '@/lib/monnify';
 import { enforceRateLimit } from '@/lib/rateLimit';
 import { sendTelegramAlert } from '@/lib/telegram';
 import { BANK_SEED } from '@/lib/providerFallback';
+import { errorMessage } from '@/lib/errors';
 
 // ⚡ AUTO-DETECT: "here's an account number, which bank is it?" ⚡
 //
@@ -82,8 +83,8 @@ export async function POST(req: Request) {
     }
 
     return NextResponse.json({ success: matches.length > 0, matches });
-  } catch (error: any) {
-    console.error('[Monnify] resolve route failed:', error.message);
+  } catch (error) {
+    console.error('[Monnify] resolve route failed:', errorMessage(error));
     return NextResponse.json({ success: false, matches: [], message: 'Could not resolve this account right now.' }, { status: 500 });
   }
 }

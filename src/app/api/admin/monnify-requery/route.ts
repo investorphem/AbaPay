@@ -4,6 +4,7 @@ import { verifyAdminRequest } from '@/utils/adminAuth';
 import { enforceRateLimit } from '@/lib/rateLimit';
 import { requeryMonnifyTransfer, finalizeMonnifyTransfer } from '@/lib/monnifyVend';
 import { classifyTransferStatus, extractMonnifyFailureReason } from '@/lib/monnify';
+import { errorMessage } from '@/lib/errors';
 
 // ⚡ Admin-triggered "Check Status" for a BANK transfer — the Monnify equivalent of
 // /api/requery (VTpass). Kept as its own route rather than branching inside /api/requery
@@ -75,8 +76,8 @@ export async function POST(req: Request) {
 
     // PROCESSING (PENDING / AWAITING_PROCESSING / IN_PROGRESS) — genuinely still processing.
     return NextResponse.json({ success: true, status: 'PENDING', message: `Monnify reports: ${monnifyStatus.status}. Still processing.` });
-  } catch (error: any) {
-    console.error('[Admin] Monnify requery failed:', error.message);
+  } catch (error) {
+    console.error('[Admin] Monnify requery failed:', errorMessage(error));
     return NextResponse.json({ success: false, message: 'Server error while querying status' }, { status: 500 });
   }
 }

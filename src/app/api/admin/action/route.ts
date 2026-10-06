@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server';
 import { supabaseAdmin as supabase } from '@/utils/supabase';
 import { verifyAdminRequest } from '@/utils/adminAuth';
 import { resetCircuit } from '@/lib/circuitBreaker';
+import { errorMessage } from '@/lib/errors';
 
 export async function POST(req: Request) {
     // 🔐 SECURITY: block anyone who is not the contract owner
@@ -52,7 +53,7 @@ export async function POST(req: Request) {
         }
 
         return NextResponse.json({ success: true });
-    } catch (e: any) {
-        return NextResponse.json({ success: false, message: e.message || "Internal server error" }, { status: 500 });
+    } catch (e) {
+        return NextResponse.json({ success: false, message: errorMessage(e) || "Internal server error" }, { status: 500 });
     }
 }

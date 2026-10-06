@@ -3,6 +3,7 @@ import crypto from 'crypto';
 import { supabaseAdmin as supabase } from '@/utils/supabase'; // ⚡ FIXED IMPORT
 import { sendWhatsAppOTP } from '@/lib/whatsapp';
 import { enforceRateLimit } from '@/lib/rateLimit';
+import { errorMessage } from '@/lib/errors';
 
 
 export async function POST(req: Request) {
@@ -52,7 +53,7 @@ export async function POST(req: Request) {
         if (!sent) return NextResponse.json({ error: "Failed to send message" }, { status: 500 });
 
         return NextResponse.json({ success: true, message: "OTP Sent" });
-    } catch (error: any) {
-        return NextResponse.json({ error: error.message }, { status: 500 });
+    } catch (error) {
+        return NextResponse.json({ error: errorMessage(error) }, { status: 500 });
     }
 }

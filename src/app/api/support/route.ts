@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server';
 import { enforceRateLimit } from '@/lib/rateLimit';
+import { errorMessage } from '@/lib/errors';
 
 export async function POST(req: Request) {
   // 🛡️ Prevent ticket spam / notification flooding (5 per 5 min per IP).
@@ -86,8 +87,8 @@ export async function POST(req: Request) {
         message: "Your ticket has been sent directly to the AbaPay Admin Team." 
     });
 
-  } catch (error: any) {
-    console.error("Support API Failure:", error.message);
+  } catch (error) {
+    console.error("Support API Failure:", errorMessage(error));
     return NextResponse.json({ 
         success: false, 
         message: "Failed to dispatch ticket. Please try again or check your connection." 

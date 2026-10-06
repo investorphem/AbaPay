@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 import { enforceRateLimit } from '@/lib/rateLimit';
 import { getHeaders } from '@/lib/vtpass'; 
+import { errorMessage } from '@/lib/errors';
 
 export async function GET(request: Request) {
   // 🛡️ Each call proxies a billable VTpass request — throttle abuse (60/min per IP).
@@ -32,8 +33,8 @@ export async function GET(request: Request) {
 
     return NextResponse.json(data);
 
-  } catch (error: any) {
-    console.error("❌ Variation Fetch Error:", error.message);
+  } catch (error) {
+    console.error("❌ Variation Fetch Error:", errorMessage(error));
     return NextResponse.json({ error: 'Failed to fetch variations from VTpass' }, { status: 500 });
   }
 }

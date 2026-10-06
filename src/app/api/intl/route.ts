@@ -35,7 +35,7 @@ export async function GET(request: Request) {
     const response = await fetch(`${baseUrl}${endpoint}`, { method: 'GET', headers, cache: 'no-store' });
     const data = await response.json();
     return NextResponse.json(data);
-  } catch (error: any) {
+  } catch {
     return NextResponse.json({ error: 'Failed to fetch international data' }, { status: 500 });
   }
 }
