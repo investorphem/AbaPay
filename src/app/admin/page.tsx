@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useEffect, useMemo } from "react";
-import { createWalletClient, createPublicClient, custom, http, formatUnits, parseUnits } from "viem";
+import { createWalletClient, createPublicClient, custom, http, formatUnits, parseUnits, type Chain } from "viem";
 import { celo, celoSepolia, base, baseSepolia } from "viem/chains"; 
 import { 
   Lock, ArrowDownToLine, Wallet, ShieldAlert, Activity,
@@ -480,15 +480,40 @@ export default function AdminDashboard() {
     setContractControls({ CELO: celoResult, BASE: baseResult });
   };
 
+  // 🔑 WHO SIGNS ON-CHAIN. The dashboard session is the OPS wallet (M4.5), but the vault accepts
+  // refunds, withdrawals and settings only from its OWNER. Every vault write therefore signs with
+  // whichever account the wallet has selected AT CLICK TIME, checked against owner() first. So:
+  // sign in as the ops wallet, then switch the wallet's selected account to the owner to send.
+  // (These writes used to sign with the sign-in account, i.e. the ops wallet, and so reverted.)
+  const ownerAccount = async (targetChain: Chain, targetContract: string): Promise<`0x${string}` | null> => {
+    if (!client) { alert('Connect your admin wallet first.'); return null; }
+    const [current] = await client.requestAddresses();
+    const owner = await createPublicClient({ chain: targetChain, transport: http() }).readContract({
+      address: targetContract as `0x${string}`, abi: ABAPAY_ADMIN_ABI, functionName: 'owner',
+    }) as string;
+    if (String(current).toLowerCase() !== owner.toLowerCase()) {
+      alert(`Only the vault owner can sign this.
+
+Owner: ${owner}
+Your wallet's selected account: ${current}
+
+Switch the selected account in your wallet to the owner and click again. You stay signed in to the dashboard as the ops admin.`);
+      return null;
+    }
+    return current;
+  };
+
   // Shared prelude for every contract-control write: resolve chain/contract, switch the
-  // admin wallet onto it if needed. Mirrors the pattern already used for withdrawals/refunds.
+  // wallet onto it if needed, and resolve the owner account that will sign.
   const prepareContractWrite = async (network: 'CELO' | 'BASE') => {
     if (!client || !address) { alert('Connect your admin wallet first.'); return null; }
     const targetChain = network === 'BASE' ? (isMainnet ? base : baseSepolia) : (isMainnet ? celo : celoSepolia);
     const targetContract = network === 'BASE' ? BASE_CONTRACT : CELO_CONTRACT;
     const currentChainId = await client.getChainId();
     if (currentChainId !== targetChain.id) await client.switchChain({ id: targetChain.id });
-    return { targetChain, targetContract };
+    const account = await ownerAccount(targetChain, targetContract);
+    if (!account) return null;
+    return { targetChain, targetContract, account };
   };
 
   // 🔒 STEP-UP CONFIRMATION — a FRESH wallet signature for a specific high-risk admin action,
@@ -519,7 +544,7 @@ export default function AdminDashboard() {
       const prep = await prepareContractWrite(network);
       if (!prep) return;
       const hash = await client.writeContract({
-        chain: prep.targetChain, account: address, address: prep.targetContract,
+        chain: prep.targetChain, account: prep.account, address: prep.targetContract,
         abi: ABAPAY_ADMIN_ABI, functionName: 'setRelayer', args: [newRelayer],
         dataSuffix: celoAttributionSuffix(prep.targetChain),
       });
@@ -545,7 +570,7 @@ export default function AdminDashboard() {
       const prep = await prepareContractWrite(network);
       if (!prep) return;
       const hash = await client.writeContract({
-        chain: prep.targetChain, account: address, address: prep.targetContract,
+        chain: prep.targetChain, account: prep.account, address: prep.targetContract,
         abi: ABAPAY_ADMIN_ABI, functionName: action, args: [],
         dataSuffix: celoAttributionSuffix(prep.targetChain),
       });
@@ -577,7 +602,7 @@ export default function AdminDashboard() {
       const prep = await prepareContractWrite(network);
       if (!prep) return;
       const hash = await client.writeContract({
-        chain: prep.targetChain, account: address, address: prep.targetContract,
+        chain: prep.targetChain, account: prep.account, address: prep.targetContract,
         abi: ABAPAY_ADMIN_ABI, functionName: 'setWithdrawalDelay', args: [BigInt(seconds)],
         dataSuffix: celoAttributionSuffix(prep.targetChain),
       });
@@ -605,7 +630,7 @@ export default function AdminDashboard() {
       const prep = await prepareContractWrite(network);
       if (!prep) return;
       const hash = await client.writeContract({
-        chain: prep.targetChain, account: address, address: prep.targetContract,
+        chain: prep.targetChain, account: prep.account, address: prep.targetContract,
         abi: ABAPAY_ADMIN_ABI, functionName: 'setTokenSupport', args: [tokenAddr, !currentlySupported],
         dataSuffix: celoAttributionSuffix(prep.targetChain),
       });
@@ -635,7 +660,7 @@ export default function AdminDashboard() {
       if (!prep) return;
       const amountWei = parseUnits(raw, decimals);
       const hash = await client.writeContract({
-        chain: prep.targetChain, account: address, address: prep.targetContract,
+        chain: prep.targetChain, account: prep.account, address: prep.targetContract,
         abi: ABAPAY_ADMIN_ABI, functionName: kind === 'agent' ? 'setMaxAgentPayment' : 'setMaxRefund', args: [tokenAddr, amountWei],
         dataSuffix: celoAttributionSuffix(prep.targetChain),
       });
@@ -692,6 +717,8 @@ export default function AdminDashboard() {
 
       const currentChainId = await client.getChainId();
       if (currentChainId !== targetChain.id) await client.switchChain({ id: targetChain.id });
+      const signer = await ownerAccount(targetChain, targetContract);
+      if (!signer) return;
 
       setWithdrawalBusyKey(key);
       const publicClient = createPublicClient({ chain: targetChain, transport: http() });
@@ -706,19 +733,19 @@ export default function AdminDashboard() {
         hash = await client.writeContract({
             chain: targetChain, address: targetContract, abi: ABAPAY_ADMIN_ABI,
             functionName: 'withdrawFunds', args: [tokenAddr],
-            account: address, dataSuffix: celoAttributionSuffix(targetChain),
+            account: signer, dataSuffix: celoAttributionSuffix(targetChain),
         });
         setStatus(`Success! Hash: ${hash.slice(0, 10)}`);
       } else if (queued.executableAt === 0) {
-        // Nothing queued yet — queue the full vault balance out to the admin's own wallet.
+        // Nothing queued yet — queue the full vault balance out to the owner wallet that signs it.
         if (parseFloat(balanceToCheck) <= 0) return setStatus(`The ${network} ${tokenSymbol} Vault is already empty.`);
         const decimals = TOKENS[tokenSymbol].decimals;
         const amountWei = parseUnits(parseFloat(balanceToCheck).toFixed(decimals), decimals);
         setStatus(`Queueing ${tokenSymbol} withdrawal on ${network} (24h timelock)...`);
         hash = await client.writeContract({
             chain: targetChain, address: targetContract, abi: ABAPAY_ADMIN_ABI,
-            functionName: 'queueWithdrawal', args: [tokenAddr, address, amountWei],
-            account: address, dataSuffix: celoAttributionSuffix(targetChain),
+            functionName: 'queueWithdrawal', args: [tokenAddr, signer, amountWei],
+            account: signer, dataSuffix: celoAttributionSuffix(targetChain),
         });
         setStatus(`Queued! Executable in 24h. Hash: ${hash.slice(0, 10)}`);
       } else if (Date.now() < queued.executableAt * 1000) {
@@ -749,7 +776,7 @@ export default function AdminDashboard() {
         hash = await client.writeContract({
             chain: targetChain, address: targetContract, abi: ABAPAY_ADMIN_ABI,
             functionName: 'executeWithdrawal', args: [tokenAddr],
-            account: address, dataSuffix: celoAttributionSuffix(targetChain),
+            account: signer, dataSuffix: celoAttributionSuffix(targetChain),
         });
         setStatus(`Withdrawn! Hash: ${hash.slice(0, 10)}`);
       }
@@ -775,12 +802,14 @@ export default function AdminDashboard() {
 
       const currentChainId = await client.getChainId();
       if (currentChainId !== targetChain.id) await client.switchChain({ id: targetChain.id });
+      const signer = await ownerAccount(targetChain, targetContract);
+      if (!signer) return;
 
       setWithdrawalBusyKey(key);
       const hash = await client.writeContract({
           chain: targetChain, address: targetContract, abi: ABAPAY_ADMIN_ABI,
           functionName: 'cancelWithdrawal', args: [tokenAddr],
-          account: address, dataSuffix: celoAttributionSuffix(targetChain),
+          account: signer, dataSuffix: celoAttributionSuffix(targetChain),
       });
       setStatus(`Withdrawal cancelled for ${network} ${tokenSymbol}. Hash: ${hash.slice(0, 10)}`);
       setTimeout(() => refreshAllData(), 5000);
@@ -876,6 +905,8 @@ export default function AdminDashboard() {
           alert(`This is a ${isBaseTx ? 'Base' : 'Celo'} transaction. Please approve the network switch in your wallet.`);
           await client.switchChain({ id: targetChain.id });
       }
+      const signer = await ownerAccount(targetChain, targetContract);
+      if (!signer) return;
 
       const decimals = tokenData.decimals;
       const cleanAmountString = rawAmount.toFixed(decimals);
@@ -900,7 +931,7 @@ export default function AdminDashboard() {
           ], name: 'refundUser', outputs: [], stateMutability: 'nonpayable', type: 'function' }],
           functionName: 'refundUser',
           args: [tokenAddr, tx.wallet_address, valueInWei, refundReason],
-          account: address,
+          account: signer,
           dataSuffix: celoAttributionSuffix(targetChain), // Celo attribution only; no-op on Base
       });
 
@@ -1221,7 +1252,7 @@ export default function AdminDashboard() {
             <div className="flex flex-col md:flex-row md:items-center gap-3 justify-between">
               {!isVaultOwner ? (
                 <p className="text-amber-300 text-xs bg-amber-500/10 border border-amber-500/20 px-4 py-2.5 rounded-xl">
-                  Signed in as an ops admin. On-chain vault actions (sending refunds, withdrawals, pause, relayer and token settings) can only be signed by the vault owner wallet. Connect it to use those buttons.
+                  Signed in as the ops admin. Refunds, withdrawals, pause, relayer and token settings are signed by the vault owner: before clicking one, switch the selected account in your wallet to the owner. You stay signed in here.
                 </p>
               ) : <span />}
               <div className="flex gap-2 shrink-0">
