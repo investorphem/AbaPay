@@ -5,6 +5,9 @@ import { notifyUserRefundCompleted } from '@/lib/refunds';
 import { getPublicClient, resolveChain, explorerBaseFor } from '@/lib/chain';
 import { resolveTokenOnChain } from '@/constants';
 import { parseUnits, decodeEventLog } from 'viem';
+import type { TransactionReceipt } from 'viem';
+import { errorMessage } from '@/lib/errors';
+import type { RefundQueueRow } from '@/lib/rows';
 
 // ⚡ REFUND VERIFICATION — ONE IMPLEMENTATION, THREE CALLERS
 //
@@ -65,16 +68,16 @@ export interface RefundClaim {
  * background sweep where nothing is waiting on the answer.
  */
 export async function verifyRefundOnChain(claim: RefundClaim, waitMs = 0): Promise<RefundVerdict> {
-  let receipt: any;
+  let receipt: TransactionReceipt;
   try {
     const client = getPublicClient(claim.blockchain);
     receipt = waitMs > 0
       ? await client.waitForTransactionReceipt({ hash: claim.refundTxHash as `0x${string}`, timeout: waitMs })
       : await client.getTransactionReceipt({ hash: claim.refundTxHash as `0x${string}` });
-  } catch (err: any) {
+  } catch (err) {
     // Not mined yet, or the RPC is unhappy. Either way this is "ask again later", NOT "this
     // refund is bad" — the caller keeps the hash instead of throwing it away.
-    return { status: 'UNCONFIRMED', detail: err?.shortMessage || err?.message || 'receipt unavailable' };
+    return { status: 'UNCONFIRMED', detail: errorMessage(err) || 'receipt unavailable' };
   }
 
   if (receipt.status !== 'success') return { status: 'REVERTED' };
@@ -90,7 +93,7 @@ export async function verifyRefundOnChain(claim: RefundClaim, waitMs = 0): Promi
   for (const log of receipt.logs) {
     if (log.address?.toLowerCase() !== token.address) continue;
     try {
-      const decoded: any = decodeEventLog({ abi: ERC20_TRANSFER_ABI, data: log.data, topics: log.topics });
+      const decoded = decodeEventLog({ abi: ERC20_TRANSFER_ABI, data: log.data, topics: log.topics });
       if (decoded.eventName !== 'Transfer') continue;
       if (String(decoded.args.to).toLowerCase() !== recipient) continue;
       const paid = BigInt(decoded.args.value);
@@ -120,7 +123,7 @@ export async function refundHashAlreadyUsed(refundTxHash: string, exceptId?: str
     .eq('refund_tx_hash', refundTxHash)
     .eq('status', 'COMPLETED')
     .limit(2);
-  return (data || []).some((row: any) => row.id !== exceptId);
+  return (data || []).some((row: { id: string }) => row.id !== exceptId);
 }
 
 /**
@@ -130,7 +133,7 @@ export async function refundHashAlreadyUsed(refundTxHash: string, exceptId?: str
  * Idempotent — the queue update is guarded on the row still being PENDING, so a sweep racing
  * an operator's click cannot notify the user twice.
  */
-export async function completeRefund(refund: any, refundTxHash: string, opts: { approvedBy?: string; notes?: string | null } = {}) {
+export async function completeRefund(refund: RefundQueueRow, refundTxHash: string, opts: { approvedBy?: string; notes?: string | null } = {}) {
   const { data: claimed } = await supabaseAdmin
     .from('refund_queue')
     .update({
@@ -273,8 +276,8 @@ export async function reconcileRecordedRefunds(opts: { force?: boolean } = {}) {
     }
 
     return { ok: true, completed, cleared, stillPending };
-  } catch (err: any) {
-    console.error('[RefundReconcile] sweep failed:', err?.message);
-    return { ok: false, error: err?.message, completed: 0, cleared: 0, stillPending: 0 };
+  } catch (err) {
+    console.error('[RefundReconcile] sweep failed:', errorMessage(err));
+    return { ok: false, error: errorMessage(err), completed: 0, cleared: 0, stillPending: 0 };
   }
 }

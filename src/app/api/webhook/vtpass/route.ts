@@ -8,6 +8,8 @@ import { normalizePurchasedCode, issuesTokenOrPin } from '@/lib/purchasedCode';
 import { buildReceiptEmail } from '@/lib/receiptEmail';
 import { recordLateDelivery, recordLateFailure } from '@/lib/providerOutcome';
 import { pointsForPayment } from '@/lib/points';
+import { errorMessage } from '@/lib/errors';
+import type { VtpassPush, VtpassReply } from '@/lib/vtpassReply';
 
 const resend = new Resend(process.env.RESEND_API_KEY || "re_dummy_key_for_build");
 
@@ -20,7 +22,7 @@ const resend = new Resend(process.env.RESEND_API_KEY || "re_dummy_key_for_build"
 const ack = () => NextResponse.json({ response: 'success' });
 
 export async function POST(req: Request) {
-  let body: any;
+  let body: VtpassPush;
 
   try {
     body = await req.json();
@@ -38,15 +40,15 @@ export async function POST(req: Request) {
   after(async () => {
     try {
       await processNotification(body);
-    } catch (error: any) {
-      console.error("VTpass webhook processing error:", error?.message || error);
+    } catch (error) {
+      console.error("VTpass webhook processing error:", errorMessage(error));
     }
   });
 
   return ack();
 }
 
-async function processNotification(body: any) {
+async function processNotification(body: VtpassPush) {
     // VTpass sometimes wraps the payload in "data", and sometimes sends it raw. We handle both.
     const payload = body.data || body;
     const { requestId } = payload;
@@ -74,7 +76,7 @@ async function processNotification(body: any) {
     const appMode = process.env.NEXT_PUBLIC_APP_MODE || "sandbox";
     const baseUrl = appMode === "live" ? "https://vtpass.com/api" : "https://sandbox.vtpass.com/api";
 
-    let confirmedPayload: any = null;
+    let confirmedPayload: VtpassReply;
     let confirmedStatus: string | null = null;
     try {
         const confirmRes = await fetch(`${baseUrl}/requery`, {
@@ -84,7 +86,7 @@ async function processNotification(body: any) {
         });
         confirmedPayload = await confirmRes.json();
         confirmedStatus = confirmedPayload.content?.transactions?.status || null;
-    } catch (e) {
+    } catch {
         // If we cannot confirm with the provider, do not act on an unauthenticated push.
         console.log("Webhook: could not confirm status with provider. Push ignored.");
         return;
@@ -102,7 +104,7 @@ async function processNotification(body: any) {
       // normalizePurchasedCode: VTpass sends the placeholder "Token : N/A" instead of omitting
       // the field, which was being stored as though it were a real meter token.
       let dbPurchasedCode = normalizePurchasedCode(confirmedPayload.purchased_code || confirmedPayload.token || confirmedPayload.tokens || confirmedPayload.Pin || trustedTx.token || trustedTx.purchased_code);
-      let vendedUnits = confirmedPayload.units || trustedTx.units || trustedTx.unit || null;
+      const vendedUnits = confirmedPayload.units || trustedTx.units || trustedTx.unit || null;
 
       // Aggressive Token Regex fallback for Electricity
       if (!dbPurchasedCode && txData.service_category === 'ELECTRICITY') {

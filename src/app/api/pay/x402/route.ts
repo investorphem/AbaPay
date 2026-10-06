@@ -17,6 +17,7 @@ import { x402IntentKey, x402UnconfirmedKey } from '@/lib/reconcileX402';
 import { sigFingerprint } from '@/lib/redact';
 import { metric } from '@/lib/log';
 import { X402_DOMAINS_BY_CHAIN } from '@/lib/x402Domains';
+import { errorMessage } from '@/lib/errors';
 
 // ⚡ THE RAW ERC-1271 CHECK — deliberately not viem's `verifyTypedData`/`verifyHash`, which
 // falls back to ecrecover on any failure here (see the long comment where this is used). This
@@ -315,6 +316,9 @@ interface CeloSettleResponse {
   payer: string;
   errorReason?: string;
   errorMessage?: string;
+  // Some facilitator errors arrive as `{ error }` or `{ message }` instead of the fields above.
+  error?: string;
+  message?: string;
   // ⚡ Celo's facilitator is prepaid — every successful /settle response carries the remaining
   // balance, e.g. `{ "settled": true, "credits": 499 }` (docs.celo.org, x402-rs). One credit is
   // spent per settled payment. Used below to warn BEFORE this hits zero, not just after — the
@@ -335,7 +339,7 @@ const LOW_CREDITS_ALERT_COOLDOWN_MS = 30 * 60 * 1_000;
 let lastLowCreditsAlertAt = 0;
 
 async function handleX402Request(req: Request) {
-  let body: any = {};
+  let body: Record<string, unknown> = {};
   try {
     body = await req.json();
   } catch {
@@ -367,7 +371,17 @@ async function handleX402Request(req: Request) {
   try {
     query = Object.fromEntries(new URL(req.url).searchParams.entries());
   } catch { /* an unparseable URL is not worth failing a payment over */ }
-  const params: any = { ...query, ...body };
+  // Every field below is a scalar the rest of this handler treats as a string. JSON lets an agent
+  // send `"billersCode": 45012345678` or `"operator_id": 12`, so numbers are accepted and stringified
+  // HERE, once; anything else (an object, an array, null) is dropped rather than reaching a
+  // `.toLowerCase()` or a fee lookup as something it isn't.
+  const merged: Record<string, unknown> = { ...query, ...body };
+  const params: Record<string, string | undefined> = Object.fromEntries(
+    Object.entries(merged).map(([k, v]) => [
+      k,
+      typeof v === 'string' ? v : typeof v === 'number' && Number.isFinite(v) ? String(v) : undefined,
+    ]),
+  );
 
   const {
     serviceID, serviceCategory, network, billersCode, phone,
@@ -383,13 +397,13 @@ async function handleX402Request(req: Request) {
 
   const isMainnet = process.env.NEXT_PUBLIC_NETWORK === 'mainnet' || process.env.NEXT_PUBLIC_NETWORK === 'celo' || process.env.NEXT_PUBLIC_NETWORK === 'base';
   const isForeign = serviceID === 'foreign-airtime';
-  const requestedNaira = parseFloat(nairaAmount);
+  const requestedNaira = parseFloat(nairaAmount ?? '');
   // computeServiceFee (src/lib/serviceRules.ts) is the shared rule MCP and the chat/DeAI agent
   // also charge from now — isForeign stays a LOCAL guard here, not baked into the shared
   // function, because it protects against this REST endpoint specifically: a caller naming
   // serviceID "foreign-airtime" but mismatching serviceCategory to something fee-bearing. MCP
   // and chat never construct a request that way, so they have no equivalent case to guard.
-  const serviceFee = isForeign ? 0 : computeServiceFee(serviceCategory, network);
+  const serviceFee = isForeign ? 0 : computeServiceFee(serviceCategory ?? '', network);
   // ⚡ FACILITATOR FEE, PASSED THROUGH — was previously absorbed by AbaPay from its own prepaid
   // Celo facilitator credit balance / CDP account (see the header comment above and the
   // low-credits check further down); now charged to the payer instead, at cost, in the
@@ -445,7 +459,7 @@ async function handleX402Request(req: Request) {
   // the 402 challenge must always fire regardless of what the client asked for (see the
   // "validation must never run before the payment challenge" note above), and the challenge's
   // own `asset`/`extra` fields are what actually govern what the client signs.
-  const requestedTokenSymbol: string = chainCfg.domains[tokenSymbol] ? tokenSymbol : 'USDC';
+  const requestedTokenSymbol: string = tokenSymbol && chainCfg.domains[tokenSymbol] ? tokenSymbol : 'USDC';
   const tokenDomain = chainCfg.domains[requestedTokenSymbol];
   const usdc = resolveTokenOnChain(requestedTokenSymbol, chainKey, isMainnet);
   if (!usdc) {
@@ -726,7 +740,7 @@ async function handleX402Request(req: Request) {
   // right below is what actually pulls funds via the payer's signed EIP-3009 authorization.
   // A check placed after settling would be too late (money already moved) to do anything but
   // refund, same reasoning as the intent_only placement in /api/pay.
-  if (serviceCategory === 'ELECTRICITY' && vendAmount !== null && wallet_address) {
+  if (serviceCategory === 'ELECTRICITY' && vendAmount !== null && wallet_address && billersCode) {
     const dup = await isDuplicateElectricity(supabase, wallet_address, billersCode, vendAmount);
     if (dup) {
       return NextResponse.json({
@@ -836,7 +850,8 @@ async function handleX402Request(req: Request) {
     payment_method: 'X402',
   };
   try {
-    let decodedPayload: any;
+    // The client's X-PAYMENT header, decoded. Structure is checked where each part is read.
+    let decodedPayload: { payload?: { signature?: unknown; [k: string]: unknown }; signature?: unknown; [k: string]: unknown };
     try {
       decodedPayload = JSON.parse(Buffer.from(paymentHeader, 'base64').toString('utf-8'));
     } catch {
@@ -1013,7 +1028,7 @@ async function handleX402Request(req: Request) {
         const publicClient = getPublicClient(chainKey);
         const code = await publicClient.getCode({ address: auth.from as `0x${string}` }).catch(() => undefined);
         payerHasCode = Boolean(code && code !== '0x');
-        debugDigest = hashTypedData(typedData as any);
+        debugDigest = hashTypedData(typedData);
 
         // Kept purely as an observation for the alert — it is NO LONGER what decides. When the
         // simulation and this disagree, the simulation is right and this line is the evidence of
@@ -1024,7 +1039,7 @@ async function handleX402Request(req: Request) {
             abi: ERC1271_IS_VALID_SIGNATURE_ABI,
             functionName: 'isValidSignature',
             args: [debugDigest as `0x${string}`, signature as `0x${string}`],
-          }).catch((err: any) => { debugMagicError = err?.shortMessage || err?.message || String(err); return null; });
+          }).catch((err: unknown) => { debugMagicError = errorMessage(err); return null; });
           debugMagicError = debugMagicError ?? `returned ${magic}`;
         }
 
@@ -1060,8 +1075,8 @@ async function handleX402Request(req: Request) {
             });
           }
           signerOk = true;
-        } catch (err: any) {
-          const reason = err?.shortMessage || err?.message || String(err);
+        } catch (err) {
+          const reason = errorMessage(err);
           debugRevert = reason;
           // ⚠️ "Already used" is NOT a bad signature and MUST NOT fall back — the money has
           // moved. Let the settle path and authorizationWasConsumed handle it as they already do,
@@ -1259,7 +1274,7 @@ async function handleX402Request(req: Request) {
       return { status: res.status, ok: res.ok, text };
     };
 
-    let parsed: any = null;
+    let parsed: Partial<CeloSettleResponse> | null = null;
     for (let attempt = 1; ; attempt++) {
       const res = await attemptSettle();
       settleHttpStatus = res.status;
@@ -1303,11 +1318,11 @@ async function handleX402Request(req: Request) {
       );
     }
     settleResult = parsed as CeloSettleResponse;
-  } catch (err: any) {
+  } catch (err) {
     // 🔴 NOT RETRYABLE, DELIBERATELY. A fetch that threw tells us nothing about what the
     // facilitator did with the request — it may have settled and lost the response. Signing
     // again here could pay twice; the contract-call rail at least prompts the user first.
-    console.error(`[Pay/x402] ${chainKey} facilitator unreachable:`, err?.message);
+    console.error(`[Pay/x402] ${chainKey} facilitator unreachable:`, errorMessage(err));
     return NextResponse.json({ x402Version: 1, error: 'Facilitator temporarily unavailable', accepts: [acceptEntry] }, { status: 402 });
   }
 
@@ -1317,7 +1332,7 @@ async function handleX402Request(req: Request) {
     // Retryable = a fresh signature is worth one prompt. Never when a transaction was named:
     // money may already have moved, and the client must not sign anything else.
     let retryable = !namesTransaction && isRetryableSettleFailure(settleHttpStatus, allText);
-    const reason = settleResult.errorMessage || settleResult.errorReason || (settleResult as any).error || (settleResult as any).message || 'Payment could not be settled';
+    const reason = settleResult.errorMessage || settleResult.errorReason || settleResult.error || settleResult.message || 'Payment could not be settled';
 
     // 🔴 BEFORE OFFERING A RETRY, ASK THE CHAIN WHETHER THE MONEY ALREADY MOVED.
     //
@@ -1713,7 +1728,7 @@ async function handleX402Request(req: Request) {
 export async function POST(req: Request) {
   try {
     return await handleX402Request(req);
-  } catch (error: any) {
+  } catch (error) {
     console.error('[Pay/x402] error:', error);
     return NextResponse.json({ success: false, status: 'SYSTEM_CRASH', message: 'System error settling payment.' }, { status: 500 });
   }
@@ -1727,7 +1742,7 @@ export async function POST(req: Request) {
 export async function GET(req: Request) {
   try {
     return await handleX402Request(req);
-  } catch (error: any) {
+  } catch (error) {
     console.error('[Pay/x402] error:', error);
     return NextResponse.json({ success: false, status: 'SYSTEM_CRASH', message: 'System error settling payment.' }, { status: 500 });
   }

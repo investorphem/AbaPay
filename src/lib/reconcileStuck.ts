@@ -10,6 +10,8 @@ import { classifyTransferStatus, extractMonnifyFailureReason } from '@/lib/monni
 import { Resend } from 'resend';
 import { normalizePurchasedCode, issuesTokenOrPin } from '@/lib/purchasedCode';
 import { pointsForPayment } from '@/lib/points';
+import { errorMessage } from '@/lib/errors';
+import type { TransactionRow } from '@/lib/rows';
 
 const resend = new Resend(process.env.RESEND_API_KEY || 're_dummy_key_for_build');
 
@@ -82,13 +84,13 @@ export async function reconcileStuckProcessing(opts: { force?: boolean } = {}) {
   let reconciled = 0;
   let alerted = 0;
 
-  for (const record of stuck as any[]) {
+  for (const record of stuck as TransactionRow[]) {
     try {
       const outcome = await reconcileStuckRow(record, baseUrl);
       if (outcome === 'reconciled') reconciled++;
       else if (outcome === 'alerted') alerted++;
-    } catch (err: any) {
-      console.error('[Reconcile] error processing stuck row:', record.tx_hash, err?.message);
+    } catch (err) {
+      console.error('[Reconcile] error processing stuck row:', record.tx_hash, errorMessage(err));
     }
   }
 
@@ -102,7 +104,7 @@ export type StuckRowOutcome = 'reconciled' | 'alerted' | 'pending' | 'skipped' |
  * Same rules as always: requery the provider, never re-send blindly. `pending` = still
  * genuinely processing at the provider; check again later.
  */
-export async function reconcileStuckRow(record: any, baseUrl: string): Promise<StuckRowOutcome> {
+export async function reconcileStuckRow(record: TransactionRow, baseUrl: string): Promise<StuckRowOutcome> {
     // 🔴 THE BUG THIS FIXES: every "genuinely ambiguous, alert the operator" branch below
     // fired on EVERY sweep run for as long as a row stayed stuck — with no memory of having
     // already alerted, a row nobody has acted on yet just re-sends the identical Telegram
@@ -201,7 +203,7 @@ export async function reconcileStuckRow(record: any, baseUrl: string): Promise<S
       if (!claimed || claimed.length === 0) return 'resolved_elsewhere'; // already resolved elsewhere
 
       const alertTokenRef = dbPurchasedCode || requeryData.content?.transactions?.transactionId || 'Success';
-      const notifications: any[] = [];
+      const notifications: PromiseLike<unknown>[] = [];
 
       notifications.push(
         sendTelegramAlert(

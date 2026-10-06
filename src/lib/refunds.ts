@@ -2,6 +2,7 @@ import 'server-only';
 import { supabaseAdmin } from '@/utils/supabase';
 import { sendTelegramAlert, sendTelegramToUser } from '@/lib/telegram';
 import { Resend } from 'resend';
+import type { RefundQueueRow } from '@/lib/rows';
 
 const resend = new Resend(process.env.RESEND_API_KEY || 're_dummy_key_for_build');
 
@@ -122,8 +123,8 @@ async function notifyUserOfPendingRefund(p: EnqueueParams) {
       .eq('link_verified', true)
       .maybeSingle();
 
-    if (link && (link as any).channel === 'TELEGRAM') {
-      await sendTelegramToUser((link as any).channel_user_id, msg);
+    if (link && link.channel === 'TELEGRAM') {
+      await sendTelegramToUser(link.channel_user_id, msg);
     }
   } catch { /* best-effort */ }
 
@@ -135,7 +136,7 @@ async function notifyUserOfPendingRefund(p: EnqueueParams) {
       .eq('tx_hash', p.txHash)
       .maybeSingle();
 
-    const email = (tx as any)?.customer_email;
+    const email = tx?.customer_email;
     if (email) {
       await resend.emails.send({
         from: 'AbaPay <receipts@abapays.com>',
@@ -156,7 +157,10 @@ async function notifyUserOfPendingRefund(p: EnqueueParams) {
 /**
  * Confirm to the user that their refund has actually landed on-chain.
  */
-export async function notifyUserRefundCompleted(refund: any, refundTxHash: string) {
+export async function notifyUserRefundCompleted(
+  refund: Pick<RefundQueueRow, 'id' | 'amount_naira' | 'amount_crypto' | 'token_used' | 'wallet_address' | 'tx_hash'>,
+  refundTxHash: string,
+) {
   const amount = refund.amount_naira
     ? `₦${Number(refund.amount_naira).toLocaleString()}`
     : `${refund.amount_crypto} ${refund.token_used}`;
@@ -175,8 +179,8 @@ export async function notifyUserRefundCompleted(refund: any, refundTxHash: strin
       .eq('link_verified', true)
       .maybeSingle();
 
-    if (link && (link as any).channel === 'TELEGRAM') {
-      await sendTelegramToUser((link as any).channel_user_id, msg);
+    if (link && link.channel === 'TELEGRAM') {
+      await sendTelegramToUser(link.channel_user_id, msg);
     }
   } catch { /* best-effort */ }
 
@@ -187,7 +191,7 @@ export async function notifyUserRefundCompleted(refund: any, refundTxHash: strin
       .eq('tx_hash', refund.tx_hash)
       .maybeSingle();
 
-    const email = (tx as any)?.customer_email;
+    const email = tx?.customer_email;
     if (email) {
       await resend.emails.send({
         from: 'AbaPay <receipts@abapays.com>',

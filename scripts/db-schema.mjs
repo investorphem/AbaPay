@@ -10,11 +10,12 @@
 // where a reviewer sees exactly which columns, policies and grants moved.
 //
 //   node scripts/db-schema.mjs           check (CI). Fails if the migrations' schema ≠ snapshot.
-//   node scripts/db-schema.mjs --update  rewrite the snapshot after adding a migration.
+//   node scripts/db-schema.mjs --update  rewrite the snapshot (and src/lib/rows.ts) after a migration.
 //   node scripts/db-schema.mjs --query   print the describe query. Run it against PRODUCTION
 //                                        (read-only) and diff the output with the snapshot to
 //                                        catch drift between the repo and the live database.
 import { buildDatabase, migrationFiles } from './lib/buildDb.mjs';
+import { ROW_TYPES_FILE, rowTypesFromSnapshot } from './lib/rowTypes.mjs';
 import fs from 'node:fs';
 import path from 'node:path';
 
@@ -86,16 +87,25 @@ const { rows } = await db.query(DESCRIBE);
 const current = rows.map((r) => r.line).join('\n') + '\n';
 await db.close();
 
+const rowTypes = rowTypesFromSnapshot(current);
 if (process.argv.includes('--update')) {
   fs.writeFileSync(SNAPSHOT, current);
-  console.log(`Snapshot written: ${rows.length} objects from ${files.length} migrations.`);
+  fs.writeFileSync(ROW_TYPES_FILE, rowTypes);
+  console.log(`Snapshot written: ${rows.length} objects from ${files.length} migrations; ${ROW_TYPES_FILE} regenerated.`);
   process.exit(0);
+}
+
+// The row types are generated from the same schema, so they're stale exactly when they differ.
+const typesOnDisk = fs.existsSync(ROW_TYPES_FILE) ? fs.readFileSync(ROW_TYPES_FILE, 'utf8').replace(/\r\n/g, '\n') : '';
+if (typesOnDisk !== rowTypes) {
+  console.error(`::error file=${ROW_TYPES_FILE}::${ROW_TYPES_FILE} doesn't match the schema. Run \`npm run db:schema -- --update\` and commit it.`);
+  process.exitCode = 1;
 }
 
 const expected = fs.existsSync(SNAPSHOT) ? fs.readFileSync(SNAPSHOT, 'utf8').replace(/\r\n/g, '\n') : '';
 if (current === expected) {
-  console.log(`DB schema OK: ${files.length} migrations apply cleanly and match the snapshot (${rows.length} objects).`);
-  process.exit(0);
+  if (!process.exitCode) console.log(`DB schema OK: ${files.length} migrations apply cleanly and match the snapshot (${rows.length} objects).`);
+  process.exit(process.exitCode ?? 0);
 }
 const want = new Set(expected.split('\n').filter(Boolean));
 const have = new Set(current.split('\n').filter(Boolean));

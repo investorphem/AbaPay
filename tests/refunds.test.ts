@@ -2,6 +2,7 @@ import { describe, it, expect, vi, beforeEach, beforeAll } from 'vitest';
 import { parseUnits } from 'viem';
 import { createFakeDb, fakeSupabase, type FakeDb } from './helpers/fakeSupabase';
 import { CELO_TOKENS, OTHER_CONTRACT, fakeClient, hash, transferLog, type FakeReceipt } from './helpers/chain';
+import type { RefundQueueRow } from '@/lib/rows';
 
 // M7: the refund pipeline. A refund is money leaving the vault, so the rules that matter are
 // "never queue one for a payment that didn't land", "never record one as paid without the
@@ -30,7 +31,9 @@ vi.mock('@/lib/chain', async (orig) => ({
 beforeAll(() => { process.env.NEXT_PUBLIC_NETWORK = 'celo'; });
 
 const { enqueueRefund } = await import('@/lib/refunds');
-const { verifyRefundOnChain, refundHashAlreadyUsed, completeRefund, rememberRefundHash, reconcileRecordedRefunds } = await import('@/lib/refundVerify');
+const { verifyRefundOnChain, refundHashAlreadyUsed, completeRefund: completeRow, rememberRefundHash, reconcileRecordedRefunds } = await import('@/lib/refundVerify');
+// Fixtures carry only the columns each case needs; the full row type is asserted here, once.
+const completeRefund = (r: object, hash: string) => completeRow(r as RefundQueueRow, hash);
 
 const WALLET = '0x3333333333333333333333333333333333333333';
 const PAY_TX = hash(10);
