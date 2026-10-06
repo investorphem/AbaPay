@@ -96,25 +96,25 @@ export default function DocsPage() {
               <Bot className="text-indigo-500" size={20} /> DeAI — Pay Bills by Chat
             </h2>
             <p className="text-slate-600 dark:text-slate-300 font-medium mb-6 leading-relaxed">
-              DeAI is AbaPay's conversational agent — talk to it on <strong>Telegram, WhatsApp, X (Twitter)</strong>, or the in-app chat widget, and it handles the rest. No menus to memorize: just say what you want, like <em>"top up my 08012345678 with 500 naira"</em> or reply <em>"Celo"</em> and <em>"usdt"</em> instead of hunting for a numbered option.
+              DeAI is AbaPay&apos;s conversational agent — talk to it on <strong>Telegram, WhatsApp, X (Twitter)</strong>, or the in-app chat widget, and it handles the rest. No menus to memorize: just say what you want, like <em>&quot;top up my 08012345678 with 500 naira&quot;</em> or reply <em>&quot;Celo&quot;</em> and <em>&quot;usdt&quot;</em> instead of hunting for a numbered option.
             </p>
             <div className="space-y-4">
               <div className="bg-indigo-50 dark:bg-indigo-900/20 border border-indigo-100 dark:border-indigo-800/50 p-5 rounded-2xl transition-colors">
                 <h4 className="text-sm font-black text-indigo-900 dark:text-indigo-100 mb-1">Two Ways to Pay</h4>
                 <p className="text-sm text-indigo-800 dark:text-indigo-300 font-medium leading-relaxed">
-                  If you've approved a spending allowance for a chain and stablecoin (see Agent Hub below), the agent pays instantly with no wallet signature needed. If you haven't, it sends you a secure, one-tap link to review and sign the payment yourself — same verified pipeline as the website either way.
+                  If you&apos;ve approved a spending allowance for a chain and stablecoin (see Agent Hub below), the agent pays instantly with no wallet signature needed. If you haven&apos;t, it sends you a secure, one-tap link to review and sign the payment yourself — same verified pipeline as the website either way.
                 </p>
               </div>
               <div className="bg-slate-50 dark:bg-[#1a1a1f] p-5 rounded-2xl border border-slate-100 dark:border-slate-800/80 transition-colors">
                 <h4 className="text-sm font-black text-slate-800 dark:text-slate-200 mb-1">See Your Balance &amp; Limit Before You Choose</h4>
                 <p className="text-sm text-slate-600 dark:text-slate-400 font-medium leading-relaxed">
-                  When the agent asks which stablecoin to use, it shows the live wallet balance <em>and</em> your remaining approved agent limit for every option on that chain — so you're never picking blind.
+                  When the agent asks which stablecoin to use, it shows the live wallet balance <em>and</em> your remaining approved agent limit for every option on that chain — so you&apos;re never picking blind.
                 </p>
               </div>
               <div className="bg-slate-50 dark:bg-[#1a1a1f] p-5 rounded-2xl border border-slate-100 dark:border-slate-800/80 transition-colors">
                 <h4 className="text-sm font-black text-slate-800 dark:text-slate-200 mb-1">Never Left Hanging</h4>
                 <p className="text-sm text-slate-600 dark:text-slate-400 font-medium leading-relaxed">
-                  Abandon a chat mid-payment and nothing is left dangling — the intent is cleaned up automatically. If a network hiccup happens right after you enter your PIN, the agent tracks the payment through to a confirmed on-chain result before ever telling you it failed, so you're never double-charged or left unsure.
+                  Abandon a chat mid-payment and nothing is left dangling — the intent is cleaned up automatically. If a network hiccup happens right after you enter your PIN, the agent tracks the payment through to a confirmed on-chain result before ever telling you it failed, so you&apos;re never double-charged or left unsure.
                 </p>
               </div>
             </div>
@@ -126,7 +126,7 @@ export default function DocsPage() {
               <Plug className="text-violet-500" size={20} /> MCP — Connect Your Own AI Assistant
             </h2>
             <p className="text-slate-600 dark:text-slate-300 font-medium mb-6 leading-relaxed">
-              AbaPay runs an <strong>MCP (Model Context Protocol)</strong> server, so an AI assistant you already use — Claude, or any MCP-speaking client — can pay your bills for you: Nigerian services, or international airtime/data across 140+ countries. It's the same engine chat uses, reached over JSON-RPC instead of a message. Nothing about it is a looser trust boundary: same on-chain allowance, same PIN gate, same kill switches, same operator caps, same spend alerts.
+              AbaPay runs an <strong>MCP (Model Context Protocol)</strong> server, so an AI assistant you already use — Claude, or any MCP-speaking client — can pay your bills for you: Nigerian services, or international airtime/data across 140+ countries. It&apos;s the same engine chat uses, reached over JSON-RPC instead of a message. Nothing about it is a looser trust boundary: same on-chain allowance, same PIN gate, same kill switches, same operator caps, same spend alerts.
             </p>
             <div className="space-y-4">
               <div className="bg-slate-50 dark:bg-[#1a1a1f] p-5 rounded-2xl border border-slate-100 dark:border-slate-800/80 transition-colors">
@@ -138,25 +138,25 @@ export default function DocsPage() {
               <div className="bg-violet-50 dark:bg-violet-900/20 border border-violet-100 dark:border-violet-800/50 p-5 rounded-2xl transition-colors">
                 <h4 className="text-sm font-black text-violet-900 dark:text-violet-100 mb-1">OAuth, or an API key</h4>
                 <p className="text-sm text-violet-800 dark:text-violet-300 font-medium leading-relaxed">
-                  Preferred: authorize once in your browser with <strong>OAuth 2.1</strong> and the connection is remembered — no credential to paste ever again. For clients that can't do OAuth, create an API key in <strong>Agent Hub → MCP</strong> instead. Either one can be revoked instantly from the Agent Hub, which kills every token issued against it.
+                  Preferred: authorize once in your browser with <strong>OAuth 2.1</strong> and the connection is remembered — no credential to paste ever again. For clients that can&apos;t do OAuth, create an API key in <strong>Agent Hub → MCP</strong> instead. Either one can be revoked instantly from the Agent Hub, which kills every token issued against it.
                 </p>
               </div>
               <div className="bg-slate-50 dark:bg-[#1a1a1f] p-5 rounded-2xl border border-slate-100 dark:border-slate-800/80 transition-colors">
                 <h4 className="text-sm font-black text-slate-800 dark:text-slate-200 mb-1">Your PIN is still required — every single payment</h4>
                 <p className="text-sm text-slate-600 dark:text-slate-400 font-medium leading-relaxed">
-                  Authorizing a connection means "this assistant may act for me". It never means "this assistant may spend". Without your PIN a connected assistant can read your balance and the plan catalogue and nothing else. If anything claims it can pay without asking you for your PIN, treat that as a red flag.
+                  Authorizing a connection means &quot;this assistant may act for me&quot;. It never means &quot;this assistant may spend&quot;. Without your PIN a connected assistant can read your balance and the plan catalogue and nothing else. If anything claims it can pay without asking you for your PIN, treat that as a red flag.
                 </p>
               </div>
               <div className="bg-slate-50 dark:bg-[#1a1a1f] p-5 rounded-2xl border border-slate-100 dark:border-slate-800/80 transition-colors">
                 <h4 className="text-sm font-black text-slate-800 dark:text-slate-200 mb-1">Real plans, real prices — never guessed</h4>
                 <p className="text-sm text-slate-600 dark:text-slate-400 font-medium leading-relaxed">
-                  A <code className="text-[11px] font-black">list_plans</code> tool gives the assistant the actual purchasable data bundles, cable packages and exam products with their real codes and current prices, straight from our payment provider. A separate <code className="text-[11px] font-black">list_international_options</code> tool does the same for the international catalogue — country, product type, operator and priced plan. It's what stops an assistant inventing a plausible-sounding "1GB for ₦1,000" that doesn't exist — a real code is required or it can't pay at all.
+                  A <code className="text-[11px] font-black">list_plans</code> tool gives the assistant the actual purchasable data bundles, cable packages and exam products with their real codes and current prices, straight from our payment provider. A separate <code className="text-[11px] font-black">list_international_options</code> tool does the same for the international catalogue — country, product type, operator and priced plan. It&apos;s what stops an assistant inventing a plausible-sounding &quot;1GB for ₦1,000&quot; that doesn&apos;t exist — a real code is required or it can&apos;t pay at all.
                 </p>
               </div>
               <div className="bg-slate-50 dark:bg-[#1a1a1f] p-5 rounded-2xl border border-slate-100 dark:border-slate-800/80 transition-colors">
                 <h4 className="text-sm font-black text-slate-800 dark:text-slate-200 mb-1">Premium receipts, and your own history — right in chat</h4>
                 <p className="text-sm text-slate-600 dark:text-slate-400 font-medium leading-relaxed">
-                  Every successful payment comes back with a branded receipt card and a shareable receipt link, not just a line of text. A <code className="text-[11px] font-black">transaction_history</code> tool lets the assistant answer "what did I pay recently" with the same records as your app's History tab, without you needing to open it.
+                  Every successful payment comes back with a branded receipt card and a shareable receipt link, not just a line of text. A <code className="text-[11px] font-black">transaction_history</code> tool lets the assistant answer &quot;what did I pay recently&quot; with the same records as your app&apos;s History tab, without you needing to open it.
                 </p>
               </div>
             </div>
@@ -177,11 +177,11 @@ export default function DocsPage() {
               </li>
               <li className="bg-slate-50 dark:bg-[#1a1a1f] p-5 rounded-2xl border border-slate-100 dark:border-slate-800/80 transition-colors">
                 <strong className="block text-sm font-black text-slate-800 dark:text-slate-200 mb-1">Bounded and Revocable, On-Chain</strong>
-                <span className="text-sm text-slate-600 dark:text-slate-400 font-medium leading-relaxed">The smart contract itself — not AbaPay's servers — enforces the cap. The agent can never spend more than the remaining amount you've approved, and you can lower it, raise it, or set it to zero at any moment. Setting it to zero is the real revocation; unlinking a chat account stops that channel but doesn't touch the on-chain limit.</span>
+                <span className="text-sm text-slate-600 dark:text-slate-400 font-medium leading-relaxed">The smart contract itself — not AbaPay&apos;s servers — enforces the cap. The agent can never spend more than the remaining amount you&apos;ve approved, and you can lower it, raise it, or set it to zero at any moment. Setting it to zero is the real revocation; unlinking a chat account stops that channel but doesn&apos;t touch the on-chain limit.</span>
               </li>
               <li className="bg-slate-50 dark:bg-[#1a1a1f] p-5 rounded-2xl border border-slate-100 dark:border-slate-800/80 transition-colors">
                 <strong className="block text-sm font-black text-slate-800 dark:text-slate-200 mb-1">No Allowance? No Problem.</strong>
-                <span className="text-sm text-slate-600 dark:text-slate-400 font-medium leading-relaxed">If you ask the agent to pay with a token you haven't approved yet, it tells you plainly and gives you the choice — approve it now in the Agent Hub, or complete just this one payment with a signed link instead.</span>
+                <span className="text-sm text-slate-600 dark:text-slate-400 font-medium leading-relaxed">If you ask the agent to pay with a token you haven&apos;t approved yet, it tells you plainly and gives you the choice — approve it now in the Agent Hub, or complete just this one payment with a signed link instead.</span>
               </li>
               <li className="bg-slate-50 dark:bg-[#1a1a1f] p-5 rounded-2xl border border-slate-100 dark:border-slate-800/80 transition-colors">
                 <strong className="block text-sm font-black text-slate-800 dark:text-slate-200 mb-1">You Hear About Every Agent Spend</strong>
@@ -196,12 +196,12 @@ export default function DocsPage() {
               <CalendarClock className="text-sky-500" size={20} /> Scheduled &amp; Recurring Bills
             </h2>
             <p className="text-slate-600 dark:text-slate-300 font-medium mb-6 leading-relaxed">
-              Tell the agent in plain language — <em>"every Tuesday buy ₦200 MTN airtime"</em>, <em>"pay my meter on the 28th every month"</em>, or a one-off <em>"top up 08012345678 in an hour"</em> — and it becomes a schedule. Ask it to <em>"show my schedules"</em> or <em>"cancel my airtime schedule"</em> the same way.
+              Tell the agent in plain language — <em>&quot;every Tuesday buy ₦200 MTN airtime&quot;</em>, <em>&quot;pay my meter on the 28th every month&quot;</em>, or a one-off <em>&quot;top up 08012345678 in an hour&quot;</em> — and it becomes a schedule. Ask it to <em>&quot;show my schedules&quot;</em> or <em>&quot;cancel my airtime schedule&quot;</em> the same way.
             </p>
             <div className="bg-sky-50 dark:bg-sky-900/20 border border-sky-100 dark:border-sky-800/50 p-5 rounded-2xl transition-colors">
               <h4 className="text-sm font-black text-sky-900 dark:text-sky-100 mb-2">Automatic execution is opt-in, per schedule</h4>
               <p className="text-sm text-sky-800 dark:text-sky-300 font-medium leading-relaxed">
-                By default a schedule only <strong>reminds</strong> you when it's due. Only if you explicitly turn on automatic execution does it pay by itself — and even then it's bounded by the same on-chain allowance and the same per-transaction and daily caps as any other agent payment. A schedule runs at most once per due date, re-checks every service rule before it fires, warns you ahead of time if your balance looks short, and pauses itself after repeated failures rather than retrying forever.
+                By default a schedule only <strong>reminds</strong> you when it&apos;s due. Only if you explicitly turn on automatic execution does it pay by itself — and even then it&apos;s bounded by the same on-chain allowance and the same per-transaction and daily caps as any other agent payment. A schedule runs at most once per due date, re-checks every service rule before it fires, warns you ahead of time if your balance looks short, and pauses itself after repeated failures rather than retrying forever.
               </p>
             </div>
           </section>
@@ -215,7 +215,7 @@ export default function DocsPage() {
               <li className="bg-slate-50 dark:bg-[#1a1a1f] p-4 rounded-2xl border border-slate-100 dark:border-slate-800/80"><strong className="text-slate-800 dark:text-slate-200">Airtime &amp; mobile data</strong> — MTN, Airtel, Glo, 9mobile, including SME data bundles. No platform fee.</li>
               <li className="bg-slate-50 dark:bg-[#1a1a1f] p-4 rounded-2xl border border-slate-100 dark:border-slate-800/80"><strong className="text-slate-800 dark:text-slate-200">Electricity</strong> — prepaid and postpaid, across the Nigerian distribution companies. Your meter is verified with the disco before you pay.</li>
               <li className="bg-slate-50 dark:bg-[#1a1a1f] p-4 rounded-2xl border border-slate-100 dark:border-slate-800/80"><strong className="text-slate-800 dark:text-slate-200">Cable TV</strong> — DStv, GOtv, Startimes. Smartcard/IUC verified before payment.</li>
-              <li className="bg-slate-50 dark:bg-[#1a1a1f] p-4 rounded-2xl border border-slate-100 dark:border-slate-800/80"><strong className="text-slate-800 dark:text-slate-200">Education PINs</strong> — WAEC result-checker and WAEC registration PINs, buyable in the app, in chat <em>and</em> through a connected AI agent. JAMB is built but not currently enabled on our merchant account, so it can't be bought today.</li>
+              <li className="bg-slate-50 dark:bg-[#1a1a1f] p-4 rounded-2xl border border-slate-100 dark:border-slate-800/80"><strong className="text-slate-800 dark:text-slate-200">Education PINs</strong> — WAEC result-checker and WAEC registration PINs, buyable in the app, in chat <em>and</em> through a connected AI agent. JAMB is built but not currently enabled on our merchant account, so it can&apos;t be bought today.</li>
               <li className="bg-slate-50 dark:bg-[#1a1a1f] p-4 rounded-2xl border border-slate-100 dark:border-slate-800/80"><strong className="text-slate-800 dark:text-slate-200">International airtime &amp; data</strong> — every country our payment provider currently covers, read live from their own list.</li>
               <li className="bg-slate-50 dark:bg-[#1a1a1f] p-4 rounded-2xl border border-slate-100 dark:border-slate-800/80"><strong className="text-slate-800 dark:text-slate-200">Bank transfers</strong> — <em>app only, deliberately.</em> Moving money to a third party needs your own wallet signature, so the agent will never execute one from an allowance.</li>
             </ul>
@@ -260,7 +260,7 @@ export default function DocsPage() {
               <Smartphone className="text-blue-500" size={20} /> Saved Beneficiaries (Recents)
             </h2>
             <p className="text-slate-600 dark:text-slate-300 font-medium mb-6 leading-relaxed">
-               Typing the same meter number or international phone number every time is stressful. AbaPay automatically saves your successful transactions as "Recent" shortcuts right below the input field.
+               Typing the same meter number or international phone number every time is stressful. AbaPay automatically saves your successful transactions as &quot;Recent&quot; shortcuts right below the input field.
             </p>
 
             <div className="bg-blue-50 dark:bg-blue-900/20 border border-blue-100 dark:border-blue-800/50 p-6 rounded-3xl transition-colors">
@@ -275,7 +275,7 @@ export default function DocsPage() {
                   </div>
                   <div className="flex items-center gap-4 text-sm text-blue-900 dark:text-blue-100 font-medium bg-white dark:bg-[#111114] px-5 py-4 rounded-2xl border border-blue-100 dark:border-blue-800/50 shadow-sm transition-colors">
                      <span className="bg-blue-100 dark:bg-blue-900/50 text-blue-700 dark:text-blue-400 font-black w-6 h-6 flex items-center justify-center rounded-full shrink-0 transition-colors">2</span>
-                     <p>The pill will turn red and say "Delete". Click it to remove it forever!</p>
+                     <p>The pill will turn red and say &quot;Delete&quot;. Click it to remove it forever!</p>
                   </div>
                </div>
             </div>
@@ -290,10 +290,10 @@ export default function DocsPage() {
               <div className="bg-slate-50 dark:bg-[#1a1a1f] p-5 rounded-3xl border border-slate-100 dark:border-slate-800/80 transition-colors">
                 <h4 className="text-sm font-black text-slate-800 dark:text-slate-200 mb-2">Sharing Your Receipt</h4>
                 <p className="text-sm text-slate-600 dark:text-slate-400 font-medium leading-relaxed">
-                  Click the dark "SHARE" button at the bottom of any successful transaction receipt. AbaPay generates a clean image of your receipt that you can send straight to WhatsApp or Telegram via your phone's share sheet — or, where that isn't available (desktop and some wallet browsers), save it as a PNG or PDF, or simply long-press the preview image.
+                  Click the dark &quot;SHARE&quot; button at the bottom of any successful transaction receipt. AbaPay generates a clean image of your receipt that you can send straight to WhatsApp or Telegram via your phone&apos;s share sheet — or, where that isn&apos;t available (desktop and some wallet browsers), save it as a PNG or PDF, or simply long-press the preview image.
                 </p>
                 <p className="text-[11px] font-bold text-slate-400 dark:text-slate-500 mt-3 uppercase tracking-wider">
-                  Note: The dopamine "+AbaPoints" animation happens on the app screen to celebrate your purchase, but it is intentionally hidden from the final receipt image so your receipts look professional when shared.
+                  Note: The dopamine &quot;+AbaPoints&quot; animation happens on the app screen to celebrate your purchase, but it is intentionally hidden from the final receipt image so your receipts look professional when shared.
                 </p>
               </div>
 
@@ -302,7 +302,7 @@ export default function DocsPage() {
                 <div>
                    <h4 className="text-sm font-black text-orange-900 dark:text-orange-100 mb-1">In-App Support System</h4>
                    <p className="text-sm text-orange-800 dark:text-orange-300 font-medium leading-relaxed">
-                     Did a transaction fail or is a token delayed? Click the "Support" button on any receipt to instantly send a ticket, complete with your transaction hash, directly to our admin ops center.
+                     Did a transaction fail or is a token delayed? Click the &quot;Support&quot; button on any receipt to instantly send a ticket, complete with your transaction hash, directly to our admin ops center.
                    </p>
                 </div>
               </div>
@@ -320,7 +320,7 @@ export default function DocsPage() {
             <ul className="space-y-4">
               <li className="bg-slate-50 dark:bg-[#1a1a1f] p-5 rounded-2xl border border-slate-100 dark:border-slate-800/80 transition-colors">
                 <strong className="block text-sm font-black text-slate-800 dark:text-slate-200 mb-1">Strict Token Requirements</strong>
-                <span className="text-sm text-slate-600 dark:text-slate-400 font-medium leading-relaxed">If a provider claims "Success" but fails to generate your electricity token or education PIN, our system refuses to accept it. Your transaction goes into a PENDING state while our background webhook safely hunts down your token.</span>
+                <span className="text-sm text-slate-600 dark:text-slate-400 font-medium leading-relaxed">If a provider claims &quot;Success&quot; but fails to generate your electricity token or education PIN, our system refuses to accept it. Your transaction goes into a PENDING state while our background webhook safely hunts down your token.</span>
               </li>
               <li className="bg-slate-50 dark:bg-[#1a1a1f] p-5 rounded-2xl border border-slate-100 dark:border-slate-800/80 transition-colors">
                 <strong className="block text-sm font-black text-slate-800 dark:text-slate-200 mb-1">Deep On-Chain Payload Decoding</strong>
@@ -328,11 +328,11 @@ export default function DocsPage() {
               </li>
               <li className="bg-slate-50 dark:bg-[#1a1a1f] p-5 rounded-2xl border border-slate-100 dark:border-slate-800/80 transition-colors">
                 <strong className="block text-sm font-black text-slate-800 dark:text-slate-200 mb-1">Preflight Intent Recovery</strong>
-                <span className="text-sm text-slate-600 dark:text-slate-400 font-medium leading-relaxed">If your mobile app crashes or your network drops immediately after signing the transaction in your wallet, your funds are not lost. The system actively scans the blockchain to recover your "abandoned" preflight intent and completes the vending in the background.</span>
+                <span className="text-sm text-slate-600 dark:text-slate-400 font-medium leading-relaxed">If your mobile app crashes or your network drops immediately after signing the transaction in your wallet, your funds are not lost. The system actively scans the blockchain to recover your &quot;abandoned&quot; preflight intent and completes the vending in the background.</span>
               </li>
               <li className="bg-slate-50 dark:bg-[#1a1a1f] p-5 rounded-2xl border border-slate-100 dark:border-slate-800/80 transition-colors">
                 <strong className="block text-sm font-black text-slate-800 dark:text-slate-200 mb-1">Verified Refunds Only</strong>
-                <span className="text-sm text-slate-600 dark:text-slate-400 font-medium leading-relaxed">Every refund is checked against the blockchain — correct token, correct recipient, sufficient amount — before it can be marked as refunded. A refund can never be recorded that didn't actually happen.</span>
+                <span className="text-sm text-slate-600 dark:text-slate-400 font-medium leading-relaxed">Every refund is checked against the blockchain — correct token, correct recipient, sufficient amount — before it can be marked as refunded. A refund can never be recorded that didn&apos;t actually happen.</span>
               </li>
             </ul>
           </section>
@@ -348,15 +348,15 @@ export default function DocsPage() {
               <FAQItem
                 q="How do I pay a bill?"
                 a={<>
-                  <p>Three ways, all running the same payment engine. <strong>In this app:</strong> pick the service, enter the number, confirm, and sign in your wallet. <strong>By chat:</strong> message AbaPay on Telegram, WhatsApp or X in plain language — "send ₦500 airtime to 08012345678". <strong>Through an AI assistant:</strong> connect AbaPay as a tool over MCP and just ask it to pay.</p>
-                  <p>Chat and AI payments need a spending allowance approved first (or they'll send you a signed link to pay yourself, one time).</p>
+                  <p>Three ways, all running the same payment engine. <strong>In this app:</strong> pick the service, enter the number, confirm, and sign in your wallet. <strong>By chat:</strong> message AbaPay on Telegram, WhatsApp or X in plain language — &quot;send ₦500 airtime to 08012345678&quot;. <strong>Through an AI assistant:</strong> connect AbaPay as a tool over MCP and just ask it to pay.</p>
+                  <p>Chat and AI payments need a spending allowance approved first (or they&apos;ll send you a signed link to pay yourself, one time).</p>
                 </>}
               />
               <FAQItem
                 q="Can I use AbaPay's agent in a Telegram group?"
                 a={<>
                   <p>Yes — add the bot to a group and tag it (<code>@AbaPayAgentBot</code>) to use it there. Anything sensitive (balances, receipts, PINs) is always sent to you privately, never posted where the group can see it.</p>
-                  <p>One group-only trick: ask it to pick a few phone numbers that were posted in the chat recently and recharge them — e.g. <em>"recharge 5 random numbers from the last 30 minutes, 200 each"</em>, or the same with data instead of airtime. It confirms the total and asks for your PIN by DM first, then posts the result (numbers, amounts, proof) back in the group once it's done. Electricity and cable aren't included in this — there's no safe way to tell a meter or smartcard number apart from any other number someone posts, so those still need you to name the account directly.</p>
+                  <p>One group-only trick: ask it to pick a few phone numbers that were posted in the chat recently and recharge them — e.g. <em>&quot;recharge 5 random numbers from the last 30 minutes, 200 each&quot;</em>, or the same with data instead of airtime. It confirms the total and asks for your PIN by DM first, then posts the result (numbers, amounts, proof) back in the group once it&apos;s done. Electricity and cable aren&apos;t included in this — there&apos;s no safe way to tell a meter or smartcard number apart from any other number someone posts, so those still need you to name the account directly.</p>
                 </>}
               />
               <FAQItem
@@ -461,7 +461,7 @@ export default function DocsPage() {
               <FAQItem
                 q="Are there fees?"
                 a={<>
-                  <p>Yes, and they're always shown in the total before you confirm. There's a small flat platform fee on electricity, cable TV, education and bank transfers. Airtime, mobile data and international top-ups carry no platform fee at all.</p>
+                  <p>Yes, and they&apos;re always shown in the total before you confirm. There&apos;s a small flat platform fee on electricity, cable TV, education and bank transfers. Airtime, mobile data and international top-ups carry no platform fee at all.</p>
                   <p>Blockchain gas is separate, goes to the network rather than to us, and depends on your wallet and chain — Base smart wallets are often sponsored, so free.</p>
                 </>}
               />
@@ -473,35 +473,35 @@ export default function DocsPage() {
                 q="What services do you support?"
                 a={<>
                   <p>Airtime, mobile data (including SME bundles), electricity (prepaid and postpaid), cable TV (DStv, GOtv, Startimes), education PINs, bank transfers, and international airtime/data.</p>
-                  <p>The providers inside each category are pulled live from our payment providers, so the list only ever shows what can genuinely be bought right now. If a provider disappears from the picker, it isn't purchasable at that moment — which is deliberately better than letting you pay for it and fail afterwards.</p>
+                  <p>The providers inside each category are pulled live from our payment providers, so the list only ever shows what can genuinely be bought right now. If a provider disappears from the picker, it isn&apos;t purchasable at that moment — which is deliberately better than letting you pay for it and fail afterwards.</p>
                 </>}
               />
               <FAQItem
                 q="How does a bank transfer work?"
                 a={<>
-                  <p>Type the destination account number — we check it against every Nigerian bank automatically and tell you whose account it is, so you don't need to know or select the bank yourself. If more than one bank has an account under that exact number, we show you the short list of matches so you can confirm which one is yours.</p>
+                  <p>Type the destination account number — we check it against every Nigerian bank automatically and tell you whose account it is, so you don&apos;t need to know or select the bank yourself. If more than one bank has an account under that exact number, we show you the short list of matches so you can confirm which one is yours.</p>
                   <p>Once confirmed, the transfer settles in real time as an actual bank payout, not a top-up voucher.</p>
                 </>}
               />
               <FAQItem
                 q="Is JAMB supported?"
                 a={<>
-                  <p>Not right now, honestly. WAEC result-checker and WAEC registration PINs work — in the app, in chat, and through a connected AI agent. JAMB is fully built on our side, but it isn't enabled on our current merchant account with our payment provider, so it doesn't appear in the live product list and can't be bought.</p>
+                  <p>Not right now, honestly. WAEC result-checker and WAEC registration PINs work — in the app, in chat, and through a connected AI agent. JAMB is fully built on our side, but it isn&apos;t enabled on our current merchant account with our payment provider, so it doesn&apos;t appear in the live product list and can&apos;t be bought.</p>
                   <p>If that changes at their end it will simply start appearing, with no update needed from us.</p>
                 </>}
               />
               <FAQItem
                 q="Which countries can I send international airtime to?"
                 a={<>
-                  <p>Every country our payment provider currently covers — including Ghana, Kenya, South Africa, the UK and the US. We deliberately don't publish a count, because we read that list live from the provider rather than keeping our own copy of it, so it can change without us knowing.</p>
-                  <p>Pick the country in the app (or just name it in chat) and you'll see its own operators, plans and local currency. If a country isn't in the live list, the agent will tell you so instead of promising something that would fail at delivery.</p>
+                  <p>Every country our payment provider currently covers — including Ghana, Kenya, South Africa, the UK and the US. We deliberately don&apos;t publish a count, because we read that list live from the provider rather than keeping our own copy of it, so it can change without us knowing.</p>
+                  <p>Pick the country in the app (or just name it in chat) and you&apos;ll see its own operators, plans and local currency. If a country isn&apos;t in the live list, the agent will tell you so instead of promising something that would fail at delivery.</p>
                 </>}
               />
               <FAQItem
                 q="Can I set up recurring or scheduled payments?"
                 a={<>
-                  <p>Yes — just say so in chat: "every Tuesday buy ₦200 MTN airtime", "pay my meter on the 28th every month", or a one-off "top up 08012345678 in an hour". Ask to "show my schedules" or "cancel my airtime schedule" the same way.</p>
-                  <p>Automatic execution is opt-in per schedule; by default a schedule only reminds you. When it is on, it's still bounded by your on-chain allowance and our per-transaction and daily caps, runs at most once per due date, and pauses itself after repeated failures.</p>
+                  <p>Yes — just say so in chat: &quot;every Tuesday buy ₦200 MTN airtime&quot;, &quot;pay my meter on the 28th every month&quot;, or a one-off &quot;top up 08012345678 in an hour&quot;. Ask to &quot;show my schedules&quot; or &quot;cancel my airtime schedule&quot; the same way.</p>
+                  <p>Automatic execution is opt-in per schedule; by default a schedule only reminds you. When it is on, it&apos;s still bounded by your on-chain allowance and our per-transaction and daily caps, runs at most once per due date, and pauses itself after repeated failures.</p>
                   <p>The outcome is reported back on whatever channel you created the schedule from. On <strong>WhatsApp</strong> there&apos;s a wrinkle outside AbaPay&apos;s control: WhatsApp only lets a business send you a free-form message within 24 hours of your last one, so a schedule due days later is delivered as a formatted notification instead. Either way, the full receipt is always in your <strong>History</strong> tab.</p>
                 </>}
               />
@@ -516,7 +516,7 @@ export default function DocsPage() {
               <FAQItem
                 q="What's the difference between paying in the app and letting an agent pay for me?"
                 a={<>
-                  <p>In the app, you sign every payment in your wallet — nothing moves without that signature. With an agent, you approve an on-chain <em>spending allowance</em> once from the Agent Hub, for one specific chain and one specific stablecoin. After that the agent can pay without a fresh signature each time, but only up to what's left of that allowance.</p>
+                  <p>In the app, you sign every payment in your wallet — nothing moves without that signature. With an agent, you approve an on-chain <em>spending allowance</em> once from the Agent Hub, for one specific chain and one specific stablecoin. After that the agent can pay without a fresh signature each time, but only up to what&apos;s left of that allowance.</p>
                   <p>The cap is enforced by the smart contract itself, not by our servers, so it cannot reach the rest of your wallet no matter what goes wrong on our side. Our own per-transaction and daily limits sit on top of yours.</p>
                 </>}
               />
@@ -534,7 +534,7 @@ export default function DocsPage() {
               <FAQItem
                 q="OAuth or API key — which should I use for MCP?"
                 a={<>
-                  <p>OAuth if your client supports it: you authorize once in the browser and the connection is remembered, so there's no credential to paste into every new conversation. The API key you create in Agent Hub → MCP is the fallback for clients that can't do the OAuth flow.</p>
+                  <p>OAuth if your client supports it: you authorize once in the browser and the connection is remembered, so there&apos;s no credential to paste into every new conversation. The API key you create in Agent Hub → MCP is the fallback for clients that can&apos;t do the OAuth flow.</p>
                   <p>Both can be revoked instantly from the Agent Hub, and revoking kills every token issued against that link. An expired or revoked authorization makes the assistant ask you to reconnect rather than quietly failing.</p>
                 </>}
               />
@@ -545,8 +545,8 @@ export default function DocsPage() {
               <FAQItem
                 q="Is my AbaPay PIN the same as my wallet password?"
                 a={<>
-                  <p>No, and it's important not to confuse them. Your wallet password and recovery phrase belong to your wallet app and we never see them. Your AbaPay PIN is a separate code you set when linking a chat account (4–6 digits) or creating an MCP credential (6 digits). Five wrong PINs lock it for a while, with longer lockouts each time, however fast the guesses arrive.</p>
-                  <p>It gates one thing: authorising a payment through those channels. It can't move funds on its own — it only unlocks spending inside the allowance you already approved on-chain. Repeated wrong PINs lock the channel out.</p>
+                  <p>No, and it&apos;s important not to confuse them. Your wallet password and recovery phrase belong to your wallet app and we never see them. Your AbaPay PIN is a separate code you set when linking a chat account (4–6 digits) or creating an MCP credential (6 digits). Five wrong PINs lock it for a while, with longer lockouts each time, however fast the guesses arrive.</p>
+                  <p>It gates one thing: authorising a payment through those channels. It can&apos;t move funds on its own — it only unlocks spending inside the allowance you already approved on-chain. Repeated wrong PINs lock the channel out.</p>
                 </>}
               />
               <FAQItem
@@ -572,8 +572,8 @@ export default function DocsPage() {
               <FAQItem
                 q="What happens if my payment succeeds on-chain but the bill doesn't deliver?"
                 a={<>
-                  <p>You get refunded, and you don't have to chase it. The moment a delivery fails after your money has landed on-chain, the transaction is flagged, queued for a refund, and our operators are alerted. You're told on the channel you used (and by email if we have one), then again when the refund actually lands.</p>
-                  <p>It goes back to the same wallet, in the same stablecoin, and is verified against the blockchain — correct token, correct recipient, sufficient amount — before it can be marked as refunded. Refunds are released by an operator rather than instantly; we aim for 24–72 hours. The gas you originally paid to submit the transaction isn't recoverable.</p>
+                  <p>You get refunded, and you don&apos;t have to chase it. The moment a delivery fails after your money has landed on-chain, the transaction is flagged, queued for a refund, and our operators are alerted. You&apos;re told on the channel you used (and by email if we have one), then again when the refund actually lands.</p>
+                  <p>It goes back to the same wallet, in the same stablecoin, and is verified against the blockchain — correct token, correct recipient, sufficient amount — before it can be marked as refunded. Refunds are released by an operator rather than instantly; we aim for 24–72 hours. The gas you originally paid to submit the transaction isn&apos;t recoverable.</p>
                 </>}
               />
               <FAQItem
@@ -583,7 +583,7 @@ export default function DocsPage() {
               <FAQItem
                 q="Why was my payment refused before I even paid?"
                 a={<>
-                  <p>Usually one of four things. (1) The service, or that one specific provider, is paused — we do that during an outage, a dispute or a security concern, and we'd rather refuse up front than take your money for something we know is broken. (2) The amount is outside the provider's own limits, which vary by network and by biller rather than following one flat rule. (3) You picked a provider our payment provider can't currently sell. (4) For agent payments: the amount exceeds your remaining allowance, your daily limit, or our operator cap.</p>
+                  <p>Usually one of four things. (1) The service, or that one specific provider, is paused — we do that during an outage, a dispute or a security concern, and we&apos;d rather refuse up front than take your money for something we know is broken. (2) The amount is outside the provider&apos;s own limits, which vary by network and by biller rather than following one flat rule. (3) You picked a provider our payment provider can&apos;t currently sell. (4) For agent payments: the amount exceeds your remaining allowance, your daily limit, or our operator cap.</p>
                   <p>The refusal message tells you which one it was.</p>
                 </>}
               />

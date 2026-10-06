@@ -56,7 +56,7 @@ export default async function ReceiptPage({ params }: { params: Promise<{ reques
       <main className="min-h-screen bg-black text-slate-100 flex flex-col items-center justify-center p-6">
         <div className="max-w-md w-full bg-[#15151a] border border-slate-800/60 rounded-[2rem] p-10 text-center">
           <h1 className="text-xl font-black mb-2">Receipt not found</h1>
-          <p className="text-sm text-slate-400">This link doesn't match a real AbaPay transaction.</p>
+          <p className="text-sm text-slate-400">This link doesn&apos;t match a real AbaPay transaction.</p>
           <Link href="/" className="inline-block mt-6 text-sm font-bold text-emerald-400 hover:text-emerald-300">
             Go to AbaPay →
           </Link>

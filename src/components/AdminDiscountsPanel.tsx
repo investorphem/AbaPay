@@ -352,7 +352,7 @@ export function AdminDiscountsPanel({ adminHeaders, onSignAdminAction }: Props) 
               <div className="flex items-center justify-between gap-3 py-2">
                 <div className="flex-1">
                   <p className="text-[11px] font-bold text-slate-300">Max ₦ per destination number, per 24h</p>
-                  <p className="text-[9px] text-slate-600">Resets daily — same phone/meter can reuse it tomorrow. Closes the "just switch wallets" loophole.</p>
+                  <p className="text-[9px] text-slate-600">Resets daily — same phone/meter can reuse it tomorrow. Closes the &quot;just switch wallets&quot; loophole.</p>
                 </div>
                 <MiniToggle value={capsOn.destination} onChange={(v) => setCapsOn((c) => ({ ...c, destination: v }))} />
               </div>
@@ -370,7 +370,7 @@ export function AdminDiscountsPanel({ adminHeaders, onSignAdminAction }: Props) 
               <div className="flex items-center justify-between gap-3 py-2">
                 <div className="flex-1">
                   <p className="text-[11px] font-bold text-slate-300">Max ₦ per verified phone (lifetime)</p>
-                  <p className="text-[9px] text-slate-600">Stronger than the wallet cap — a SIM costs money, unlike a free wallet. Wallets with no verified phone won't qualify while this is on.</p>
+                  <p className="text-[9px] text-slate-600">Stronger than the wallet cap — a SIM costs money, unlike a free wallet. Wallets with no verified phone won&apos;t qualify while this is on.</p>
                 </div>
                 <MiniToggle value={capsOn.phone} onChange={(v) => setCapsOn((c) => ({ ...c, phone: v }))} />
               </div>

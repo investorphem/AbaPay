@@ -1858,7 +1858,7 @@ export default function AdminDashboard() {
                               )}
                             </div>
                             {cc.withdrawalDelaySeconds === undefined ? (
-                              <p className="text-[10px] text-slate-600 italic">Not available — this chain's contract is still on V2/V3 (fixed 24h delay, no setter).</p>
+                              <p className="text-[10px] text-slate-600 italic">Not available — this chain&apos;s contract is still on V2/V3 (fixed 24h delay, no setter).</p>
                             ) : (
                               <div className="flex gap-2">
                                 <input
