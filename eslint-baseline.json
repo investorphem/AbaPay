@@ -137,17 +137,11 @@
   "src/lib/deai/humanize.ts": {
     "@typescript-eslint/no-explicit-any": 2
   },
-  "src/lib/deai/intentEngine.ts": {
-    "@typescript-eslint/no-explicit-any": 11
-  },
   "src/lib/deai/international.ts": {
     "@typescript-eslint/no-explicit-any": 4
   },
   "src/lib/deai/mcpOAuth.ts": {
     "@typescript-eslint/no-explicit-any": 3
-  },
-  "src/lib/deai/pinSecurity.ts": {
-    "@typescript-eslint/no-explicit-any": 5
   },
   "src/lib/deai/receiptCard.tsx": {
     "@next/next/no-img-element": 2,
@@ -164,16 +158,13 @@
     "@typescript-eslint/no-explicit-any": 1
   },
   "src/lib/parity.ts": {
-    "@typescript-eslint/no-explicit-any": 5
+    "@typescript-eslint/no-explicit-any": 1
   },
   "src/lib/paymasterPolicy.ts": {
     "@typescript-eslint/no-explicit-any": 1
   },
   "src/lib/rateLimit.ts": {
     "@typescript-eslint/no-explicit-any": 2
-  },
-  "src/lib/scheduler.ts": {
-    "@typescript-eslint/no-explicit-any": 5
   },
   "src/lib/serviceRules.ts": {
     "@typescript-eslint/no-explicit-any": 3
