@@ -41,15 +41,17 @@ export function markCommitted(): void {
   if (store) store.committed = true;
 }
 
-function stable(v: any): any {
+function stable(v: unknown): unknown {
   if (Array.isArray(v)) return v.map(stable);
   if (v && typeof v === 'object') {
-    return Object.keys(v).sort().filter((k) => !OMIT_FROM_HASH.has(k)).reduce((o: any, k) => { o[k] = stable(v[k]); return o; }, {});
+    const obj = v as Record<string, unknown>;
+    return Object.keys(obj).sort().filter((k) => !OMIT_FROM_HASH.has(k))
+      .reduce<Record<string, unknown>>((o, k) => { o[k] = stable(obj[k]); return o; }, {});
   }
   return v;
 }
 
-export function requestHash(tool: string, args: any): string {
+export function requestHash(tool: string, args: unknown): string {
   return crypto.createHash('sha256').update(JSON.stringify({ tool, args: stable(args || {}) })).digest('hex');
 }
 
@@ -66,7 +68,7 @@ export type IdempotencyOutcome<T> =
 export async function runIdempotent<T>(
   scope: string,
   tool: string,
-  args: any,
+  args: unknown,
   explicitKey: string | null,
   fn: () => Promise<T>,
 ): Promise<IdempotencyOutcome<T>> {
@@ -83,7 +85,8 @@ export async function runIdempotent<T>(
   if (error && error.code === '23505') {
     const { data: existing } = await supabaseAdmin
       .from('idempotency_keys').select('*').eq('scope', scope).eq('key', key).maybeSingle();
-    const row = existing as any;
+    // An idempotency_keys row (031).
+    const row = existing as { expires_at: string; request_hash: string; status: string; response: unknown; created_at: string } | null;
     if (row && new Date(row.expires_at).getTime() <= Date.now()) {
       // Expired: remove exactly that row (not a newer one) and claim afresh.
       await supabaseAdmin.from('idempotency_keys').delete().eq('scope', scope).eq('key', key).eq('expires_at', row.expires_at);
@@ -117,7 +120,7 @@ export async function runIdempotent<T>(
     await release(scope, key);
   } else {
     const { error: saveErr } = await supabaseAdmin.from('idempotency_keys')
-      .update({ status: 'DONE', response: result as any, expires_at: new Date(Date.now() + ttl).toISOString() })
+      .update({ status: 'DONE', response: result, expires_at: new Date(Date.now() + ttl).toISOString() })
       .eq('scope', scope).eq('key', key);
     // Left IN_PROGRESS on a failed save: repeats are refused as "in progress" until it
     // expires — never re-run.

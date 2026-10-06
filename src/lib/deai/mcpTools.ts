@@ -20,6 +20,7 @@ import { checkIntlMinimum } from '@/lib/parity';
 import { MCP_UI_CARD_URI } from '@/lib/deai/mcpUiTemplates';
 import { runIdempotent, markCommitted } from '@/lib/idempotency';
 import crypto from 'crypto';
+import type { RefundQueueRow, ScheduledBillRow, TransactionRow } from '@/lib/rows';
 
 // ⚡ AGENT TOOL LAYER — the tools themselves (definitions + implementations), extracted from
 // src/app/api/mcp/route.ts so more than one transport can reach them. It is deliberately
@@ -111,6 +112,9 @@ function stripMd(s: string): string {
     .replace(/(?<=^|\s)_([^_\n]+)_(?=$|[\s.,!?])/g, '$1')
     .replace(/[*`]/g, '');
 }
+
+/** What every tool returns: MCP content blocks, optionally an error flag and a UI card. */
+export type ToolResult = { content: unknown[]; isError?: boolean; structuredContent?: Record<string, unknown> };
 
 export function textResult(text: string) {
   return { content: [{ type: 'text', text: stripMd(text) }] };
@@ -447,7 +451,7 @@ async function callDescribeCapabilities() {
 // No auth required — this is a read-only catalog lookup, same trust level as
 // describe_capabilities. Shares fetchVariations()/variationServiceId() with chat
 // (src/lib/deai/selection.ts) so the two can never see a different plan list or price.
-async function callListPlans(args: any) {
+async function callListPlans(args: Record<string, unknown>) {
   const service = String(args?.service || '').toUpperCase();
   const provider = String(args?.provider || '').toLowerCase().trim();
   if (!provider) return errorResult('provider is required.');
@@ -478,7 +482,7 @@ async function callListPlans(args: any) {
 // bill from the wrong wallet, which is the worst possible failure here. Omitting api_key (the
 // normal OAuth case) falls through to the token's identity.
 async function resolveIdentity(
-  args: any,
+  args: Record<string, unknown>,
   oauthIdentity: McpIdentity | null
 ): Promise<{ identity: McpIdentity } | { error: 'missing' | 'invalid' }> {
   const apiKey = String(args?.api_key || '');
@@ -532,7 +536,7 @@ const SCHEDULABLE_INTENTS: Record<string, string> = {
   CABLE: 'TV',
 };
 
-async function callCheckBalance(args: any, oauthIdentity: McpIdentity | null) {
+async function callCheckBalance(args: Record<string, unknown>, oauthIdentity: McpIdentity | null) {
   const resolved = await resolveIdentity(args, oauthIdentity);
   if ('error' in resolved) {
     // No credential at all → real 401 so the client can offer the OAuth connect flow.
@@ -598,7 +602,7 @@ async function callCheckBalance(args: any, oauthIdentity: McpIdentity | null) {
   });
 }
 
-async function callTransactionHistory(args: any, oauthIdentity: McpIdentity | null) {
+async function callTransactionHistory(args: Record<string, unknown>, oauthIdentity: McpIdentity | null) {
   const resolved = await resolveIdentity(args, oauthIdentity);
   if ('error' in resolved) {
     if (resolved.error === 'missing') return NEEDS_AUTH;
@@ -636,7 +640,7 @@ async function callTransactionHistory(args: any, oauthIdentity: McpIdentity | nu
       : textResult('No transactions found for this wallet yet.');
   }
 
-  const lines = data.map((tx: any, i: number) => {
+  const lines = data.map((tx: TransactionRow, i: number) => {
     const date = new Date(tx.created_at).toLocaleString('en-NG', { timeZone: 'Africa/Lagos', day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' });
     const serviceLabel = `${(tx.network || '').toUpperCase()} ${tx.service_category || ''}`.trim();
     const amount = `$${Number(tx.amount_usdt || 0).toFixed(2)} (₦${Number(tx.amount_naira || 0).toLocaleString()})`;
@@ -647,7 +651,7 @@ async function callTransactionHistory(args: any, oauthIdentity: McpIdentity | nu
   const text = `${data.length} recent transaction(s) for ${identity.wallet_address}:\n\n${lines.join('\n')}`;
 
   try {
-    const rows = data.map((tx: any) => ({
+    const rows = data.map((tx: TransactionRow) => ({
       date: new Date(tx.created_at).toLocaleString('en-NG', { timeZone: 'Africa/Lagos', day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' }),
       serviceLabel: `${(tx.network || '').toUpperCase()} ${tx.service_category || ''}`.trim(),
       accountNumber: tx.account_number || '',
@@ -676,7 +680,7 @@ const STATUS_WORDS: Record<string, string> = {
   FAILED_PAYMENT: 'The payment itself did not go through — nothing was charged.',
 };
 
-async function callGetPaymentStatus(args: any, oauthIdentity: McpIdentity | null) {
+async function callGetPaymentStatus(args: Record<string, unknown>, oauthIdentity: McpIdentity | null) {
   const resolved = await resolveIdentity(args, oauthIdentity);
   if ('error' in resolved) {
     if (resolved.error === 'missing') return NEEDS_AUTH;
@@ -702,7 +706,7 @@ async function callGetPaymentStatus(args: any, oauthIdentity: McpIdentity | null
   }
   if (!tx) return errorResult(`No payment with reference ${reference} was found for this wallet.`);
 
-  const t = tx as any;
+  const t = tx as TransactionRow;
   const lines = [
     `${`${(t.network || '').toUpperCase()} ${t.service_category || ''}`.trim()} — ₦${Number(t.amount_naira || 0).toLocaleString()} to ${t.account_number || 'n/a'}`,
     `Status: ${t.status} — ${STATUS_WORDS[t.status] || 'See the AbaPay app for details.'}`,
@@ -713,7 +717,7 @@ async function callGetPaymentStatus(args: any, oauthIdentity: McpIdentity | null
   if (String(t.tx_hash || '').startsWith('0x')) {
     const { data: refund } = await supabaseAdmin
       .from('refund_queue').select('status, refund_tx_hash').eq('tx_hash', t.tx_hash).maybeSingle();
-    const r = refund as any;
+    const r = refund as Pick<RefundQueueRow, 'status' | 'refund_tx_hash'> | null;
     if (r) {
       lines.push(r.status === 'COMPLETED' && r.refund_tx_hash
         ? `Refund: sent — ${explorerBaseFor(t.blockchain)}/tx/${r.refund_tx_hash}`
@@ -728,7 +732,7 @@ async function callGetPaymentStatus(args: any, oauthIdentity: McpIdentity | null
 // No auth required — read-only catalogue lookup, same trust level as list_plans. Drills down
 // one level of VTpass's country -> product type -> operator -> variation chain per call,
 // depending on which args are already known.
-async function callListInternationalOptions(args: any) {
+async function callListInternationalOptions(args: Record<string, unknown>) {
   const countryInput = args?.country ? String(args.country).trim() : '';
   const productTypeId = args?.product_type_id ? String(args.product_type_id) : '';
   const operatorId = args?.operator_id ? String(args.operator_id) : '';
@@ -861,7 +865,7 @@ async function finalizePayBillResult(params: {
       result.pending ? 'PENDING' : result.vendFailed ? 'FAILED_VENDING' : 'SUCCESS';
     try {
       const { data: txRow } = await supabaseAdmin.from('transactions').select('*').eq('tx_hash', result.txHash).maybeSingle();
-      const row = txRow as any;
+      const row = txRow as TransactionRow | null;
       const receiptUrl = row?.request_id
         ? `${process.env.NEXT_PUBLIC_APP_URL || 'https://abapays.com'}/receipt/${row.request_id}`
         : null;
@@ -917,7 +921,7 @@ async function finalizePayBillResult(params: {
 // priced server-side from the variation's own rate (never a client-claimed amount), then run
 // through the exact same allowance/spend/discount engine every other MCP payment uses.
 async function callPayBillInternational(
-  args: any,
+  args: Record<string, unknown>,
   identity: McpIdentity,
   ctx: { accountNumber: string; customerName: string | null; customerEmail: string | null; chainOverride: string | null; tokenOverride: string | null }
 ) {
@@ -1026,7 +1030,7 @@ async function callPayBillInternational(
   });
 }
 
-async function callPayBill(args: any, oauthIdentity: McpIdentity | null) {
+async function callPayBill(args: Record<string, unknown>, oauthIdentity: McpIdentity | null) {
   const apiKey = String(args?.api_key || '');
   const pin = String(args?.pin || '');
   const service = String(args?.service || '').toUpperCase();
@@ -1252,7 +1256,7 @@ async function callPayBill(args: any, oauthIdentity: McpIdentity | null) {
 
 // ===================== SCHEDULING (MCP parity with chat) =====================
 
-async function callScheduleBill(args: any, oauthIdentity: McpIdentity | null) {
+async function callScheduleBill(args: Record<string, unknown>, oauthIdentity: McpIdentity | null) {
   const apiKey = String(args?.api_key || '');
   const pin = String(args?.pin || '');
   const service = String(args?.service || '').toUpperCase();
@@ -1415,7 +1419,7 @@ async function callScheduleBill(args: any, oauthIdentity: McpIdentity | null) {
   );
 }
 
-async function callListSchedules(args: any, oauthIdentity: McpIdentity | null) {
+async function callListSchedules(args: Record<string, unknown>, oauthIdentity: McpIdentity | null) {
   const resolved = await resolveIdentity(args, oauthIdentity);
   if ('error' in resolved) {
     if (resolved.error === 'missing') return NEEDS_AUTH;
@@ -1439,22 +1443,22 @@ async function callListSchedules(args: any, oauthIdentity: McpIdentity | null) {
   }
 
   const ordinalDay = (n: number) => `${n}${n === 1 ? 'st' : n === 2 ? 'nd' : n === 3 ? 'rd' : 'th'}`;
-  const lines = data.map((sc: any) => {
+  const lines = data.map((sc: ScheduledBillRow) => {
     const when = sc.frequency === 'once'
       ? (sc.run_once_at ? `once, at ${new Date(sc.run_once_at).toLocaleString('en-NG', { timeZone: 'Africa/Lagos', day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' })}` : 'once')
       : sc.frequency === 'weekly'
-      ? `every ${['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'][sc.day_of_week] || '?'}`
+      ? `every ${['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'][sc.day_of_week ?? -1] || '?'}`
       : sc.frequency === 'daily' ? 'daily'
       : sc.day_of_month ? `on the ${ordinalDay(sc.day_of_month)} monthly` : 'monthly';
     return `• id: "${sc.id}" — ${String(sc.provider || '').toUpperCase()} ${sc.service_category} — NGN ${Number(sc.amount_ngn).toLocaleString()} to ${sc.billers_code}, ${when} — ${sc.auto_execute ? 'auto-pays' : 'notify-only'}`;
   });
 
   const text = `${data.length} active schedule(s) — pass "id" to cancel_schedule to remove one:\n\n${lines.join('\n')}`;
-  const cardSchedules = data.map((sc: any) => {
+  const cardSchedules = data.map((sc: ScheduledBillRow) => {
     const when = sc.frequency === 'once'
       ? (sc.run_once_at ? `once, at ${new Date(sc.run_once_at).toLocaleString('en-NG', { timeZone: 'Africa/Lagos', day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' })}` : 'once')
       : sc.frequency === 'weekly'
-      ? `every ${['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'][sc.day_of_week] || '?'}`
+      ? `every ${['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'][sc.day_of_week ?? -1] || '?'}`
       : sc.frequency === 'daily' ? 'daily'
       : sc.day_of_month ? `on the ${ordinalDay(sc.day_of_month)} monthly` : 'monthly';
     return {
@@ -1470,7 +1474,7 @@ async function callListSchedules(args: any, oauthIdentity: McpIdentity | null) {
   return withCard(textResult(text), { view: 'schedules', schedules: cardSchedules });
 }
 
-async function callCancelSchedule(args: any, oauthIdentity: McpIdentity | null) {
+async function callCancelSchedule(args: Record<string, unknown>, oauthIdentity: McpIdentity | null) {
   const resolved = await resolveIdentity(args, oauthIdentity);
   if ('error' in resolved) {
     if (resolved.error === 'missing') return NEEDS_AUTH;
@@ -1519,7 +1523,7 @@ async function callCancelSchedule(args: any, oauthIdentity: McpIdentity | null) 
   }
 
   // `all` (explicit, PIN-checked above) matches every row; otherwise filter by id or provider.
-  const target = (scheds as any[]).filter((sc) =>
+  const target = scheds.filter((sc) =>
     (!id || String(sc.id) === id) && (!provider || String(sc.provider || '').toUpperCase() === provider)
   );
 
@@ -1527,7 +1531,7 @@ async function callCancelSchedule(args: any, oauthIdentity: McpIdentity | null) 
     return errorResult('No active schedule matched that id/provider. Call list_schedules to see real ids.');
   }
 
-  const { error: updErr } = await supabaseAdmin.from('scheduled_bills').update({ is_active: false }).in('id', target.map((t: any) => t.id));
+  const { error: updErr } = await supabaseAdmin.from('scheduled_bills').update({ is_active: false }).in('id', target.map((t: { id: string }) => t.id));
   if (updErr) {
     console.error('[MCP] cancel_schedule update failed:', updErr.message);
     return errorResult('Could not cancel right now — try again shortly.');
@@ -1559,7 +1563,7 @@ interface ValidatedBatchRecipient {
   serviceID: string;
 }
 
-async function callPayBillBatch(args: any, oauthIdentity: McpIdentity | null) {
+async function callPayBillBatch(args: Record<string, unknown>, oauthIdentity: McpIdentity | null) {
   const apiKey = String(args?.api_key || '');
   const pin = String(args?.pin || '');
   const rawRecipients = Array.isArray(args?.recipients) ? args.recipients : null;
@@ -1756,12 +1760,12 @@ async function callPayBillBatch(args: any, oauthIdentity: McpIdentity | null) {
 // idempotency key — see src/lib/idempotency.ts.
 const IDEMPOTENT_TOOLS = new Set(['pay_bill', 'pay_bill_batch', 'schedule_bill']);
 
-export async function callTool(name: string, args: any, oauthIdentity: McpIdentity | null) {
+export async function callTool(name: string, args: Record<string, unknown>, oauthIdentity: McpIdentity | null): Promise<ToolResult | typeof NEEDS_AUTH> {
   if (IDEMPOTENT_TOOLS.has(name)) return callIdempotent(name, args, oauthIdentity);
   return dispatchTool(name, args, oauthIdentity);
 }
 
-async function callIdempotent(name: string, args: any, oauthIdentity: McpIdentity | null) {
+async function callIdempotent(name: string, args: Record<string, unknown>, oauthIdentity: McpIdentity | null) {
   const explicitKey = args?.idempotency_key === undefined || args?.idempotency_key === null ? null : String(args.idempotency_key);
   if (explicitKey !== null && !/^[A-Za-z0-9._:-]{8,128}$/.test(explicitKey)) {
     return errorResult('idempotency_key must be 8-128 characters of letters, digits, ".", "_", ":" or "-".');
@@ -1780,18 +1784,19 @@ async function callIdempotent(name: string, args: any, oauthIdentity: McpIdentit
     if (outcome.kind === 'IN_PROGRESS') {
       return errorResult('This exact request is already being processed. Nothing extra was charged. Wait a few seconds, then retry with the same idempotency_key to get its result.');
     }
-    const stored = outcome.result as any;
+    // What the tool returned the first time: an MCP tool result.
+    const stored = outcome.result as ToolResult;
     const note = `(Already processed ${outcome.ageSeconds}s ago. This is that result, and nothing was charged again. ${explicitKey ? 'To make a new payment, use a new idempotency_key.' : 'To pay the same bill again on purpose, pass a new idempotency_key.'})`;
     return { ...stored, content: [...(stored?.content || []), { type: 'text', text: note }] };
-  } catch (err: any) {
-    if (err?.message === 'IDEMPOTENCY_UNAVAILABLE') {
+  } catch (err) {
+    if (err instanceof Error && err.message === 'IDEMPOTENCY_UNAVAILABLE') {
       return errorResult('Payments are briefly unavailable. Nothing was charged. Please try again in a minute.');
     }
     throw err;
   }
 }
 
-async function dispatchTool(name: string, args: any, oauthIdentity: McpIdentity | null) {
+async function dispatchTool(name: string, args: Record<string, unknown>, oauthIdentity: McpIdentity | null) {
   switch (name) {
     case 'describe_capabilities': return callDescribeCapabilities();
     case 'list_plans': return callListPlans(args);
@@ -1804,7 +1809,8 @@ async function dispatchTool(name: string, args: any, oauthIdentity: McpIdentity 
     case 'list_schedules': return callListSchedules(args, oauthIdentity);
     case 'cancel_schedule': return callCancelSchedule(args, oauthIdentity);
     case 'pay_bill_batch': return callPayBillBatch(args, oauthIdentity);
-    default: return null;
+    // A tool name that isn't in TOOLS: tell the agent, rather than answer with a null result.
+    default: return errorResult(`Unknown tool "${name}". Call tools/list for the tools this server offers.`);
   }
 }
 

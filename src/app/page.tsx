@@ -4109,6 +4109,8 @@ export default function Home() {
       )}
 
                   <ReceiptModal 
+          // A fresh instance per receipt, so one receipt's download links never show on the next.
+          key={selectedReceipt?.id ?? 'none'}
           receipt={selectedReceipt} 
           isMainnet={isMainnet} 
           onClose={() => setSelectedReceipt(null)} 

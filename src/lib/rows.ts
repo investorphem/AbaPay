@@ -74,3 +74,57 @@ export interface RefundQueueRow {
   vtpass_error: string | null;
   wallet_address: string;
 }
+
+/** A row of public.discount_campaigns. */
+export interface DiscountCampaignRow {
+  created_at: string;
+  created_by: string | null;
+  ends_at: string | null;
+  id: string;
+  is_active: boolean;
+  max_discount_ngn: number | null;
+  max_discount_per_destination_ngn: number | null;
+  max_discount_per_phone_ngn: number | null;
+  max_discount_per_wallet_ngn: number | null;
+  max_total_discount_ngn: number | null;
+  name: string;
+  services: string[] | null;
+  starts_at: string | null;
+  type: string;
+  updated_at: string;
+  value: number;
+}
+
+/** A row of public.scheduled_bills. */
+export interface ScheduledBillRow {
+  amount_ngn: number;
+  auto_execute: boolean;
+  batch_id: string | null;
+  billers_code: string;
+  blockchain: string | null;
+  consecutive_failures: number;
+  created_at: string;
+  customer_address: string | null;
+  customer_name: string | null;
+  day_of_month: number | null;
+  day_of_week: number | null;
+  frequency: string;
+  id: string;
+  is_active: boolean;
+  last_notified_at: string | null;
+  last_paid_at: string | null;
+  last_run_date: string | null;
+  last_tx_hash: string | null;
+  meter_type: string | null;
+  notify_channel: string | null;
+  notify_channel_id: string | null;
+  notify_email: string | null;
+  notify_telegram: string | null;
+  provider: string | null;
+  run_once_at: string | null;
+  service_category: string;
+  service_id: string;
+  token_used: string | null;
+  variation_code: string | null;
+  wallet_address: string;
+}

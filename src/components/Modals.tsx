@@ -12,8 +12,6 @@ function formatTxAmount(amountNaira: any) {
 }
 
 export function ReceiptModal({ receipt, isMainnet, onClose, onSupport }: any) {
-  if (!receipt) return null;
-
   const [isProcessingShare, setIsProcessingShare] = useState(false);
   // Real, tappable download links — see handleShareImage's fallback branch for why these
   // replaced a JS-synthesized <a>.click(). Deliberately `data:` URLs, not blob: — a wallet's
@@ -23,6 +21,10 @@ export function ReceiptModal({ receipt, isMainnet, onClose, onSupport }: any) {
   // "Can not handle uri:: blob:...". A data: URL is fully self-contained, so there's nothing
   // for an external handler to fail to resolve.
   const [saveOptions, setSaveOptions] = useState<{ imageUrl: string; pdfUrl: string | null } | null>(null);
+
+  // After every hook, never before: this modal is always mounted and `receipt` flips between null
+  // and a receipt, so returning before the useState calls changed the hook count between renders.
+  if (!receipt) return null;
 
   // normalizePurchasedCode strips VTpass's own "Token : " label and rejects its placeholders
   // ("N/A", "Vended Successfully"). New rows are already clean because the vend paths normalize

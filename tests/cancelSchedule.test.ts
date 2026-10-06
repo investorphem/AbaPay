@@ -16,7 +16,14 @@ vi.mock('@/lib/deai/receiptCard', () => ({ renderReceiptImage: async () => null,
 vi.mock('@/lib/deai/relayer', () => ({ getRemainingAllowance: async () => 0, getMaxAgentPayment: async () => 0 }));
 vi.mock('@/lib/deai/batch', () => ({ checkAutonomousCapacity: async () => ({}), groupByChainToken: () => [], executeAgentPayment: async () => ({}) }));
 
-import { callTool } from '@/lib/deai/mcpTools';
+import { callTool as callToolRaw, NEEDS_AUTH, type ToolResult } from '@/lib/deai/mcpTools';
+
+// Every case here supplies an identity, so NEEDS_AUTH would itself be a failure.
+const callTool = async (...a: Parameters<typeof callToolRaw>): Promise<ToolResult> => {
+  const r = await callToolRaw(...a);
+  if (r === NEEDS_AUTH) throw new Error('unexpected NEEDS_AUTH');
+  return r;
+};
 
 const WALLET = '0xabc0000000000000000000000000000000000001';
 const identity = {

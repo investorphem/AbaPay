@@ -1,6 +1,7 @@
 import 'server-only'; // SECURITY: Monnify (Moniepoint's API product) keys never leak to the frontend
 import crypto from 'crypto';
 import { BANK_SEED } from '@/lib/providerFallback';
+import { errorMessage } from '@/lib/errors';
 
 // ⚡ MONIEPOINT / MONNIFY CLIENT ⚡
 //
@@ -153,7 +154,7 @@ export async function getBanks(): Promise<BankListResult> {
     if (!data?.requestSuccessful || !Array.isArray(list) || list.length === 0) throw new Error('Empty bank list');
 
     const banks: MonnifyBank[] = list
-      .map((b: any) => ({ code: String(b.code), name: String(b.name) }))
+      .map((b: { code: unknown; name: unknown }) => ({ code: String(b.code), name: String(b.name) }))
       .sort((a: MonnifyBank, b: MonnifyBank) => a.name.localeCompare(b.name));
 
     bankCache = { banks, at: Date.now() };
@@ -215,10 +216,10 @@ export async function validateAccountRaw(accountNumber: string, bankCode: string
         bankCode: data.responseBody.bankCode || bankCode,
       } : null,
     };
-  } catch (e: any) {
+  } catch (e) {
     // A network-level failure (timeout, connection reset) — distinguishable from Monnify
     // actively rejecting the request, which callers may want to treat differently.
-    return { requestSuccessful: false, responseCode: 'NETWORK_ERROR', responseMessage: e?.message || 'Could not reach Monnify.', result: null };
+    return { requestSuccessful: false, responseCode: 'NETWORK_ERROR', responseMessage: errorMessage(e) || 'Could not reach Monnify.', result: null };
   }
 }
 
@@ -242,7 +243,7 @@ export interface TransferResult {
   status: 'SUCCESS' | 'PENDING' | 'PENDING_AUTHORIZATION' | 'FAILED' | string;
   reference: string;
   amount?: number;
-  raw: any;
+  raw: unknown;
 }
 
 // ⚡ MONNIFY'S FULL DISBURSEMENT STATUS VOCABULARY — sourced directly from their own
@@ -358,22 +359,33 @@ export function userFacingMonnifyError(codeOrMessage: string | undefined | null)
  * `responseMessage`. Shared by both the admin-facing and user-facing formatters below so a
  * code/message is only ever looked up once.
  */
-function extractMonnifyRawFailureText(raw: any): string | undefined {
-  return raw?.responseBody?.transactionDescription
-    || raw?.eventData?.transactionDescription
-    || raw?.responseMessage
-    || raw?.error
-    || raw?.message
+/** Where Monnify puts failure text, across its sync responses and webhook payloads. */
+type MonnifyFailureShape = {
+  responseCode?: string;
+  responseMessage?: string;
+  error?: string;
+  message?: string;
+  responseBody?: { transactionDescription?: string; responseCode?: string };
+  eventData?: { transactionDescription?: string };
+} | null | undefined;
+
+function extractMonnifyRawFailureText(raw: unknown): string | undefined {
+  const r = raw as MonnifyFailureShape;
+  return r?.responseBody?.transactionDescription
+    || r?.eventData?.transactionDescription
+    || r?.responseMessage
+    || r?.error
+    || r?.message
     || undefined;
 }
 
-export function extractMonnifyFailureReason(raw: any): string {
+export function extractMonnifyFailureReason(raw: unknown): string {
   return friendlyMonnifyError(extractMonnifyRawFailureText(raw));
 }
 
 /** Customer-safe counterpart to extractMonnifyFailureReason() — see userFacingMonnifyError()
  * for what's actually safe to relay. */
-export function extractMonnifyUserFailureReason(raw: any): string {
+export function extractMonnifyUserFailureReason(raw: unknown): string {
   return userFacingMonnifyError(extractMonnifyRawFailureText(raw));
 }
 
@@ -385,11 +397,12 @@ export function extractMonnifyUserFailureReason(raw: any): string {
  * docs) so a low-float failure can trigger an immediate operator alert instead of waiting for
  * the next scheduled balance sweep.
  */
-export function isInsufficientBalanceError(raw: any): boolean {
-  const code = raw?.responseBody?.responseCode || raw?.responseCode;
+export function isInsufficientBalanceError(raw: unknown): boolean {
+  const r = raw as MonnifyFailureShape;
+  const code = r?.responseBody?.responseCode || r?.responseCode;
   if (code === 'D04') return true;
   const text = String(
-    raw?.responseBody?.transactionDescription || raw?.eventData?.transactionDescription || raw?.responseMessage || ''
+    r?.responseBody?.transactionDescription || r?.eventData?.transactionDescription || r?.responseMessage || ''
   ).toLowerCase();
   return text.includes('sufficient balance');
 }
