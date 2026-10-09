@@ -3,16 +3,20 @@ import { toDataSuffix } from '@celo/attribution-tags';
 
 // ─── CELO BUILDERS ON-CHAIN ATTRIBUTION ───────────────────────────────────────
 //
-// This is our Celo Builders attribution tag (assigned at registration, locked to our
-// GitHub repo). The Dune leaderboard only credits transactions whose calldata carries
-// THIS exact tag, so it must ride in every Celo transaction we send.
+// Our Celo attribution tags (each assigned at registration, locked to our GitHub repo). A
+// leaderboard only credits transactions whose calldata carries ITS tag, so every tag we hold
+// rides in every Celo transaction we send. ERC-8021 carries several codes in one suffix, and
+// `toDataSuffix` encodes an array of them; `fromDataSuffix` / `verifyTx` decode all of them.
+//
+//   celo_2719403c6aff  Celo Open Rails hackathon (registered 2026-10)
+//   celo_9d71588659ec  Celo Builders (the original registration; keep it so that credit continues)
 //
 // ⚠️ CELO ONLY. `celoAttributionSuffix()` returns undefined for Base — see
 // `baseAttributionSuffix()` below for Base's own (differently-formatted) builder code.
-export const CELO_ATTRIBUTION_TAG = 'celo_9d71588659ec';
+export const CELO_ATTRIBUTION_TAGS = ['celo_2719403c6aff', 'celo_9d71588659ec'] as const;
 
 // Precompute the ERC-8021 data suffix once — it never changes.
-const CELO_DATA_SUFFIX = toDataSuffix(CELO_ATTRIBUTION_TAG);
+const CELO_DATA_SUFFIX = toDataSuffix(CELO_ATTRIBUTION_TAGS);
 
 // Celo mainnet (42220) and Celo Sepolia (11142220).
 const CELO_CHAIN_IDS = new Set<number>([celo.id, celoSepolia.id]);

@@ -39,6 +39,24 @@ export function resolveChain(blockchain: string | null | undefined) {
 // got a silently broken balance/allowance read even though the server side had failover.
 // One list, both sides.
 export function rpcUrlsFor(chainId: number): string[] {
+  return [...privateRpcFor(chainId), ...publicRpcFor(chainId)];
+}
+
+// A paid RPC endpoint (e.g. Chainstack), tried FIRST on mainnet, with the public endpoints kept
+// behind it as automatic fallbacks. Deliberately NOT a NEXT_PUBLIC_ variable: the URL carries the
+// provider's access key, and Next.js only inlines NEXT_PUBLIC_ variables into the browser bundle.
+// So on the server this is the private endpoint, and in the browser it reads undefined and the
+// public list is used unchanged. The key never leaves the server. BASE_RPC_URL is also what
+// hardhat.config.ts already reads for Base.
+function privateRpcFor(chainId: number): string[] {
+  const url =
+    chainId === celo.id ? process.env.CELO_RPC_URL
+    : chainId === base.id ? process.env.BASE_RPC_URL
+    : undefined;
+  return url && url.trim() ? [url.trim()] : [];
+}
+
+function publicRpcFor(chainId: number): string[] {
   switch (chainId) {
     case celo.id:
       return ['https://forno.celo.org', 'https://rpc.ankr.com/celo'];
