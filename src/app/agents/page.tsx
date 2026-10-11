@@ -6,7 +6,7 @@ import {
 } from "lucide-react";
 import { Star, Package, PackageSearch } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
-import { getAgentStats } from "@/lib/dune/agentStats";
+import { getAgentStats } from "@/lib/onchain/agentStats";
 import { getDiscoveryStats } from "@/lib/discoveryStats";
 
 // ⚡ agents.abapays.com'S HOMEPAGE — see middleware.ts's AGENT_HOSTS rewrite for how this
@@ -20,6 +20,9 @@ import { getDiscoveryStats } from "@/lib/discoveryStats";
 // (README.md, the main dashboards) — but this site's audience is Celo agent infrastructure
 // specifically. Every number, address and endpoint across this whole /agents/* tree is Celo
 // mainnet only.
+// The hero numbers come from the on-chain index, which gains rows every 15 minutes.
+export const revalidate = 600;
+
 export const metadata: Metadata = {
   title: "AbaPay Rails — Celo Agent Payment Infrastructure",
   description:
@@ -247,7 +250,7 @@ export default async function AgentsHomePage() {
         ))}
       </section>
 
-      {/* LIVE NUMBERS — Celo mainnet only, read from Dune at request time. */}
+      {/* LIVE NUMBERS — Celo mainnet only, from AbaPay's own on-chain index (src/lib/onchain). */}
       <section className="grid grid-cols-2 sm:grid-cols-4 gap-px bg-slate-100 dark:bg-slate-800/60 rounded-[2rem] overflow-hidden border border-slate-100 dark:border-slate-800/60 mb-1">
         {HERO_STATS.map((s) => (
           <div key={s.l} className="bg-white dark:bg-[#111114] p-5 sm:p-6">
@@ -257,7 +260,7 @@ export default async function AgentsHomePage() {
         ))}
       </section>
       <p className="text-xs text-slate-400 dark:text-slate-500 mb-6 px-2">
-        Celo mainnet only, refreshed daily. &quot;Agent-native&quot; is x402 plus agent-relayer volume, as a share of total volume. <a href="https://dune.com/abapay/abapay-on-celo" target="_blank" rel="noopener noreferrer" className="underline hover:text-emerald-500">Verify on Dune →</a>
+        Celo mainnet only, read from the chain every 15 minutes. &quot;Agent-native&quot; is x402 plus agent-relayer volume, as a share of total volume. <Link href="/agents/stats" className="underline hover:text-emerald-500">Charts and every transaction →</Link>
       </p>
 
       {/* RAIL BREAKDOWN — same three rails agentNativePct is derived from (Direct wallet,
