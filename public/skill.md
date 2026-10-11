@@ -74,6 +74,7 @@ JSON-RPC at `https://agents.abapays.com/api/a2a`, Agent Card at
 ## Verify
 
 - ERC-8004 identity: `https://8004scan.io/agents/celo/9687`
+- Cursor plugin: `https://cursor.directory/plugins/abapay`
 - Source (MIT): `https://github.com/investorphem/AbaPay`
 - Full 12-chapter handbook: `https://docs.abapays.com`
 - Tools ↔ rail matrix (which function on which surface): `https://agents.abapays.com/tools`

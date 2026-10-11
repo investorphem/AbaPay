@@ -39,7 +39,7 @@ https://agents.abapays.com/api/mcp   (Streamable HTTP)
 
 ## Install
 
-From the Cursor Marketplace, install **AbaPay**, then sign in when Cursor prompts.
+Install **AbaPay** from [cursor.directory/plugins/abapay](https://cursor.directory/plugins/abapay), then sign in when Cursor prompts.
 
 Or add the server yourself in `.cursor/mcp.json` (project) or `~/.cursor/mcp.json` (global):
 

@@ -156,6 +156,11 @@ export default async function AboutPage() {
                 <td className="py-2.5 text-slate-400 dark:text-slate-500">—</td>
               </tr>
               <tr>
+                <td className="py-2.5 pr-4 font-bold text-slate-700 dark:text-slate-300">Cursor</td>
+                <td className="py-2.5 pr-4"><a href="https://cursor.directory/plugins/abapay" target="_blank" rel="noopener noreferrer" className="text-emerald-600 dark:text-emerald-400 hover:underline">cursor.directory/plugins/abapay</a></td>
+                <td className="py-2.5 text-slate-400 dark:text-slate-500">Listed</td>
+              </tr>
+              <tr>
                 <td className="py-2.5 pr-4 font-bold text-slate-700 dark:text-slate-300">Glama — server</td>
                 <td className="py-2.5 pr-4"><a href="https://glama.ai/mcp/servers/investorphem/AbaPay" target="_blank" rel="noopener noreferrer" className="text-emerald-600 dark:text-emerald-400 hover:underline">glama.ai/mcp/servers/investorphem/AbaPay</a></td>
                 <td className="py-2.5 text-slate-400 dark:text-slate-500">Approved</td>
