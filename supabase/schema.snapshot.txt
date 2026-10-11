@@ -118,6 +118,24 @@ column mcp_oauth_tokens.id uuid not null default gen_random_uuid()
 column mcp_oauth_tokens.refresh_expires_at timestamp with time zone
 column mcp_oauth_tokens.refresh_token_hash text
 column mcp_oauth_tokens.revoked boolean not null default false
+column onchain_cursors.chain text not null
+column onchain_cursors.head_block bigint
+column onchain_cursors.last_block bigint not null
+column onchain_cursors.updated_at timestamp with time zone not null default now()
+column onchain_payments.amount_usd numeric(30,6) not null
+column onchain_payments.block_number bigint not null
+column onchain_payments.block_time timestamp with time zone not null
+column onchain_payments.chain text not null
+column onchain_payments.contract text not null
+column onchain_payments.contract_label text not null
+column onchain_payments.log_index integer not null
+column onchain_payments.payer text not null
+column onchain_payments.rail text not null
+column onchain_payments.service_type text
+column onchain_payments.tags text[] not null default '{}'::text[]
+column onchain_payments.token_address text not null
+column onchain_payments.token_symbol text not null
+column onchain_payments.tx_hash text not null
 column otp_requests.code text not null
 column otp_requests.created_at timestamp with time zone not null default timezone('utc'::text, now())
 column otp_requests.expires_at timestamp with time zone not null
@@ -301,6 +319,11 @@ constraint mcp_oauth_tokens.mcp_oauth_tokens_agent_link_id_fkey FOREIGN KEY (age
 constraint mcp_oauth_tokens.mcp_oauth_tokens_client_id_fkey FOREIGN KEY (client_id) REFERENCES mcp_oauth_clients(client_id) ON DELETE CASCADE
 constraint mcp_oauth_tokens.mcp_oauth_tokens_pkey PRIMARY KEY (id)
 constraint mcp_oauth_tokens.mcp_oauth_tokens_refresh_token_hash_key UNIQUE (refresh_token_hash)
+constraint onchain_cursors.onchain_cursors_chain_check CHECK ((chain = ANY (ARRAY['CELO'::text, 'BASE'::text])))
+constraint onchain_cursors.onchain_cursors_pkey PRIMARY KEY (chain)
+constraint onchain_payments.onchain_payments_chain_check CHECK ((chain = ANY (ARRAY['CELO'::text, 'BASE'::text])))
+constraint onchain_payments.onchain_payments_pkey PRIMARY KEY (chain, tx_hash, log_index)
+constraint onchain_payments.onchain_payments_rail_check CHECK ((rail = ANY (ARRAY['direct'::text, 'agent'::text, 'x402'::text])))
 constraint otp_requests.otp_requests_pkey PRIMARY KEY (phone)
 constraint platform_settings.platform_settings_pkey PRIMARY KEY (id)
 constraint rate_limits.rate_limits_pkey PRIMARY KEY (key)
@@ -325,6 +348,7 @@ function consume_auth_nonce(p_nonce text, p_purpose text) returns boolean lang=p
 function enqueue_fulfilment_job() returns trigger lang=plpgsql secdef=f config=search_path=public, pg_temp body=780e8972739061d912d439517964c130
 function fail_job(p_id uuid, p_error text, p_retry_seconds integer) returns text lang=plpgsql secdef=f config=search_path=public, pg_temp body=7e40fae56cde1c49da5bd5a2745f64ff
 function link_wallet_to_phone(target_wallet text, target_phone text) returns boolean lang=plpgsql secdef=f config=search_path=public, pg_temp body=5c655c27f237ce1e98d69904a2cc2869
+function onchain_summary(p_chain text) returns jsonb lang=sql secdef=f config=search_path=public, pg_temp body=1d0d8e7d41c77c5c1e3e07f123d979da
 function pin_attempt_clear(p_link_id uuid) returns void lang=sql secdef=f config=search_path=public, pg_temp body=5a357b931f327adacacb856193deb8b9
 function pin_attempt_reserve(p_link_id uuid) returns TABLE(allowed boolean, attempts integer, locked_until timestamp with time zone, locked_now boolean) lang=plpgsql secdef=f config=search_path=public, pg_temp body=08886edaf04372b2311df48a7ec1858c
 function rate_limit_hit(p_key text, p_window_seconds integer) returns TABLE(used integer, window_start timestamp with time zone) lang=plpgsql secdef=f config=search_path=public, pg_temp body=8a129139739abfc2875cf458c3c21122
@@ -372,6 +396,8 @@ grant DELETE,INSERT,REFERENCES,SELECT,TRIGGER,TRUNCATE,UPDATE on mcp_oauth_codes
 grant DELETE,INSERT,REFERENCES,SELECT,TRIGGER,TRUNCATE,UPDATE on mcp_oauth_tokens to anon
 grant DELETE,INSERT,REFERENCES,SELECT,TRIGGER,TRUNCATE,UPDATE on mcp_oauth_tokens to authenticated
 grant DELETE,INSERT,REFERENCES,SELECT,TRIGGER,TRUNCATE,UPDATE on mcp_oauth_tokens to service_role
+grant DELETE,INSERT,REFERENCES,SELECT,TRIGGER,TRUNCATE,UPDATE on onchain_cursors to service_role
+grant DELETE,INSERT,REFERENCES,SELECT,TRIGGER,TRUNCATE,UPDATE on onchain_payments to service_role
 grant DELETE,INSERT,REFERENCES,SELECT,TRIGGER,TRUNCATE,UPDATE on otp_requests to anon
 grant DELETE,INSERT,REFERENCES,SELECT,TRIGGER,TRUNCATE,UPDATE on otp_requests to authenticated
 grant DELETE,INSERT,REFERENCES,SELECT,TRIGGER,TRUNCATE,UPDATE on otp_requests to service_role
@@ -409,6 +435,7 @@ grant execute on consume_auth_nonce(p_nonce text, p_purpose text) to service_rol
 grant execute on enqueue_fulfilment_job() to service_role
 grant execute on fail_job(p_id uuid, p_error text, p_retry_seconds integer) to service_role
 grant execute on link_wallet_to_phone(target_wallet text, target_phone text) to service_role
+grant execute on onchain_summary(p_chain text) to service_role
 grant execute on pin_attempt_clear(p_link_id uuid) to service_role
 grant execute on pin_attempt_reserve(p_link_id uuid) to service_role
 grant execute on rate_limit_hit(p_key text, p_window_seconds integer) to service_role
@@ -458,6 +485,10 @@ index mcp_oauth_tokens.idx_mcp_oauth_tokens_refresh CREATE INDEX idx_mcp_oauth_t
 index mcp_oauth_tokens.mcp_oauth_tokens_access_token_hash_key CREATE UNIQUE INDEX mcp_oauth_tokens_access_token_hash_key ON public.mcp_oauth_tokens USING btree (access_token_hash)
 index mcp_oauth_tokens.mcp_oauth_tokens_pkey CREATE UNIQUE INDEX mcp_oauth_tokens_pkey ON public.mcp_oauth_tokens USING btree (id)
 index mcp_oauth_tokens.mcp_oauth_tokens_refresh_token_hash_key CREATE UNIQUE INDEX mcp_oauth_tokens_refresh_token_hash_key ON public.mcp_oauth_tokens USING btree (refresh_token_hash)
+index onchain_cursors.onchain_cursors_pkey CREATE UNIQUE INDEX onchain_cursors_pkey ON public.onchain_cursors USING btree (chain)
+index onchain_payments.onchain_payments_chain_payer CREATE INDEX onchain_payments_chain_payer ON public.onchain_payments USING btree (chain, payer)
+index onchain_payments.onchain_payments_chain_time CREATE INDEX onchain_payments_chain_time ON public.onchain_payments USING btree (chain, block_time DESC)
+index onchain_payments.onchain_payments_pkey CREATE UNIQUE INDEX onchain_payments_pkey ON public.onchain_payments USING btree (chain, tx_hash, log_index)
 index otp_requests.otp_requests_pkey CREATE UNIQUE INDEX otp_requests_pkey ON public.otp_requests USING btree (phone)
 index platform_settings.platform_settings_pkey CREATE UNIQUE INDEX platform_settings_pkey ON public.platform_settings USING btree (id)
 index rate_limits.idx_rate_limits_window_start CREATE INDEX idx_rate_limits_window_start ON public.rate_limits USING btree (window_start)
@@ -501,6 +532,8 @@ table idempotency_keys rls=t
 table mcp_oauth_clients rls=t
 table mcp_oauth_codes rls=t
 table mcp_oauth_tokens rls=t
+table onchain_cursors rls=t
+table onchain_payments rls=t
 table otp_requests rls=t
 table platform_settings rls=t
 table rate_limits rls=t
