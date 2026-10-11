@@ -18,6 +18,7 @@ const LINKS = [
   { label: "API", href: "/agents/api" },
   { label: "SDK", href: "/agents/sdk" },
   { label: "Channels", href: "/agents/channels" },
+  { label: "Stats", href: "/agents/stats" },
   { label: "About", href: "/agents/about" },
 ];
 

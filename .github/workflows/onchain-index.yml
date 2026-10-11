@@ -1,0 +1,68 @@
+name: On-chain index
+
+# Keeps AbaPay's own on-chain index (onchain_payments, the Dune replacement) current by calling
+# /api/cron/onchain-index, which reads new vault payments from Celo and Base.
+#
+# Scheduled: one call every 15 minutes. GitHub can start scheduled runs late; that only delays
+# the numbers, it can't skip any, because each call resumes from the last indexed block.
+#
+# Manual "Run workflow" with backfill=true keeps calling until every chain reports caughtUp. Use
+# it once after the 038 migration (months of history) and after any re-index.
+
+on:
+  schedule:
+    - cron: '*/15 * * * *'
+  workflow_dispatch:
+    inputs:
+      backfill:
+        description: 'Keep calling until fully caught up (first run / re-index)'
+        type: boolean
+        default: false
+
+concurrency:
+  group: onchain-index
+  cancel-in-progress: false
+
+jobs:
+  index:
+    name: Index vault payments
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+
+    env:
+      APP_URL: ${{ secrets.APP_URL }}
+      CRON_SECRET: ${{ secrets.CRON_SECRET }}
+      BACKFILL: ${{ inputs.backfill }}
+
+    steps:
+      - name: Check required secrets
+        run: |
+          missing=""
+          [ -n "$APP_URL" ]     || missing="$missing APP_URL"
+          [ -n "$CRON_SECRET" ] || missing="$missing CRON_SECRET"
+          if [ -n "$missing" ]; then
+            echo "::error::Missing repository secret(s):$missing — add them under Settings → Secrets and variables → Actions."
+            exit 1
+          fi
+
+      - name: Index
+        run: |
+          # APP_URL must be the canonical host (www): curl drops the Authorization header on a
+          # cross-host redirect. See dune-refresh.yml for the history.
+          rounds=1
+          [ "$BACKFILL" = "true" ] && rounds=40
+          for i in $(seq 1 "$rounds"); do
+            code=$(curl -sS --max-time 320 -o /tmp/out.json -w '%{http_code}' -X POST \
+              -H "Authorization: Bearer $CRON_SECRET" \
+              "$APP_URL/api/cron/onchain-index" || echo 000)
+            echo "round $i: HTTP $code"; cat /tmp/out.json; echo
+            case "$code" in
+              200) ;;
+              401) echo "::error::CRON_SECRET is rejected by $APP_URL (401)."; exit 1 ;;
+              *)   echo "::error::Indexing failed (HTTP $code)."; exit 1 ;;
+            esac
+            if grep -q '"caughtUp":true' /tmp/out.json; then echo "Caught up."; exit 0; fi
+          done
+          if [ "$BACKFILL" = "true" ]; then
+            echo "::warning::Not caught up after $rounds rounds; run the backfill again to continue."
+          fi

@@ -674,7 +674,28 @@ Without registering these, users can still create schedules (recurring or one-of
 chat, but nothing will ever execute them — they'll sit `is_active` forever with no cron to
 pick them up.
 
-**Dune dashboards — refreshed daily, automatically:**
+**On-chain stats — AbaPay's own index (replaces Dune as the source of the public numbers):**
+
+[agents.abapays.com/stats](https://agents.abapays.com/stats) (Celo) and
+[/stats/base](https://agents.abapays.com/stats/base) show every payment into an AbaPay vault —
+payments, unique wallets, volume, the split by rail (direct wallet, agent relayer, x402), daily
+charts, per-contract and per-token totals, attribution-tag counts, and the latest payments, each
+linked to its transaction. `/api/onchain/export?chain=CELO` (or `BASE`) downloads the full list
+as CSV. The agents home page's hero numbers come from the same index.
+
+- **Indexer:** [`src/lib/onchain/indexer.ts`](src/lib/onchain/indexer.ts) reads vault events and
+  stablecoin transfers into the vaults over each chain's RPC (`CELO_RPC_URL` / `BASE_RPC_URL`
+  first, then the public endpoints), using the same definitions as the Dune queries. It covers
+  all five vaults: Celo V1, V3 and V4, and Base V1 and V4.
+- **Storage:** `onchain_payments` and `onchain_cursors` (migration 038). `onchain_summary()`
+  returns everything the pages show in one query. No customer data is stored: the bill account
+  number in `PaymentReceived` is never read into the table.
+- **Schedule:** [`.github/workflows/onchain-index.yml`](.github/workflows/onchain-index.yml)
+  calls `POST /api/cron/onchain-index` every 15 minutes (`APP_URL` + `CRON_SECRET` secrets).
+  Each call resumes from the last indexed block. After applying 038, run the workflow once by
+  hand with **backfill** ticked to read the history.
+
+**Dune dashboards (historical; the account's plan stopped refreshing them on 2026-09-23):**
 ```
 DUNE_API_KEY=your_dune_api_key        # Required by /api/cron/dune-refresh
 ```

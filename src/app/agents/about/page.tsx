@@ -133,7 +133,7 @@ export default async function AboutPage() {
       {/* ⚡ DISCOVERY — every real place an agent (or a person) can actually find this MCP
           server, not a claims list. Counts are live-fetched (src/lib/discoveryStats.ts) from
           npm's and GitHub's own public APIs, same "real number or null, never a guess" pattern
-          getAgentStats() uses for the Dune-sourced numbers elsewhere on this site. A null count
+          getAgentStats() uses for the on-chain numbers elsewhere on this site. A null count
           renders as "—", not a fabricated placeholder. */}
       <section id="discovery" className="bg-white dark:bg-[#111114] border border-slate-100 dark:border-slate-800/60 rounded-[2rem] p-6 sm:p-8 mb-6 scroll-mt-24">
         <h2 className="font-black text-slate-900 dark:text-white mb-1.5 flex items-center gap-2"><Compass size={18} className="text-emerald-500" /> Where this agent is discoverable</h2>

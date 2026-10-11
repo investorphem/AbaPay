@@ -8,6 +8,10 @@ GitHub](https://github.com/investorphem/AbaPay/commits/main).
 
 ## 2026-10-11
 
+* **Live on-chain stats, without Dune.** [agents.abapays.com/stats](https://agents.abapays.com/stats)
+  shows every payment into AbaPay's vaults on Celo (and [Base](https://agents.abapays.com/stats/base)),
+  read directly from the chain every 15 minutes: payments, wallets, volume, rails, daily charts,
+  and every transaction linked to the explorer, with a CSV download.
 * **AbaPay is on Cursor.** Listed as a plugin at [cursor.directory/plugins/abapay](https://cursor.directory/plugins/abapay).
   Installing it connects AbaPay's MCP server, and Cursor runs the OAuth sign-in. AbaPay now
   accepts Cursor's sign-in callback, which used to be rejected.
