@@ -18,6 +18,12 @@ Agent ID **9687** — a verifiable identity any agent's tooling can check indepe
 Listed in the official Model Context Protocol registry as `io.github.investorphem/abapay` —
 discoverable by any MCP-aware client without a hardcoded URL.
 
+## Cursor
+
+Listed as a Cursor plugin at [cursor.directory/plugins/abapay](https://cursor.directory/plugins/abapay). Installing it
+adds AbaPay's MCP server to Cursor, which then runs the OAuth sign-in in your browser. The
+plugin's source is `integrations/cursor-plugin/` in the repo.
+
 {% hint style="warning" %}
 **Honestly stated:** identity here is discovery, not access control. Registration lets another agent verify which on-chain identity is speaking for AbaPay — it does not gate who can call the MCP server or the x402 endpoint. Those stay open by design.
 {% endhint %}

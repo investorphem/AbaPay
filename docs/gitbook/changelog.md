@@ -6,6 +6,12 @@ test-tooling fixes are left out. Full history: [commits on
 GitHub](https://github.com/investorphem/AbaPay/commits/main).
 {% endhint %}
 
+## 2026-10-11
+
+* **AbaPay is on Cursor.** Listed as a plugin at [cursor.directory/plugins/abapay](https://cursor.directory/plugins/abapay).
+  Installing it connects AbaPay's MCP server, and Cursor runs the OAuth sign-in. AbaPay now
+  accepts Cursor's sign-in callback, which used to be rejected.
+
 ## 2026-10-01
 
 * **Wallet sign-in uses Sign-In with Ethereum (EIP-4361).** Every wallet-ownership signature

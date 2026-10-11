@@ -38,6 +38,10 @@ export default function MCPPage() {
         <p className="text-xs text-slate-400 dark:text-slate-500 mt-3">
           Claude Desktop / Code: Settings → Connectors → Add custom connector → paste the URL above.
         </p>
+        <p className="text-xs text-slate-400 dark:text-slate-500 mt-1">
+          Cursor: install the AbaPay plugin from <a href="https://cursor.directory/plugins/abapay" target="_blank" rel="noopener noreferrer" className="text-emerald-600 dark:text-emerald-400 hover:underline">cursor.directory</a>, or paste the config above into <code>.cursor/mcp.json</code>.
+          Grok: grok.com/connectors → New Connector → Custom → paste the URL above.
+        </p>
       </section>
 
       <div className="mb-6">

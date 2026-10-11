@@ -43,5 +43,5 @@ and legal terms.
 {% endhint %}
 
 {% hint style="success" %}
-**Wider agent-registry discovery — shipped.** Listed on the official MCP Registry, on-chain via ERC-8004, approved on Glama's server and connector directories, live on MCP Playground's server registry, and merged into `awesome-mcp-servers` (95k+ stars).
+**Wider agent-registry discovery — shipped.** Listed on the official MCP Registry, as a plugin on [cursor.directory](https://cursor.directory/plugins/abapay), on-chain via ERC-8004, approved on Glama's server and connector directories, live on MCP Playground's server registry, and merged into `awesome-mcp-servers` (95k+ stars).
 {% endhint %}
