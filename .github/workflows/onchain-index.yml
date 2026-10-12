@@ -61,7 +61,9 @@ jobs:
               401) echo "::error::CRON_SECRET is rejected by $APP_URL (401)."; exit 1 ;;
               *)   echo "::error::Indexing failed (HTTP $code)."; exit 1 ;;
             esac
-            if grep -q '"caughtUp":true' /tmp/out.json; then echo "Caught up."; exit 0; fi
+            # The TOP-LEVEL flag only: each chain's result carries its own caughtUp too, and a
+            # chain that finished early must not end the backfill for the others.
+            if grep -q '^{"caughtUp":true' /tmp/out.json; then echo "Caught up."; exit 0; fi
           done
           if [ "$BACKFILL" = "true" ]; then
             echo "::warning::Not caught up after $rounds rounds; run the backfill again to continue."

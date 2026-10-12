@@ -12,8 +12,9 @@ import type { OnchainChain } from '@/lib/onchain/config';
 // last one stopped and returns `caughtUp`; the very first run has months of history to read, so
 // the workflow's manual "backfill" mode keeps calling until every chain reports caughtUp.
 //
-// ?chain=CELO or ?chain=BASE limits a call to one chain. Without it, Celo goes first (it is the
-// chain the agents site reports on) and Base gets whatever time is left.
+// ?chain=CELO or ?chain=BASE limits a call to one chain. Without it, Base goes first: once caught
+// up it needs a few seconds a run, so Celo (the chain the agents site reports on) gets nearly the
+// whole budget instead of a fixed half.
 
 export const maxDuration = 300;
 
@@ -30,14 +31,14 @@ export async function POST(req: Request) {
   if (param && param !== 'CELO' && param !== 'BASE') {
     return NextResponse.json({ error: 'chain must be CELO or BASE' }, { status: 400 });
   }
-  const chains: OnchainChain[] = param ? [param as OnchainChain] : ['CELO', 'BASE'];
+  const chains: OnchainChain[] = param ? [param as OnchainChain] : ['BASE', 'CELO'];
 
   const started = Date.now();
   const results: (IndexResult | { chain: OnchainChain; error: string })[] = [];
   for (const [i, chain] of chains.entries()) {
     const left = TOTAL_BUDGET_MS - (Date.now() - started);
-    // Split what's left evenly across the chains still to go, so a long Celo backfill can't
-    // starve Base of every run.
+    // Split what's left evenly across the chains still to go, so a long backfill on one chain
+    // can't starve the other of every run.
     const budget = Math.floor(left / (chains.length - i));
     try {
       results.push(await indexChain(chain, indexerRpc(chain), supabaseIndexerStore, budget));

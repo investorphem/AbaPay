@@ -142,17 +142,15 @@ export default async function StatsView({ chain }: { chain: OnchainChain }) {
         <Legend series={RAIL_SERIES} />
       </section>
 
-      <div className="grid lg:grid-cols-2 gap-x-6">
-        <section className={card}>
-          <h3 className={h3}>Total volume over time</h3>
-          <AreaLine days={allDays} values={cumulative} format={(v) => usd.format(v)} label="Cumulative volume" />
-        </section>
-        <section className={card}>
-          <h3 className={h3}>Paying wallets per day (last 90 days)</h3>
-          <StackedBars days={days90} rows={walletRows} series={WALLET_SERIES} unit="Wallets" />
-          <Legend series={WALLET_SERIES} />
-        </section>
-      </div>
+      <section className={card}>
+        <h3 className={h3}>Total volume over time</h3>
+        <AreaLine days={allDays} values={cumulative} format={(v) => usd.format(v)} label="Cumulative volume" />
+      </section>
+      <section className={card}>
+        <h3 className={h3}>Paying wallets per day (last 90 days)</h3>
+        <StackedBars days={days90} rows={walletRows} series={WALLET_SERIES} unit="Wallets" />
+        <Legend series={WALLET_SERIES} />
+      </section>
 
       <section className={card}>
         <h3 className={h3}>By rail</h3>
