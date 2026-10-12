@@ -1,16 +1,15 @@
-// Where the analytics site lives. On any real abapays.com deployment that is its own host,
-// stats.abapays.com (middleware.ts rewrites that host onto src/app/stats). Preview deployments and
-// localhost have no such host, so there the same pages are reached at /stats on whatever host is
-// serving. Same rule as getAgentAppUrl() uses for agents.abapays.com.
+// Where the analytics site lives: its own host, stats.abapays.com (middleware.ts rewrites that host
+// onto src/app/stats). Only `next dev` uses the /stats path on the same host instead, since there
+// is no stats host on localhost.
+//
+// 🔴 NOT DECIDED FROM NEXT_PUBLIC_APP_URL. The first version did that, the way getAgentAppUrl()
+// does, but production's value isn't an abapays.com URL, so it fell back to "/stats". On the agents
+// host that path is rewritten back into /agents/stats, which redirected to itself: a redirect loop
+// on agents.abapays.com/stats/base. Previews link to the live site, which is the right place for
+// a visitor anyway.
 
 export function statsBase(): string {
-  const raw = process.env.NEXT_PUBLIC_APP_URL || '';
-  try {
-    if (/(^|\.)abapays\.com$/i.test(new URL(raw).hostname)) return 'https://stats.abapays.com';
-  } catch {
-    // not an absolute URL: fall through to the path form
-  }
-  return '/stats';
+  return process.env.NODE_ENV === 'development' ? '/stats' : 'https://stats.abapays.com';
 }
 
 /** A page on the analytics site: '' (overview), '/celo' or '/base'. */
