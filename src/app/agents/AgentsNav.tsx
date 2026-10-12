@@ -4,7 +4,6 @@ import { useState, useRef, useEffect } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { ChevronDown, FolderGit2 } from "lucide-react";
-import { statsHref } from "@/lib/onchain/statsUrl";
 
 // ⚡ REAL PAGES, REAL LINKS — the previous version of this nav pointed at #anchors on one long
 // page. Clicking "A2A" now genuinely navigates to /agents/a2a, same as clicking "A2A" on
@@ -19,8 +18,6 @@ const LINKS = [
   { label: "API", href: "/agents/api" },
   { label: "SDK", href: "/agents/sdk" },
   { label: "Channels", href: "/agents/channels" },
-  // Its own site now (stats.abapays.com); see src/lib/onchain/statsUrl.ts.
-  { label: "Stats", href: statsHref("/celo") },
   { label: "About", href: "/agents/about" },
 ];
 
