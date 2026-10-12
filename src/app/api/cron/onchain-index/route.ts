@@ -1,6 +1,7 @@
 import 'server-only';
 import { NextResponse } from 'next/server';
 import { verifyCronRequest } from '@/utils/cronAuth';
+import { pingDeadman } from '@/lib/deadman';
 import { isMainnetEnv } from '@/lib/chain';
 import { indexChain, type IndexResult } from '@/lib/onchain/indexer';
 import { indexerRpc, supabaseIndexerStore } from '@/lib/onchain/runtime';
@@ -50,5 +51,7 @@ export async function POST(req: Request) {
 
   const failed = results.some((r) => 'error' in r);
   const caughtUp = results.every((r) => 'caughtUp' in r && r.caughtUp);
+  // HEALTHCHECK_URL_ONCHAIN: pages someone if the index stops being fed (src/lib/deadman.ts).
+  await pingDeadman('ONCHAIN', !failed);
   return NextResponse.json({ caughtUp, results }, { status: failed ? 502 : 200 });
 }

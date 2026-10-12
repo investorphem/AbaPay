@@ -7,7 +7,7 @@ component is at `GET /api/admin/health` (admin session required). It returns `co
 ## A cron stopped (dead-man alert from healthchecks.io / Better Stack)
 
 **Means:** a job didn't ping on time (`/api/cleanup`, `/api/schedules/run`,
-`/api/schedules/run-instant` or `/api/cron/dune-refresh`). A `/fail` ping means it ran and failed.
+`/api/schedules/run-instant` or `/api/cron/onchain-index`). A `/fail` ping means it ran and failed.
 
 **Check:** the scheduler (cron-job.org or the GitHub workflow) is enabled, and its `CRON_SECRET`
 matches Vercel's. A 401 or 503 from the route means a secret problem. Then open the run in the

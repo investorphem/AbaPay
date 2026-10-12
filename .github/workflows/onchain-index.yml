@@ -1,6 +1,6 @@
 name: On-chain index
 
-# Keeps AbaPay's own on-chain index (onchain_payments, the Dune replacement) current by calling
+# Keeps AbaPay's own on-chain index (onchain_payments, behind stats.abapays.com) current by calling
 # /api/cron/onchain-index, which reads new vault payments from Celo and Base.
 #
 # Scheduled: one call every 15 minutes. GitHub can start scheduled runs late; that only delays
@@ -48,7 +48,7 @@ jobs:
       - name: Index
         run: |
           # APP_URL must be the canonical host (www): curl drops the Authorization header on a
-          # cross-host redirect. See dune-refresh.yml for the history.
+          # cross-host redirect, which would look like a broken secret.
           rounds=1
           [ "$BACKFILL" = "true" ] && rounds=40
           for i in $(seq 1 "$rounds"); do

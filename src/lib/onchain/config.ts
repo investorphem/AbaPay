@@ -1,10 +1,9 @@
 // Which contracts and tokens the on-chain index covers. Mainnet only: the index exists to report
 // real activity, and the testnet vaults would only dilute it.
 //
-// Same contract and token lists as the Dune setup (dune/*-chain/00_events.sql and
-// scripts/dune-*-setup.mjs), so the numbers carry over. `startBlock` is each vault's deployment
-// block, read from its creation transaction (Celo V3/V4), from dune/celo-chain/README.md (Celo V1)
-// or by bisecting eth_getCode (Base). Nothing can have been paid into a vault before it existed,
+// Every AbaPay vault ever deployed on each chain, and every stablecoin they have accepted.
+// `startBlock` is each vault's deployment block, read from its creation transaction (Celo V3/V4),
+// from the V1 deployment record (Celo V1, 2026-04-07) or by bisecting eth_getCode (Base). Nothing can have been paid into a vault before it existed,
 // so indexing starts at the earliest of them.
 
 export type OnchainChain = 'CELO' | 'BASE';
