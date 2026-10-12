@@ -1,6 +1,7 @@
 import {
   Bot, ShieldCheck, Fingerprint, FolderGit2, FileText, Building2, Mail, Send, Network, BookOpen, Puzzle,
   MousePointerClick,
+  BarChart3,
 } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 
@@ -25,6 +26,7 @@ const FOOTER_GROUPS: {
       { label: "MCP Registry listing", href: "https://registry.modelcontextprotocol.io/v0.1/servers?search=io.github.investorphem/abapay", icon: Bot },
       { label: "Cursor plugin", href: "https://cursor.directory/plugins/abapay", icon: MousePointerClick },
       { label: "ERC-8004 identity", href: "https://8004scan.io/agents/celo/9687", icon: Fingerprint },
+      { label: "On-chain stats", href: "https://stats.abapays.com", icon: BarChart3 },
       { label: "Agent Card", href: "/.well-known/agent-card.json", icon: Network },
       { label: "OpenAPI reference", href: "/openapi.json", icon: FileText },
       { label: "Full Handbook", href: "https://docs.abapays.com", icon: BookOpen },
