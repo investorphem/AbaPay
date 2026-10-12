@@ -14,8 +14,14 @@ export type OnchainSummary = {
   by_rail: { rail: 'direct' | 'agent' | 'x402'; payments: number; wallets: number; volume_usd: Num }[];
   by_contract: { chain: OnchainChain; contract: string; contract_label: string; payments: number; wallets: number; volume_usd: Num; first_payment: string; last_payment: string }[];
   by_token: { token_symbol: string; payments: number; volume_usd: Num }[];
+  /** Added by 039; absent if only 038 is applied. */
+  by_service?: { service_type: string; payments: number; volume_usd: Num }[];
   tags: { tag: string; payments: number; last_payment: string }[];
-  daily: { day: string; direct: number; agent: number; x402: number; wallets: number; volume_usd: Num; new_wallets: number }[];
+  daily: {
+    day: string; direct: number; agent: number; x402: number; wallets: number; volume_usd: Num; new_wallets: number;
+    /** Added by 039. */
+    volume_direct?: Num; volume_agent?: Num; volume_x402?: Num;
+  }[];
   cursors: { chain: OnchainChain; last_block: number; head_block: number | null; updated_at: string }[];
 };
 
