@@ -694,6 +694,11 @@ as CSV. The agents home page's hero numbers come from the same index.
   calls `POST /api/cron/onchain-index` every 15 minutes (`APP_URL` + `CRON_SECRET` secrets).
   Each call resumes from the last indexed block. After applying 038, run the workflow once by
   hand with **backfill** ticked to read the history.
+- **Reliable 15-minute trigger:** GitHub delays scheduled workflows on busy runners, sometimes
+  by hours, so register a free [cron-job.org](https://cron-job.org) job as the main trigger, like
+  the schedule runners above: `POST https://www.abapays.com/api/cron/onchain-index` every 15
+  minutes, header `x-cron-secret: <CRON_SECRET>`, request timeout 300s. The GitHub schedule stays
+  as a backup; overlapping calls are harmless because rows are upserted.
 
 **Dune dashboards (historical; the account's plan stopped refreshing them on 2026-09-23):**
 ```
