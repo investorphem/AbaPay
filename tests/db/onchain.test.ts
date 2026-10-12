@@ -66,6 +66,20 @@ describe('onchain_summary', () => {
     ]));
   });
 
+  it('splits daily volume by rail (039)', async () => {
+    const s = (await summary('CELO')) as unknown as { daily: { day: string; volume_direct: number; volume_agent: number; volume_x402: number }[] };
+    expect(s.daily.map((d) => [d.day, Number(d.volume_direct), Number(d.volume_agent), Number(d.volume_x402)])).toEqual([
+      ['2026-10-01', 2.5, 1, 0],
+      ['2026-10-02', 0, 0, 1.5],
+    ]);
+  });
+
+  it('groups contract payments by service and leaves x402 (no service on-chain) out (039)', async () => {
+    await db.query('update onchain_payments set service_type = $1 where tx_hash in ($2, $3)', ['AIRTIME', '0xa1', '0xa2']);
+    const s = (await summary('CELO')) as unknown as { by_service: { service_type: string; payments: number }[] };
+    expect(s.by_service).toEqual([expect.objectContaining({ service_type: 'AIRTIME', payments: 2 })]);
+  });
+
   it('is not callable, and the tables not readable, with the browser (anon) key', async () => {
     const grants = await db.query<{ ok: boolean }>(`select has_function_privilege('anon', 'public.onchain_summary(text)', 'execute') as ok`);
     expect(grants.rows[0].ok).toBe(false);

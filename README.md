@@ -677,10 +677,14 @@ pick them up.
 **On-chain stats — AbaPay's own index (replaces Dune as the source of the public numbers):**
 
 [agents.abapays.com/stats](https://agents.abapays.com/stats) (Celo) and
-[/stats/base](https://agents.abapays.com/stats/base) show every payment into an AbaPay vault —
-payments, unique wallets, volume, the split by rail (direct wallet, agent relayer, x402), daily
-charts, per-contract and per-token totals, attribution-tag counts, and the latest payments, each
-linked to its transaction. `/api/onchain/export?chain=CELO` (or `BASE`) downloads the full list
+[/stats/base](https://agents.abapays.com/stats/base) show every payment into an AbaPay vault as a
+Dune-style dashboard: counters (payments, unique wallets, volume, agent-native share, last 30
+days, hackathon-tagged payments), interactive daily charts (payments and volume by rail, new vs
+returning wallets, cumulative volume) with a 30D / 90D / All range, pie charts (volume by rail and
+token, what contract payments bought), attribution-tag counts, and the latest payments, each
+linked to its transaction. Every panel has a description, a "How it's calculated" note, a
+shareable link (`#panel-id`), and a footer naming the chain and date, so a screenshot of one
+panel stands on its own. Charts use Recharts. `/api/onchain/export?chain=CELO` (or `BASE`) downloads the full list
 as CSV. The agents home page's hero numbers come from the same index.
 
 - **Indexer:** [`src/lib/onchain/indexer.ts`](src/lib/onchain/indexer.ts) reads vault events and
