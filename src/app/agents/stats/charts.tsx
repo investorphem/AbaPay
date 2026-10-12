@@ -2,9 +2,11 @@
 // justify a client-side dependency, and plain SVG renders before any JavaScript loads. Hovering a
 // bar or point shows its exact value (an SVG <title>).
 
-const W = 720;
-const H = 220;
-const PAD = { top: 12, right: 12, bottom: 26, left: 44 };
+// A narrow drawing area on purpose: the SVG scales to the card's width, and a wide viewBox shrinks
+// the axis labels to unreadable on a phone.
+const W = 480;
+const H = 200;
+const PAD = { top: 10, right: 8, bottom: 24, left: 40 };
 const IW = W - PAD.left - PAD.right;
 const IH = H - PAD.top - PAD.bottom;
 
@@ -29,13 +31,13 @@ function Frame({ max, labels, format, children }: { max: number; labels: string[
         return (
           <g key={t}>
             <line x1={PAD.left} x2={W - PAD.right} y1={y} y2={y} className="stroke-slate-100 dark:stroke-slate-800" strokeWidth={1} />
-            <text x={PAD.left - 6} y={y + 4} textAnchor="end" className="fill-slate-400 dark:fill-slate-500" fontSize={11}>{format(t)}</text>
+            <text x={PAD.left - 6} y={y + 4} textAnchor="end" className="fill-slate-400 dark:fill-slate-500" fontSize={12}>{format(t)}</text>
           </g>
         );
       })}
       {children}
       {xIdx.map((i) => (
-        <text key={i} x={PAD.left + step * i + step / 2} y={H - 6} textAnchor={i === 0 ? 'start' : i === labels.length - 1 ? 'end' : 'middle'} className="fill-slate-400 dark:fill-slate-500" fontSize={11}>
+        <text key={i} x={PAD.left + step * i + step / 2} y={H - 6} textAnchor={i === 0 ? 'start' : i === labels.length - 1 ? 'end' : 'middle'} className="fill-slate-400 dark:fill-slate-500" fontSize={12}>
           {shortDate(labels[i])}
         </text>
       ))}
