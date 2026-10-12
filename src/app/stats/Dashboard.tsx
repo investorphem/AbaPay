@@ -19,7 +19,7 @@ import {
 } from 'recharts';
 import { Check, Download, ExternalLink, Link2 } from 'lucide-react';
 
-// The Dune-style dashboard on /agents/stats. Every panel is self-contained (title, description,
+// The Dune-style dashboard on stats.abapays.com. Every panel is self-contained (title, description,
 // "how it's calculated", chain and date in its footer), so a screenshot of any one panel still
 // says what it shows and where it came from. Hover or tap a bar or slice for its exact values;
 // click a legend entry to hide that series.
@@ -29,14 +29,17 @@ type Rail = 'direct' | 'agent' | 'x402';
 
 export type DashboardData = {
   chainName: string;
-  explorer: string;
+  /** The overview page: both chains, so it adds a by-chain panel and a chain column. */
+  overview: boolean;
+  explorers: Record<string, string>;
   asOf: string;
-  indexedBlock: number | null;
+  indexedBlocks: { chain: string; block: number }[];
   totals: { payments: Num; wallets: Num; volume_usd: Num; agent_volume_usd: Num; first_payment: string | null };
   last30: { payments: Num; wallets: Num; volume_usd: Num };
   byRail: { rail: Rail; payments: Num; wallets: Num; volume_usd: Num }[];
   byToken: { token_symbol: string; payments: Num; volume_usd: Num }[];
   byService: { service_type: string; payments: Num; volume_usd: Num }[];
+  byChain: { name: string; payments: number; volume_usd: number }[];
   tags: { tag: string; payments: Num; last_payment: string }[];
   daily: {
     day: string;
@@ -44,7 +47,7 @@ export type DashboardData = {
     wallets: Num; new_wallets: Num; volume_usd: Num;
     volume_direct?: Num; volume_agent?: Num; volume_x402?: Num;
   }[];
-  latest: { tx_hash: string; log_index: number; block_time: string; payer: string; token_symbol: string; amount_usd: Num; rail: Rail }[];
+  latest: { chain: string; tx_hash: string; log_index: number; block_time: string; payer: string; token_symbol: string; amount_usd: Num; rail: Rail }[];
   hackathonTag: string | null;
   csvHref: string;
 };
@@ -75,6 +78,14 @@ const RANGES = [
   { key: 'all', label: 'All', days: Infinity },
 ] as const;
 type RangeKey = (typeof RANGES)[number]['key'];
+
+/** Keeps the `keep` largest slices and folds the rest into one "Other" slice. */
+function topWithOther(rows: { name: string; value: number }[], keep: number) {
+  const sorted = [...rows].sort((a, b) => b.value - a.value);
+  if (sorted.length <= keep + 1) return sorted;
+  const rest = sorted.slice(keep).reduce((s, r) => s + r.value, 0);
+  return [...sorted.slice(0, keep), { name: `Other (${sorted.length - keep})`, value: rest }];
+}
 
 /* ─── Panel chrome ─────────────────────────────────────────────────────────── */
 
@@ -118,7 +129,7 @@ function Panel({ id, title, description, how, footer, compact = false, className
       </details>
       <div className="mt-3 pt-3 border-t border-slate-100 dark:border-slate-800/60 flex items-center justify-between gap-2 text-[10px] font-bold uppercase tracking-wider text-slate-400 dark:text-slate-500">
         <span className="min-w-0">AbaPay · {footer}</span>
-        {!compact && <span className="whitespace-nowrap">agents.abapays.com/stats</span>}
+        {!compact && <span className="whitespace-nowrap">stats.abapays.com</span>}
       </div>
     </section>
   );
@@ -270,7 +281,7 @@ export default function Dashboard({ d }: { d: DashboardData }) {
     { id: 'wallets-30d', title: 'Wallets, last 30 days', value: nf.format(n(d.last30.wallets)), description: 'Distinct paying wallets in the last 30 days.', how: <>Same as Unique wallets, limited to the last 30 days.</> },
     { id: 'volume-30d', title: 'Volume, last 30 days', value: usd0.format(n(d.last30.volume_usd)), description: 'Stablecoin value paid in over the last 30 days.', how: <>Same as Volume, limited to the last 30 days.</> },
     d.hackathonTag
-      ? { id: 'hackathon', title: 'Hackathon-tagged payments', value: nf.format(hackathon ? n(hackathon.payments) : 0), description: `Payments carrying the Celo Open Rails tag ${d.hackathonTag}.`, how: <>Read from the ERC-8021 attribution suffix on each contract payment&apos;s calldata. x402 payments can&apos;t carry it: the x402 facilitator submits those transactions, not AbaPay.</> }
+      ? { id: 'hackathon', title: 'Hackathon-tagged payments', value: nf.format(hackathon ? n(hackathon.payments) : 0), description: `Celo payments carrying the Open Rails hackathon tag ${d.hackathonTag}.`, how: <>Read from the ERC-8021 attribution suffix on each contract payment&apos;s calldata. x402 payments can&apos;t carry it: the x402 facilitator submits those transactions, not AbaPay.</> }
       : { id: 'rails', title: 'Rails in use', value: nf.format(d.byRail.length), description: 'Settlement rails that carried at least one payment.', how: <>Direct wallet, agent relayer and x402.</> },
   ];
 
@@ -278,7 +289,7 @@ export default function Dashboard({ d }: { d: DashboardData }) {
     <>
       <div className="flex flex-wrap items-center justify-between gap-3 mb-4">
         <p className="text-xs text-slate-400 dark:text-slate-500">
-          {d.indexedBlock !== null && <>Indexed to block {nf.format(d.indexedBlock)} · </>}as of {d.asOf} · updated every 15 minutes
+          {d.indexedBlocks.map((b) => `${b.chain} block ${nf.format(b.block)}`).join(' · ')}{d.indexedBlocks.length > 0 && ' · '}as of {d.asOf} · updated every 15 minutes
         </p>
         <div className="flex items-center gap-3">
           <span className="text-[11px] font-bold uppercase tracking-wider text-slate-400 dark:text-slate-500">Charts</span>
@@ -337,6 +348,12 @@ export default function Dashboard({ d }: { d: DashboardData }) {
       </div>
 
       <div className="grid lg:grid-cols-2 gap-4 mb-4">
+        {d.overview && d.byChain.length > 0 && (
+          <Panel id="chain-share" title="Volume by chain" description="How AbaPay's volume splits between Celo and Base, all time." footer={footer}
+            how={<>Total volume per chain across every indexed vault on it.</>}>
+            <Donut data={d.byChain.map((c) => ({ name: c.name, value: c.volume_usd, detail: `${nf.format(c.payments)} payments`, color: c.name === 'Celo' ? '#facc15' : '#3b82f6' }))} format={usdSmart} />
+          </Panel>
+        )}
         <Panel id="rail-share" title="Volume by rail" description="Where the money came through, all time." footer={footer}
           how={<>Total volume per rail, as a share of all volume. Same rail definitions as Daily payments by rail.</>}>
           <Donut data={d.byRail.map((r) => ({ name: RAIL_NAME[r.rail], color: RAILS.find((x) => x.key === r.rail)?.color, value: n(r.volume_usd), detail: `${nf.format(n(r.payments))} payments` }))} format={usdSmart} />
@@ -345,13 +362,10 @@ export default function Dashboard({ d }: { d: DashboardData }) {
           how={<>Total volume per token. USDm is a legacy 18-decimal token, still counted for older contract payments.</>}>
           <Donut data={d.byToken.map((t) => ({ name: t.token_symbol, value: n(t.volume_usd), detail: `${nf.format(n(t.payments))} payments` }))} format={usdSmart} />
         </Panel>
-      </div>
-
-      <div className="grid lg:grid-cols-2 gap-4 mb-4">
         {d.byService.length > 0 && (
           <Panel id="services" title="What contract payments bought" description="Bill categories paid through the vault contracts, by number of payments." footer={footer}
-            how={<>The <code>serviceType</code> field of each <code>PaymentReceived</code> event. x402 payments carry no service on-chain (it lives in the off-chain payment request), so they are not in this chart.</>}>
-            <Donut data={d.byService.map((s) => ({ name: s.service_type, value: n(s.payments) }))} format={(v) => `${nf.format(v)} payments`} />
+            how={<>The <code>serviceType</code> field of each <code>PaymentReceived</code> event; the seven largest are shown and the rest grouped as Other. x402 payments carry no service on-chain (it lives in the off-chain payment request), so they are not in this chart.</>}>
+            <Donut data={topWithOther(d.byService.map((s) => ({ name: s.service_type, value: n(s.payments) })), 7)} format={(v) => `${nf.format(v)} payments`} />
           </Panel>
         )}
         <Panel id="tags" title="Attribution tags" description="ERC-8021 builder tags found on contract payments." footer={footer}
@@ -373,18 +387,19 @@ export default function Dashboard({ d }: { d: DashboardData }) {
 
       <Panel id="latest" title="Latest payments" description="The most recent payments, each linked to its transaction on the explorer." footer={footer} className="mb-6"
         action={<a href={d.csvHref} className="inline-flex items-center gap-1.5 text-xs font-bold text-emerald-600 dark:text-emerald-400 hover:underline"><Download size={14} /> CSV</a>}
-        how={<>Newest first. The CSV has every indexed payment on this chain with its transaction hash, block, payer, token, amount, rail and tags.</>}>
+        how={<>Newest first. The CSV has every indexed payment{d.overview ? ' on both chains' : ' on this chain'} with its transaction hash, block, payer, token, amount, rail and tags.</>}>
         <div className="overflow-x-auto">
           <table className="w-full text-sm">
-            <thead><tr className="text-left text-[11px] uppercase tracking-wider text-slate-400 dark:text-slate-500"><th className="pb-2 pr-4">Time</th><th className="pb-2 pr-4">Rail</th><th className="pb-2 pr-4 text-right">Amount</th><th className="pb-2 pr-4">Payer</th><th className="pb-2">Transaction</th></tr></thead>
+            <thead><tr className="text-left text-[11px] uppercase tracking-wider text-slate-400 dark:text-slate-500"><th className="pb-2 pr-4">Time</th>{d.overview && <th className="pb-2 pr-4">Chain</th>}<th className="pb-2 pr-4">Rail</th><th className="pb-2 pr-4 text-right">Amount</th><th className="pb-2 pr-4">Payer</th><th className="pb-2">Transaction</th></tr></thead>
             <tbody className="divide-y divide-slate-100 dark:divide-slate-800/60 text-slate-600 dark:text-slate-300">
               {d.latest.map((p) => (
                 <tr key={`${p.tx_hash}-${p.log_index}`}>
                   <td className="py-2 pr-4 whitespace-nowrap">{when(p.block_time)}</td>
+                  {d.overview && <td className="py-2 pr-4 whitespace-nowrap">{p.chain === 'CELO' ? 'Celo' : 'Base'}</td>}
                   <td className="py-2 pr-4 whitespace-nowrap">{RAIL_NAME[p.rail]}</td>
                   <td className="py-2 pr-4 whitespace-nowrap text-right tabular-nums">{usd2.format(n(p.amount_usd))} {p.token_symbol}</td>
-                  <td className="py-2 pr-4 font-mono text-xs"><a href={`${d.explorer}/address/${p.payer}`} target="_blank" rel="noopener noreferrer" className="text-emerald-600 dark:text-emerald-400 hover:underline">{short(p.payer)}</a></td>
-                  <td className="py-2 font-mono text-xs"><a href={`${d.explorer}/tx/${p.tx_hash}`} target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-1 text-emerald-600 dark:text-emerald-400 hover:underline">{short(p.tx_hash)} <ExternalLink size={11} /></a></td>
+                  <td className="py-2 pr-4 font-mono text-xs"><a href={`${d.explorers[p.chain]}/address/${p.payer}`} target="_blank" rel="noopener noreferrer" className="text-emerald-600 dark:text-emerald-400 hover:underline">{short(p.payer)}</a></td>
+                  <td className="py-2 font-mono text-xs"><a href={`${d.explorers[p.chain]}/tx/${p.tx_hash}`} target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-1 text-emerald-600 dark:text-emerald-400 hover:underline">{short(p.tx_hash)} <ExternalLink size={11} /></a></td>
                 </tr>
               ))}
             </tbody>

@@ -8,8 +8,8 @@ GitHub](https://github.com/investorphem/AbaPay/commits/main).
 
 ## 2026-10-11
 
-* **Live on-chain stats, without Dune.** [agents.abapays.com/stats](https://agents.abapays.com/stats)
-  shows every payment into AbaPay's vaults on Celo (and [Base](https://agents.abapays.com/stats/base)),
+* **Live on-chain stats, without Dune.** [stats.abapays.com](https://stats.abapays.com), AbaPay's
+  own analytics site, shows every payment into its vaults on Celo and Base,
   read directly from the chain every 15 minutes: payments, wallets, volume, rails, daily charts,
   and every transaction linked to the explorer, with a CSV download.
 * **AbaPay is on Cursor.** Listed as a plugin at [cursor.directory/plugins/abapay](https://cursor.directory/plugins/abapay).
