@@ -1,13 +1,7 @@
-import type { Metadata } from 'next';
-import StatsView from '../StatsView';
+import { permanentRedirect } from 'next/navigation';
+import { statsHref } from '@/lib/onchain/statsUrl';
 
-export const metadata: Metadata = {
-  title: 'On-chain activity on Base — AbaPay Rails',
-  description: 'Every payment into an AbaPay vault on Base, read directly from the chain: payments, wallets, volume and rails, each linked to its transaction.',
-};
-
-export const revalidate = 300;
-
-export default function BaseStatsPage() {
-  return <StatsView chain="BASE" />;
+// The analytics moved to their own site, stats.abapays.com. Old links keep working.
+export default function AgentsBaseStatsRedirect() {
+  permanentRedirect(statsHref('/base'));
 }

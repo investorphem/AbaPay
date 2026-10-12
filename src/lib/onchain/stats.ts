@@ -48,14 +48,14 @@ export type LatestPayment = {
   tags: string[];
 };
 
-export async function getLatestPayments(chain: OnchainChain, limit = 20): Promise<LatestPayment[]> {
+/** The newest payments on one chain, or on both when chain is null. */
+export async function getLatestPayments(chain: OnchainChain | null, limit = 20): Promise<LatestPayment[]> {
   try {
-    const { data, error } = await supabaseAdmin
+    let q = supabaseAdmin
       .from('onchain_payments')
-      .select('chain, tx_hash, log_index, block_time, contract_label, payer, token_symbol, amount_usd, rail, tags')
-      .eq('chain', chain)
-      .order('block_time', { ascending: false })
-      .limit(limit);
+      .select('chain, tx_hash, log_index, block_time, contract_label, payer, token_symbol, amount_usd, rail, tags');
+    if (chain) q = q.eq('chain', chain);
+    const { data, error } = await q.order('block_time', { ascending: false }).limit(limit);
     if (error || !data) return [];
     return data as LatestPayment[];
   } catch {

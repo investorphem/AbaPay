@@ -38,6 +38,13 @@ const AGENT_HOSTS = new Set(['agents.abapays.com', 'rails.abapays.com']);
 const AGENT_HOST_SKIP = /^\/(api|\.well-known|agents|docs|terms|privacy|receipt)(\/|$)/;
 const LOOKS_LIKE_STATIC_FILE = /\.[a-zA-Z0-9]+$/;
 
+// ⚡ stats.abapays.com: the public on-chain analytics as their own site (src/app/stats/), the way
+// docs.abapays.com is its own site. Same move as the agents host: every page path is prefixed with
+// /stats, so the URLs are stats.abapays.com/, /celo and /base. /api stays as-is (the CSV export
+// lives there), and so do static files and paths already under /stats.
+const STATS_HOSTS = new Set(['stats.abapays.com']);
+const STATS_HOST_SKIP = /^\/(api|stats)(\/|$)/;
+
 // ⚡ CORS FOR THE PUBLIC AGENT-FACING API SURFACE — exact-path allowlist, deliberately narrow.
 // Without this, a browser-based agent (including agents.abapays.com's own "try it" panels)
 // gets silently blocked calling these from a different origin: no Access-Control-Allow-Origin
@@ -80,6 +87,14 @@ export function middleware(req: NextRequest) {
     const url = req.nextUrl.clone();
     url.pathname = '/masonode';
     return NextResponse.rewrite(url);
+  }
+
+  if (STATS_HOSTS.has(hostname)) {
+    if (!STATS_HOST_SKIP.test(pathname) && !LOOKS_LIKE_STATIC_FILE.test(pathname)) {
+      const url = req.nextUrl.clone();
+      url.pathname = pathname === '/' ? '/stats' : `/stats${pathname}`;
+      return NextResponse.rewrite(url);
+    }
   }
 
   if (AGENT_HOSTS.has(hostname)) {

@@ -7,6 +7,7 @@ import {
 import { Star, Package, PackageSearch } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 import { getAgentStats } from "@/lib/onchain/agentStats";
+import { statsHref } from "@/lib/onchain/statsUrl";
 import { getDiscoveryStats } from "@/lib/discoveryStats";
 
 // ⚡ agents.abapays.com'S HOMEPAGE — see middleware.ts's AGENT_HOSTS rewrite for how this
@@ -260,7 +261,7 @@ export default async function AgentsHomePage() {
         ))}
       </section>
       <p className="text-xs text-slate-400 dark:text-slate-500 mb-6 px-2">
-        Celo mainnet only, read from the chain every 15 minutes. &quot;Agent-native&quot; is x402 plus agent-relayer volume, as a share of total volume. <Link href="/agents/stats" className="underline hover:text-emerald-500">Charts and every transaction →</Link>
+        Celo mainnet only, read from the chain every 15 minutes. &quot;Agent-native&quot; is x402 plus agent-relayer volume, as a share of total volume. <a href={statsHref("/celo")} className="underline hover:text-emerald-500">Charts and every transaction on stats.abapays.com →</a>
       </p>
 
       {/* RAIL BREAKDOWN — same three rails agentNativePct is derived from (Direct wallet,
