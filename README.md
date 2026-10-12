@@ -682,11 +682,13 @@ pick them up.
 the old `agents.abapays.com/stats` links redirect there. It shows every payment into an AbaPay
 vault as a Dune-style dashboard: counters (payments, unique wallets, volume, agent-native share, last 30
 days, hackathon-tagged payments), interactive daily charts (payments and volume by rail, new vs
-returning wallets, cumulative volume) with a 30D / 90D / All range, pie charts (volume by rail and
-token, what contract payments bought), attribution-tag counts, and the latest payments, each
+returning wallets, cumulative volume) with a 30D / 90D / All range, pie charts (volume by chain, rail and
+token), attribution-tag counts, and the latest payments, each
 linked to its transaction. Every panel has a description, a "How it's calculated" note, a
-shareable link (`#panel-id`), and a footer naming the chain and date, so a screenshot of one
-panel stands on its own. Charts use Recharts. `/api/onchain/export?chain=CELO` (or `BASE`, or `ALL`) downloads the full
+camera button that saves the panel as a PNG (like Dune's), a shareable link (`#panel-id`), and a
+footer naming the chain and date, so an image of one panel stands on its own. Times are Nigerian
+time (WAT) and days are Lagos days (migration 040). An open page refreshes its data every 5
+minutes. Charts use Recharts. `/api/onchain/export?chain=CELO` (or `BASE`, or `ALL`) downloads the full
 list as CSV. The agents home page's hero numbers come from the same index.
 
 - **Indexer:** [`src/lib/onchain/indexer.ts`](src/lib/onchain/indexer.ts) reads vault events and

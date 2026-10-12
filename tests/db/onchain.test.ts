@@ -86,4 +86,15 @@ describe('onchain_summary', () => {
     const read = await db.query<{ ok: boolean }>(`select has_table_privilege('anon', 'public.onchain_payments', 'select') as ok`);
     expect(read.rows[0].ok).toBe(false);
   });
+
+  // Last on purpose: it adds a row, which changes the daily series the tests above check.
+  it('groups days by Nigerian time (040): 23:30 UTC is the next day in Lagos', async () => {
+    await db.query(
+      `insert into onchain_payments (chain, tx_hash, log_index, block_number, block_time, contract, contract_label, payer, token_address, token_symbol, amount_usd, rail)
+       values ('CELO', '0xa5', 0, 1, '2026-10-02T23:30:00Z', '0xvault', 'AbaPay V4 (current)', '0xu4', '0xusdc', 'USDC', 1, 'x402')`,
+    );
+    const s = await summary('CELO');
+    const oct3 = s.daily.find((d) => d.day === '2026-10-03');
+    expect(oct3).toMatchObject({ x402: 1, new_wallets: 1 });
+  });
 });
