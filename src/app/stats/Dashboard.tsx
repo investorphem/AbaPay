@@ -1,6 +1,8 @@
 'use client';
 
-import { useMemo, useState, type ReactNode } from 'react';
+import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
+import { useRouter } from 'next/navigation';
+import { toPng } from 'html-to-image';
 import {
   Area,
   AreaChart,
@@ -17,7 +19,7 @@ import {
   YAxis,
   type LegendPayload,
 } from 'recharts';
-import { Check, Download, ExternalLink, Link2 } from 'lucide-react';
+import { Camera, Check, Download, ExternalLink, Link2, Loader2 } from 'lucide-react';
 
 // The Dune-style dashboard on stats.abapays.com. Every panel is self-contained (title, description,
 // "how it's calculated", chain and date in its footer), so a screenshot of any one panel still
@@ -38,7 +40,6 @@ export type DashboardData = {
   last30: { payments: Num; wallets: Num; volume_usd: Num };
   byRail: { rail: Rail; payments: Num; wallets: Num; volume_usd: Num }[];
   byToken: { token_symbol: string; payments: Num; volume_usd: Num }[];
-  byService: { service_type: string; payments: Num; volume_usd: Num }[];
   byChain: { name: string; payments: number; volume_usd: number }[];
   tags: { tag: string; payments: Num; last_payment: string }[];
   daily: {
@@ -61,7 +62,12 @@ const usdCompact = (v: number) => `$${compact.format(v)}`;
 const usdSmart = (v: number) => (Math.abs(v) < 100 ? usd2.format(v) : usd0.format(v));
 const day = (d: string) => new Date(`${d.slice(0, 10)}T00:00:00Z`).toLocaleDateString('en-US', { month: 'short', day: 'numeric', timeZone: 'UTC' });
 const dayLong = (d: string) => new Date(`${d.slice(0, 10)}T00:00:00Z`).toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric', year: 'numeric', timeZone: 'UTC' });
-const when = (iso: string) => new Date(iso).toLocaleString('en-US', { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit', timeZone: 'UTC' }) + ' UTC';
+// Every time on the site is Nigerian time (WAT, UTC+1), and days are Lagos days (migration 040).
+// day() and dayLong() format a bare YYYY-MM-DD from the database, which is already a Lagos day, so
+// they read it at UTC midnight purely to avoid shifting it.
+const TZ = 'Africa/Lagos';
+const when = (iso: string) => new Date(iso).toLocaleString('en-US', { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit', timeZone: TZ }) + ' WAT';
+const lagosToday = () => new Intl.DateTimeFormat('en-CA', { timeZone: TZ }).format(new Date());
 const short = (a: string) => `${a.slice(0, 6)}…${a.slice(-4)}`;
 
 const RAILS: { key: Rail; name: string; color: string }[] = [
@@ -79,14 +85,6 @@ const RANGES = [
 ] as const;
 type RangeKey = (typeof RANGES)[number]['key'];
 
-/** Keeps the `keep` largest slices and folds the rest into one "Other" slice. */
-function topWithOther(rows: { name: string; value: number }[], keep: number) {
-  const sorted = [...rows].sort((a, b) => b.value - a.value);
-  if (sorted.length <= keep + 1) return sorted;
-  const rest = sorted.slice(keep).reduce((s, r) => s + r.value, 0);
-  return [...sorted.slice(0, keep), { name: `Other (${sorted.length - keep})`, value: rest }];
-}
-
 /* ─── Panel chrome ─────────────────────────────────────────────────────────── */
 
 function Panel({ id, title, description, how, footer, compact = false, className = '', action, children }: {
@@ -95,7 +93,9 @@ function Panel({ id, title, description, how, footer, compact = false, className
   compact?: boolean;
   className?: string; action?: ReactNode; children: ReactNode;
 }) {
+  const ref = useRef<HTMLElement>(null);
   const [copied, setCopied] = useState(false);
+  const [shooting, setShooting] = useState(false);
   const copy = async () => {
     try {
       await navigator.clipboard.writeText(`${location.origin}${location.pathname}#${id}`);
@@ -105,16 +105,43 @@ function Panel({ id, title, description, how, footer, compact = false, className
       location.hash = id;
     }
   };
+  // 📷 Saves this panel as a PNG, the way Dune's camera button does. The buttons are left out of
+  // the image, and so is "How it's calculated" unless it is open, so the picture is just the panel.
+  const snapshot = async () => {
+    const el = ref.current;
+    if (!el) return;
+    setShooting(true);
+    const options = {
+      pixelRatio: 2,
+      backgroundColor: getComputedStyle(el).backgroundColor,
+      filter: (node: HTMLElement) =>
+        !(node.dataset && 'noCapture' in node.dataset) && !(node.tagName === 'DETAILS' && !(node as HTMLDetailsElement).open),
+    };
+    try {
+      // Embedding the page fonts can fail on some browsers; the image is still worth having without them.
+      const url = await toPng(el, options).catch(() => toPng(el, { ...options, skipFonts: true }));
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `abapay-${id}-${new Intl.DateTimeFormat('en-CA', { timeZone: TZ }).format(new Date())}.png`;
+      a.click();
+    } finally {
+      setShooting(false);
+    }
+  };
+  const btn = 'p-1.5 rounded-lg text-slate-400 hover:text-emerald-600 dark:hover:text-emerald-400 hover:bg-slate-50 dark:hover:bg-slate-800/60';
   return (
-    <section id={id} className={`min-w-0 scroll-mt-24 bg-white dark:bg-[#111114] border border-slate-100 dark:border-slate-800/60 rounded-3xl p-5 sm:p-6 flex flex-col ${className}`}>
+    <section ref={ref} id={id} className={`min-w-0 scroll-mt-24 bg-white dark:bg-[#111114] border border-slate-100 dark:border-slate-800/60 rounded-3xl p-5 sm:p-6 flex flex-col ${className}`}>
       <div className="flex items-start justify-between gap-3">
         <div className="min-w-0">
           <h2 className="text-sm font-black text-slate-900 dark:text-white">{title}</h2>
           <p className="text-xs text-slate-500 dark:text-slate-400 mt-1 leading-relaxed">{description}</p>
         </div>
-        <div className="flex items-center gap-2 flex-shrink-0">
+        <div className="flex items-center gap-1 flex-shrink-0" data-no-capture="">
           {action}
-          <button type="button" onClick={copy} aria-label={`Copy a link to "${title}"`} title="Copy a link to this panel" className="p-1.5 rounded-lg text-slate-400 hover:text-emerald-600 dark:hover:text-emerald-400 hover:bg-slate-50 dark:hover:bg-slate-800/60">
+          <button type="button" onClick={snapshot} disabled={shooting} aria-label={`Save "${title}" as an image`} title="Save this panel as an image" className={btn}>
+            {shooting ? <Loader2 size={14} className="animate-spin" /> : <Camera size={14} />}
+          </button>
+          <button type="button" onClick={copy} aria-label={`Copy a link to "${title}"`} title="Copy a link to this panel" className={btn}>
             {copied ? <Check size={14} /> : <Link2 size={14} />}
           </button>
         </div>
@@ -225,6 +252,13 @@ function Donut({ data, format }: { data: { name: string; value: number; detail?:
 
 export default function Dashboard({ d }: { d: DashboardData }) {
   const [range, setRange] = useState<RangeKey>('90');
+  const router = useRouter();
+  // Live while open: re-fetch the page's data every 5 minutes without a reload (the range
+  // choice and any open notes are kept). New payments reach the index every 15 minutes.
+  useEffect(() => {
+    const t = setInterval(() => router.refresh(), 5 * 60_000);
+    return () => clearInterval(t);
+  }, [router]);
   const footer = `${d.chainName} · as of ${d.asOf}`;
   const footerShort = `${d.chainName} · ${d.asOf.split(',').slice(0, 2).join(',')}`;
 
@@ -234,8 +268,8 @@ export default function Dashboard({ d }: { d: DashboardData }) {
     const first = d.daily[0]?.day.slice(0, 10);
     if (!first) return [];
     const out: DashboardData['daily'] = [];
-    const end = new Date(); end.setUTCHours(0, 0, 0, 0);
-    for (let t = Date.parse(`${first}T00:00:00Z`); t <= end.getTime(); t += 86_400_000) {
+    const end = Date.parse(`${lagosToday()}T00:00:00Z`);
+    for (let t = Date.parse(`${first}T00:00:00Z`); t <= end; t += 86_400_000) {
       const k = new Date(t).toISOString().slice(0, 10);
       out.push(byDay.get(k) ?? { day: k, direct: 0, agent: 0, x402: 0, wallets: 0, new_wallets: 0, volume_usd: 0, volume_direct: 0, volume_agent: 0, volume_x402: 0 });
     }
@@ -259,7 +293,9 @@ export default function Dashboard({ d }: { d: DashboardData }) {
   const volume = n(d.totals.volume_usd);
   const agentPct = volume > 0 ? (100 * n(d.totals.agent_volume_usd)) / volume : 0;
   const hackathon = d.hackathonTag ? d.tags.find((t) => t.tag === d.hackathonTag) : undefined;
-  const since = d.totals.first_payment ? dayLong(d.totals.first_payment) : '';
+  const since = d.totals.first_payment
+    ? new Date(d.totals.first_payment).toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric', year: 'numeric', timeZone: TZ })
+    : '';
 
   const rangeToggle = (
     <div className="inline-flex rounded-full border border-slate-200 dark:border-slate-800 p-0.5" role="group" aria-label="Time range">
@@ -289,7 +325,7 @@ export default function Dashboard({ d }: { d: DashboardData }) {
     <>
       <div className="flex flex-wrap items-center justify-between gap-3 mb-4">
         <p className="text-xs text-slate-400 dark:text-slate-500">
-          {d.indexedBlocks.map((b) => `${b.chain} block ${nf.format(b.block)}`).join(' · ')}{d.indexedBlocks.length > 0 && ' · '}as of {d.asOf} · updated every 15 minutes
+          {d.indexedBlocks.map((b) => `${b.chain} block ${nf.format(b.block)}`).join(' · ')}{d.indexedBlocks.length > 0 && ' · '}as of {d.asOf} · <span className="inline-flex items-center gap-1 text-emerald-600 dark:text-emerald-400 font-bold"><span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />Live</span> · new payments every 15 minutes
         </p>
         <div className="flex items-center gap-3">
           <span className="text-[11px] font-bold uppercase tracking-wider text-slate-400 dark:text-slate-500">Charts</span>
@@ -307,13 +343,13 @@ export default function Dashboard({ d }: { d: DashboardData }) {
 
       <div className="grid gap-4 mb-4">
         <Panel id="daily-payments" title="Daily payments by rail" description="How many payments settled each day, split by how they were paid. Hover or tap a bar for the day's numbers; click a legend item to hide it." footer={footer}
-          how={<>Grouped by the UTC day of the block. <b>x402</b>: a stablecoin transfer into a vault with no <code>PaymentReceived</code> in the same transaction. <b>Agent (relayer)</b>: a contract payment whose transaction also emitted <code>AgentPayment</code>. <b>Direct (wallet)</b>: every other contract payment.</>}>
+          how={<>Grouped by the Nigerian (WAT) day of the block. <b>x402</b>: a stablecoin transfer into a vault with no <code>PaymentReceived</code> in the same transaction. <b>Agent (relayer)</b>: a contract payment whose transaction also emitted <code>AgentPayment</code>. <b>Direct (wallet)</b>: every other contract payment.</>}>
           <StackedDaily rows={paymentsRows} series={RAILS} format={(v) => nf.format(v)} axisFormat={(v) => compact.format(v)} />
         </Panel>
 
         {hasRailVolume && (
           <Panel id="daily-volume" title="Daily volume by rail" description="US-dollar value paid in each day, split by rail." footer={footer}
-            how={<>Sum of payment amounts per UTC day, same rail definitions as Daily payments by rail.</>}>
+            how={<>Sum of payment amounts per Nigerian (WAT) day, same rail definitions as Daily payments by rail.</>}>
             <StackedDaily rows={volumeRows} series={RAILS} format={usdSmart} axisFormat={usdCompact} />
           </Panel>
         )}
@@ -342,7 +378,7 @@ export default function Dashboard({ d }: { d: DashboardData }) {
         </Panel>
 
         <Panel id="wallets" title="Paying wallets per day" description="Distinct wallets that paid each day, split into first-time and returning." footer={footer}
-          how={<>A wallet is <b>new</b> on the UTC day of its first ever payment on this chain, and <b>returning</b> on every later day it pays.</>}>
+          how={<>A wallet is <b>new</b> on the Nigerian (WAT) day of its first ever payment on this chain, and <b>returning</b> on every later day it pays.</>}>
           <StackedDaily rows={walletRows} series={[{ key: 'returning', name: 'Returning', color: '#0ea5e9' }, { key: 'new_wallets', name: 'New', color: '#10b981' }]} format={(v) => nf.format(v)} axisFormat={(v) => compact.format(v)} />
         </Panel>
       </div>
@@ -362,12 +398,6 @@ export default function Dashboard({ d }: { d: DashboardData }) {
           how={<>Total volume per token. USDm is a legacy 18-decimal token, still counted for older contract payments.</>}>
           <Donut data={d.byToken.map((t) => ({ name: t.token_symbol, value: n(t.volume_usd), detail: `${nf.format(n(t.payments))} payments` }))} format={usdSmart} />
         </Panel>
-        {d.byService.length > 0 && (
-          <Panel id="services" title="What contract payments bought" description="Bill categories paid through the vault contracts, by number of payments." footer={footer}
-            how={<>The <code>serviceType</code> field of each <code>PaymentReceived</code> event; the seven largest are shown and the rest grouped as Other. x402 payments carry no service on-chain (it lives in the off-chain payment request), so they are not in this chart.</>}>
-            <Donut data={topWithOther(d.byService.map((s) => ({ name: s.service_type, value: n(s.payments) })), 7)} format={(v) => `${nf.format(v)} payments`} />
-          </Panel>
-        )}
         <Panel id="tags" title="Attribution tags" description="ERC-8021 builder tags found on contract payments." footer={footer}
           how={<>Decoded from the data suffix at the end of each contract payment&apos;s calldata. A transaction can carry several tags; each is counted.</>}>
           {d.tags.length === 0 ? (

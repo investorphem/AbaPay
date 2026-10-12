@@ -41,14 +41,13 @@ export default async function StatsView({ chain }: { chain: OnchainChain | null 
             overview: chain === null,
             explorers: { CELO: ONCHAIN_CHAINS.CELO.explorer, BASE: ONCHAIN_CHAINS.BASE.explorer },
             asOf: newest
-              ? new Date(newest).toLocaleString('en-US', { month: 'short', day: 'numeric', year: 'numeric', hour: '2-digit', minute: '2-digit', timeZone: 'UTC' }) + ' UTC'
+              ? new Date(newest).toLocaleString('en-US', { month: 'short', day: 'numeric', year: 'numeric', hour: '2-digit', minute: '2-digit', timeZone: 'Africa/Lagos' }) + ' WAT'
               : '',
             indexedBlocks: cursors.map((c) => ({ chain: NAME[c.chain], block: Number(c.last_block) })),
             totals: summary.totals,
             last30: summary.last30,
             byRail: summary.by_rail,
             byToken: summary.by_token,
-            byService: summary.by_service ?? [],
             byChain: chain
               ? []
               : (['CELO', 'BASE'] as const).map((c) => {
