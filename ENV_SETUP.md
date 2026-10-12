@@ -518,7 +518,7 @@ Jobs that stay unresolved after 8 attempts are parked as `needs_review` and aler
 HEALTHCHECK_URL_CLEANUP=https://hc-ping.com/<uuid>     # /api/cleanup
 HEALTHCHECK_URL_SCHEDULES=https://hc-ping.com/<uuid>   # /api/schedules/run
 HEALTHCHECK_URL_INSTANT=https://hc-ping.com/<uuid>     # /api/schedules/run-instant
-HEALTHCHECK_URL_DUNE=https://hc-ping.com/<uuid>        # /api/cron/dune-refresh (or HEALTHCHECK_URL_DUNE_<DASHBOARD>)
+HEALTHCHECK_URL_ONCHAIN=https://hc-ping.com/<uuid>     # /api/cron/onchain-index
 LOG_LEVEL=info                                         # debug | info | warn | error
 LOG_FORMAT=                                            # "plain" for readable text instead of JSON lines
 ```
@@ -555,54 +555,21 @@ always allowed, as are this project's Vercel previews, plus localhost outside pr
 
 ---
 
-## 15. Dune Analytics (dashboard refresh)
+## 15. On-chain stats (stats.abapays.com)
 
-```
-DUNE_API_KEY=<from dune.com → abapay team → Settings → API keys>
-ABAPAY_BASE_CONTRACTS="0xC0A4…=AbaPayV4 (current),0xF3AeFF…=AbaPay V1 (original)"
-ABAPAY_CELO_CONTRACTS="0x5df8aE2B…=AbaPayV4 (current),0x42Fa4637…=AbaPayV3 (original)"
-```
-**Free** on the Community/trial plan. `DUNE_API_KEY` is required by `/api/cron/dune-refresh`,
-which re-runs the analytics queries behind the three public dashboards so none go stale:
+No extra variables. The indexer behind stats.abapays.com reads the chain over the same RPC
+endpoints as everything else (`CELO_RPC_URL` / `BASE_RPC_URL` first, then the public ones) and
+writes to Supabase with the service-role key. What it needs:
 
-* `?dashboard=main` — the original combined Celo + Base dashboard (7 queries)
-* `?dashboard=base` — **Base mainnet only** (9 queries), SQL in `dune/base-chain/`
-* `?dashboard=celo` — **Celo mainnet only** (9 queries, 6 with a panel), SQL in `dune/celo-chain/`
-
-Needed because Dune's own **query** scheduler only runs on the **medium/large** engines, which
-this plan cannot use (`medium` returns *"Performance medium is not supported for this
-dataset"*). So a cron calling this route is the only way to update the dashboard **panels**.
-`.github/workflows/dune-refresh.yml` does that daily — set the repository secrets `APP_URL`
-and `CRON_SECRET` (Settings → Secrets and variables → Actions) and it runs itself; nothing to
-register at cron-job.org.
-
-⚠️ **The performance tier this route asks for has already changed once, and may again.**
-It was `small` until 2026-09-10, when the account's plan started rejecting it entirely
-(`"This performance tier is not available with your subscription"`) — not the `medium`/`large`
-rejection above, a different, harder one. It's `free` as of 2026-09-11, verified against a real
-`workflow_dispatch` run. If dashboards go stale again and the error looks like this, check
-`PERFORMANCE` in `src/app/api/cron/dune-refresh/route.ts` first — its own comment carries
-whatever is currently known, more up to date than this file.
-
-⚠️ That cron is only half of the refresh. The **data** behind each dashboard lives in a
-materialized view, which Dune refreshes on its own matview cron at 02:00 UTC — matview crons
-*do* work on this plan, unlike the query scheduler, though matview creation itself needed the
-`medium` tier even while ad-hoc query execution was capped at `free` (verified live when the
-Celo dashboard was stood up — the two are apparently separate entitlements on this plan). A
-matview refresh does not count as an execution of the query, so it never updates a panel on its
-own; and the cron above only re-aggregates whatever the matviews last wrote. Both halves are
-required. See `dune/base-chain/README.md` and `dune/celo-chain/README.md`.
-
-`ABAPAY_BASE_CONTRACTS` / `ABAPAY_CELO_CONTRACTS` are only read by
-`scripts/dune-base-setup.mjs` / `scripts/dune-celo-setup.mjs`, which render and deploy each
-dashboard's SQL. Each lists **every** AbaPay deployment on that chain, not just the current
-one, so a redeploy doesn't truncate the dashboard's history. Format is `address=label`,
-comma-separated. ⚠️ Make sure the API key belongs to the **abapay team**, not your personal
-account, or the queries are created in the wrong place.
-
-Budget: ~12 credits per full refresh of the main dashboard against a 2,500/month quota; the
-Base and Celo dashboards each add a similar amount. A daily run of all three costs roughly
-1,000–1,200 credits/month — still inside the free tier.
+* **Migrations 038–040** applied (tables `onchain_payments` and `onchain_cursors`, and
+  `onchain_summary()`).
+* **A 15-minute trigger:** a free cron-job.org job, `POST https://www.abapays.com/api/cron/onchain-index`
+  with header `x-cron-secret: <CRON_SECRET>`. `.github/workflows/onchain-index.yml` runs the same
+  call as a backup and has a manual **backfill** mode for reading history from scratch.
+* **Optional:** `HEALTHCHECK_URL_ONCHAIN` (see the dead-man switches above) to be alerted if
+  the index stops being fed.
+* **The domain:** `stats.abapays.com` added to the Vercel project, with a CNAME at the DNS host.
+  `middleware.ts` routes it to `src/app/stats/`.
 
 ---
 

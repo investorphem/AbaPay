@@ -674,18 +674,18 @@ Without registering these, users can still create schedules (recurring or one-of
 chat, but nothing will ever execute them — they'll sit `is_active` forever with no cron to
 pick them up.
 
-**On-chain stats — AbaPay's own index (replaces Dune as the source of the public numbers):**
+**On-chain stats — AbaPay's own index of the chain:**
 
 [stats.abapays.com](https://stats.abapays.com) is its own site (like docs.abapays.com):
 [Overview](https://stats.abapays.com) (both chains), [Celo](https://stats.abapays.com/celo) and
 [Base](https://stats.abapays.com/base). `middleware.ts` rewrites that host onto `src/app/stats/`;
 the old `agents.abapays.com/stats` links redirect there. It shows every payment into an AbaPay
-vault as a Dune-style dashboard: counters (payments, unique wallets, volume, agent-native share, last 30
+vault as a dashboard: counters (payments, unique wallets, volume, agent-native share, last 30
 days, hackathon-tagged payments), interactive daily charts (payments and volume by rail, new vs
 returning wallets, cumulative volume) with a 30D / 90D / All range, pie charts (volume by chain, rail and
 token), attribution-tag counts, and the latest payments, each
 linked to its transaction. Every panel has a description, a "How it's calculated" note, a
-camera button that saves the panel as a PNG (like Dune's), a shareable link (`#panel-id`), and a
+camera button that saves the panel as a PNG, a shareable link (`#panel-id`), and a
 footer naming the chain and date, so an image of one panel stands on its own. Times are Nigerian
 time (WAT) and days are Lagos days (migration 040). An open page refreshes its data every 5
 minutes. Charts use Recharts. `/api/onchain/export?chain=CELO` (or `BASE`, or `ALL`) downloads the full
@@ -693,7 +693,7 @@ list as CSV. The agents home page's hero numbers come from the same index.
 
 - **Indexer:** [`src/lib/onchain/indexer.ts`](src/lib/onchain/indexer.ts) reads vault events and
   stablecoin transfers into the vaults over each chain's RPC (`CELO_RPC_URL` / `BASE_RPC_URL`
-  first, then the public endpoints), using the same definitions as the Dune queries. It covers
+  first, then the public endpoints), and classifies each payment by rail. It covers
   all five vaults: Celo V1, V3 and V4, and Base V1 and V4.
 - **Storage:** `onchain_payments` and `onchain_cursors` (migration 038). `onchain_summary()`
   returns everything the pages show in one query. No customer data is stored: the bill account
@@ -708,78 +708,6 @@ list as CSV. The agents home page's hero numbers come from the same index.
   minutes, header `x-cron-secret: <CRON_SECRET>`, request timeout as high as the plan allows. Progress
   is saved after every block range, so even a call cut short moves the index forward. The GitHub
   schedule stays as a backup; overlapping calls are harmless because rows are upserted.
-
-**Dune dashboards (historical; the account's plan stopped refreshing them on 2026-09-23):**
-```
-DUNE_API_KEY=your_dune_api_key        # Required by /api/cron/dune-refresh
-```
-There are **three** public dashboards on the `abapay` Dune team, and `/api/cron/dune-refresh`
-re-runs all of them:
-
-| `?dashboard=` | What it covers | Queries |
-|---|---|---|
-| `main` (default) | The original combined dashboard — Celo **and** Base, split by chain — [dune.com/abapay/abapay-ecosystem-traction](https://dune.com/abapay/abapay-ecosystem-traction) | 6 |
-| `base` | **Base mainnet only**, both AbaPay deployments and both settlement rails (contract calls **and x402**) — [dune.com/abapay/abapay-on-base](https://dune.com/abapay/abapay-on-base) | 9 |
-| `celo` | **Celo mainnet only**, both AbaPay deployments (V3 → V4) and all three settlement rails (direct wallet, agent/relayer, **and x402**) — [dune.com/abapay/abapay-on-celo](https://dune.com/abapay/abapay-on-celo) | 9 |
-
-The per-chain dashboards exist because on the combined one every per-chain figure is a *slice*
-of a Celo+Base total, so per-chain user counts, DAU and new-vs-returning are all mixed. Each is
-scoped to its own chain at the source, and each tracks **both** contract deployments on that
-chain so history doesn't restart at a redeploy:
-
-- Base: `0xC0A4dAA04DEd9c54D1239507B5A5E645761ef488` (AbaPayV4, current) and
-  `0xF3AeFF0c326B1277A2D8623b7694aEB5E6A565e5` (the original AbaPay V1). SQL in
-  [`dune/base-chain/`](dune/base-chain/), deployed with `node scripts/dune-base-setup.mjs`.
-- Celo: `0x5df8aE2B963165b735B18Ca86B1ea448d2AA032C` (AbaPayV4, current) and
-  `0x42Fa463798Ed129a9B5Ee51721CB6db1bfCBe3b9` (AbaPayV3, original). SQL in
-  [`dune/celo-chain/`](dune/celo-chain/), deployed with `node scripts/dune-celo-setup.mjs`. Its
-  agent-vs-direct-vs-x402 rail split (`12_by_rail.sql`) is deliberately kept as the dashboard's
-  headline chart, unlike Base's equivalent — see that directory's README for why.
-
-See each directory's own README for the full detail.
-
-**Automatic daily refresh — two mechanisms, both required:**
-
-| Layer | What keeps it fresh | When |
-|---|---|---|
-| **Data** — one materialized view per dashboard (`dune.abapay.result_abapay_unified_payments`, `dune.abapay.result_abapay_base_events`, `dune.abapay.result_abapay_celo_events`) | Dune's own matview cron | 02:00 UTC daily |
-| **Panels** — the queries that have charts across all three dashboards | [`.github/workflows/dune-refresh.yml`](.github/workflows/dune-refresh.yml) → `/api/cron/dune-refresh` | 03:15 UTC daily |
-
-The workflow needs two repository secrets, `APP_URL` and `CRON_SECRET`.
-
-⚠️ **Something outside this repo also calls `?dashboard=main`.** On 2026-08-15 the only workflow
-run started 03:51 UTC, yet the five `main` panel queries were executed again at 05:15:03–05:15:10
-— 1.5s apart, which is this route's own `SPACING_MS`, so it is this endpoint being called by
-another scheduler (a Vercel dashboard cron or an external cron service predating the workflow).
-It is not harmful, but it **masks failures**: `main` gets a second attempt each day and therefore
-always looks healthy, while `base` — which nothing else covers — stays stale whenever the
-workflow run fails. Worth finding and removing so both dashboards have the same single owner.
-
-**A refresh is only "done" when the execution COMPLETES.** `/execute` returning an
-`execution_id` means Dune accepted the job, not that the query ran: an accepted execution can
-still end `QUERY_STATE_FAILED`, leaving the panel on yesterday's result while the cron reports a
-clean 200. The route therefore polls every execution to a terminal state and makes one spaced
-retry pass over whatever genuinely didn't refresh, and the two dashboards are separated by 60s
-so the second one doesn't start into a rate limiter the first one just saturated. `base` is
-always the second call, which is why it was always the casualty.
-
-A dashboard panel renders the **last execution** of the query behind it, and refreshing a matview
-does *not* count as an execution of that query. So the matview cron alone never moves a panel —
-the combined dashboard sat six days stale while its matviews were refreshing every six hours —
-and executing the queries alone would only re-aggregate a stale table. Both halves, every day.
-
-**Why not use Dune's own scheduler?** Its built-in **query** scheduler runs only on the medium
-and large engines, and the `community_fluid_engine_v2` plan has neither — requesting `medium`
-returns *"Performance medium is not supported for this dataset"*, so the in-app schedule never
-fires however it is configured. Matview crons are the one piece of Dune-native scheduling that
-*does* work on this plan, which is why the data layer uses them and the panel layer uses the API.
-
-Each dashboard has a **root query** that feeds the matview the rest aggregate. The cron
-deliberately does **not** execute the roots: neither has a chart of its own, so running one costs
-credits to update nothing. Every query the cron does execute reads a matview rather than raw
-chain tables — well under **1 credit for all ten**, against a 2,500/month quota. A few queries
-are deployed but kept off the dashboards; the cron deliberately skips those, because executing
-a query with no panel spends credits updating something nobody can see.
 
 ---
 

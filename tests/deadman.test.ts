@@ -12,7 +12,7 @@ beforeEach(() => {
 afterEach(() => {
   vi.unstubAllGlobals();
   vi.restoreAllMocks();
-  for (const k of ['HEALTHCHECK_URL_CLEANUP', 'HEALTHCHECK_URL_DUNE', 'HEALTHCHECK_URL_DUNE_BASE']) delete process.env[k];
+  for (const k of ['HEALTHCHECK_URL_CLEANUP', 'HEALTHCHECK_URL_ONCHAIN', 'HEALTHCHECK_URL_ONCHAIN_BASE']) delete process.env[k];
 });
 
 describe('dead-man pings', () => {
@@ -34,9 +34,9 @@ describe('dead-man pings', () => {
   });
 
   it('falls back to the shared job URL', async () => {
-    process.env.HEALTHCHECK_URL_DUNE = 'https://hc-ping.com/dune';
-    await pingDeadman('DUNE_BASE', true, 'DUNE');
-    expect(calls).toEqual(['https://hc-ping.com/dune']);
+    process.env.HEALTHCHECK_URL_ONCHAIN = 'https://hc-ping.com/onchain';
+    await pingDeadman('ONCHAIN_BASE', true, 'ONCHAIN');
+    expect(calls).toEqual(['https://hc-ping.com/onchain']);
   });
 
   it('withDeadman pings /fail and rethrows when the job throws', async () => {

@@ -3,10 +3,9 @@ import { getOnchainSummary, RAIL_LABEL } from './stats';
 
 // ⚡ THE NUMBERS ON agents.abapays.com'S HERO GRID — CELO-ONLY, deliberately.
 //
-// The site's pitch is Celo agent-payment rails, so Base volume stays out of it. These used to come
-// from two Dune queries (see git history for src/lib/dune/agentStats.ts); they now come from
-// AbaPay's own on-chain index, which reads the chain directly and uses the same definitions, and
-// which /agents/stats shows in full.
+// The site's pitch is Celo agent-payment rails, so Base volume stays out of it. The numbers come
+// from AbaPay's own on-chain index, which reads the chain directly; stats.abapays.com shows them
+// in full.
 
 export type RailBreakdown = {
   rail: string;
@@ -24,7 +23,7 @@ export type AgentStats = {
 };
 
 // Last known-good snapshot, used ONLY if the index can't be read or is still empty. Captured
-// 2026-09-13 from Dune, Celo mainnet only. Deliberately not a rounder-looking placeholder, so a
+// 2026-09-13, Celo mainnet only. Deliberately not a rounder-looking placeholder, so a
 // viewer seeing it is a sign something upstream is broken.
 const FALLBACK: AgentStats = {
   volumeUsd: 26992,

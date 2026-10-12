@@ -4,14 +4,14 @@ import { log } from '@/lib/log';
 //
 // Nothing used to notice a cron that STOPPED running: the external scheduler could be paused,
 // lose its secret, or hit a deploy that 404s the route, and the only symptom was refunds, one-off
-// schedules or dashboards quietly going stale. Each cron now pings an external monitor
+// schedules or the public stats quietly going stale. Each cron now pings an external monitor
 // (healthchecks.io or Better Stack heartbeats) when it finishes; the monitor pages when a ping
 // is LATE. That is the point: an alert that needs the job to run can't report the job not running.
 //
 //   HEALTHCHECK_URL_CLEANUP     /api/cleanup
 //   HEALTHCHECK_URL_SCHEDULES   /api/schedules/run
 //   HEALTHCHECK_URL_INSTANT     /api/schedules/run-instant
-//   HEALTHCHECK_URL_DUNE        /api/cron/dune-refresh (or HEALTHCHECK_URL_DUNE_<DASHBOARD>)
+//   HEALTHCHECK_URL_ONCHAIN     /api/cron/onchain-index (stats.abapays.com)
 //
 // A run that finished but FAILED pings `<url>/fail`, which both providers treat as an explicit
 // failure. With no URL configured nothing is sent. A ping never throws or delays the job's own

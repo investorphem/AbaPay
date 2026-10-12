@@ -1,6 +1,6 @@
 import 'server-only';
 
-// ⚡ LIVE, NOT SNAPSHOTTED — same pattern as src/lib/dune/agentStats.ts: real numbers from the
+// ⚡ LIVE, NOT SNAPSHOTTED — same pattern as src/lib/onchain/agentStats.ts: real numbers from the
 // real public APIs (npm, PyPI, GitHub — all unauthenticated, no key to manage), revalidated
 // periodically, with a null field meaning "couldn't fetch" rather than a fabricated number.
 // pypistats.org 404s for a package in its first ~24h after publish; past that window it

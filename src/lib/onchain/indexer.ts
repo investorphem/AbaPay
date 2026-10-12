@@ -8,7 +8,7 @@ import {
   type OnchainChain,
 } from './config';
 
-// ⚡ AbaPay's own on-chain index, the replacement for Dune.
+// ⚡ AbaPay's own on-chain index: the source of every number on stats.abapays.com.
 //
 // Reads every payment into an AbaPay vault straight from the chain's RPC (Chainstack first, the
 // public endpoints as fallback; see rpcUrlsFor) and stores one row per payment in

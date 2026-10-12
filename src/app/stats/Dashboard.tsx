@@ -21,7 +21,7 @@ import {
 } from 'recharts';
 import { Camera, Check, Download, ExternalLink, Link2, Loader2 } from 'lucide-react';
 
-// The Dune-style dashboard on stats.abapays.com. Every panel is self-contained (title, description,
+// The analytics dashboard on stats.abapays.com. Every panel is self-contained (title, description,
 // "how it's calculated", chain and date in its footer), so a screenshot of any one panel still
 // says what it shows and where it came from. Hover or tap a bar or slice for its exact values;
 // click a legend entry to hide that series.
@@ -105,7 +105,7 @@ function Panel({ id, title, description, how, footer, compact = false, className
       location.hash = id;
     }
   };
-  // 📷 Saves this panel as a PNG, the way Dune's camera button does. The buttons are left out of
+  // 📷 Saves this panel as a PNG. The buttons are left out of
   // the image, and so is "How it's calculated" unless it is open, so the picture is just the panel.
   const snapshot = async () => {
     const el = ref.current;
