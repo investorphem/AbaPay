@@ -11,6 +11,8 @@ import {
   CartesianGrid,
   Cell,
   Legend,
+  Line,
+  LineChart,
   Pie,
   PieChart,
   ResponsiveContainer,
@@ -28,6 +30,13 @@ import { Camera, Check, Download, ExternalLink, Link2, Loader2 } from 'lucide-re
 
 type Num = number | string;
 type Rail = 'direct' | 'agent' | 'x402';
+type Window = {
+  payments: Num; wallets: Num; new_wallets: Num; volume_usd: Num; agent_volume_usd: Num;
+  by_rail: { rail: Rail; payments: Num; wallets: Num; volume_usd: Num }[];
+  by_token: { token_symbol: string; payments: Num; volume_usd: Num }[];
+  by_chain: { chain: string; payments: Num; volume_usd: Num }[];
+  tags: { tag: string; payments: Num; last_payment: string }[];
+};
 
 export type DashboardData = {
   chainName: string;
@@ -36,12 +45,11 @@ export type DashboardData = {
   explorers: Record<string, string>;
   asOf: string;
   indexedBlocks: { chain: string; block: number }[];
-  totals: { payments: Num; wallets: Num; volume_usd: Num; agent_volume_usd: Num; first_payment: string | null };
-  last30: { payments: Num; wallets: Num; volume_usd: Num };
-  byRail: { rail: Rail; payments: Num; wallets: Num; volume_usd: Num }[];
-  byToken: { token_symbol: string; payments: Num; volume_usd: Num }[];
-  byChain: { name: string; payments: number; volume_usd: number }[];
-  tags: { tag: string; payments: Num; last_payment: string }[];
+  firstPayment: string | null;
+  /** The counters, splits and tags for each range. Only `all` is guaranteed (see StatsView's allTimeOnly). */
+  windows: Partial<Record<RangeKey, Window>>;
+  /** Distinct paying wallets per Lagos day, and over the 7 and 30 days ending it. Empty without migration 041. */
+  active: { day: string; dau: Num; wau: Num; mau: Num }[];
   daily: {
     day: string;
     direct: Num; agent: Num; x402: Num;
@@ -78,10 +86,13 @@ const RAILS: { key: Rail; name: string; color: string }[] = [
 const RAIL_NAME = Object.fromEntries(RAILS.map((r) => [r.key, r.name])) as Record<Rail, string>;
 const PALETTE = ['#10b981', '#0ea5e9', '#8b5cf6', '#f59e0b', '#f43f5e', '#64748b', '#14b8a6', '#eab308'];
 
+// One switch drives the whole page: counters, charts, splits and tags. `phrase` finishes a sentence
+// ("Payments in the last 7 days") and goes in every panel's footer, so a screenshot says its range.
 const RANGES = [
-  { key: '30', label: '30D', days: 30 },
-  { key: '90', label: '90D', days: 90 },
-  { key: 'all', label: 'All', days: Infinity },
+  { key: '7', label: '7D', days: 7, phrase: 'the last 7 days' },
+  { key: '30', label: '30D', days: 30, phrase: 'the last 30 days' },
+  { key: '90', label: '90D', days: 90, phrase: 'the last 90 days' },
+  { key: 'all', label: 'All', days: Infinity, phrase: 'all time' },
 ] as const;
 type RangeKey = (typeof RANGES)[number]['key'];
 
@@ -162,12 +173,14 @@ function Panel({ id, title, description, how, footer, compact = false, className
   );
 }
 
-function ChartTooltip({ active, payload, label, format, labelFormat }: {
+function ChartTooltip({ active, payload, label, format, labelFormat, showTotal = true }: {
   active?: boolean;
   payload?: { name?: string; value?: number | string; color?: string; payload?: { fill?: string } }[];
   label?: string | number;
   format: (v: number) => string;
   labelFormat?: (l: string) => string;
+  /** False for overlapping series (DAU/WAU/MAU), where a total would be meaningless. */
+  showTotal?: boolean;
 }) {
   if (!active || !payload?.length) return null;
   const total = payload.reduce((s, p) => s + n(p.value), 0);
@@ -180,7 +193,7 @@ function ChartTooltip({ active, payload, label, format, labelFormat }: {
           <span className="font-bold tabular-nums">{format(n(p.value))}</span>
         </div>
       ))}
-      {payload.length > 1 && (
+      {showTotal && payload.length > 1 && (
         <div className="flex justify-between gap-4 mt-1 pt-1 border-t border-slate-100 dark:border-slate-800 font-black text-slate-900 dark:text-white">
           <span>Total</span><span className="tabular-nums">{format(total)}</span>
         </div>
@@ -219,6 +232,37 @@ function StackedDaily({ rows, series, format, axisFormat }: {
   );
 }
 
+const ACTIVE_SERIES = [
+  { key: 'mau', name: 'MAU', color: '#8b5cf6' },
+  { key: 'wau', name: 'WAU', color: '#0ea5e9' },
+  { key: 'dau', name: 'DAU', color: '#10b981' },
+];
+
+function ActiveLines({ rows }: { rows: { day: string; dau: number; wau: number; mau: number }[] }) {
+  const [hidden, setHidden] = useState<Set<string>>(new Set());
+  const toggle = (e: LegendPayload) => {
+    const key = String(e.dataKey);
+    setHidden((h) => { const s = new Set(h); if (s.has(key)) s.delete(key); else s.add(key); return s; });
+  };
+  return (
+    <div className="h-64 text-slate-400 dark:text-slate-500">
+      <ResponsiveContainer width="100%" height="100%">
+        <LineChart data={rows} margin={{ top: 4, right: 4, bottom: 0, left: 0 }}>
+          <CartesianGrid vertical={false} stroke="currentColor" strokeOpacity={0.15} />
+          <XAxis dataKey="day" {...axis} tickFormatter={day} minTickGap={24} />
+          <YAxis {...axis} tickFormatter={(v: number) => compact.format(v)} width={44} allowDecimals={false} />
+          {/* Not a stack: DAU, WAU and MAU overlap, so adding them up would mean nothing. */}
+          <Tooltip content={<ChartTooltip format={(v) => nf.format(v)} labelFormat={dayLong} showTotal={false} />} />
+          <Legend onClick={toggle} iconType="circle" iconSize={8} wrapperStyle={{ fontSize: 12, cursor: 'pointer' }} />
+          {ACTIVE_SERIES.map((s) => (
+            <Line key={s.key} type="monotone" dataKey={s.key} name={s.name} stroke={s.color} strokeWidth={2} dot={false} hide={hidden.has(s.key)} />
+          ))}
+        </LineChart>
+      </ResponsiveContainer>
+    </div>
+  );
+}
+
 function Donut({ data, format }: { data: { name: string; value: number; detail?: string; color?: string }[]; format: (v: number) => string }) {
   const total = data.reduce((s, d) => s + d.value, 0);
   return (
@@ -251,7 +295,7 @@ function Donut({ data, format }: { data: { name: string; value: number; detail?:
 /* ─── The dashboard ────────────────────────────────────────────────────────── */
 
 export default function Dashboard({ d }: { d: DashboardData }) {
-  const [range, setRange] = useState<RangeKey>('90');
+  const [range, setRange] = useState<RangeKey>('30');
   const router = useRouter();
   // Live while open: re-fetch the page's data every 5 minutes without a reload (the range
   // choice and any open notes are kept). New payments reach the index every 15 minutes.
@@ -259,9 +303,6 @@ export default function Dashboard({ d }: { d: DashboardData }) {
     const t = setInterval(() => router.refresh(), 5 * 60_000);
     return () => clearInterval(t);
   }, [router]);
-  const footer = `${d.chainName} · as of ${d.asOf}`;
-  const footerShort = `${d.chainName} · ${d.asOf.split(',').slice(0, 2).join(',')}`;
-
   // Every calendar day from the first payment to today, so days with no payments show as gaps.
   const allDays = useMemo(() => {
     const byDay = new Map(d.daily.map((r) => [r.day.slice(0, 10), r]));
@@ -281,21 +322,39 @@ export default function Dashboard({ d }: { d: DashboardData }) {
     return allDays.map((r) => ({ day: r.day.slice(0, 10), total: (run += n(r.volume_usd)) }));
   }, [allDays]);
 
-  const days = RANGES.find((r) => r.key === range)!.days;
+  const R = RANGES.find((r) => r.key === range)!;
+  const days = R.days;
   const shown = Number.isFinite(days) ? allDays.slice(-days) : allDays;
   const shownCum = Number.isFinite(days) ? cumulative.slice(-days) : cumulative;
+  const shownActive = Number.isFinite(days) ? d.active.slice(-days) : d.active;
   const hasRailVolume = d.daily.some((r) => r.volume_x402 !== undefined);
 
   const paymentsRows = shown.map((r) => ({ day: r.day.slice(0, 10), x402: n(r.x402), agent: n(r.agent), direct: n(r.direct) }));
   const volumeRows = shown.map((r) => ({ day: r.day.slice(0, 10), x402: n(r.volume_x402), agent: n(r.volume_agent), direct: n(r.volume_direct) }));
   const walletRows = shown.map((r) => ({ day: r.day.slice(0, 10), new_wallets: n(r.new_wallets), returning: Math.max(n(r.wallets) - n(r.new_wallets), 0) }));
+  const activeRows = shownActive.map((r) => ({ day: r.day.slice(0, 10), dau: n(r.dau), wau: n(r.wau), mau: n(r.mau) }));
 
-  const volume = n(d.totals.volume_usd);
-  const agentPct = volume > 0 ? (100 * n(d.totals.agent_volume_usd)) / volume : 0;
-  const hackathon = d.hackathonTag ? d.tags.find((t) => t.tag === d.hackathonTag) : undefined;
-  const since = d.totals.first_payment
-    ? new Date(d.totals.first_payment).toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric', year: 'numeric', timeZone: TZ })
+  // The chosen range's numbers. Without migration 041 only `all` exists, and the panels say so.
+  const w = d.windows[range] ?? d.windows.all!;
+  const wPhrase = d.windows[range] ? R.phrase : 'all time';
+  const footer = `${d.chainName} · ${wPhrase} · as of ${d.asOf}`;
+  const footerShort = `${d.chainName} · ${wPhrase} · ${d.asOf.split(',').slice(0, 2).join(',')}`;
+
+  const volume = n(w.volume_usd);
+  const agentPct = volume > 0 ? (100 * n(w.agent_volume_usd)) / volume : 0;
+  const returning = Math.max(n(w.wallets) - n(w.new_wallets), 0);
+  const hackathon = d.hackathonTag ? w.tags.find((t) => t.tag === d.hackathonTag) : undefined;
+  const since = d.firstPayment
+    ? new Date(d.firstPayment).toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric', year: 'numeric', timeZone: TZ })
     : '';
+  const inRange = wPhrase === 'all time' ? `since ${since}` : `in ${wPhrase}`;
+
+  // DAU, WAU, MAU as of today (the last row of the series), and how much of the month's base shows
+  // up on an average day: the mean DAU over the last 30 days divided by today's MAU.
+  const today = d.active.at(-1);
+  const last30Active = d.active.slice(-30);
+  const avgDau = last30Active.length ? last30Active.reduce((s, r) => s + n(r.dau), 0) / last30Active.length : 0;
+  const stickiness = today && n(today.mau) > 0 ? (100 * avgDau) / n(today.mau) : 0;
 
   const rangeToggle = (
     <div className="inline-flex rounded-full border border-slate-200 dark:border-slate-800 p-0.5" role="group" aria-label="Time range">
@@ -308,29 +367,40 @@ export default function Dashboard({ d }: { d: DashboardData }) {
     </div>
   );
 
+  const rolling = <> Windows are rolling from now (7D is the last 7 × 24 hours), not calendar weeks or months.</>;
   const COUNTERS: { id: string; title: string; value: string; description: string; how: ReactNode }[] = [
-    { id: 'payments', title: 'Payments', value: nf.format(n(d.totals.payments)), description: `All payments into AbaPay's vaults on ${d.chainName} since ${since}.`, how: <>One row per payment: a <code>PaymentReceived</code> event for a contract payment, or a stablecoin transfer into a vault for x402. Includes payments that were later refunded; this is what the chain recorded.</> },
-    { id: 'wallets', title: 'Unique wallets', value: nf.format(n(d.totals.wallets)), description: 'Distinct addresses that have paid into a vault.', how: <>The payer of each payment: the user for a contract payment, and the address that signed the transfer for x402. Counted once however many times it paid.</> },
-    { id: 'volume', title: 'Volume', value: usd0.format(volume), description: 'Total stablecoin value paid in, in US dollars.', how: <>Sum of every payment&apos;s amount. Every accepted token is a US-dollar stablecoin, so amounts are counted at $1, not priced.</> },
-    { id: 'agent-share', title: 'Agent-native volume', value: `${agentPct.toFixed(1)}%`, description: 'Share of volume that came through agent rails.', how: <>x402 plus agent-relayer volume, divided by all volume. Direct wallet payments made by a person in the app are the rest.</> },
-    { id: 'payments-30d', title: 'Payments, last 30 days', value: nf.format(n(d.last30.payments)), description: 'Payments in the 30 days up to now.', how: <>Same count as Payments, limited to the last 30 days (rolling, not calendar).</> },
-    { id: 'wallets-30d', title: 'Wallets, last 30 days', value: nf.format(n(d.last30.wallets)), description: 'Distinct paying wallets in the last 30 days.', how: <>Same as Unique wallets, limited to the last 30 days.</> },
-    { id: 'volume-30d', title: 'Volume, last 30 days', value: usd0.format(n(d.last30.volume_usd)), description: 'Stablecoin value paid in over the last 30 days.', how: <>Same as Volume, limited to the last 30 days.</> },
+    { id: 'payments', title: 'Payments', value: nf.format(n(w.payments)), description: `Payments into AbaPay's vaults on ${d.chainName} ${inRange}.`, how: <>One row per payment: a <code>PaymentReceived</code> event for a contract payment, or a stablecoin transfer into a vault for x402. Includes payments that were later refunded; this is what the chain recorded.{rolling}</> },
+    { id: 'wallets', title: 'Unique wallets', value: nf.format(n(w.wallets)), description: `Distinct addresses that paid into a vault ${inRange}.`, how: <>The payer of each payment: the user for a contract payment, and the address that signed the transfer for x402. Counted once however many times it paid in the range.{rolling}</> },
+    { id: 'volume', title: 'Volume', value: usd0.format(volume), description: `Stablecoin value paid in ${inRange}, in US dollars.`, how: <>Sum of every payment&apos;s amount. Every accepted token is a US-dollar stablecoin, so amounts are counted at $1, not priced.{rolling}</> },
+    { id: 'agent-share', title: 'Agent-native volume', value: `${agentPct.toFixed(1)}%`, description: `Share of volume ${inRange} that came through agent rails.`, how: <>x402 plus agent-relayer volume, divided by all volume in the range. Direct wallet payments made by a person in the app are the rest.</> },
+    { id: 'new-wallets', title: 'New wallets', value: nf.format(n(w.new_wallets)), description: `Wallets whose first ever payment was ${inRange}.`, how: <>A wallet is new in the range if its first payment on {d.overview ? 'either chain' : 'this chain'} falls inside it.{rolling}</> },
+    { id: 'returning-wallets', title: 'Returning wallets', value: nf.format(returning), description: `Wallets that paid ${inRange} and had paid before it.`, how: <>Unique wallets in the range minus new wallets.</> },
+    { id: 'avg-payment', title: 'Average payment', value: usdSmart(n(w.payments) > 0 ? volume / n(w.payments) : 0), description: `Mean payment size ${inRange}.`, how: <>Volume divided by payments, for the range.</> },
     d.hackathonTag
-      ? { id: 'hackathon', title: 'Hackathon-tagged payments', value: nf.format(hackathon ? n(hackathon.payments) : 0), description: `Celo payments carrying the Open Rails hackathon tag ${d.hackathonTag}.`, how: <>Read from the ERC-8021 attribution suffix on each contract payment&apos;s calldata. x402 payments can&apos;t carry it: the x402 facilitator submits those transactions, not AbaPay.</> }
-      : { id: 'rails', title: 'Rails in use', value: nf.format(d.byRail.length), description: 'Settlement rails that carried at least one payment.', how: <>Direct wallet, agent relayer and x402.</> },
+      ? { id: 'hackathon', title: 'Hackathon-tagged payments', value: nf.format(hackathon ? n(hackathon.payments) : 0), description: `Celo payments ${inRange} carrying the Open Rails hackathon tag ${d.hackathonTag}.`, how: <>Read from the ERC-8021 attribution suffix on each contract payment&apos;s calldata. x402 payments can&apos;t carry it: the x402 facilitator submits those transactions, not AbaPay.</> }
+      : { id: 'rails', title: 'Rails in use', value: nf.format(w.by_rail.length), description: `Settlement rails that carried at least one payment ${inRange}.`, how: <>Direct wallet, agent relayer and x402.</> },
   ];
+
+  const ACTIVE: { id: string; title: string; value: string; description: string; how: ReactNode }[] = today ? [
+    { id: 'dau', title: 'DAU', value: nf.format(n(today.dau)), description: 'Daily active wallets: distinct wallets that paid today (WAT).', how: <>Distinct payers on today&apos;s Nigerian (WAT) calendar day, midnight to now.</> },
+    { id: 'wau', title: 'WAU', value: nf.format(n(today.wau)), description: 'Weekly active wallets: distinct wallets that paid in the last 7 days.', how: <>Distinct payers over the 7 WAT days ending today, today included.</> },
+    { id: 'mau', title: 'MAU', value: nf.format(n(today.mau)), description: 'Monthly active wallets: distinct wallets that paid in the last 30 days.', how: <>Distinct payers over the 30 WAT days ending today, today included.</> },
+    { id: 'stickiness', title: 'Stickiness (DAU/MAU)', value: `${stickiness.toFixed(1)}%`, description: 'How much of the monthly base pays on an average day.', how: <>The average DAU over the last 30 days ({avgDau.toFixed(1)}) divided by MAU. Higher means people come back more often.</> },
+  ] : [];
 
   return (
     <>
-      <div className="flex flex-wrap items-center justify-between gap-3 mb-4">
-        <p className="text-xs text-slate-400 dark:text-slate-500">
-          {d.indexedBlocks.map((b) => `${b.chain} block ${nf.format(b.block)}`).join(' · ')}{d.indexedBlocks.length > 0 && ' · '}as of {d.asOf} · <span className="inline-flex items-center gap-1 text-emerald-600 dark:text-emerald-400 font-bold"><span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />Live</span> · new payments every 15 minutes
-        </p>
-        <div className="flex items-center gap-3">
-          <span className="text-[11px] font-bold uppercase tracking-wider text-slate-400 dark:text-slate-500">Charts</span>
-          {rangeToggle}
-        </div>
+      <p className="text-xs text-slate-400 dark:text-slate-500 mb-3">
+        {d.indexedBlocks.map((b) => `${b.chain} block ${nf.format(b.block)}`).join(' · ')}{d.indexedBlocks.length > 0 && ' · '}as of {d.asOf} · <span className="inline-flex items-center gap-1 text-emerald-600 dark:text-emerald-400 font-bold"><span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />Live</span> · new payments every 15 minutes
+      </p>
+
+      {/* The range switch stays in view while scrolling, since it drives every panel below it. */}
+      <div className="sticky top-2 z-20 flex flex-wrap items-center justify-between gap-3 mb-4 rounded-2xl border border-slate-100 dark:border-slate-800/60 bg-white/90 dark:bg-[#111114]/90 backdrop-blur px-4 py-2">
+        <span className="text-xs font-bold text-slate-600 dark:text-slate-300">
+          Showing <span className="text-slate-900 dark:text-white">{wPhrase}</span>
+          {!d.windows[range] && <span className="font-medium text-slate-400"> (range totals unavailable, counters are all-time)</span>}
+        </span>
+        {rangeToggle}
       </div>
 
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-4">
@@ -340,6 +410,25 @@ export default function Dashboard({ d }: { d: DashboardData }) {
           </Panel>
         ))}
       </div>
+
+      {ACTIVE.length > 0 && (
+        <>
+          <h2 className="text-xs font-black uppercase tracking-wider text-slate-400 dark:text-slate-500 mt-8 mb-3 px-1">Active wallets</h2>
+          <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-4">
+            {ACTIVE.map((c) => (
+              <Panel key={c.id} id={c.id} title={c.title} description={c.description} how={c.how} footer={`${d.chainName} · ${d.asOf.split(',').slice(0, 2).join(',')}`} compact>
+                <div className="text-3xl font-black tracking-tight text-slate-900 dark:text-white tabular-nums">{c.value}</div>
+              </Panel>
+            ))}
+          </div>
+          <div className="grid gap-4 mb-4">
+            <Panel id="active-wallets" title="DAU, WAU and MAU over time" description="Distinct paying wallets on each day, and over the 7 and 30 days ending it. Hover or tap for a day's numbers; click a legend item to hide it." footer={footer}
+              how={<>For each Nigerian (WAT) day: <b>DAU</b> counts distinct payers that day, <b>WAU</b> over the 7 days ending that day, <b>MAU</b> over the 30 days ending that day. A wallet that pays every day counts once in each.</>}>
+              <ActiveLines rows={activeRows} />
+            </Panel>
+          </div>
+        </>
+      )}
 
       <div className="grid gap-4 mb-4">
         <Panel id="daily-payments" title="Daily payments by rail" description="How many payments settled each day, split by how they were paid. Hover or tap a bar for the day's numbers; click a legend item to hide it." footer={footer}
@@ -384,29 +473,29 @@ export default function Dashboard({ d }: { d: DashboardData }) {
       </div>
 
       <div className="grid lg:grid-cols-2 gap-4 mb-4">
-        {d.overview && d.byChain.length > 0 && (
-          <Panel id="chain-share" title="Volume by chain" description="How AbaPay's volume splits between Celo and Base, all time." footer={footer}
-            how={<>Total volume per chain across every indexed vault on it.</>}>
-            <Donut data={d.byChain.map((c) => ({ name: c.name, value: c.volume_usd, detail: `${nf.format(c.payments)} payments`, color: c.name === 'Celo' ? '#facc15' : '#3b82f6' }))} format={usdSmart} />
+        {d.overview && w.by_chain.length > 0 && (
+          <Panel id="chain-share" title="Volume by chain" description={`How AbaPay's volume splits between Celo and Base, ${inRange}.`} footer={footer}
+            how={<>Volume per chain across every indexed vault on it, for the range.</>}>
+            <Donut data={w.by_chain.map((c) => ({ name: c.chain === 'CELO' ? 'Celo' : 'Base', value: n(c.volume_usd), detail: `${nf.format(n(c.payments))} payments`, color: c.chain === 'CELO' ? '#facc15' : '#3b82f6' }))} format={usdSmart} />
           </Panel>
         )}
-        <Panel id="rail-share" title="Volume by rail" description="Where the money came through, all time." footer={footer}
-          how={<>Total volume per rail, as a share of all volume. Same rail definitions as Daily payments by rail.</>}>
-          <Donut data={d.byRail.map((r) => ({ name: RAIL_NAME[r.rail], color: RAILS.find((x) => x.key === r.rail)?.color, value: n(r.volume_usd), detail: `${nf.format(n(r.payments))} payments` }))} format={usdSmart} />
+        <Panel id="rail-share" title="Volume by rail" description={`Where the money came through, ${inRange}.`} footer={footer}
+          how={<>Volume per rail in the range, as a share of all volume in it. Same rail definitions as Daily payments by rail.</>}>
+          <Donut data={w.by_rail.map((r) => ({ name: RAIL_NAME[r.rail], color: RAILS.find((x) => x.key === r.rail)?.color, value: n(r.volume_usd), detail: `${nf.format(n(r.payments))} payments` }))} format={usdSmart} />
         </Panel>
-        <Panel id="token-share" title="Volume by token" description="Which stablecoins were used to pay, all time." footer={footer}
-          how={<>Total volume per token. USDm is a legacy 18-decimal token, still counted for older contract payments.</>}>
-          <Donut data={d.byToken.map((t) => ({ name: t.token_symbol, value: n(t.volume_usd), detail: `${nf.format(n(t.payments))} payments` }))} format={usdSmart} />
+        <Panel id="token-share" title="Volume by token" description={`Which stablecoins were used to pay, ${inRange}.`} footer={footer}
+          how={<>Volume per token in the range. USDm is a legacy 18-decimal token, still counted for older contract payments.</>}>
+          <Donut data={w.by_token.map((t) => ({ name: t.token_symbol, value: n(t.volume_usd), detail: `${nf.format(n(t.payments))} payments` }))} format={usdSmart} />
         </Panel>
-        <Panel id="tags" title="Attribution tags" description="ERC-8021 builder tags found on contract payments." footer={footer}
+        <Panel id="tags" title="Attribution tags" description={`ERC-8021 builder tags found on contract payments ${inRange}.`} footer={footer}
           how={<>Decoded from the data suffix at the end of each contract payment&apos;s calldata. A transaction can carry several tags; each is counted.</>}>
-          {d.tags.length === 0 ? (
-            <p className="text-sm text-slate-500 dark:text-slate-400">No tagged payments yet.</p>
+          {w.tags.length === 0 ? (
+            <p className="text-sm text-slate-500 dark:text-slate-400">No tagged payments in this range.</p>
           ) : (
             <div className="overflow-x-auto"><table className="w-full text-sm">
               <thead><tr className="text-left text-[11px] uppercase tracking-wider text-slate-400 dark:text-slate-500"><th className="pb-2 pr-4">Tag</th><th className="pb-2 pr-4 text-right">Payments</th><th className="pb-2 text-right">Last seen</th></tr></thead>
               <tbody className="divide-y divide-slate-100 dark:divide-slate-800/60 text-slate-600 dark:text-slate-300">
-                {d.tags.map((t) => (
+                {w.tags.map((t) => (
                   <tr key={t.tag}><td className="py-2 pr-4 font-mono text-xs">{t.tag}</td><td className="py-2 pr-4 text-right tabular-nums">{nf.format(n(t.payments))}</td><td className="py-2 text-right whitespace-nowrap">{when(t.last_payment)}</td></tr>
                 ))}
               </tbody>

@@ -35,6 +35,34 @@ export async function getOnchainSummary(chain: OnchainChain | null): Promise<Onc
   }
 }
 
+export type WindowKey = '7' | '30' | '90' | 'all';
+
+export type OnchainWindow = {
+  payments: number; wallets: number; new_wallets: number; volume_usd: Num; agent_volume_usd: Num;
+  by_rail: { rail: 'direct' | 'agent' | 'x402'; payments: number; wallets: number; volume_usd: Num }[];
+  by_token: { token_symbol: string; payments: number; volume_usd: Num }[];
+  by_chain: { chain: OnchainChain; payments: number; volume_usd: Num }[];
+  tags: { tag: string; payments: number; last_payment: string }[];
+};
+
+/** onchain_windows() (supabase/migrations/041_onchain_windows.sql): the range-switched numbers on stats.abapays.com. */
+export type OnchainWindows = {
+  windows: Record<WindowKey, OnchainWindow>;
+  /** One row per Lagos day, first payment to today: distinct paying wallets that day, in the 7 days and in the 30 days ending it. */
+  active: { day: string; dau: number; wau: number; mau: number }[];
+};
+
+/** Null when the database can't be reached or 041 isn't applied yet; the page then shows all-time numbers only. */
+export async function getOnchainWindows(chain: OnchainChain | null): Promise<OnchainWindows | null> {
+  try {
+    const { data, error } = await supabaseAdmin.rpc('onchain_windows', { p_chain: chain });
+    if (error || !data) return null;
+    return data as OnchainWindows;
+  } catch {
+    return null;
+  }
+}
+
 export type LatestPayment = {
   chain: OnchainChain;
   tx_hash: string;
