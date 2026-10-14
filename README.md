@@ -596,6 +596,18 @@ x402scan rather than being relabeled contract calls. Anything without EIP-3009 u
 contract call. It never touches the agent-initiated flow, since x402 needs a fresh signature per
 payment. Distinct infra from `RELAYER_PRIVATE_KEY` above.
 
+**Which chain a challenge offers — Celo is the agent default.** A request that names a chain
+(`blockchain`, and `token`) is challenged on exactly that. One that names none, such as a
+crawler's probe, a generic x402 client or Celo's [buy](https://usebuy.ai) marketplace CLI, gets
+**Celo first, with all three stablecoins** (USDC, USD₮, USA₮, each under its own EIP-712 domain),
+then Base USDC when Base is configured, all at one price. The paid retry settles on the chain and
+token its payment header was signed for. `AGENT_DEFAULT_CHAIN` (`src/constants`) is Celo for every
+agent-facing path (x402, MCP, A2A, agent links, the relayer); `DEFAULT_CHAIN` (Base) is only the
+consumer app's. Trade-off, chosen deliberately: Coinbase's validator
+(`POST /platform/v2/x402/validate`) judges `accepts[0]`, and with Celo first a bare probe no longer
+passes it, so the Coinbase Bazaar listing of this endpoint is not expected. Every Celo index
+(Celo's buy catalogue, agent402.tools, x402scan) reads the Celo entry.
+
 ⚠️ **Expect some wallets to warn about the signature, and know why.** x402 settles via an
 EIP-3009 `transferWithAuthorization` — a signature permitting a third party to move the tokens.
 That is structurally the same request a token-drainer makes, so some wallet security scanners

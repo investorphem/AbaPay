@@ -54,6 +54,12 @@ export const SERVICES = [
 export type ChainName = 'CELO' | 'BASE';
 export const DEFAULT_CHAIN: ChainName = 'BASE';
 
+// ⚡ THE AGENT-SIDE DEFAULT — CELO. DEFAULT_CHAIN above is the consumer app's (www.abapays.com,
+// where a connected wallet leads). Everything agent-facing — the x402 endpoint, MCP, A2A, the
+// agent link and the relayer — defaults to Celo with its three stablecoins (USDC, USD₮, USA₮)
+// whenever the caller doesn't name a chain. Base stays available to any caller that asks for it.
+export const AGENT_DEFAULT_CHAIN: ChainName = 'CELO';
+
 // How to read a transaction/agent-link row whose `blockchain` column is NULL or empty.
 //
 // Every row the app writes populates that column, so this only ever fires for rows written
