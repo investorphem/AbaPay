@@ -147,26 +147,23 @@ export default function NimApp() {
 
   // Plans for data, cable and exam PINs.
   useEffect(() => {
-    setPlans([]); setPlan(null);
     if (!provider || !['DATA', 'CABLE', 'EDUCATION'].includes(svc || '')) return;
     getJson<{ content?: { variations?: Plan[] } }>(`/api/variations?serviceID=${encodeURIComponent(provider)}`)
       .then((d) => setPlans(d.content?.variations || []))
       .catch(() => {});
   }, [provider, svc]);
 
-  // International drill-down: country → product → operator → plan.
+  // International drill-down: country → product → operator → plan. Changing a level clears the
+  // levels below it in the change handler, so each effect only ever loads.
   useEffect(() => {
-    setProducts([]); setProduct(null);
     if (!country) return;
     getJson<{ content: typeof products }>(`/api/intl?action=products&code=${country}`).then((d) => setProducts(Array.isArray(d.content) ? d.content : [])).catch(() => {});
   }, [country]);
   useEffect(() => {
-    setOperators([]); setOperator(null);
     if (!country || !product) return;
     getJson<{ content: typeof operators }>(`/api/intl?action=operators&code=${country}&type_id=${product.product_type_id}`).then((d) => setOperators(Array.isArray(d.content) ? d.content : [])).catch(() => {});
   }, [country, product]);
   useEffect(() => {
-    setIntlPlans([]); setIntlPlan(null);
     if (!operator || !product) return;
     getJson<{ content: { currency?: string; variations?: typeof intlPlans } }>(`/api/intl?action=variations&operator_id=${operator.operator_id}&type_id=${product.product_type_id}`)
       .then((d) => { setIntlPlans(d.content?.variations || []); setIntlCurrency(d.content?.currency || ''); })
@@ -387,7 +384,7 @@ export default function NimApp() {
           <div className="space-y-3">
             {svc !== 'BANK' && svc !== 'INTL' && (
               <Field label="Provider">
-                <select value={provider} onChange={(e) => { setProvider(e.target.value); setVerified(null); }} className={input}>
+                <select value={provider} onChange={(e) => { setProvider(e.target.value); setVerified(null); setPlans([]); setPlan(null); }} className={input}>
                   <option value="">Choose…</option>
                   {providers.map((p) => <option key={p.serviceID} value={p.serviceID}>{p.displayName}</option>)}
                 </select>
@@ -406,14 +403,14 @@ export default function NimApp() {
             {svc === 'INTL' && (
               <>
                 <Field label="Country">
-                  <select value={country} onChange={(e) => setCountry(e.target.value)} className={input}>
+                  <select value={country} onChange={(e) => { setCountry(e.target.value); setProducts([]); setProduct(null); setOperators([]); setOperator(null); setIntlPlans([]); setIntlPlan(null); }} className={input}>
                     <option value="">Choose…</option>
                     {countries.map((c) => <option key={c.code} value={c.code}>{c.name}</option>)}
                   </select>
                 </Field>
                 {products.length > 0 && (
                   <Field label="Product">
-                    <select value={product?.product_type_id ?? ''} onChange={(e) => setProduct(products.find((p) => String(p.product_type_id) === e.target.value) || null)} className={input}>
+                    <select value={product?.product_type_id ?? ''} onChange={(e) => { setProduct(products.find((p) => String(p.product_type_id) === e.target.value) || null); setOperators([]); setOperator(null); setIntlPlans([]); setIntlPlan(null); }} className={input}>
                       <option value="">Choose…</option>
                       {products.map((p) => <option key={p.product_type_id} value={p.product_type_id}>{p.name}</option>)}
                     </select>
@@ -421,7 +418,7 @@ export default function NimApp() {
                 )}
                 {operators.length > 0 && (
                   <Field label="Operator">
-                    <select value={operator?.operator_id ?? ''} onChange={(e) => setOperator(operators.find((o) => o.operator_id === e.target.value) || null)} className={input}>
+                    <select value={operator?.operator_id ?? ''} onChange={(e) => { setOperator(operators.find((o) => o.operator_id === e.target.value) || null); setIntlPlans([]); setIntlPlan(null); }} className={input}>
                       <option value="">Choose…</option>
                       {operators.map((o) => <option key={o.operator_id} value={o.operator_id}>{o.name}</option>)}
                     </select>
