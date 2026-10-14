@@ -245,6 +245,7 @@ column transactions.foreign_amount numeric
 column transactions.id uuid not null default gen_random_uuid()
 column transactions.meter_account_type text
 column transactions.network text not null
+column transactions.nim_usd_price numeric
 column transactions.operator_id text
 column transactions.payment_method text
 column transactions.phone text

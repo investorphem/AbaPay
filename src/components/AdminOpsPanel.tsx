@@ -28,6 +28,31 @@ export function AdminOpsPanel({ adminHeaders, onExecuteRefund }: Props) {
   const [busyId, setBusyId] = useState<string | null>(null);
   const [replies, setReplies] = useState<Record<string, string>>({});
   const [msg, setMsg] = useState('');
+  // NIM refunds (blockchain 'NIMIQ'): the operator sends NIM from the treasury wallet in Nimiq Pay
+  // or the Nimiq Wallet, then pastes the hash here; the backend verifies it on the Nimiq chain.
+  const [nimHashes, setNimHashes] = useState<Record<string, string>>({});
+  const isNim = (r: { blockchain?: string | null }) => String(r.blockchain || '').toUpperCase() === 'NIMIQ';
+  const nimAddress = (a: string) => String(a || '').replace(/\s+/g, '').toUpperCase().replace(/(.{4})(?=.)/g, '$1 ');
+
+  const recordNimRefund = async (r: { id: string }) => {
+    const hash = (nimHashes[r.id] || '').trim().toLowerCase();
+    if (!/^[0-9a-f]{64}$/.test(hash)) { setMsg('Paste the 64-character Nimiq transaction hash of the refund you sent.'); return; }
+    setBusyId(r.id); setMsg('');
+    try {
+      const res = await fetch('/api/admin/refunds', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', ...adminHeaders },
+        body: JSON.stringify({ id: r.id, refund_tx_hash: hash }),
+      });
+      const data = await res.json();
+      setMsg(data.message);
+      if (data.success) { setNimHashes(p => ({ ...p, [r.id]: '' })); await load(); }
+    } catch {
+      setMsg('Couldn’t reach the server. The NIM you sent is on chain: paste the hash again in a moment.');
+    } finally {
+      setBusyId(null);
+    }
+  };
 
   const load = useCallback(async () => {
     try {
@@ -174,22 +199,35 @@ export function AdminOpsPanel({ adminHeaders, onExecuteRefund }: Props) {
                 <div className="min-w-0">
                   <p className="text-[10px] uppercase tracking-widest text-slate-500 font-bold">{channelIcon(r.source_channel)} · {r.service_category}</p>
                   <p className="text-lg font-black text-slate-100 mt-0.5">
-                    {Number(r.amount_crypto).toFixed(4)} {r.token_used}
+                    {isNim(r) ? Number(r.amount_crypto).toLocaleString() : Number(r.amount_crypto).toFixed(4)} {r.token_used}
                     {r.amount_naira ? <span className="text-xs text-slate-500 font-bold ml-2">₦{Number(r.amount_naira).toLocaleString()}</span> : null}
                   </p>
-                  <p className="text-[10px] text-slate-500 font-mono mt-1 truncate">{r.wallet_address}</p>
+                  <p className="text-[10px] text-slate-500 font-mono mt-1 truncate">{isNim(r) ? nimAddress(r.wallet_address) : r.wallet_address}</p>
                   <p className="text-[10px] text-orange-400 mt-1">{r.vtpass_error || r.reason}</p>
                 </div>
               </div>
 
+              {isNim(r) && (
+                <div className="mb-3 space-y-2">
+                  <p className="text-[10px] text-slate-400 leading-relaxed">
+                    Send <b className="text-slate-200">{Number(r.amount_crypto).toLocaleString()} NIM</b> from the treasury wallet to the address above, then paste the transaction hash.
+                  </p>
+                  <input
+                    value={nimHashes[r.id] || ''}
+                    onChange={e => setNimHashes(p => ({ ...p, [r.id]: e.target.value }))}
+                    placeholder="Nimiq refund transaction hash"
+                    className="w-full bg-[#1a1a1f] border border-slate-800/80 rounded-xl px-3 py-2 text-[11px] font-mono text-slate-200"
+                  />
+                </div>
+              )}
               <div className="flex gap-2">
                 <button
-                  onClick={() => doRefund(r)}
+                  onClick={() => (isNim(r) ? recordNimRefund(r) : doRefund(r))}
                   disabled={busyId === r.id}
                   className="flex-1 py-2.5 bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 text-white rounded-xl text-[10px] font-black uppercase tracking-widest flex items-center justify-center gap-2"
                 >
                   {busyId === r.id ? <Loader2 size={12} className="animate-spin" /> : <Banknote size={12} />}
-                  Refund now
+                  {isNim(r) ? 'Record NIM refund' : 'Refund now'}
                 </button>
                 <button
                   onClick={() => rejectRefund(r)}

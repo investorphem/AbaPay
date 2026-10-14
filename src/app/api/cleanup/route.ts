@@ -4,6 +4,7 @@ import { reconcileStuckProcessing } from '@/lib/reconcileStuck';
 import { checkProviderBalances } from '@/lib/balanceAlerts';
 import { reconcileRecordedRefunds } from '@/lib/refundVerify';
 import { reconcileX402Intents } from '@/lib/reconcileX402';
+import { reconcileNimIntents } from '@/lib/nimSettle';
 import { pruneWebhookEvents } from '@/lib/webhookEvents';
 import { pruneIdempotencyKeys } from '@/lib/idempotency';
 import { pruneDoneJobs } from '@/lib/jobs';
@@ -32,7 +33,7 @@ async function handle(req: Request) {
   // check every call, but the ALERT itself keeps its own 6h per-provider cooldown regardless
   // of how often this endpoint is hit, so a cron running every few minutes can't spam Telegram
   // every time the float is confirmed low.
-  const [preflightResult, stuckResult, balanceResult, refundResult, x402Result] = await Promise.all([
+  const [preflightResult, stuckResult, balanceResult, refundResult, x402Result, nimResult] = await Promise.all([
     cleanupStalePreflights({ force: true }),
     reconcileStuckProcessing({ force: true }),
     checkProviderBalances(),
@@ -40,6 +41,8 @@ async function handle(req: Request) {
     reconcileRecordedRefunds({ force: true }),
     // Finishes or closes x402 payments whose request died after the intent was recorded.
     reconcileX402Intents({ force: true }),
+    // Settles NIM payments whose app closed before reporting them, expires unpaid NIM orders.
+    reconcileNimIntents({ force: true }),
     // Drops chat-webhook de-dup rows past every platform's retry window. Best-effort.
     pruneWebhookEvents(),
     // Drops expired MCP idempotency keys (src/lib/idempotency.ts). Best-effort.
@@ -47,10 +50,10 @@ async function handle(req: Request) {
     // Drops fulfilment jobs finished more than 30 days ago (src/lib/jobs.ts).
     pruneDoneJobs(),
   ]);
-  const ok = preflightResult.ok && stuckResult.ok && balanceResult.ok && refundResult.ok && x402Result.ok;
+  const ok = preflightResult.ok && stuckResult.ok && balanceResult.ok && refundResult.ok && x402Result.ok && nimResult.ok;
   // Dead-man ping: HEALTHCHECK_URL_CLEANUP (src/lib/deadman.ts).
   await pingDeadman('CLEANUP', ok);
-  return NextResponse.json({ preflight: preflightResult, stuckProcessing: stuckResult, balances: balanceResult, refunds: refundResult, x402Intents: x402Result }, { status: ok ? 200 : 500 });
+  return NextResponse.json({ preflight: preflightResult, stuckProcessing: stuckResult, balances: balanceResult, refunds: refundResult, x402Intents: x402Result, nimIntents: nimResult }, { status: ok ? 200 : 500 });
 }
 
 export async function GET(req: Request) { return handle(req); }

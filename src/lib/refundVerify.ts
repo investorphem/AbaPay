@@ -2,12 +2,13 @@ import 'server-only';
 import { supabaseAdmin } from '@/utils/supabase';
 import { sendTelegramAlert } from '@/lib/telegram';
 import { notifyUserRefundCompleted } from '@/lib/refunds';
-import { getPublicClient, resolveChain, explorerBaseFor } from '@/lib/chain';
+import { getPublicClient, resolveChain, explorerTxUrl } from '@/lib/chain';
 import { resolveTokenOnChain } from '@/constants';
 import { parseUnits, decodeEventLog } from 'viem';
 import type { TransactionReceipt } from 'viem';
 import { errorMessage } from '@/lib/errors';
 import type { RefundQueueRow } from '@/lib/rows';
+import { LUNA_PER_NIM, verifyNimRefund } from '@/lib/nimiq';
 
 // ⚡ REFUND VERIFICATION — ONE IMPLEMENTATION, THREE CALLERS
 //
@@ -68,6 +69,18 @@ export interface RefundClaim {
  * background sweep where nothing is waiting on the answer.
  */
 export async function verifyRefundOnChain(claim: RefundClaim, waitMs = 0): Promise<RefundVerdict> {
+  // NIM refunds are plain Nimiq transfers the operator sends from the treasury wallet; there is
+  // no EVM receipt to read. Same verdicts, read from the Nimiq chain (src/lib/nimiq.ts).
+  if (String(claim.blockchain || '').toUpperCase() === 'NIMIQ') {
+    const v = await verifyNimRefund(claim.refundTxHash, {
+      to: String(claim.walletAddress || ''),
+      minLuna: Math.round(Number(claim.amountCrypto) * LUNA_PER_NIM),
+    });
+    if (v.status === 'CONFIRMED') return { status: 'VERIFIED' };
+    if (v.status === 'PENDING') return { status: 'UNCONFIRMED', detail: v.detail };
+    return v.status === 'FAILED' ? { status: 'REVERTED' } : { status: 'MISMATCH' };
+  }
+
   let receipt: TransactionReceipt;
   try {
     const client = getPublicClient(claim.blockchain);
@@ -240,7 +253,7 @@ export async function reconcileRecordedRefunds(opts: { force?: boolean } = {}) {
         });
         if (done) {
           completed++;
-          const explorer = `${explorerBaseFor(row.blockchain)}/tx/${row.refund_tx_hash}`;
+          const explorer = explorerTxUrl(row.blockchain, row.refund_tx_hash);
           sendTelegramAlert(
             `✅ *REFUND RECONCILED*\n\nA refund that was sent on-chain but never recorded has been completed automatically.\n\n` +
             `💰 ${row.amount_crypto} ${row.token_used} → \`${row.wallet_address}\`\n🔗 ${explorer}`,

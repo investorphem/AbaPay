@@ -26,6 +26,7 @@ export interface TransactionRow {
   id: string;
   meter_account_type: string | null;
   network: string;
+  nim_usd_price: number | null;
   operator_id: string | null;
   payment_method: string | null;
   phone: string | null;

@@ -45,7 +45,7 @@ export default function PrivacyPolicy() {
 
             <h3 className="font-bold text-slate-800 dark:text-slate-200 mt-4 mb-2">A. On-Chain & Web3 Data</h3>
             <ul className="list-disc pl-5 space-y-2 mb-4">
-              <li><strong>Public Wallet Addresses:</strong> We collect your Base, Celo, or other EVM public wallet addresses to facilitate stablecoin escrow and transaction tracking.</li>
+              <li><strong>Public Wallet Addresses:</strong> We collect your Base, Celo, or other EVM public wallet addresses to facilitate stablecoin escrow and transaction tracking. If you pay with NIM in the Nimiq Pay mini app, we record the Nimiq address that paid, so the payment can be matched to your order and any refund sent back to it.</li>
               <li><strong>Transaction Hashes:</strong> Public blockchain metadata confirming your payment.</li>
               <li><strong className="text-emerald-600 dark:text-emerald-400">Strict Self-Custody Guarantee:</strong> AbaPay NEVER collects, stores, or requests access to your private keys, seed phrases, or wallet passwords.</li>
             </ul>
@@ -86,7 +86,7 @@ export default function PrivacyPolicy() {
             <ul className="list-disc pl-5 space-y-2 mb-3">
               <li><strong>Utility Aggregators:</strong> We share necessary vending data with our API partners (e.g., VTpass Global) strictly for the purpose of executing your transaction across borders.</li>
               <li><strong>Bank Transfer Partner:</strong> For the Transfer feature, we share the destination account number (and, once verified, the account holder&apos;s name) with Monnify — Moniepoint Inc.&apos;s API — strictly to identify the receiving bank and execute the payout from our Moniepoint business account.</li>
-              <li><strong>Blockchain Networks:</strong> Your public wallet address and transaction amount are permanently broadcasted to the public, immutable Base or Celo blockchains.</li>
+              <li><strong>Blockchain Networks:</strong> Your public wallet address and transaction amount are permanently broadcasted to the public, immutable Base or Celo blockchains (or, for NIM payments, the Nimiq blockchain, together with the order reference the payment carries).</li>
               <li><strong>AI Processing Partner:</strong> Chat messages sent to the DeAI agent are transmitted to Anthropic (Claude API) solely to interpret your request. Anthropic never receives your private keys, PIN, or any ability to sign transactions.</li>
               <li><strong>Messaging Platforms:</strong> To operate the agent, we exchange data with Telegram, Meta (WhatsApp), and X&apos;s respective bot/webhook infrastructure.</li>
               <li><strong>Law Enforcement:</strong> If compelled by a valid subpoena or directive from relevant local or international law enforcement (e.g., EFCC, SEC, or FATF-aligned agencies), we may disclose metadata to prevent cross-border financial crimes.</li>

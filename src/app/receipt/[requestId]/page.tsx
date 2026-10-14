@@ -1,5 +1,5 @@
 import { supabaseAdmin } from '@/utils/supabase';
-import { explorerBaseFor } from '@/lib/chain';
+import { explorerTxUrl } from '@/lib/chain';
 import { logoForServiceId } from '@/lib/providerFallback';
 import { issuesTokenOrPin } from '@/lib/purchasedCode';
 import Link from 'next/link';
@@ -68,8 +68,9 @@ export default async function ReceiptPage({ params }: { params: Promise<{ reques
   const ok = tx.status === 'SUCCESS';
   const isElectricity = String(tx.service_category || '').toUpperCase() === 'ELECTRICITY';
   const serviceLabel = `${(tx.network || '').toUpperCase()} ${tx.service_category || ''}`.trim();
-  const isRealTx = String(tx.tx_hash || '').startsWith('0x');
-  const explorerUrl = isRealTx ? `${explorerBaseFor(tx.blockchain)}/tx/${tx.tx_hash}` : null;
+  // A settled hash: 0x… on the EVM rails, 64 bare hex characters on the NIM rail.
+  const isRealTx = String(tx.tx_hash || '').startsWith('0x') || (String(tx.blockchain || '').toUpperCase() === 'NIMIQ' && /^[0-9a-f]{64}$/.test(String(tx.tx_hash || '')));
+  const explorerUrl = isRealTx ? explorerTxUrl(tx.blockchain, tx.tx_hash) : null;
   const date = new Date(tx.created_at).toLocaleString('en-NG', {
     timeZone: 'Africa/Lagos', day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit',
   });

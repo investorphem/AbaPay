@@ -12,6 +12,7 @@ import { explorerBaseFor } from '@/lib/chain';
 import { verifyVaultPayment, UNDECIDED_PROOF_FAILURES } from '@/lib/paymentProof';
 import { normalizeChainName, LEGACY_RECORD_CHAIN } from '@/constants';
 import { metric } from '@/lib/log';
+import { billCharges } from '@/lib/billCharges';
 
 // ⚡ /api/pay — THE WEB APP'S CONTRACT-CALL RAIL. Two calls per payment:
 //
@@ -94,6 +95,11 @@ async function cancelIntent(body: PayRequest) {
     console.warn(`[Pay] Refused cancel_intent for non-preflight hash: ${String(id).slice(0, 24)}`);
     return NextResponse.json({ success: false, status: "CANCELLED", message: "Only an unsigned payment intent can be cancelled." }, { status: 400 });
   }
+  // NIM orders are never deleted on request: the NIM may already be on its way, and the sweep in
+  // src/lib/nimSettle.ts only expires an order after checking the treasury for its payment.
+  if (id.startsWith('preflight_nim_')) {
+    return NextResponse.json({ success: false, status: "CANCELLED", message: "NIM orders expire on their own if unpaid." }, { status: 400 });
+  }
   await supabase.from('transactions').delete().eq('tx_hash', id).eq('status', 'PENDING');
   return NextResponse.json({ success: true, status: "CANCELLED" });
 }
@@ -136,13 +142,8 @@ async function createIntent(req: Request, body: PayRequest) {
     return NextResponse.json({ success: false, status: 'FAILED_VENDING', code: gate.code, message: gate.reason }, { status: gate.code === 'AMOUNT_OUT_OF_RANGE' ? 400 : 409 });
   }
 
-  const isForeign = serviceID === 'foreign-airtime';
-  const needsVerification = !isForeign && (serviceCategory === 'ELECTRICITY' || serviceCategory === 'BANK' || (serviceCategory === 'EDUCATION' && serviceID === 'jamb') || (serviceCategory === 'CABLE' && network !== 'SHOWMAX'));
-  const serviceFee = (needsVerification || serviceCategory === 'EDUCATION') ? 100 : 0;
-  // ⚡ CBN STAMP DUTY — ₦50 fixed on electronic transfers of ₦10,000 and above. Charged into the
-  // crypto amount like serviceFee, tracked in its own column (stamp_duty_ngn) — a regulatory
-  // pass-through, not revenue.
-  const stampDutyNgn = (serviceCategory === 'BANK' && vendAmount >= 10000) ? 50 : 0;
+  // Service fee and CBN stamp duty, charged into the crypto amount (src/lib/billCharges.ts).
+  const { serviceFee, stampDutyNgn } = billCharges({ serviceCategory, serviceID, network, amountNgn: vendAmount });
 
   // 1. RATE — server-side source of truth. Priced HERE, at intent time: the amount recorded on
   // this row is what settlement later requires the vault to have received.
@@ -247,6 +248,12 @@ async function settle(body: PayRequest) {
     // attach it to — the one case nothing downstream can recover by itself.
     await alert(`🚨 *PREFLIGHT RECONCILE FAILED*\nNo intent row for \`${intentId || '(none sent)'}\` when settling real tx \`${txHash}\`. Funds may be on-chain — this payment needs manual recovery.`);
     return NextResponse.json({ success: false, status: 'TIMEOUT', code: 'INTENT_NOT_FOUND', message: "We're confirming this payment in the background — check History shortly." }, { status: 404 });
+  }
+
+  // A NIM order settles only through /api/pay/nim, against the Nimiq chain. Never try to prove it
+  // as a vault payment here: its amount is in NIM, and its chain isn't an EVM chain.
+  if (String(row.blockchain || '').toUpperCase() === 'NIMIQ') {
+    return NextResponse.json({ success: false, status: 'FAILED_VENDING', code: 'WRONG_RAIL', message: "This order is paid with NIM in Nimiq Pay." }, { status: 400 });
   }
 
   if (row.status !== 'PENDING') {
