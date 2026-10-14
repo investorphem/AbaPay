@@ -5,7 +5,7 @@ import { hashPin } from '@/utils/pinSecurity';
 import { enforceRateLimit } from '@/lib/rateLimit';
 import { verifyWalletOwnership } from '@/utils/walletAuth';
 import { generateMcpApiKey, hashMcpApiKey } from '@/lib/deai/mcpAuth';
-import { normalizeChainName, defaultTokenForChain } from '@/constants';
+import { normalizeChainName, defaultTokenForChain, AGENT_DEFAULT_CHAIN } from '@/constants';
 
 // ⚡ SOCIAL LINKING — done in the REAL APP, where the user has their wallet.
 //
@@ -72,11 +72,11 @@ export async function POST(req: Request) {
       return NextResponse.json({ success: false, message: 'An MCP API key needs a 6-digit PIN' }, { status: 400 });
     }
 
-    // A link the caller doesn't pin to a chain gets the app's default (Base), and the token
-    // that chain leads with (USDC) rather than a hardcoded USD₮ — pairing "no chain given"
+    // A link the caller doesn't pin to a chain gets the agent default (Celo, AGENT_DEFAULT_CHAIN),
+    // and the token that chain leads with rather than a hardcoded one — pairing "no chain given"
     // with a token the default chain doesn't lead with is how an agent ends up approved for
     // a combination the user never picked.
-    const approvedChain = normalizeChainName(approved_chain);
+    const approvedChain = approved_chain ? normalizeChainName(approved_chain) : AGENT_DEFAULT_CHAIN;
 
     // 🔐 Prove the caller actually controls this wallet before binding a chat identity + PIN
     // to it — see src/utils/walletAuth.ts for why a bare address string is not enough.

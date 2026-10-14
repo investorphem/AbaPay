@@ -2,7 +2,7 @@ import { NextResponse } from 'next/server';
 import { supabaseAdmin as supabase } from '@/utils/supabase';
 import { executeVend, getStrictRequestId } from '@/lib/vend';
 import { vendInputFromRow } from '@/lib/vendInput';
-import { resolveTokenOnChain, DEFAULT_CHAIN } from '@/constants';
+import { resolveTokenOnChain, AGENT_DEFAULT_CHAIN } from '@/constants';
 import { sendTelegramAlert } from '@/lib/telegram';
 import { getServiceRules, computeServiceFee, checkWebPayment } from '@/lib/serviceRules';
 import { isDuplicateElectricity } from '@/lib/parity';
@@ -225,6 +225,29 @@ interface X402ChainConfig {
 // Resolve everything chain-specific in ONE place. Returns null when the chain isn't configured
 // (e.g. Base without CDP creds, or a missing vault address) — callers then behave exactly as if
 // x402 isn't available for that chain, never half-settling.
+/**
+ * What a payment header was signed for — its chain, and (v2 only) the token's address — for a
+ * paid retry whose body doesn't name them. Reads the flat v1 `network` and v2's
+ * `accepted.network` / `accepted.asset`. Null fields when absent or unreadable, so the caller
+ * falls back to its defaults.
+ */
+function signedInHeader(req: Request): { chain: ChainKey | null; asset: string | null } {
+  const header = req.headers.get('x-payment') || req.headers.get('payment-signature');
+  if (!header) return { chain: null, asset: null };
+  try {
+    const decoded = JSON.parse(Buffer.from(header, 'base64').toString('utf-8'));
+    const network = String(decoded?.network ?? decoded?.accepted?.network ?? '').toLowerCase();
+    const chain: ChainKey | null =
+      network === 'eip155:42220' || network === 'eip155:11142220' || network.startsWith('celo') ? 'CELO'
+      : network === 'eip155:8453' || network === 'eip155:84532' || network.startsWith('base') ? 'BASE'
+      : null;
+    const asset = typeof decoded?.accepted?.asset === 'string' ? decoded.accepted.asset.toLowerCase() : null;
+    return { chain, asset };
+  } catch {
+    return { chain: null, asset: null };
+  }
+}
+
 async function chainConfigFor(chainKey: ChainKey, isMainnet: boolean): Promise<X402ChainConfig | null> {
   if (chainKey === 'BASE') {
     const id = process.env.CDP_API_KEY_ID;
@@ -442,9 +465,19 @@ async function handleX402Request(req: Request) {
   // advertised Celo the Base route could never be listed no matter how many payments settled.
   // A request that NAMES a chain is still honoured exactly as before — only the "didn't say"
   // case moves, and it moves to the chain the app itself defaults to.
+  //
+  // ⚡ CELO IS THE AGENT DEFAULT (AGENT_DEFAULT_CHAIN). This endpoint is agent-facing, so a
+  // caller that names no chain — a crawler's probe, a generic x402 client, Celo's `buy` CLI —
+  // is answered on Celo, with Base offered after it (see `challengeAccepts` below). Between
+  // 2026-08-21 and this change the default followed the consumer app's (Base).
+  //
+  // A paid retry that names no chain settles on the chain it SIGNED for: a generic client picks
+  // an entry from the challenge without ever sending `blockchain`, and the payment header says
+  // which one it picked.
+  const signed = !blockchain || !tokenSymbol ? signedInHeader(req) : { chain: null, asset: null };
   const requestedChain: ChainKey = blockchain
     ? (String(blockchain).toUpperCase().includes('BASE') ? 'BASE' : 'CELO')
-    : (DEFAULT_CHAIN === 'BASE' ? 'BASE' : 'CELO');
+    : signed.chain ?? AGENT_DEFAULT_CHAIN;
   const chainCfg = (await chainConfigFor(requestedChain, isMainnet)) || (await chainConfigFor('CELO', isMainnet));
   if (!chainCfg) {
     return NextResponse.json({ success: false, status: 'FAILED_VENDING', message: 'This payment method is temporarily unavailable.' }, { status: 500 });
@@ -459,7 +492,11 @@ async function handleX402Request(req: Request) {
   // the 402 challenge must always fire regardless of what the client asked for (see the
   // "validation must never run before the payment challenge" note above), and the challenge's
   // own `asset`/`extra` fields are what actually govern what the client signs.
-  const requestedTokenSymbol: string = tokenSymbol && chainCfg.domains[tokenSymbol] ? tokenSymbol : 'USDC';
+  // A paid retry that names no token settles in the token it signed (v2 headers carry its address).
+  const signedTokenSymbol = !tokenSymbol && signed.asset
+    ? Object.keys(chainCfg.domains).find((sym) => resolveTokenOnChain(sym, chainKey, isMainnet)?.address.toLowerCase() === signed.asset) ?? null
+    : null;
+  const requestedTokenSymbol: string = tokenSymbol && chainCfg.domains[tokenSymbol] ? tokenSymbol : signedTokenSymbol ?? 'USDC';
   const tokenDomain = chainCfg.domains[requestedTokenSymbol];
   const usdc = resolveTokenOnChain(requestedTokenSymbol, chainKey, isMainnet);
   if (!usdc) {
@@ -679,6 +716,38 @@ async function handleX402Request(req: Request) {
     extensions: bazaarExtension,
   };
 
+  // ⚡ ONE CHALLENGE, EVERY WAY TO PAY, WHEN THE CALLER NAMED NO CHAIN. The default chain (Celo)
+  // leads with each of its stablecoins — USDC, USD₮, USA₮, each under its own EIP-712 domain —
+  // and Base USDC follows when Base is configured. A client signs whichever entry its wallet can
+  // pay; the paid retry settles on that chain and token (`signed` above). A caller that names a
+  // chain (and token) gets exactly that one entry, as before.
+  const entryFor = (cfg: X402ChainConfig, symbol: string) => {
+    const token = resolveTokenOnChain(symbol, cfg.chainKey, isMainnet);
+    const domain = cfg.domains[symbol];
+    if (!token || !domain || !cfg.payTo) return null;
+    const wei = BigInt(Math.round(requiredCrypto * 10 ** token.decimals)).toString();
+    return {
+      ...acceptEntry,
+      network: cfg.caip2, amount: wei, maxAmountRequired: wei, payTo: cfg.payTo, asset: token.address,
+      extra: { name: domain.name, version: domain.version, primaryType: 'TransferWithAuthorization' },
+    };
+  };
+  const challengeAccepts: (typeof acceptEntry)[] = [acceptEntry];
+  if (!blockchain) {
+    for (const symbol of Object.keys(chainCfg.domains)) {
+      if (symbol === requestedTokenSymbol) continue;
+      const e = entryFor(chainCfg, symbol);
+      if (e) challengeAccepts.push(e);
+    }
+    const other = await chainConfigFor(chainKey === 'CELO' ? 'BASE' : 'CELO', isMainnet);
+    if (other) {
+      for (const symbol of Object.keys(other.domains)) {
+        const e = entryFor(other, symbol);
+        if (e) challengeAccepts.push(e);
+      }
+    }
+  }
+
   if (!paymentHeader) {
     // No payment attempted yet — issue the challenge. Traced x402scan's actual crawler
     // (@agentcash/discovery, the npm package it probes with — see node_modules-free repo
@@ -712,7 +781,7 @@ async function handleX402Request(req: Request) {
         // so it already self-reports whichever host actually served the request.
         iconUrl: 'https://www.abapays.com/logo.png',
       },
-      accepts: [acceptEntry],
+      accepts: challengeAccepts,
       // Same object `acceptEntry.extensions` carries into settle — see `bazaarExtension`
       // above for what this declares and why it can no longer live only here.
       extensions: acceptEntry.extensions,
@@ -720,7 +789,7 @@ async function handleX402Request(req: Request) {
     const v1Body = {
       x402Version: 1,
       error: 'Payment required',
-      accepts: [acceptEntry],
+      accepts: challengeAccepts,
       // ⚡ NOT PART OF THE x402 SPEC — additive, ignored by any client that only reads the
       // fields it knows about. A wallet that can sign EIP-3009 but has no client driving the
       // challenge/sign/retry sequence itself has no way to act on a bare 402 — this points a

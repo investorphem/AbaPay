@@ -313,3 +313,61 @@ describe('reconcileX402Intents / cleanupStalePreflights', () => {
     expect(intentRow()).toMatchObject({ status: 'PENDING' });
   });
 });
+
+describe('/api/pay/x402 — Celo is the agent default, Base is offered after it', () => {
+  // The endpoint is agent-facing: a caller that names no chain is answered on Celo, with each of
+  // Celo's three stablecoins, then Base USDC. buy (Celo's marketplace CLI) pays only on Celo.
+  const BASE_VAULT = '0xc0a4daa04ded9c54d1239507b5a5e645761ef488';
+  const withBase = async <T>(fn: () => Promise<T>) => {
+    process.env.CDP_API_KEY_ID = 'id';
+    process.env.CDP_API_KEY_SECRET = 'secret';
+    process.env.NEXT_PUBLIC_ABAPAY_BASE_ADDRESS = BASE_VAULT;
+    try { return await fn(); } finally {
+      delete process.env.CDP_API_KEY_ID;
+      delete process.env.CDP_API_KEY_SECRET;
+      delete process.env.NEXT_PUBLIC_ABAPAY_BASE_ADDRESS;
+    }
+  };
+  // The bill as a generic x402 client sends it: no chain, no token.
+  const unnamed: Partial<typeof bill> = { ...bill };
+  delete unnamed.blockchain;
+  delete unnamed.token;
+  type Accept = { network: string; asset: string; payTo: string; maxAmountRequired: string; extra: { name: string } };
+
+  it('a bare probe gets Celo USDC, USD₮ and USA₮ first, then Base USDC, all at one price', async () => {
+    const { accepts } = await withBase(async () => (await GET(new Request('http://localhost/api/pay/x402'))).json()) as { accepts: Accept[] };
+    expect(accepts.map((a) => a.network)).toEqual(['eip155:42220', 'eip155:42220', 'eip155:42220', 'eip155:8453']);
+    expect(accepts.slice(0, 3).map((a) => a.extra.name)).toEqual(['USDC', 'Tether USD', 'Tether America USD']);
+    expect(accepts.slice(0, 3).every((a) => a.payTo === CELO_VAULT)).toBe(true);
+    expect(accepts[3]).toMatchObject({ payTo: BASE_VAULT, extra: { name: 'USD Coin' } });
+    expect(new Set(accepts.map((a) => a.maxAmountRequired)).size).toBe(1);
+  });
+
+  it('without Base configured, a bare probe still offers all three Celo stablecoins', async () => {
+    const { accepts } = await (await GET(new Request('http://localhost/api/pay/x402'))).json() as { accepts: Accept[] };
+    expect(accepts.map((a) => a.extra.name)).toEqual(['USDC', 'Tether USD', 'Tether America USD']);
+  });
+
+  it('a caller that names a chain gets exactly that one entry', async () => {
+    const r = await withBase(() => pay(bill, null));
+    expect(r.json.accepts.map((a: Accept) => a.network)).toEqual(['eip155:42220']);
+  });
+
+  it('a paid retry that names no chain settles on Celo, the chain its header signed', async () => {
+    receipts[SETTLE_TX] = settledReceipt();
+    const r = await withBase(() => pay(unnamed, header()));
+    expect(r.json.status).toBe('SUCCESS');
+    expect(facilitatorCalls).toBe(1);
+    expect(db.tables.transactions[0]).toMatchObject({ blockchain: 'CELO', token_used: 'USDC' });
+  });
+
+  it('a v2 retry that names no token settles in the token it signed (USD₮)', async () => {
+    const usdt = CELO_TOKENS['USD₮'].address;
+    const flat = JSON.parse(Buffer.from(header(), 'base64').toString());
+    const v2 = Buffer.from(JSON.stringify({ ...flat, accepted: { network: 'eip155:42220', asset: usdt } })).toString('base64');
+    receipts[SETTLE_TX] = { status: 'success', logs: [transferLog({ token: usdt, from: PAYER, to: CELO_VAULT, value: BigInt(1_000_000) })] };
+    const r = await pay(unnamed, v2);
+    expect(r.json.status).toBe('SUCCESS');
+    expect(db.tables.transactions[0]).toMatchObject({ blockchain: 'CELO', token_used: 'USD₮' });
+  });
+});

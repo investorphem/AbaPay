@@ -2,7 +2,7 @@ import 'server-only';
 import { createWalletClient, publicActions, parseUnits, formatUnits } from 'viem';
 import { privateKeyToAccount } from 'viem/accounts';
 import { resolveChain, getPublicClient, getChainTransport, isMainnetEnv } from '@/lib/chain';
-import { resolveTokenOnChain, DEFAULT_CHAIN } from '@/constants';
+import { resolveTokenOnChain, AGENT_DEFAULT_CHAIN } from '@/constants';
 import { sendTelegramAlert } from '@/lib/telegram';
 import { metric } from '@/lib/log';
 import { celoAttributionSuffix, baseAttributionSuffix } from '@/lib/attribution';
@@ -69,7 +69,7 @@ const capCache = new Map<string, { at: number; raw: bigint; decimals: number }>(
  * reverted with ExceedsMaxAgentPayment. The contract is the authority on this number; reading it
  * lets the agent refuse up front and say what the real limit is. `null` = could not read.
  */
-export async function getMaxAgentPayment(tokenSymbol: string, blockchain: string = DEFAULT_CHAIN): Promise<number | null> {
+export async function getMaxAgentPayment(tokenSymbol: string, blockchain: string = AGENT_DEFAULT_CHAIN): Promise<number | null> {
   const contract = contractAddressFor(blockchain);
   const token = resolveTokenOnChain(tokenSymbol, blockchain, isMainnetEnv());
   if (!contract || !token) return null;
@@ -109,7 +109,7 @@ export interface AllowanceInfo {
 export async function getRemainingAllowance(
   userWallet: string,
   tokenSymbol: string,
-  blockchain: string = DEFAULT_CHAIN
+  blockchain: string = AGENT_DEFAULT_CHAIN
 ): Promise<AllowanceInfo> {
   try {
     const contract = contractAddressFor(blockchain);
@@ -202,7 +202,7 @@ export async function relayPayBillFor(params: {
   amountNgn?: number;
 }): Promise<RelayResult> {
   const { userWallet, tokenSymbol, serviceType, accountNumber, amountCrypto } = params;
-  const blockchain = params.blockchain || DEFAULT_CHAIN;
+  const blockchain = params.blockchain || AGENT_DEFAULT_CHAIN;
   const sourceChannel = params.sourceChannel || 'AGENT';
 
   const pk = process.env.RELAYER_PRIVATE_KEY;
