@@ -1,5 +1,5 @@
 import { ONCHAIN_CHAINS, HACKATHON_TAG, type OnchainChain } from '@/lib/onchain/config';
-import { getLatestPayments, getOnchainSummary } from '@/lib/onchain/stats';
+import { getLatestPayments, getOnchainSummary, getOnchainWindows, type OnchainSummary, type OnchainWindows } from '@/lib/onchain/stats';
 import Dashboard from './Dashboard';
 
 // The three pages of stats.abapays.com: the overview (both chains, chain = null), Celo and Base.
@@ -8,9 +8,27 @@ import Dashboard from './Dashboard';
 
 const NAME: Record<OnchainChain, string> = { CELO: 'Celo', BASE: 'Base' };
 
+// Without onchain_windows() (migration 041 not applied, or the call failed) the page still works:
+// the all-time window is rebuilt from onchain_summary(), and the counters stay all-time.
+function allTimeOnly(s: OnchainSummary): Partial<OnchainWindows['windows']> {
+  const byChain = (['CELO', 'BASE'] as const)
+    .map((c) => {
+      const rows = s.by_contract.filter((r) => r.chain === c);
+      return { chain: c, payments: rows.reduce((t, r) => t + Number(r.payments), 0), volume_usd: rows.reduce((t, r) => t + Number(r.volume_usd), 0) };
+    })
+    .filter((c) => c.payments > 0);
+  return {
+    all: {
+      payments: s.totals.payments, wallets: s.totals.wallets, new_wallets: s.totals.wallets,
+      volume_usd: s.totals.volume_usd, agent_volume_usd: s.totals.agent_volume_usd,
+      by_rail: s.by_rail, by_token: s.by_token, by_chain: byChain, tags: s.tags,
+    },
+  };
+}
+
 export default async function StatsView({ chain }: { chain: OnchainChain | null }) {
   const scope = chain ? NAME[chain] : 'Celo and Base';
-  const [summary, latest] = await Promise.all([getOnchainSummary(chain), getLatestPayments(chain)]);
+  const [summary, windows, latest] = await Promise.all([getOnchainSummary(chain), getOnchainWindows(chain), getLatestPayments(chain)]);
   const cursors = summary?.cursors ?? [];
   const newest = cursors.map((c) => c.updated_at).sort().at(-1) ?? summary?.totals.last_payment ?? null;
   const vaults = (chain ? [chain] : (['CELO', 'BASE'] as const)).flatMap((c) =>
@@ -44,17 +62,9 @@ export default async function StatsView({ chain }: { chain: OnchainChain | null 
               ? new Date(newest).toLocaleString('en-US', { month: 'short', day: 'numeric', year: 'numeric', hour: '2-digit', minute: '2-digit', timeZone: 'Africa/Lagos' }) + ' WAT'
               : '',
             indexedBlocks: cursors.map((c) => ({ chain: NAME[c.chain], block: Number(c.last_block) })),
-            totals: summary.totals,
-            last30: summary.last30,
-            byRail: summary.by_rail,
-            byToken: summary.by_token,
-            byChain: chain
-              ? []
-              : (['CELO', 'BASE'] as const).map((c) => {
-                  const rows = summary.by_contract.filter((r) => r.chain === c);
-                  return { name: NAME[c], payments: rows.reduce((s, r) => s + Number(r.payments), 0), volume_usd: rows.reduce((s, r) => s + Number(r.volume_usd), 0) };
-                }),
-            tags: summary.tags,
+            firstPayment: summary.totals.first_payment,
+            windows: windows?.windows ?? allTimeOnly(summary),
+            active: windows?.active ?? [],
             daily: summary.daily,
             latest,
             hackathonTag: chain === 'BASE' ? null : HACKATHON_TAG,

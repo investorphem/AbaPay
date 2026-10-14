@@ -680,10 +680,12 @@ pick them up.
 [Overview](https://stats.abapays.com) (both chains), [Celo](https://stats.abapays.com/celo) and
 [Base](https://stats.abapays.com/base). `middleware.ts` rewrites that host onto `src/app/stats/`;
 the old `agents.abapays.com/stats` links redirect there. It shows every payment into an AbaPay
-vault as a dashboard: counters (payments, unique wallets, volume, agent-native share, last 30
-days, hackathon-tagged payments), interactive daily charts (payments and volume by rail, new vs
-returning wallets, cumulative volume) with a 30D / 90D / All range, pie charts (volume by chain, rail and
-token), attribution-tag counts, and the latest payments, each
+vault as a dashboard. One sticky 7D / 30D / 90D / All switch drives every range-able panel:
+counters (payments, unique wallets, volume, agent-native share, new and returning wallets,
+average payment, hackathon-tagged payments), interactive daily charts (payments and volume by
+rail, new vs returning wallets, cumulative volume), pie charts (volume by chain, rail and token)
+and attribution-tag counts. An Active wallets section shows DAU, WAU and MAU as of today, DAU/MAU
+stickiness, and a DAU/WAU/MAU line chart. Then come the latest payments, each
 linked to its transaction. Every panel has a description, a "How it's calculated" note, a
 camera button that saves the panel as a PNG, a shareable link (`#panel-id`), and a
 footer naming the chain and date, so an image of one panel stands on its own. Times are Nigerian
@@ -696,7 +698,9 @@ list as CSV. The agents home page's hero numbers come from the same index.
   first, then the public endpoints), and classifies each payment by rail. It covers
   all five vaults: Celo V1, V3 and V4, and Base V1 and V4.
 - **Storage:** `onchain_payments` and `onchain_cursors` (migration 038). `onchain_summary()`
-  returns everything the pages show in one query. No customer data is stored: the bill account
+  returns the all-time numbers and daily series in one query; `onchain_windows()` (migration 041)
+  returns the rolling 7/30/90-day and all-time windows plus the DAU/WAU/MAU series. Without 041
+  the site still loads, with all-time counters only. No customer data is stored: the bill account
   number in `PaymentReceived` is never read into the table.
 - **Schedule:** [`.github/workflows/onchain-index.yml`](.github/workflows/onchain-index.yml)
   calls `POST /api/cron/onchain-index` every 15 minutes (`APP_URL` + `CRON_SECRET` secrets).
