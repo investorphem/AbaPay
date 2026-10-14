@@ -3,7 +3,7 @@ import { supabaseAdmin as supabase } from '@/utils/supabase';
 import { executeVend } from '@/lib/vend';
 import { vendInputFromRow } from '@/lib/vendInput';
 import { reconcileStuckRow } from '@/lib/reconcileStuck';
-import { explorerBaseFor } from '@/lib/chain';
+import { explorerTxUrl } from '@/lib/chain';
 import { sendTelegramAlert } from '@/lib/telegram';
 import { log, metric } from '@/lib/log';
 import { getHeaders } from '@/lib/vtpass';
@@ -88,7 +88,7 @@ export async function runFulfilmentJob(job: FulfilmentJob): Promise<{ outcome: J
     // the requery path below instead of being sent a second time.
     const result = await executeVend(vendInputFromRow(tx, {
       txHash: tx.tx_hash,
-      explorerUrl: `${explorerBaseFor(tx.blockchain)}/tx/${tx.tx_hash}`,
+      explorerUrl: explorerTxUrl(tx.blockchain, tx.tx_hash),
       baseRate: await exchangeRate(),
     }));
     if (result.status === 'SUCCESS' || result.status === 'FAILED_VENDING') return { outcome: 'done', detail: `delivered by the worker: ${result.status}` };

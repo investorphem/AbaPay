@@ -97,6 +97,16 @@ export function getPublicClient(blockchain: string | null | undefined): PublicCl
   return createPublicClient({ chain, transport: getChainTransport(blockchain) }) as PublicClient;
 }
 
+/**
+ * A link to one transaction on the right explorer. Prefer this over `${explorerBaseFor()}/tx/…`
+ * wherever a row may be a NIM order (blockchain 'NIMIQ'): Nimiq isn't an EVM chain, so it has
+ * neither a viem chain nor a /tx/ path.
+ */
+export function explorerTxUrl(blockchain: string | null | undefined, hash: string): string {
+  if (String(blockchain || '').toUpperCase() === 'NIMIQ') return `https://nimiq.watch/#${hash}`;
+  return `${explorerBaseFor(blockchain)}/tx/${hash}`;
+}
+
 export function explorerBaseFor(blockchain: string | null | undefined): string {
   const { chain } = resolveChain(blockchain);
   switch (chain.id) {

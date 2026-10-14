@@ -866,6 +866,13 @@ Switch the selected account in your wallet to the owner and click again. You sta
     // rejected it" from "we just guessed". Require an explicit reason in that specific gap —
     // Check Status already fills this in automatically for the vast majority of cases; this
     // prompt only fires when that hasn't happened yet.
+    // 🔴 A NIM order's amount is in NIM and its payer is a Nimiq address: refunding it from the
+    // vault would send that NUMBER of stablecoins to nowhere. NIM refunds go out from the treasury
+    // wallet and are recorded in Ops → Refunds.
+    if (String(tx.blockchain || '').toUpperCase() === 'NIMIQ') {
+      return alert("This is a NIM order. Send the NIM back from the treasury wallet, then record the hash in Ops → Refunds.");
+    }
+
     let manualReason: string | null = null;
     if (!tx.error_code && !tx.api_response && (tx.status === 'PENDING' || tx.status === 'PROCESSING')) {
       manualReason = window.prompt(
@@ -1039,8 +1046,13 @@ Switch the selected account in your wallet to the owner and click again. You sta
 
   const analytics = useMemo(() => {
     const successTx = timeFilteredTransactions.filter(tx => tx.status === "SUCCESS");
-    const totalDeposited = timeFilteredTransactions.reduce((acc, tx) => acc + (parseFloat(tx.amount_usdt || tx.amount_crypto) || 0), 0);
-    const totalRefunded = timeFilteredTransactions.filter(tx => tx.status === "REFUNDED").reduce((acc, tx) => acc + (parseFloat(tx.amount_usdt || tx.amount_crypto) || 0), 0);
+    // In US dollars. NIM rows hold NIM in amount_usdt, so they're converted at their quote price.
+    const usdOf = (tx: { amount_usdt?: unknown; amount_crypto?: unknown; blockchain?: unknown; nim_usd_price?: unknown }) => {
+      const amt = parseFloat(String(tx.amount_usdt || tx.amount_crypto)) || 0;
+      return String(tx.blockchain || '').toUpperCase() === 'NIMIQ' ? amt * (Number(tx.nim_usd_price) || 0) : amt;
+    };
+    const totalDeposited = timeFilteredTransactions.reduce((acc, tx) => acc + usdOf(tx), 0);
+    const totalRefunded = timeFilteredTransactions.filter(tx => tx.status === "REFUNDED").reduce((acc, tx) => acc + usdOf(tx), 0);
 
     return {
       vol: successTx.reduce((acc, tx) => acc + Number(tx.amount_naira || 0), 0),

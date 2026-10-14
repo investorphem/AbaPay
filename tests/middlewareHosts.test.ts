@@ -25,6 +25,19 @@ describe('stats.abapays.com', () => {
   });
 });
 
+describe('nim.abapays.com', () => {
+  it.each([
+    ['/', '/nim'],
+    ['/help', '/nim/help'],
+  ])('rewrites %s to %s', (path, to) => {
+    expect(rewrittenTo(run('nim.abapays.com', path))).toBe(to);
+  });
+
+  it.each(['/api/pay/nim', '/api/variations', '/receipt/abc', '/terms', '/nim', '/logo.png'])('leaves %s alone', (path) => {
+    expect(rewrittenTo(run('nim.abapays.com', path))).toBeNull();
+  });
+});
+
 describe('agents.abapays.com still routes as before', () => {
   it('rewrites /x402 and leaves /api alone', () => {
     expect(rewrittenTo(run('agents.abapays.com', '/x402'))).toBe('/agents/x402');

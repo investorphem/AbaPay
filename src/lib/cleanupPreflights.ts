@@ -42,6 +42,9 @@ export async function cleanupStalePreflights(opts: { force?: boolean } = {}) {
     .eq('status', 'PENDING')
     .like('tx_hash', 'preflight_%')
     .not('tx_hash', 'like', 'preflight_x402_%')
+    // NIM intents have their own sweep (src/lib/nimSettle.ts), which looks for the payment on the
+    // Nimiq chain before expiring anything.
+    .not('tx_hash', 'like', 'preflight_nim_%')
     .lt('created_at', cutoff)
     .select('id');
 

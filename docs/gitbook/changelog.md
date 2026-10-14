@@ -6,6 +6,14 @@ test-tooling fixes are left out. Full history: [commits on
 GitHub](https://github.com/investorphem/AbaPay/commits/main).
 {% endhint %}
 
+## 2026-10-13
+
+* **Pay with NIM in Nimiq Pay.** [nim.abapays.com](https://nim.abapays.com) is AbaPay as a
+  Nimiq Pay mini app: airtime, data, electricity, cable TV, exam PINs, bank transfers and
+  international top-ups, paid in NIM. The price is fixed when you tap Pay, the payment is
+  checked on the Nimiq chain before anything is delivered, and a failed delivery is refunded in
+  NIM to the address that paid.
+
 ## 2026-10-11
 
 * **Live on-chain stats.** [stats.abapays.com](https://stats.abapays.com), AbaPay's

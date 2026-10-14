@@ -45,6 +45,12 @@ const LOOKS_LIKE_STATIC_FILE = /\.[a-zA-Z0-9]+$/;
 const STATS_HOSTS = new Set(['stats.abapays.com']);
 const STATS_HOST_SKIP = /^\/(api|stats)(\/|$)/;
 
+// ⚡ nim.abapays.com: the Nimiq Pay mini app (src/app/nim/), paid in NIM only. Same move as stats:
+// page paths are prefixed with /nim, /api stays as-is (it calls /api/pay/nim, /api/variations,
+// /api/verify …), and so do static files, the receipt pages and paths already under /nim.
+const NIM_HOSTS = new Set(['nim.abapays.com']);
+const NIM_HOST_SKIP = /^\/(api|nim|receipt|terms|privacy)(\/|$)/;
+
 // ⚡ CORS FOR THE PUBLIC AGENT-FACING API SURFACE — exact-path allowlist, deliberately narrow.
 // Without this, a browser-based agent (including agents.abapays.com's own "try it" panels)
 // gets silently blocked calling these from a different origin: no Access-Control-Allow-Origin
@@ -93,6 +99,14 @@ export function middleware(req: NextRequest) {
     if (!STATS_HOST_SKIP.test(pathname) && !LOOKS_LIKE_STATIC_FILE.test(pathname)) {
       const url = req.nextUrl.clone();
       url.pathname = pathname === '/' ? '/stats' : `/stats${pathname}`;
+      return NextResponse.rewrite(url);
+    }
+  }
+
+  if (NIM_HOSTS.has(hostname)) {
+    if (!NIM_HOST_SKIP.test(pathname) && !LOOKS_LIKE_STATIC_FILE.test(pathname)) {
+      const url = req.nextUrl.clone();
+      url.pathname = pathname === '/' ? '/nim' : `/nim${pathname}`;
       return NextResponse.rewrite(url);
     }
   }
