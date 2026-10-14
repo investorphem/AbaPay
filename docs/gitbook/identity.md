@@ -18,6 +18,12 @@ Agent ID **9687** — a verifiable identity any agent's tooling can check indepe
 Listed in the official Model Context Protocol registry as `io.github.investorphem/abapay` —
 discoverable by any MCP-aware client without a hardcoded URL.
 
+## agent402.tools
+
+AbaPay's x402 endpoint is indexed on [agent402.tools](https://agent402.tools/api/index?seller=agents.abapays.com),
+an open index of x402 sellers. It found us through the `/.well-known/x402` manifest on
+`agents.abapays.com` and re-crawls the live 402 challenge for price, networks and assets.
+
 ## Cursor
 
 Listed as a Cursor plugin at [cursor.directory/plugins/abapay](https://cursor.directory/plugins/abapay). Installing it

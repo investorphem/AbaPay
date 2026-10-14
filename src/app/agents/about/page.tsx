@@ -186,6 +186,11 @@ export default async function AboutPage() {
                 <td className="py-2.5 text-slate-400 dark:text-slate-500">Listed</td>
               </tr>
               <tr>
+                <td className="py-2.5 pr-4 font-bold text-slate-700 dark:text-slate-300">agent402.tools (x402 index)</td>
+                <td className="py-2.5 pr-4"><a href="https://agent402.tools/api/index?seller=agents.abapays.com" target="_blank" rel="noopener noreferrer" className="text-emerald-600 dark:text-emerald-400 hover:underline">agents.abapays.com</a></td>
+                <td className="py-2.5 text-slate-400 dark:text-slate-500">Indexed</td>
+              </tr>
+              <tr>
                 <td className="py-2.5 pr-4 font-bold text-slate-700 dark:text-slate-300">npm</td>
                 <td className="py-2.5 pr-4"><a href="https://www.npmjs.com/package/abapay-sdk" target="_blank" rel="noopener noreferrer" className="text-emerald-600 dark:text-emerald-400 hover:underline">abapay-sdk</a></td>
                 <td className="py-2.5 text-slate-400 dark:text-slate-500">{stats.npmDownloadsLastMonth !== null ? `${nf.format(stats.npmDownloadsLastMonth)} / mo` : "—"}</td>
@@ -244,7 +249,7 @@ export default async function AboutPage() {
             </div>
             <h3 className="font-black text-slate-900 dark:text-white mb-1.5">Wider agent-registry discovery</h3>
             <p className="text-sm text-slate-500 dark:text-slate-400 leading-relaxed">
-              Listed on the official MCP Registry, on-chain via ERC-8004, approved on <a href="https://glama.ai/mcp/servers/investorphem/AbaPay" target="_blank" rel="noopener noreferrer" className="underline hover:text-emerald-500">Glama&apos;s server directory</a> and its <a href="https://glama.ai/mcp/connectors" target="_blank" rel="noopener noreferrer" className="underline hover:text-emerald-500">connector directory</a>, live on <a href="https://mcpplaygroundonline.com/mcp-servers/investorphem-abapay" target="_blank" rel="noopener noreferrer" className="underline hover:text-emerald-500">MCP Playground&apos;s server registry</a>, and merged into <a href="https://github.com/punkpeye/awesome-mcp-servers#-finance--fintech" target="_blank" rel="noopener noreferrer" className="underline hover:text-emerald-500">awesome-mcp-servers</a> (95k+ stars). Full list: <a href="#discovery" className="underline hover:text-emerald-500">above</a>.
+              Listed on the official MCP Registry, on-chain via ERC-8004, approved on <a href="https://glama.ai/mcp/servers/investorphem/AbaPay" target="_blank" rel="noopener noreferrer" className="underline hover:text-emerald-500">Glama&apos;s server directory</a> and its <a href="https://glama.ai/mcp/connectors" target="_blank" rel="noopener noreferrer" className="underline hover:text-emerald-500">connector directory</a>, live on <a href="https://mcpplaygroundonline.com/mcp-servers/investorphem-abapay" target="_blank" rel="noopener noreferrer" className="underline hover:text-emerald-500">MCP Playground&apos;s server registry</a>, and merged into <a href="https://github.com/punkpeye/awesome-mcp-servers#-finance--fintech" target="_blank" rel="noopener noreferrer" className="underline hover:text-emerald-500">awesome-mcp-servers</a> (95k+ stars), and its x402 endpoint is indexed on <a href="https://agent402.tools/api/index?seller=agents.abapays.com" target="_blank" rel="noopener noreferrer" className="underline hover:text-emerald-500">agent402.tools</a>. Full list: <a href="#discovery" className="underline hover:text-emerald-500">above</a>.
             </p>
           </div>
         </div>
