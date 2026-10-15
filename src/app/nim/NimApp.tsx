@@ -1,8 +1,9 @@
 'use client';
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 import { init, type NimiqProvider } from '@nimiq/mini-app-sdk';
-import { Phone, Wifi, Lightbulb, Tv, GraduationCap, Landmark, Globe2, Loader2, CheckCircle2, XCircle, ExternalLink, Copy, Check, ChevronLeft } from 'lucide-react';
+import { Phone, Wifi, Lightbulb, Tv, GraduationCap, Landmark, Globe2, Loader2, CheckCircle2, XCircle, ExternalLink, Copy, Check, ChevronLeft, ChevronDown, Search, X, Home, History as HistoryIcon, Clock } from 'lucide-react';
 import { billCharges } from '@/lib/billCharges';
 
 // ⚡ THE NIMIQ PAY MINI APP — every service abapays.com sells, paid in NIM.
@@ -25,15 +26,19 @@ type Quote = { available: boolean; nim_usd: number | null; ngn_per_usd: number; 
 type Intent = { intent_id: string; recipient: string; luna: number; nim: number; reference: string };
 type Phase = 'idle' | 'ordering' | 'signing' | 'confirming' | 'done' | 'failed';
 
-const SERVICES: { id: Svc; label: string; icon: typeof Phone; category?: string }[] = [
-  { id: 'AIRTIME', label: 'Airtime', icon: Phone, category: 'airtime' },
-  { id: 'DATA', label: 'Data', icon: Wifi, category: 'data' },
-  { id: 'ELECTRICITY', label: 'Electricity', icon: Lightbulb, category: 'electricity-bill' },
-  { id: 'CABLE', label: 'Cable TV', icon: Tv, category: 'tv-subscription' },
-  { id: 'EDUCATION', label: 'Exam PINs', icon: GraduationCap, category: 'education' },
-  { id: 'BANK', label: 'Bank transfer', icon: Landmark },
-  { id: 'INTL', label: 'International', icon: Globe2 },
+// Same icon colours as the main app's service tiles (src/constants SERVICES).
+const SERVICES: { id: Svc; label: string; icon: typeof Phone; color: string; bg: string; category?: string }[] = [
+  { id: 'AIRTIME', label: 'Airtime', icon: Phone, color: 'text-[#34d399]', bg: 'bg-emerald-500/10', category: 'airtime' },
+  { id: 'DATA', label: 'Data', icon: Wifi, color: 'text-[#0ea5e9]', bg: 'bg-sky-500/10', category: 'data' },
+  { id: 'ELECTRICITY', label: 'Electricity', icon: Lightbulb, color: 'text-[#f97316]', bg: 'bg-orange-500/10', category: 'electricity-bill' },
+  { id: 'CABLE', label: 'Cable TV', icon: Tv, color: 'text-[#ec4899]', bg: 'bg-pink-500/10', category: 'tv-subscription' },
+  { id: 'EDUCATION', label: 'Exam PINs', icon: GraduationCap, color: 'text-[#a855f7]', bg: 'bg-purple-500/10', category: 'education' },
+  { id: 'BANK', label: 'Bank transfer', icon: Landmark, color: 'text-[#E9B213]', bg: 'bg-amber-500/10' },
+  { id: 'INTL', label: 'International', icon: Globe2, color: 'text-[#6366f1]', bg: 'bg-indigo-500/10' },
 ];
+
+/** A stored service_category → the tile it came from (international rows are "INTL …"). */
+const CATEGORY_OF: Record<string, Svc> = { AIRTIME: 'AIRTIME', INTERNET: 'DATA', DATA: 'DATA', ELECTRICITY: 'ELECTRICITY', CABLE: 'CABLE', EDUCATION: 'EDUCATION', BANK: 'BANK' };
 
 const LUNA = 100_000;
 const AIRTIME_PRESETS = [200, 500, 1000, 2000, 5000];
@@ -62,6 +67,8 @@ function unwrap<T>(v: T | { error: { message?: string; type?: string } }): T {
 export default function NimApp() {
   // ── Wallet ─────────────────────────────────────────────────────────────────────────────────
   const nimiq = useRef<NimiqProvider | null>(null);
+  // The same provider as state, for children that render with it (a ref can't be read during render).
+  const [wallet, setWallet] = useState<NimiqProvider | null>(null);
   const [env, setEnv] = useState<'loading' | 'ready' | 'outside'>('loading');
   const [account, setAccount] = useState('');
   const [balanceLuna, setBalanceLuna] = useState<number | null>(null);
@@ -78,6 +85,7 @@ export default function NimApp() {
     init({ timeout: 8_000 })
       .then(async (p) => {
         nimiq.current = p;
+        setWallet(p);
         const accounts = unwrap(await p.listAccounts());
         if (cancelled) return;
         if (!accounts?.length) throw new Error('No Nimiq account');
@@ -99,7 +107,18 @@ export default function NimApp() {
   }, []);
 
   // ── Service + form ─────────────────────────────────────────────────────────────────────────
+  const [tab, setTab] = useState<'pay' | 'history'>('pay');
   const [svc, setSvc] = useState<Svc | null>(null);
+
+  // serviceID → VTpass logo for every category, so History can show each order's provider logo.
+  const [logos, setLogos] = useState<Record<string, string>>({});
+  useEffect(() => {
+    if (env !== 'ready') return;
+    const cats = SERVICES.map((s) => s.category).filter(Boolean) as string[];
+    Promise.all(cats.map((c) => getJson<{ providers?: Provider[] }>(`/api/providers?category=${c}`).catch(() => ({ providers: [] as Provider[] }))))
+      .then((all) => setLogos(Object.fromEntries(all.flatMap((d) => (d.providers || []).filter((p) => p.logo).map((p) => [p.serviceID, p.logo as string])))))
+      .catch(() => {});
+  }, [env]);
   const [providers, setProviders] = useState<Provider[]>([]);
   const [provider, setProvider] = useState('');
   const [plans, setPlans] = useState<Plan[]>([]);
@@ -117,12 +136,12 @@ export default function NimApp() {
   const [banks, setBanks] = useState<{ code: string; name: string }[]>([]);
   const [bankCode, setBankCode] = useState('');
   // International
-  const [countries, setCountries] = useState<{ code: string; name: string; currency: string; prefix: string }[]>([]);
+  const [countries, setCountries] = useState<{ code: string; name: string; currency: string; prefix: string; flag?: string }[]>([]);
   const [country, setCountry] = useState('');
   const [products, setProducts] = useState<{ product_type_id: number; name: string }[]>([]);
   const [product, setProduct] = useState<{ product_type_id: number; name: string } | null>(null);
-  const [operators, setOperators] = useState<{ operator_id: string; name: string }[]>([]);
-  const [operator, setOperator] = useState<{ operator_id: string; name: string } | null>(null);
+  const [operators, setOperators] = useState<{ operator_id: string; name: string; operator_image?: string }[]>([]);
+  const [operator, setOperator] = useState<{ operator_id: string; name: string; operator_image?: string } | null>(null);
   const [intlPlans, setIntlPlans] = useState<{ variation_code: string; name: string; fixedPrice: string; variation_amount: string | null; variation_amount_min?: number; variation_amount_max?: number; variation_rate: number; charged_amount: string | null }[]>([]);
   const [intlPlan, setIntlPlan] = useState<(typeof intlPlans)[number] | null>(null);
   const [intlCurrency, setIntlCurrency] = useState('');
@@ -357,10 +376,15 @@ export default function NimApp() {
       </header>
 
       {quote && !quote.available && (
-        <Note tone="warn">NIM payments are paused right now. Please try again shortly.</Note>
+        <div className="mb-4"><Note tone="warn">NIM payments are paused right now. Please try again shortly.</Note></div>
       )}
 
-      {!svc ? (
+      {tab === 'history' ? (
+        <>
+          <h1 className="text-xl font-black mb-4">History</h1>
+          <HistoryView nimiq={wallet} account={account} logos={logos} />
+        </>
+      ) : !svc ? (
         <>
           <h1 className="text-xl font-black mb-1">What do you want to pay?</h1>
           <p className="text-xs opacity-60 mb-4">Paid in NIM, delivered in Nigeria and 140+ countries.{quote?.nim_usd ? ` 1 NIM ≈ ${ngn(quote.nim_usd * quote.ngn_per_usd)}.` : ''}</p>
@@ -368,7 +392,7 @@ export default function NimApp() {
             {SERVICES.map((s) => (
               <button key={s.id} type="button" onClick={() => { resetForm(); setSvc(s.id); setPhase('idle'); setMessage(''); }}
                 className="flex flex-col items-start gap-3 p-4 rounded-2xl bg-white dark:bg-[#1F2348] border border-black/5 dark:border-white/10 text-left active:scale-[0.98] transition">
-                <s.icon size={22} className="text-[#E9B213]" />
+                <span className={`w-10 h-10 rounded-xl flex items-center justify-center ${s.bg}`}><s.icon size={20} className={s.color} /></span>
                 <span className="text-sm font-black">{s.label}</span>
               </button>
             ))}
@@ -384,52 +408,46 @@ export default function NimApp() {
           <div className="space-y-3">
             {svc !== 'BANK' && svc !== 'INTL' && (
               <Field label="Provider">
-                <select value={provider} onChange={(e) => { setProvider(e.target.value); setVerified(null); setPlans([]); setPlan(null); }} className={input}>
-                  <option value="">Choose…</option>
-                  {providers.map((p) => <option key={p.serviceID} value={p.serviceID}>{p.displayName}</option>)}
-                </select>
+                <Picker title="Choose a provider" value={provider} searchable={providers.length > 6}
+                  items={providers.map((p) => ({ id: p.serviceID, label: p.displayName, image: p.logo }))}
+                  onSelect={(id) => { setProvider(id); setVerified(null); setPlans([]); setPlan(null); }} />
               </Field>
             )}
 
             {svc === 'BANK' && (
               <Field label="Bank">
-                <select value={bankCode} onChange={(e) => { setBankCode(e.target.value); setVerified(null); }} className={input}>
-                  <option value="">Choose…</option>
-                  {banks.map((b) => <option key={b.code} value={b.code}>{b.name}</option>)}
-                </select>
+                <Picker title="Choose a bank" value={bankCode} searchable placeholder="Search banks"
+                  items={banks.map((b) => ({ id: b.code, label: b.name }))}
+                  onSelect={(id) => { setBankCode(id); setVerified(null); }} />
               </Field>
             )}
 
             {svc === 'INTL' && (
               <>
                 <Field label="Country">
-                  <select value={country} onChange={(e) => { setCountry(e.target.value); setProducts([]); setProduct(null); setOperators([]); setOperator(null); setIntlPlans([]); setIntlPlan(null); }} className={input}>
-                    <option value="">Choose…</option>
-                    {countries.map((c) => <option key={c.code} value={c.code}>{c.name}</option>)}
-                  </select>
+                  <Picker title="Choose a country" value={country} searchable placeholder="Search countries"
+                    items={countries.map((c) => ({ id: c.code, label: c.name, sub: `+${c.prefix} · ${c.currency}`, image: c.flag, keywords: `${c.code} ${c.prefix} ${c.currency}` }))}
+                    onSelect={(id) => { setCountry(id); setProducts([]); setProduct(null); setOperators([]); setOperator(null); setIntlPlans([]); setIntlPlan(null); }} />
                 </Field>
                 {products.length > 0 && (
                   <Field label="Product">
-                    <select value={product?.product_type_id ?? ''} onChange={(e) => { setProduct(products.find((p) => String(p.product_type_id) === e.target.value) || null); setOperators([]); setOperator(null); setIntlPlans([]); setIntlPlan(null); }} className={input}>
-                      <option value="">Choose…</option>
-                      {products.map((p) => <option key={p.product_type_id} value={p.product_type_id}>{p.name}</option>)}
-                    </select>
+                    <Picker title="Choose a product" value={product ? String(product.product_type_id) : ''}
+                      items={products.map((p) => ({ id: String(p.product_type_id), label: p.name }))}
+                      onSelect={(id) => { setProduct(products.find((p) => String(p.product_type_id) === id) || null); setOperators([]); setOperator(null); setIntlPlans([]); setIntlPlan(null); }} />
                   </Field>
                 )}
                 {operators.length > 0 && (
                   <Field label="Operator">
-                    <select value={operator?.operator_id ?? ''} onChange={(e) => { setOperator(operators.find((o) => o.operator_id === e.target.value) || null); setIntlPlans([]); setIntlPlan(null); }} className={input}>
-                      <option value="">Choose…</option>
-                      {operators.map((o) => <option key={o.operator_id} value={o.operator_id}>{o.name}</option>)}
-                    </select>
+                    <Picker title="Choose an operator" value={operator?.operator_id ?? ''} searchable={operators.length > 6}
+                      items={operators.map((o) => ({ id: o.operator_id, label: o.name, image: o.operator_image }))}
+                      onSelect={(id) => { setOperator(operators.find((o) => o.operator_id === id) || null); setIntlPlans([]); setIntlPlan(null); }} />
                   </Field>
                 )}
                 {intlPlans.length > 0 && (
                   <Field label="Plan">
-                    <select value={intlPlan?.variation_code ?? ''} onChange={(e) => setIntlPlan(intlPlans.find((p) => p.variation_code === e.target.value) || null)} className={input}>
-                      <option value="">Choose…</option>
-                      {intlPlans.map((p) => <option key={p.variation_code} value={p.variation_code}>{p.name}</option>)}
-                    </select>
+                    <Picker title="Choose a plan" value={intlPlan?.variation_code ?? ''} searchable={intlPlans.length > 8} placeholder="Search plans"
+                      items={intlPlans.map((p) => ({ id: p.variation_code, label: p.name, image: operator?.operator_image }))}
+                      onSelect={(id) => setIntlPlan(intlPlans.find((p) => p.variation_code === id) || null)} />
                   </Field>
                 )}
                 {intlPlan && intlPlan.fixedPrice !== 'Yes' && (
@@ -483,10 +501,10 @@ export default function NimApp() {
 
             {(svc === 'DATA' || svc === 'EDUCATION' || (svc === 'CABLE' && !(['dstv', 'gotv'].includes(provider) && cableMode === 'renew' && verified?.renewal))) && plans.length > 0 && (
               <Field label={svc === 'EDUCATION' ? 'PIN type' : svc === 'CABLE' ? 'Package' : 'Plan'}>
-                <select value={plan?.variation_code ?? ''} onChange={(e) => setPlan(plans.find((p) => p.variation_code === e.target.value) || null)} className={input}>
-                  <option value="">Choose…</option>
-                  {plans.map((p) => <option key={p.variation_code} value={p.variation_code}>{p.name}</option>)}
-                </select>
+                <Picker title={svc === 'EDUCATION' ? 'Choose a PIN type' : svc === 'CABLE' ? 'Choose a package' : 'Choose a plan'} value={plan?.variation_code ?? ''}
+                  searchable={plans.length > 8} placeholder="Search plans"
+                  items={plans.map((p) => ({ id: p.variation_code, label: p.name, image: providers.find((x) => x.serviceID === provider)?.logo, right: ngn(Number(p.variation_amount)) }))}
+                  onSelect={(id) => setPlan(plans.find((p) => p.variation_code === id) || null)} />
               </Field>
             )}
 
@@ -539,6 +557,20 @@ export default function NimApp() {
         <p>AbaPay by Masonode Technologies Limited · <a href="/terms" className="underline">Terms</a> · <a href="/privacy" className="underline">Privacy</a></p>
         <p>Open source · <a href="https://github.com/investorphem/AbaPay" className="underline">GitHub</a></p>
       </footer>
+
+      {/* Pay / History. Hidden mid-payment, so a tab switch can't hide a payment in progress. */}
+      {!busy && (
+        <nav className="fixed bottom-0 inset-x-0 z-40 border-t border-black/5 dark:border-white/10 bg-white/95 dark:bg-[#1F2348]/95 backdrop-blur" style={{ paddingBottom: 'env(safe-area-inset-bottom)' }}>
+          <div className="max-w-md mx-auto grid grid-cols-2">
+            {([['pay', 'Pay', Home], ['history', 'History', HistoryIcon]] as const).map(([id, label, Icon]) => (
+              <button key={id} type="button" onClick={() => setTab(id)} aria-current={tab === id ? 'page' : undefined}
+                className={`flex flex-col items-center gap-0.5 py-2.5 text-[11px] font-black ${tab === id ? 'text-[#E9B213]' : 'opacity-50'}`}>
+                <Icon size={20} />{label}
+              </button>
+            ))}
+          </div>
+        </nav>
+      )}
     </div>
   );
 }
@@ -568,7 +600,7 @@ function Brand() {
   return (
     <div className="flex items-center gap-2">
       {/* eslint-disable-next-line @next/next/no-img-element */}
-      <img src="/logo.png" alt="" width={28} height={28} className="object-contain" />
+      <img src="/abapay-logo.svg" alt="" width={28} height={28} className="object-contain" />
       <span className="font-black tracking-tight">AbaPay <span className="text-[#E9B213]">NIM</span></span>
     </div>
   );
@@ -603,5 +635,236 @@ function ResultCard({ ok, message, result, onDone, onRetry }: {
         <button type="button" onClick={onDone} className={`py-3 rounded-full bg-[#E9B213] text-[#1F2348] text-xs font-black ${ok ? 'col-span-2' : ''}`}>New payment</button>
       </div>
     </div>
+  );
+}
+
+// ── Picker — a searchable bottom sheet in place of the system <select> ─────────────────────────
+
+type PickerItem = { id: string; label: string; sub?: string; image?: string; right?: string; keywords?: string };
+
+/** A provider logo, country flag or operator image from VTpass, with initials when there is none or it fails to load. */
+function Logo({ src, label, size = 32 }: { src?: string; label: string; size?: number }) {
+  const [failed, setFailed] = useState(false);
+  const initials = label.replace(/[^A-Za-z0-9 ]/g, '').split(/\s+/).filter(Boolean).slice(0, 2).map((w) => w[0]).join('').toUpperCase() || '•';
+  if (!src || failed) {
+    return (
+      <span style={{ width: size, height: size }} className="flex-shrink-0 rounded-full bg-[#1F2348]/10 dark:bg-white/10 flex items-center justify-center text-[10px] font-black text-[#1F2348]/70 dark:text-white/70">
+        {initials}
+      </span>
+    );
+  }
+  return (
+    // eslint-disable-next-line @next/next/no-img-element
+    <img src={src} alt="" width={size} height={size} loading="lazy" onError={() => setFailed(true)}
+      style={{ width: size, height: size }} className="flex-shrink-0 rounded-full object-cover bg-white border border-black/5" />
+  );
+}
+
+function Picker({ title, items, value, onSelect, searchable = false, placeholder = 'Search' }: {
+  title: string; items: PickerItem[]; value: string; onSelect: (id: string) => void; searchable?: boolean; placeholder?: string;
+}) {
+  const [open, setOpen] = useState(false);
+  const [q, setQ] = useState('');
+  const selected = items.find((i) => i.id === value);
+  const shown = useMemo(() => {
+    const term = q.trim().toLowerCase();
+    if (!term) return items;
+    // Names that start with the search come first ("gha" → Ghana before Afghanistan).
+    const rank = (i: PickerItem) => (i.label.toLowerCase().startsWith(term) ? 0 : i.label.toLowerCase().split(/s+/).some((w) => w.startsWith(term)) ? 1 : 2);
+    return items
+      .filter((i) => `${i.label} ${i.sub || ''} ${i.keywords || ''}`.toLowerCase().includes(term))
+      .sort((a, b) => rank(a) - rank(b));
+  }, [items, q]);
+
+  useEffect(() => {
+    if (!open) return;
+    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') setOpen(false); };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [open]);
+
+  return (
+    <>
+      <button type="button" onClick={() => { setQ(''); setOpen(true); }} disabled={!items.length}
+        className={`${input} flex items-center gap-3 text-left disabled:opacity-50`}>
+        {selected ? <Logo src={selected.image} label={selected.label} size={28} /> : null}
+        <span className={`flex-1 min-w-0 truncate ${selected ? 'font-bold' : 'opacity-50'}`}>{selected ? selected.label : items.length ? 'Choose…' : 'Loading…'}</span>
+        {selected?.right && <span className="text-xs font-black tabular-nums opacity-70">{selected.right}</span>}
+        <ChevronDown size={16} className="opacity-50 flex-shrink-0" />
+      </button>
+
+      {/* Portalled to <body>: the picker sits inside a <label>, and a click inside a label re-clicks
+          its trigger button, which reopened the sheet the moment an item was picked. */}
+      {open && createPortal(
+        <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center" role="dialog" aria-modal="true" aria-label={title}>
+          <button type="button" aria-label="Close" onClick={() => setOpen(false)} className="absolute inset-0 bg-black/50 backdrop-blur-[2px]" />
+          <div className="relative w-full max-w-md max-h-[85vh] flex flex-col rounded-t-3xl sm:rounded-3xl bg-[#F8F8F8] dark:bg-[#14162B] shadow-2xl">
+            <div className="flex items-center justify-between px-5 pt-4 pb-3">
+              <h2 className="text-base font-black">{title}</h2>
+              <button type="button" onClick={() => setOpen(false)} aria-label="Close" className="p-1.5 rounded-full bg-black/5 dark:bg-white/10"><X size={16} /></button>
+            </div>
+            {searchable && (
+              <div className="px-5 pb-3">
+                <div className="flex items-center gap-2 px-3 py-2.5 rounded-xl bg-white dark:bg-[#1F2348] border border-black/10 dark:border-white/10 focus-within:border-[#E9B213]">
+                  <Search size={15} className="opacity-50" />
+                  <input autoFocus value={q} onChange={(e) => setQ(e.target.value)} placeholder={placeholder} className="flex-1 bg-transparent text-sm outline-none" />
+                  {q && <button type="button" onClick={() => setQ('')} aria-label="Clear"><X size={14} className="opacity-50" /></button>}
+                </div>
+              </div>
+            )}
+            <ul className="flex-1 overflow-y-auto px-3 pb-6">
+              {shown.length === 0 && <li className="px-3 py-8 text-center text-sm opacity-60">No matches for “{q}”.</li>}
+              {shown.map((i) => (
+                <li key={i.id}>
+                  <button type="button" onClick={() => { onSelect(i.id); setOpen(false); }}
+                    className={`w-full flex items-center gap-3 px-3 py-3 rounded-2xl text-left active:scale-[0.99] transition ${i.id === value ? 'bg-[#E9B213]/15' : 'hover:bg-black/5 dark:hover:bg-white/5'}`}>
+                    <Logo src={i.image} label={i.label} />
+                    <span className="flex-1 min-w-0">
+                      <span className="block text-sm font-bold truncate">{i.label}</span>
+                      {i.sub && <span className="block text-[11px] opacity-60 truncate">{i.sub}</span>}
+                    </span>
+                    {i.right && <span className="text-xs font-black tabular-nums">{i.right}</span>}
+                    {i.id === value && <Check size={16} className="text-[#E9B213] flex-shrink-0" />}
+                  </button>
+                </li>
+              ))}
+            </ul>
+          </div>
+        </div>,
+        document.body,
+      )}
+    </>
+  );
+}
+
+// ── History ──────────────────────────────────────────────────────────────────────────────────
+
+type HistoryRow = {
+  created_at: string; status: string; service_category: string | null; service_id: string | null; network: string | null;
+  account_number: string | null; amount_naira: number | string | null; display_amount: string | null; amount_usdt: number | string | null;
+  tx_hash: string; request_id: string | null; purchased_code: string | null; units: string | null;
+};
+type HistorySession = { message: string; signature: string; publicKey: string };
+
+const SESSION_KEY = 'abapay-nim-history-session';
+
+/**
+ * The signed-in history, scoped server-side to the address the signature proves
+ * (src/app/api/pay/nim/history). The signature is kept for this browsing session only, so the
+ * user signs once rather than on every visit to the tab.
+ */
+function HistoryView({ nimiq, account, logos }: { nimiq: NimiqProvider | null; account: string; logos: Record<string, string> }) {
+  const [rows, setRows] = useState<HistoryRow[] | null>(null);
+  const [state, setState] = useState<'idle' | 'signing' | 'loading' | 'error'>('idle');
+  const [error, setError] = useState('');
+
+  const load = useCallback(async (session: HistorySession) => {
+    setState('loading'); setError('');
+    const res = await fetch('/api/pay/nim/history', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(session) });
+    const d = await res.json().catch(() => ({}));
+    if (!res.ok) {
+      try { sessionStorage.removeItem(SESSION_KEY); } catch { /* storage unavailable */ }
+      setState('error'); setError(d.error || 'Could not load your history.'); return;
+    }
+    setRows(d.transactions || []); setState('idle');
+  }, []);
+
+  // Reuse this session's signature when it was made by the same address.
+  useEffect(() => {
+    let saved: (HistorySession & { address: string }) | null = null;
+    try { saved = JSON.parse(sessionStorage.getItem(SESSION_KEY) || 'null'); } catch { saved = null; }
+    if (!saved || saved.address !== account) return;
+    const session = saved;
+    const t = setTimeout(() => { void load(session); }, 0);
+    return () => clearTimeout(t);
+  }, [account, load]);
+
+  const signIn = async () => {
+    if (!nimiq) return;
+    setState('signing'); setError('');
+    try {
+      const message = `AbaPay: show my order history\nAddress: ${account.replace(/\s+/g, '').toUpperCase()}\nIssued: ${new Date().toISOString()}`;
+      const signed = unwrap(await nimiq.sign(message)) as { publicKey: string; signature: string };
+      const session = { message, signature: signed.signature, publicKey: signed.publicKey };
+      try { sessionStorage.setItem(SESSION_KEY, JSON.stringify({ address: account, ...session })); } catch { /* storage unavailable */ }
+      await load(session);
+    } catch (e) {
+      const text = e instanceof Error ? e.message : String(e);
+      setState('error');
+      setError(/cancel|denied|reject|abort|dismiss|closed/i.test(text) ? 'Signing was cancelled.' : `Couldn’t sign in: ${text}`);
+    }
+  };
+
+  if (rows === null) {
+    return (
+      <div className="rounded-3xl bg-white dark:bg-[#1F2348] border border-black/5 dark:border-white/10 p-6 text-center">
+        <span className="w-12 h-12 mx-auto rounded-2xl bg-[#E9B213]/15 flex items-center justify-center"><HistoryIcon size={22} className="text-[#E9B213]" /></span>
+        <h2 className="text-lg font-black mt-3">Your orders</h2>
+        <p className="text-xs opacity-60 mt-1 max-w-xs mx-auto">Sign a short message in Nimiq Pay to prove this wallet is yours. It costs nothing and moves no funds.</p>
+        <button type="button" onClick={signIn} disabled={state === 'signing' || state === 'loading'}
+          className="mt-5 px-6 py-3 rounded-full bg-[#E9B213] text-[#1F2348] font-black text-sm disabled:opacity-50 inline-flex items-center gap-2">
+          {(state === 'signing' || state === 'loading') && <Loader2 size={14} className="animate-spin" />}
+          {state === 'signing' ? 'Approve in Nimiq Pay…' : state === 'loading' ? 'Loading…' : 'Show my history'}
+        </button>
+        {error && <Note tone="warn">{error}</Note>}
+      </div>
+    );
+  }
+
+  if (rows.length === 0) {
+    return <div className="rounded-3xl bg-white dark:bg-[#1F2348] border border-black/5 dark:border-white/10 p-8 text-center text-sm opacity-70">No orders yet. Your NIM payments will show up here.</div>;
+  }
+
+  return (
+    <ul className="space-y-3">
+      {rows.map((r) => <HistoryCard key={r.tx_hash} row={r} logo={r.service_id ? logos[r.service_id] : undefined} />)}
+    </ul>
+  );
+}
+
+function HistoryCard({ row, logo }: { row: HistoryRow; logo?: string }) {
+  const [copied, setCopied] = useState(false);
+  const category = String(row.service_category || '').toUpperCase();
+  const svc = SERVICES.find((s) => s.id === (category.startsWith('INTL') ? 'INTL' : CATEGORY_OF[category]));
+  const status = row.status === 'SUCCESS' ? { text: 'Delivered', cls: 'bg-emerald-500/15 text-emerald-700 dark:text-emerald-300' }
+    : row.status === 'REFUNDED' ? { text: 'Refunded', cls: 'bg-sky-500/15 text-sky-700 dark:text-sky-300' }
+    : row.status === 'PROCESSING' || row.status === 'PENDING' ? { text: 'Processing', cls: 'bg-amber-500/15 text-amber-700 dark:text-amber-300' }
+    : { text: 'Failed · refund due', cls: 'bg-rose-500/15 text-rose-700 dark:text-rose-300' };
+  const naira = row.display_amount || (row.amount_naira ? ngn(Number(row.amount_naira)) : '');
+  return (
+    <li className="rounded-2xl bg-white dark:bg-[#1F2348] border border-black/5 dark:border-white/10 p-4">
+      <div className="flex items-start gap-3">
+        {logo ? <Logo src={logo} label={row.network || ''} size={40} />
+          : svc ? <span className={`w-10 h-10 rounded-xl flex items-center justify-center flex-shrink-0 ${svc.bg}`}><svc.icon size={20} className={svc.color} /></span>
+          : <Logo label={row.network || '?'} size={40} />}
+        <div className="flex-1 min-w-0">
+          <div className="flex items-center justify-between gap-2">
+            <p className="text-sm font-black truncate">{(row.network || '').replace(/-/g, ' ')} {svc?.label || row.service_category}</p>
+            <span className={`text-[10px] font-black px-2 py-0.5 rounded-full whitespace-nowrap ${status.cls}`}>{status.text}</span>
+          </div>
+          <p className="text-[11px] opacity-60 truncate">{row.account_number}</p>
+          <div className="flex items-center justify-between mt-1.5">
+            <span className="text-[11px] opacity-60 inline-flex items-center gap-1"><Clock size={11} />{new Date(row.created_at).toLocaleString('en-NG', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })}</span>
+            <span className="text-xs font-black tabular-nums">{naira}{row.amount_usdt ? <span className="opacity-60 font-bold"> · {nimFmt(Number(row.amount_usdt))}</span> : null}</span>
+          </div>
+        </div>
+      </div>
+      {row.purchased_code && (
+        <div className="mt-3 flex items-center justify-between gap-2 rounded-xl bg-black/5 dark:bg-white/5 px-3 py-2">
+          <span className="min-w-0">
+            <span className="block text-[10px] uppercase tracking-widest opacity-60">Token / PIN</span>
+            <span className="block font-mono text-sm font-black break-all">{row.purchased_code}</span>
+            {row.units && <span className="block text-[11px] opacity-60">{row.units}</span>}
+          </span>
+          <button type="button" onClick={() => { navigator.clipboard?.writeText(row.purchased_code || ''); setCopied(true); setTimeout(() => setCopied(false), 1500); }} aria-label="Copy" className="p-2 rounded-lg text-[#E9B213]">
+            {copied ? <Check size={14} /> : <Copy size={14} />}
+          </button>
+        </div>
+      )}
+      <div className="mt-2 flex gap-4 text-[11px] font-bold">
+        {row.request_id && row.status === 'SUCCESS' && <a href={`/receipt/${row.request_id}`} className="inline-flex items-center gap-1 underline">Receipt <ExternalLink size={10} /></a>}
+        {/^[0-9a-f]{64}$/.test(row.tx_hash) && <a href={`https://nimiq.watch/#${row.tx_hash}`} target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-1 underline opacity-70">Payment <ExternalLink size={10} /></a>}
+      </div>
+    </li>
   );
 }
