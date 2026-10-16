@@ -11,7 +11,7 @@ import { normalizePurchasedCode, issuesTokenOrPin } from '@/lib/purchasedCode';
 import { recordLateDelivery, recordLateFailure } from '@/lib/providerOutcome';
 import { pointsForPayment } from '@/lib/points';
 import { errorMessage } from '@/lib/errors';
-import type { VtpassReply } from '@/lib/vtpassReply';
+import { vtpassHasNoRecord, type VtpassReply } from '@/lib/vtpassReply';
 
 const resend = new Resend(process.env.RESEND_API_KEY || "re_dummy_key_for_build");
 
@@ -183,6 +183,12 @@ export async function POST(req: Request) {
 
       return NextResponse.json({ success: true, status: record.status === 'SUCCESS' ? 'REVERSED_NEEDS_REFUND' : 'FAILED_VENDING' });
 
+    } else if (vtpassHasNoRecord(requeryData) && (record.status === 'PENDING' || record.status === 'PROCESSING')) {
+      // VTpass never received this order (code 015): nothing was vended and nothing can be.
+      // Said plainly, and recorded on the row, instead of "still processing" forever.
+      const reason = `VTpass has no record of request ${request_id} (requery: ${String(requeryData.code ?? '')} ${String(requeryData.response_description ?? '')}`.trim() + ') — it never reached them. Nothing was delivered; safe to refund.';
+      await supabase.from('transactions').update({ error_code: 'STUCK_ALERTED', api_response: reason }).eq('id', record.id).in('status', ['PENDING', 'PROCESSING']);
+      return NextResponse.json({ success: true, status: record.status, noRecord: true, message: `${reason} Use Refund on this row.` });
     } else {
       return NextResponse.json({ success: true, status: 'PENDING', message: 'Transaction is still processing at the provider.' });
     }

@@ -44,6 +44,10 @@ order but hasn't confirmed delivery, or didn't answer.
 **Do:** requery from the admin dashboard. Never mark a row delivered or refunded by hand without
 the biller's answer.
 
+If VTpass has no record of the request (requery code `015`, INVALID REQUEST ID), the order never
+reached them: nothing was delivered and nothing can be later. Check Status says so, the sweep sends
+"VTPASS HAS NO RECORD" once, and the row shows the reason. Refund it from the row.
+
 ## Unresolved x402 payments (`x402_intents_unresolved`)
 
 **Means:** an x402 intent recorded more than 15 minutes ago that is neither settled nor closed.

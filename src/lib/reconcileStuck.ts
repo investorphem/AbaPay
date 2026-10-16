@@ -3,6 +3,7 @@ import { supabaseAdmin as supabase } from '@/utils/supabase';
 import { sendTelegramAlert } from '@/lib/telegram';
 import { sendAbaPaySms } from '@/lib/messaging';
 import { getHeaders } from '@/lib/vtpass';
+import { vtpassHasNoRecord } from '@/lib/vtpassReply';
 import { enqueueRefund } from '@/lib/refunds';
 import { buildReceiptEmail } from '@/lib/receiptEmail';
 import { requeryMonnifyTransfer, finalizeMonnifyTransfer } from '@/lib/monnifyVend';
@@ -286,14 +287,17 @@ export async function reconcileStuckRow(record: TransactionRow, baseUrl: string)
     } else {
       // Neither delivered nor failed — either still genuinely processing at VTpass (leave
       // it, next sweep will re-check), or VTpass has no record of this request_id at all
-      // (our crash happened before the /pay call ever went out). Can't safely tell which
-      // from here without risking a double-vend, so this alerts rather than guesses.
-      const vtpassKnowsNothing = !requeryData?.content && !requeryData?.response_description;
-      if (vtpassKnowsNothing) {
+      // (our crash happened before the /pay call ever went out, or /pay got an error page and
+      // VTpass never took the order). Can't safely tell which from here without risking a
+      // double-vend, so this alerts rather than guesses. See vtpassHasNoRecord for code 015.
+      if (vtpassHasNoRecord(requeryData)) {
         await sendTelegramAlert(
-          `🚨 *STUCK PAYMENT — VTPASS HAS NO RECORD*\n\nTx \`${record.tx_hash}\` has been ${record.status} for over ${STUCK_MINUTES} min. Funds are already on-chain, but VTpass's requery shows no record of request_id \`${record.request_id}\` — our server likely crashed BEFORE ever calling VTpass. This needs a manual decision in the admin dashboard: retry the vend, or refund.\n\n👤 Wallet: \`${record.wallet_address || 'unknown'}\`\n💰 ${record.amount_usdt} ${record.token_used || 'USD₮'} (₦${record.amount_naira})\n🛒 ${record.network} ${record.service_category}`
+          `🚨 *STUCK PAYMENT — VTPASS HAS NO RECORD*\n\nTx \`${record.tx_hash}\` has been ${record.status} for over ${STUCK_MINUTES} min. Funds are already on-chain, but VTpass's requery shows no record of request_id \`${record.request_id}\` — the order never reached VTpass, so nothing was delivered and nothing can be later. Refund it in the admin dashboard.\n\n👤 Wallet: \`${record.wallet_address || 'unknown'}\`\n💰 ${record.amount_usdt} ${record.token_used || 'USD₮'} (₦${record.amount_naira})\n🛒 ${record.network} ${record.service_category}`
         );
-        await supabase.from('transactions').update({ error_code: 'STUCK_ALERTED' }).eq('id', record.id);
+        await supabase.from('transactions').update({
+          error_code: 'STUCK_ALERTED',
+          api_response: `VTpass has no record of request ${record.request_id} (requery: ${String(requeryData?.code ?? '')} ${String(requeryData?.response_description ?? '')}`.trim() + ') — it never reached them. Nothing was delivered; safe to refund.',
+        }).eq('id', record.id);
         return 'alerted';
       }
       // else: genuinely still processing at VTpass — leave alone, checked again next sweep.
