@@ -5,6 +5,7 @@ import { internalAuthHeaders } from '@/utils/internalAuth';
 import { claimWebhookEvent, releaseWebhookEvent } from '@/lib/webhookEvents';
 import { supabaseAdmin } from '@/utils/supabase';
 import { isFlowReply, pinFlowId, pinFlowMessage, pinFromFlowReply } from '@/lib/whatsappPinFlow';
+import { OVER_CAP_MESSAGE, checkDailyCap, countWhatsAppSend } from '@/lib/whatsappBudget';
 
 const WHATSAPP_TOKEN = process.env.WHATSAPP_ACCESS_TOKEN as string;
 const WHATSAPP_PHONE_ID = process.env.WHATSAPP_PHONE_NUMBER_ID as string;
@@ -83,13 +84,14 @@ export async function POST(req: Request) {
       if (isFlowReply(messageObj) && !flowPin && senderNumber) {
         const flowId = pinFlowId();
         const retryText = "We couldn't read that PIN. Tap Enter PIN and type your 4 to 6 digit PIN again.";
-        await fetch(`https://graph.facebook.com/v18.0/${WHATSAPP_PHONE_ID}/messages`, {
+        const retry = await fetch(`https://graph.facebook.com/v18.0/${WHATSAPP_PHONE_ID}/messages`, {
           method: 'POST',
           headers: { 'Authorization': `Bearer ${WHATSAPP_TOKEN}`, 'Content-Type': 'application/json' },
           body: JSON.stringify(flowId
             ? pinFlowMessage(senderNumber, retryText, flowId, crypto.randomUUID())
             : { messaging_product: "whatsapp", to: senderNumber, type: "text", text: { body: retryText } }),
-        }).catch((e) => console.error('[WhatsApp] PIN retry send failed:', e));
+        }).catch((e) => { console.error('[WhatsApp] PIN retry send failed:', e); return null; });
+        if (retry?.ok) await countWhatsAppSend();
         return NextResponse.json({ success: true });
       }
 
@@ -100,6 +102,26 @@ export async function POST(req: Request) {
       messageId = messageObj.id;
       if (await claimWebhookEvent('WHATSAPP', messageId) === 'DUPLICATE') {
         return NextResponse.json({ success: true, duplicate: true });
+      }
+
+      // 💸 PER-USER DAILY CAP (src/lib/whatsappBudget.ts) — every bot reply is a billable
+      // service message past Meta's monthly allowance. Over the cap, one explanation and then
+      // silence until midnight, so nothing more is billed. A chat waiting for its PIN always
+      // gets through, so a payment is never cut off halfway.
+      const { data: sessionNow } = await supabaseAdmin.from('deai_sessions')
+        .select('status, expires_at').eq('chat_id', senderNumber).maybeSingle();
+      const midPayment = !!flowPin || (sessionNow?.status === 'AWAITING_PIN' && (!sessionNow.expires_at || new Date(sessionNow.expires_at).getTime() > Date.now()));
+      const cap = await checkDailyCap(senderNumber, midPayment);
+      if (!cap.allow) {
+        if (cap.notify) {
+          const r = await fetch(`https://graph.facebook.com/v18.0/${WHATSAPP_PHONE_ID}/messages`, {
+            method: 'POST',
+            headers: { 'Authorization': `Bearer ${WHATSAPP_TOKEN}`, 'Content-Type': 'application/json' },
+            body: JSON.stringify({ messaging_product: "whatsapp", to: senderNumber, type: "text", text: { body: OVER_CAP_MESSAGE } }),
+          }).catch(() => null);
+          if (r?.ok) await countWhatsAppSend();
+        }
+        return NextResponse.json({ success: true, capped: true });
       }
 
       const response = await fetch(CORE_ENGINE_URL, {
@@ -174,6 +196,7 @@ export async function POST(req: Request) {
         // error body (e.g. "Invalid OAuth access token", "(#100) phone number ... does not
         // exist") — none of that ever reached the logs before, so the send just silently
         // failed with zero trace anywhere.
+        if (sendRes.ok) await countWhatsAppSend();
         if (!sendRes.ok) {
           const errBody = await sendRes.text();
           console.error('[WhatsApp] Failed to send reply via Graph API:', sendRes.status, errBody);

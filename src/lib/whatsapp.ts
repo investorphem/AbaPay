@@ -1,3 +1,5 @@
+import { countWhatsAppSend } from '@/lib/whatsappBudget';
+
 // ⚡ Outbound WhatsApp sends via Meta's Graph API — the same call the inbound webhook uses to
 // reply, plus the template fallback that makes an OUT-OF-WINDOW send possible at all.
 //
@@ -85,6 +87,8 @@ async function postToGraph(payload: Record<string, unknown>): Promise<{ ok: bool
     headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' },
     body: JSON.stringify(payload),
   });
+  // Every delivered message counts toward the month's WhatsApp bill (src/lib/whatsappBudget.ts).
+  if (res.ok) await countWhatsAppSend().catch(() => {});
   return { ok: res.ok, body: res.ok ? '' : await res.text() };
 }
 
