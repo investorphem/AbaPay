@@ -479,6 +479,9 @@ WHATSAPP_VERIFY_TOKEN=your_verify_token
 WHATSAPP_APP_SECRET=your_meta_app_secret   # ⚠️ REQUIRED. Verifies the X-Hub-Signature-256 on inbound webhooks so senders can't be spoofed.
 WHATSAPP_SCHEDULE_TEMPLATE_NAME=schedule_update   # Approved utility template used when the 24h window has closed. Unset = scheduled payments go unreported on WhatsApp.
 WHATSAPP_SCHEDULE_TEMPLATE_LANG=en                # Must match the template's language exactly ('en' and 'en_US' are different templates).
+WHATSAPP_PIN_FLOW_ID=                            # Published secure-PIN WhatsApp Flow (scripts/whatsapp-pin-flow.mjs). Set = PINs are entered in a masked WhatsApp form, never typed into the chat. Unset = PIN asked as text.
+WHATSAPP_PIN_FLOW_MODE=                          # 'draft' only while testing an unpublished Flow.
+WHATSAPP_BUSINESS_ACCOUNT_ID=                    # WABA id; only the Flow script needs it.
 ```
 
 #### The 24-hour window, and why the scheduler needs a template
