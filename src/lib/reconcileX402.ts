@@ -238,6 +238,32 @@ async function watchRefusedIntents(now: number) {
 
   for (const row of (refused || []) as Row[]) {
     if ((await authorizationState(row)) !== true) continue;
+
+    // 🔴 "USED" IS NOT "PAID". EIP-3009 marks an authorization used both when it is spent AND
+    // when the payer CANCELS it (cancelAuthorization) — and wallets cancel a refused one. A
+    // cancelled authorization moved no money, yet this used to raise "the payer's money moved,
+    // refund by hand" for it (2026-10-16: a USA₮ payer's wallet cancelled after the refusal; the
+    // funds never left). So require the payment itself: a transfer from this payer into a vault,
+    // in our own on-chain index (src/lib/onchain/indexer.ts, refreshed every 15 minutes).
+    const { data: landed } = await supabase.from('onchain_payments')
+      .select('tx_hash, amount_usd')
+      .eq('chain', String(row.blockchain || 'CELO').toUpperCase())
+      .eq('payer', String(row.x402_payer || row.wallet_address || '').toLowerCase())
+      .gte('block_time', new Date(new Date(row.created_at).getTime() - 5 * 60_000).toISOString())
+      .gte('amount_usd', Number(row.amount_usdt) * 0.99)
+      .limit(1);
+    if (!landed?.length) {
+      // Not in the index: either still to be indexed (give it 45 minutes) or the authorization was
+      // cancelled. Past that, close it as cancelled: nothing moved, nothing is owed.
+      if (now - new Date(row.created_at).getTime() > 45 * 60_000) {
+        await supabase.from('transactions').update({
+          error_code: 'X402_AUTH_CANCELLED',
+          api_response: 'The facilitator refused this payment and the authorization was later marked used without any payment reaching the vault — it was cancelled. Nothing moved; nothing is owed.',
+        }).eq('id', row.id).eq('error_code', 'X402_SETTLE_REFUSED');
+      }
+      continue;
+    }
+
     // Status stays FAILED_PAYMENT (terminal under migration 026); the error_code marks it seen.
     await supabase.from('transactions').update({
       error_code: 'X402_LATE_SETTLEMENT',
