@@ -1,0 +1,44 @@
+{
+  "version": "6.3",
+  "screens": [
+    {
+      "id": "PIN",
+      "title": "AbaPay Secure",
+      "terminal": true,
+      "sensitive": ["pin"],
+      "layout": {
+        "type": "SingleColumnLayout",
+        "children": [
+          {
+            "type": "Form",
+            "name": "pin_form",
+            "children": [
+              {
+                "type": "TextBody",
+                "text": "Enter your AbaPay PIN to confirm this payment. It is never shown in your chat."
+              },
+              {
+                "type": "TextInput",
+                "name": "pin",
+                "label": "PIN",
+                "input-type": "passcode",
+                "required": true,
+                "min-chars": 4,
+                "max-chars": 6,
+                "helper-text": "4 to 6 digits"
+              },
+              {
+                "type": "Footer",
+                "label": "Confirm",
+                "on-click-action": {
+                  "name": "complete",
+                  "payload": { "pin": "${form.pin}" }
+                }
+              }
+            ]
+          }
+        ]
+      }
+    }
+  ]
+}

@@ -3,6 +3,8 @@ import { NextResponse } from 'next/server';
 import crypto from 'crypto';
 import { internalAuthHeaders } from '@/utils/internalAuth';
 import { claimWebhookEvent, releaseWebhookEvent } from '@/lib/webhookEvents';
+import { supabaseAdmin } from '@/utils/supabase';
+import { isFlowReply, pinFlowId, pinFlowMessage, pinFromFlowReply } from '@/lib/whatsappPinFlow';
 
 const WHATSAPP_TOKEN = process.env.WHATSAPP_ACCESS_TOKEN as string;
 const WHATSAPP_PHONE_ID = process.env.WHATSAPP_PHONE_NUMBER_ID as string;
@@ -69,8 +71,27 @@ export async function POST(req: Request) {
     if (body.object === 'whatsapp_business_account' && body.entry?.[0]?.changes?.[0]?.value?.messages) {
       const messageObj = body.entry[0].changes[0].value.messages[0];
       
-      const text = messageObj.text?.body || "";
+      // A completed secure PIN form (src/lib/whatsappPinFlow.ts) arrives as an `nfm_reply`, not
+      // as text. Its PIN goes to the engine exactly as a typed PIN would — it just never sat in
+      // the chat.
+      const flowPin = pinFromFlowReply(messageObj);
+      const text = flowPin ?? messageObj.text?.body ?? "";
       const senderNumber = messageObj.from;
+
+      // A Flow reply we can't read a PIN from is answered here and never reaches the engine, so
+      // it can't count as a wrong-PIN attempt toward the lockout.
+      if (isFlowReply(messageObj) && !flowPin && senderNumber) {
+        const flowId = pinFlowId();
+        const retryText = "We couldn't read that PIN. Tap Enter PIN and type your 4 to 6 digit PIN again.";
+        await fetch(`https://graph.facebook.com/v18.0/${WHATSAPP_PHONE_ID}/messages`, {
+          method: 'POST',
+          headers: { 'Authorization': `Bearer ${WHATSAPP_TOKEN}`, 'Content-Type': 'application/json' },
+          body: JSON.stringify(flowId
+            ? pinFlowMessage(senderNumber, retryText, flowId, crypto.randomUUID())
+            : { messaging_product: "whatsapp", to: senderNumber, type: "text", text: { body: retryText } }),
+        }).catch((e) => console.error('[WhatsApp] PIN retry send failed:', e));
+        return NextResponse.json({ success: true });
+      }
 
       if (!text || !senderNumber) return NextResponse.json({ success: true });
 
@@ -119,9 +140,25 @@ export async function POST(req: Request) {
         // your PIN, delete it", with no idea whether a PIN was ever actually being asked for.
         // `isPinEntry` is set by the core engine only when the session was genuinely
         // AWAITING_PIN for this exact turn — see HumanizeCtx in core/route.ts.
-        if (engineData.isPinEntry) {
+        // Only a PIN TYPED into the chat needs deleting; one entered in the secure form never was.
+        if (engineData.isPinEntry && !flowPin && !isFlowReply(messageObj)) {
           outgoingMessage += '\n\n_🔒 For your security, please delete your last message (your PIN) from this chat — WhatsApp doesn\'t let AbaPay do that for you._';
         }
+
+        // 🔐 SECURE PIN FORM — whenever this reply leaves the chat waiting for a PIN (first ask,
+        // or a retry after a wrong one), send the "Enter PIN" button instead of plain text. Read
+        // from the session rather than from the reply's wording, so every engine path that asks
+        // for a PIN gets it. Falls back to text when the Flow isn't configured.
+        const flowId = pinFlowId();
+        let awaitingPin = false;
+        if (flowId) {
+          const { data: session } = await supabaseAdmin.from('deai_sessions')
+            .select('status, expires_at').eq('chat_id', senderNumber).maybeSingle();
+          awaitingPin = session?.status === 'AWAITING_PIN' && (!session.expires_at || new Date(session.expires_at).getTime() > Date.now());
+        }
+        const payload = flowId && awaitingPin
+          ? pinFlowMessage(senderNumber, outgoingMessage, flowId, crypto.randomUUID())
+          : { messaging_product: "whatsapp", to: senderNumber, type: "text", text: { body: outgoingMessage } };
 
         const sendRes = await fetch(`https://graph.facebook.com/v18.0/${WHATSAPP_PHONE_ID}/messages`, {
           method: 'POST',
@@ -129,12 +166,7 @@ export async function POST(req: Request) {
             'Authorization': `Bearer ${WHATSAPP_TOKEN}`,
             'Content-Type': 'application/json'
           },
-          body: JSON.stringify({
-            messaging_product: "whatsapp",
-            to: senderNumber,
-            type: "text",
-            text: { body: outgoingMessage }
-          })
+          body: JSON.stringify(payload)
         });
 
         // ⚡ THE ACTUAL FIX — this call's result was never checked. A bad/expired access

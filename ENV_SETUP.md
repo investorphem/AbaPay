@@ -415,7 +415,9 @@ WHATSAPP_VERIFY_TOKEN=<any string you make up yourself>
 WHATSAPP_APP_SECRET=...
 ```
 **Free tier for a limited number of conversations/month, then paid per-conversation** — Meta's
-WhatsApp Business Platform pricing is conversation-based; check
+WhatsApp Business Platform pricing is per delivered message. Replies inside the 24-hour
+customer-service window are free up to a monthly allowance per number (1,000 since
+1 October 2026), then billed; templates (such as the schedule-update fallback) are billed. Check
 [developers.facebook.com/docs/whatsapp/pricing](https://developers.facebook.com/docs/whatsapp/pricing)
 for current rates.
 1. Create a Meta App at [developers.facebook.com](https://developers.facebook.com) → add the
@@ -429,6 +431,12 @@ for current rates.
    → Webhook**, callback URL `https://www.abapays.com/api/whatsapp/webhook` (verify which
    domain is canonical first), verify token = your `WHATSAPP_VERIFY_TOKEN`. Subscribe to the
    `messages` field.
+6. **Secure PIN entry (optional, recommended).** Set `WHATSAPP_BUSINESS_ACCOUNT_ID` (WhatsApp
+   Manager → Account tools → the WABA id) and run `node scripts/whatsapp-pin-flow.mjs --publish`.
+   It creates the "AbaPay secure PIN" Flow (src/config/whatsapp-pin-flow.json) and prints its id;
+   set that as `WHATSAPP_PIN_FLOW_ID`. The bot then asks for the PIN with an "Enter PIN" button
+   that opens a masked WhatsApp form, so the PIN never appears in the chat. To try it before
+   publishing, run the script without `--publish` and set `WHATSAPP_PIN_FLOW_MODE=draft`.
 
 ---
 
