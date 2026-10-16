@@ -276,6 +276,13 @@ column wallet_links.wallet_address text not null
 column webhook_events.external_id text not null
 column webhook_events.received_at timestamp with time zone not null default now()
 column webhook_events.source text not null
+column whatsapp_flow_orders.chat_id text not null
+column whatsapp_flow_orders.created_at timestamp with time zone not null default now()
+column whatsapp_flow_orders.expires_at timestamp with time zone not null default (now() + '00:15:00'::interval)
+column whatsapp_flow_orders.flow_token text not null
+column whatsapp_flow_orders.id uuid not null default gen_random_uuid()
+column whatsapp_flow_orders.intent_data jsonb not null
+column whatsapp_flow_orders.used_at timestamp with time zone
 constraint abapay_global_users.abapay_global_users_email_key UNIQUE (email)
 constraint abapay_global_users.abapay_global_users_phone_number_key UNIQUE (phone_number)
 constraint abapay_global_users.abapay_global_users_pkey PRIMARY KEY (id)
@@ -342,6 +349,8 @@ constraint transactions.transactions_tx_hash_key UNIQUE (tx_hash)
 constraint wallet_links.wallet_links_pkey PRIMARY KEY (wallet_address)
 constraint wallet_links.wallet_links_user_id_fkey FOREIGN KEY (user_id) REFERENCES abapay_users(id)
 constraint webhook_events.webhook_events_pkey PRIMARY KEY (source, external_id)
+constraint whatsapp_flow_orders.whatsapp_flow_orders_flow_token_key UNIQUE (flow_token)
+constraint whatsapp_flow_orders.whatsapp_flow_orders_pkey PRIMARY KEY (id)
 function award_transaction_points(target_wallet text, points_to_add numeric) returns void lang=plpgsql secdef=f config=search_path=public, pg_temp body=87b720db33a2d1531ce412192cfe4f96
 function claim_jobs(p_limit integer) returns SETOF fulfilment_jobs lang=sql secdef=f config=search_path=public, pg_temp body=9d4bca651913ae7c9e5907ffcf69fa9d
 function complete_job(p_id uuid) returns void lang=sql secdef=f config=search_path=public, pg_temp body=3428d94c2ed06263702c2890d824b2be
@@ -430,6 +439,7 @@ grant DELETE,INSERT,REFERENCES,SELECT,TRIGGER,TRUNCATE,UPDATE on wallet_links to
 grant DELETE,INSERT,REFERENCES,SELECT,TRIGGER,TRUNCATE,UPDATE on webhook_events to anon
 grant DELETE,INSERT,REFERENCES,SELECT,TRIGGER,TRUNCATE,UPDATE on webhook_events to authenticated
 grant DELETE,INSERT,REFERENCES,SELECT,TRIGGER,TRUNCATE,UPDATE on webhook_events to service_role
+grant DELETE,INSERT,REFERENCES,SELECT,TRIGGER,TRUNCATE,UPDATE on whatsapp_flow_orders to service_role
 grant execute on award_transaction_points(target_wallet text, points_to_add numeric) to service_role
 grant execute on claim_jobs(p_limit integer) to service_role
 grant execute on complete_job(p_id uuid) to service_role
@@ -520,6 +530,9 @@ index transactions.transactions_x402_authorization_key CREATE UNIQUE INDEX trans
 index wallet_links.wallet_links_pkey CREATE UNIQUE INDEX wallet_links_pkey ON public.wallet_links USING btree (wallet_address)
 index webhook_events.webhook_events_pkey CREATE UNIQUE INDEX webhook_events_pkey ON public.webhook_events USING btree (source, external_id)
 index webhook_events.webhook_events_received_at_idx CREATE INDEX webhook_events_received_at_idx ON public.webhook_events USING btree (received_at)
+index whatsapp_flow_orders.whatsapp_flow_orders_chat_idx CREATE INDEX whatsapp_flow_orders_chat_idx ON public.whatsapp_flow_orders USING btree (chat_id, created_at DESC)
+index whatsapp_flow_orders.whatsapp_flow_orders_flow_token_key CREATE UNIQUE INDEX whatsapp_flow_orders_flow_token_key ON public.whatsapp_flow_orders USING btree (flow_token)
+index whatsapp_flow_orders.whatsapp_flow_orders_pkey CREATE UNIQUE INDEX whatsapp_flow_orders_pkey ON public.whatsapp_flow_orders USING btree (id)
 policy platform_settings.Allow public read-only access on settings PERMISSIVE SELECT to public using (true) check ()
 table abapay_global_users rls=t
 table abapay_users rls=t
@@ -547,5 +560,6 @@ table telegram_group_messages rls=t
 table transactions rls=t
 table wallet_links rls=t
 table webhook_events rls=t
+table whatsapp_flow_orders rls=t
 trigger transactions.transactions_enqueue_fulfilment CREATE TRIGGER transactions_enqueue_fulfilment AFTER INSERT OR UPDATE OF status ON public.transactions FOR EACH ROW EXECUTE FUNCTION enqueue_fulfilment_job()
 trigger transactions.transactions_state_guard CREATE TRIGGER transactions_state_guard BEFORE UPDATE ON public.transactions FOR EACH ROW EXECUTE FUNCTION transactions_state_guard()

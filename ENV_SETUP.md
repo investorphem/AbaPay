@@ -446,6 +446,22 @@ its PIN always gets through.
    set that as `WHATSAPP_PIN_FLOW_ID`. The bot then asks for the PIN with an "Enter PIN" button
    that opens a masked WhatsApp form, so the PIN never appears in the chat. To try it before
    publishing, run the script without `--publish` and set `WHATSAPP_PIN_FLOW_MODE=draft`.
+7. **Checkout form (optional, recommended — cuts a purchase from 6–8 billed replies to about 3).**
+   The whole purchase (service → provider → number and plan or amount → confirm) happens in one
+   WhatsApp Flow, answered live by `https://www.abapays.com/api/whatsapp/flow`. Those endpoint
+   calls aren't messages, so they aren't billed.
+   1. `node scripts/whatsapp-checkout-flow.mjs keys <a folder outside the repo>` generates an
+      RSA-2048 key pair. Put the contents of `flow-private.pem` in Vercel as
+      `WHATSAPP_FLOW_PRIVATE_KEY` (Sensitive) and redeploy.
+   2. Register `flow-public.pem`: in WhatsApp Manager when setting up the Flow's endpoint ("Sign
+      public key"), or `node scripts/whatsapp-checkout-flow.mjs upload-key <path>/flow-public.pem`.
+   3. Create the Flow from `src/config/whatsapp-checkout-flow.json` with endpoint
+      `https://www.abapays.com/api/whatsapp/flow` (WhatsApp Manager, or
+      `node scripts/whatsapp-checkout-flow.mjs create`), run Meta's health check, then publish.
+   4. Set `WHATSAPP_CHECKOUT_FLOW_ID` to its id. Users who send *menu*, *buy*, *pay* or a greeting
+      get a "Start a payment" button. The form's DETAILS step verifies meters and smartcards with
+      VTpass and stores the order server-side (`whatsapp_flow_orders`, migration 043); submitting
+      it makes the engine run that stored order through its usual checks to the PIN step.
 
 ---
 

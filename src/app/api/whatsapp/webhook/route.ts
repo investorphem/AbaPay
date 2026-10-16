@@ -6,6 +6,7 @@ import { claimWebhookEvent, releaseWebhookEvent } from '@/lib/webhookEvents';
 import { supabaseAdmin } from '@/utils/supabase';
 import { isFlowReply, pinFlowId, pinFlowMessage, pinFromFlowReply } from '@/lib/whatsappPinFlow';
 import { OVER_CAP_MESSAGE, checkDailyCap, countWhatsAppSend } from '@/lib/whatsappBudget';
+import { CHECKOUT_TRIGGER_RE, checkoutCompletion, checkoutFlowId, checkoutFlowMessage, isCheckoutReply } from '@/lib/whatsappCheckout';
 
 const WHATSAPP_TOKEN = process.env.WHATSAPP_ACCESS_TOKEN as string;
 const WHATSAPP_PHONE_ID = process.env.WHATSAPP_PHONE_NUMBER_ID as string;
@@ -76,12 +77,18 @@ export async function POST(req: Request) {
       // as text. Its PIN goes to the engine exactly as a typed PIN would — it just never sat in
       // the chat.
       const flowPin = pinFromFlowReply(messageObj);
-      const text = flowPin ?? messageObj.text?.body ?? "";
       const senderNumber = messageObj.from;
+      // A submitted checkout form (src/lib/whatsappCheckout.ts): its order is already stored
+      // server-side; the engine is asked to run it below (flow_order), with empty text.
+      const checkoutChat = senderNumber ? checkoutCompletion(messageObj, senderNumber) : null;
+      const text = flowPin ?? messageObj.text?.body ?? "";
+
+      // A checkout form issued to a different number: ignore it, it places no order.
+      if (isCheckoutReply(messageObj) && !checkoutChat) return NextResponse.json({ success: true });
 
       // A Flow reply we can't read a PIN from is answered here and never reaches the engine, so
       // it can't count as a wrong-PIN attempt toward the lockout.
-      if (isFlowReply(messageObj) && !flowPin && senderNumber) {
+      if (isFlowReply(messageObj) && !flowPin && !checkoutChat && senderNumber) {
         const flowId = pinFlowId();
         const retryText = "We couldn't read that PIN. Tap Enter PIN and type your 4 to 6 digit PIN again.";
         const retry = await fetch(`https://graph.facebook.com/v18.0/${WHATSAPP_PHONE_ID}/messages`, {
@@ -95,7 +102,7 @@ export async function POST(req: Request) {
         return NextResponse.json({ success: true });
       }
 
-      if (!text || !senderNumber) return NextResponse.json({ success: true });
+      if ((!text && !checkoutChat) || !senderNumber) return NextResponse.json({ success: true });
 
       // ⚡ DE-DUPLICATION — Meta redelivers a webhook it thinks failed, with the same message
       // id. A redelivery is answered 200 and does nothing (src/lib/webhookEvents.ts).
@@ -124,13 +131,29 @@ export async function POST(req: Request) {
         return NextResponse.json({ success: true, capped: true });
       }
 
+      // 🛒 CHECKOUT FORM — "menu", "buy", "hi"… opens the whole purchase as one WhatsApp form
+      // instead of a chat conversation: one message here, the confirmation with the PIN button,
+      // and the receipt. Not offered mid-payment, so a waiting PIN is never interrupted.
+      const checkoutId = checkoutFlowId();
+      if (checkoutId && !midPayment && !checkoutChat && CHECKOUT_TRIGGER_RE.test(text)) {
+        const r = await fetch(`https://graph.facebook.com/v18.0/${WHATSAPP_PHONE_ID}/messages`, {
+          method: 'POST',
+          headers: { 'Authorization': `Bearer ${WHATSAPP_TOKEN}`, 'Content-Type': 'application/json' },
+          body: JSON.stringify(checkoutFlowMessage(senderNumber, '👋 Pay a bill in a few taps. Tap *Start a payment* to choose the service, provider and amount.\n\nOr just tell me what you need, e.g. "buy 500 MTN airtime for 08012345678".', checkoutId, crypto.randomUUID())),
+        }).catch(() => null);
+        if (r?.ok) await countWhatsAppSend();
+        else console.error('[WhatsApp] checkout form send failed:', r?.status);
+        return NextResponse.json({ success: true });
+      }
+
       const response = await fetch(CORE_ENGINE_URL, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', ...internalAuthHeaders() },
         body: JSON.stringify({
           platform: 'WHATSAPP',
           platform_id: senderNumber,
-          text: text
+          text: checkoutChat ? '' : text,
+          ...(checkoutChat ? { flow_order: true } : {}),
         })
       });
 

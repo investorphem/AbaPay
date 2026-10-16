@@ -116,3 +116,25 @@ describe('daily cap (src/lib/whatsappBudget.ts)', () => {
     expect(engineCalls).toEqual([expect.objectContaining({ text: '4821' })]);
   });
 });
+
+describe('checkout form (src/lib/whatsappCheckout.ts)', () => {
+  it('"menu" opens the checkout form instead of a chat reply', async () => {
+    process.env.WHATSAPP_CHECKOUT_FLOW_ID = '555';
+    try {
+      await deliver({ type: 'text', text: { body: 'menu' } });
+      expect(engineCalls).toHaveLength(0);
+      expect(graphSends[0]).toMatchObject({ type: 'interactive', interactive: { type: 'flow', action: { parameters: { flow_id: '555', flow_cta: 'Start a payment' } } } });
+    } finally { delete process.env.WHATSAPP_CHECKOUT_FLOW_ID; }
+  });
+
+  it('a submitted form asks the engine to run the stored order, with no text', async () => {
+    await deliver(flowReply({ flow_token: `abapay-checkout:${SENDER}:n1`, confirmed: 'yes' }));
+    expect(engineCalls).toEqual([expect.objectContaining({ text: '', flow_order: true, platform_id: SENDER })]);
+  });
+
+  it('a form issued to another number places no order', async () => {
+    await deliver(flowReply({ flow_token: 'abapay-checkout:2348099999999:n1', confirmed: 'yes' }));
+    expect(engineCalls.filter((c) => (c as { flow_order?: boolean }).flow_order)).toHaveLength(0);
+    expect(graphSends).toHaveLength(0);
+  });
+});

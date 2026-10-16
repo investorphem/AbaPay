@@ -481,7 +481,10 @@ WHATSAPP_SCHEDULE_TEMPLATE_NAME=schedule_update   # Approved utility template us
 WHATSAPP_SCHEDULE_TEMPLATE_LANG=en                # Must match the template's language exactly ('en' and 'en_US' are different templates).
 WHATSAPP_PIN_FLOW_ID=                            # Published secure-PIN WhatsApp Flow (scripts/whatsapp-pin-flow.mjs). Set = PINs are entered in a masked WhatsApp form, never typed into the chat. Unset = PIN asked as text.
 WHATSAPP_PIN_FLOW_MODE=                          # 'draft' only while testing an unpublished Flow.
-WHATSAPP_BUSINESS_ACCOUNT_ID=                    # WABA id; only the Flow script needs it.
+WHATSAPP_BUSINESS_ACCOUNT_ID=                    # WABA id; only the Flow scripts need it.
+WHATSAPP_CHECKOUT_FLOW_ID=                       # Published checkout Flow (scripts/whatsapp-checkout-flow.mjs). Set = "menu"/"buy"/greetings open a one-form purchase (src/lib/whatsappCheckout.ts); ~3 billed replies per purchase instead of 6–8.
+WHATSAPP_CHECKOUT_FLOW_MODE=                     # 'draft' only while testing an unpublished checkout Flow.
+WHATSAPP_FLOW_PRIVATE_KEY=                       # PEM private key for the Flow data endpoint (/api/whatsapp/flow). Its public key is registered with WhatsApp. Sensitive.
 WHATSAPP_DAILY_USER_CAP=20                       # Bot replies per user per day (src/lib/whatsappBudget.ts). Past it: one note pointing to Telegram/web, then silence until midnight WAT. A chat waiting for its PIN is never cut off.
 WHATSAPP_DAILY_USER_CAP_PAID=10                  # The cap once the month passes Meta's free allowance.
 WHATSAPP_FREE_MONTHLY_REPLIES=1000               # Meta's free service replies per number per month.

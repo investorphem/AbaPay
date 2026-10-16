@@ -3,6 +3,7 @@ import { NextResponse } from 'next/server';
 import { parseIntent, classifyPivot } from '@/lib/deai/intentEngine';
 import { humanizeReply } from '@/lib/deai/humanize';
 import { verifyAccount as realVerifyAccount, fetchCryptoBalances as realFetchCryptoBalances, resolveServiceId } from '@/lib/deai/services';
+import { claimFlowOrder } from '@/lib/whatsappCheckout';
 import { createDeepLink } from '@/lib/deai/deeplink';
 import { relayPayBillFor, getRemainingAllowance } from '@/lib/deai/relayer';
 import { checkServiceAllowed, checkAgentSpendAllowed, isChannelEnabled, computeServiceFee } from '@/lib/serviceRules';
@@ -970,6 +971,105 @@ async function handleCore(req: Request, ctx: HumanizeCtx): Promise<NextResponse>
       await supabase.from('deai_sessions').delete().eq('chat_id', platform_id);
       session = null;
     }
+
+    // ⚡ WHATSAPP CHECKOUT FORM (src/lib/whatsappCheckout.ts) — the user filled the whole order
+    // in a WhatsApp Flow. The order was built and verified SERVER-SIDE by the Flow's data
+    // endpoint and stored against this chat; nothing in this request carries order fields. It
+    // becomes this chat's in-progress order, and the text is emptied so no AI parse runs: the
+    // pipeline below picks it up exactly as if the details had been collected in chat, with every
+    // gate (account format, amount limits, verification, duplicates, chain/token, parity, PIN).
+    if (reqBody.flow_order === true && channel === 'WHATSAPP') {
+      const order = await claimFlowOrder(platform_id);
+      if (!order) {
+        return NextResponse.json({ action: 'REPLY', message: '⌛ That order form has expired. Send *menu* to start a new one.' });
+      }
+      session = { chat_id: platform_id, platform, intent_data: order, status: 'AWAITING_DETAILS', expires_at: new Date(Date.now() + 300000).toISOString() };
+      await supabase.from('deai_sessions').upsert(session, { onConflict: 'chat_id' });
+      text = '';
+      ctx.userText = '';
+    }
+
+    // ⚡ FINISH CHECKOUT — everything after the paying token is known: parity gate, duplicate
+    // electricity guard, receipt-email question, then the PIN prompt. Shared by the token reply
+    // (AWAITING_TOKEN) and by an order that arrives with chain and token already set (a chat
+    // message naming both, or the WhatsApp checkout form), which previously fell through to
+    // "I didn't catch that" because only the token reply ever reached the PIN step.
+    const finishCheckout = async (d: NonNullable<typeof session>['intent_data'], selected: string): Promise<NextResponse> => {
+      d.selected_token = selected;
+      d.pin_attempts = 0;
+
+      // ⚡ PARITY GATE — enforce every compulsory field the WEB FORM requires.
+      //
+      // The app will not let a user pay for electricity without a phone number (the token
+      // is delivered by SMS), or make an international payment without a valid email. The
+      // agent must enforce the SAME rules — otherwise it submits a payment the app itself
+      // would have rejected, and it fails at vend time (or vends and the user never
+      // receives their token).
+      const isIntl = !!(d.country && d.country !== 'NG');
+      const parity = checkParity(d.intent, d, { isInternational: isIntl });
+
+      if (parity.error) {
+        return NextResponse.json({ action: 'REPLY', message: `⚠️ ${parity.error}` });
+      }
+
+      if (parity.missing.length > 0) {
+        // Ask for the first missing compulsory field, then resume.
+        const next = parity.missing[0];
+        d.awaiting_field = next.field;
+        await supabase.from('deai_sessions').upsert({
+          chat_id: platform_id, platform, intent_data: d,
+          status: 'AWAITING_FIELD',
+          expires_at: new Date(Date.now() + 300000).toISOString(),
+        }, { onConflict: 'chat_id' });
+
+        return NextResponse.json({ action: 'REPLY', message: `📝 ${next.ask}` });
+      }
+
+      // ⚡ DUPLICATE ELECTRICITY GUARD — the app blocks an identical meter payment on the
+      // same day, because double-vending a token is a common and expensive user error.
+      if (d.intent === 'ELECTRICITY') {
+        const dup = await isDuplicateElectricity(
+          supabase,
+          globalUser?.wallet_address || '',
+          d.destination_account,
+          Number(d.amount_ngn)
+        );
+        if (dup) {
+          await supabase.from('deai_sessions').delete().eq('chat_id', platform_id);
+          return NextResponse.json({
+            action: 'REPLY',
+            message: `⚠️ *Looks like a duplicate.*\n\nYou already paid ₦${Number(d.amount_ngn).toLocaleString()} to meter ${d.destination_account} today.\n\nIf you really meant to pay again, please do it in the app so you can confirm it deliberately.`,
+          });
+        }
+      }
+
+      // Ask about a receipt email before PIN, unless already forced/answered (see the other
+      // AWAITING_PIN transition above for the full rationale).
+      if (needsEmailOptIn(d)) {
+        await supabase.from('deai_sessions').upsert({
+          chat_id: platform_id, platform, intent_data: d,
+          status: 'AWAITING_EMAIL_CHOICE',
+          expires_at: new Date(Date.now() + 300000).toISOString(),
+        }, { onConflict: 'chat_id' });
+        return NextResponse.json({ action: 'REPLY', message: `📧 Want an email receipt? Reply with your email, or say *skip*.` });
+      }
+
+      await supabase.from('deai_sessions').upsert({ chat_id: platform_id, platform, intent_data: d, status: 'AWAITING_PIN', expires_at: new Date(Date.now() + 300000).toISOString() }, { onConflict: 'chat_id' });
+
+      let detailsRow = "";
+      // See the AWAITING_EMAIL_CHOICE checkout above: `variation_name` is never written
+      // anywhere — the chosen plan is stored as `variation_label`.
+      if (d.intent === 'VEND_DATA') detailsRow = `Plan: ${d.variation_label || d.variation_name || 'selected plan'}\nNetwork: ${d.provider?.toUpperCase()}`;
+      else if (d.intent === 'VEND_AIRTIME') detailsRow = `Network: ${d.provider?.toUpperCase()}`;
+      else if (d.intent === 'BANK_TRANSFER') detailsRow = `Bank: ${d.provider?.toUpperCase()}`;
+      else detailsRow = `Name: ${d.verified_name || 'N/A'}`;
+
+      const total = Number(d.amount_ngn || 0) + computeServiceFee(serviceCategoryForIntent(d.intent), d.provider);
+      return NextResponse.json({
+          action: 'REPLY',
+          message: `🤖 *Final Checkout*\n\nService: ${d.intent.replace('_', ' ')}\nAccount: ${d.destination_account}\n${detailsRow}\nAmount: ${currencySymbol}${d.amount_ngn || 0}\nPayment: *${selected}*\n*Total: ${currencySymbol}${total}*\n\n🔒 Reply with your *PIN* to confirm.`
+      });
+    };
 
     // Language baseline: reuse whatever language was detected earlier this conversation (stored
     // on the session), so short follow-ups like "1" or a bare PIN still get replies in the
@@ -2211,80 +2311,7 @@ async function handleCore(req: Request, ctx: HumanizeCtx): Promise<NextResponse>
         return NextResponse.json({ action: 'REPLY', message: `❌ Invalid choice. On ${chosenChain}:\n\n${list}` });
       }
 
-      session.intent_data.selected_token = selected;
-      session.intent_data.pin_attempts = 0; 
-
-      // ⚡ PARITY GATE — enforce every compulsory field the WEB FORM requires.
-      //
-      // The app will not let a user pay for electricity without a phone number (the token
-      // is delivered by SMS), or make an international payment without a valid email. The
-      // agent must enforce the SAME rules — otherwise it submits a payment the app itself
-      // would have rejected, and it fails at vend time (or vends and the user never
-      // receives their token).
-      const isIntl = !!(session.intent_data.country && session.intent_data.country !== 'NG');
-      const parity = checkParity(session.intent_data.intent, session.intent_data, { isInternational: isIntl });
-
-      if (parity.error) {
-        return NextResponse.json({ action: 'REPLY', message: `⚠️ ${parity.error}` });
-      }
-
-      if (parity.missing.length > 0) {
-        // Ask for the first missing compulsory field, then resume.
-        const next = parity.missing[0];
-        session.intent_data.awaiting_field = next.field;
-        await supabase.from('deai_sessions').upsert({
-          chat_id: platform_id, platform, intent_data: session.intent_data,
-          status: 'AWAITING_FIELD',
-          expires_at: new Date(Date.now() + 300000).toISOString(),
-        }, { onConflict: 'chat_id' });
-
-        return NextResponse.json({ action: 'REPLY', message: `📝 ${next.ask}` });
-      }
-
-      // ⚡ DUPLICATE ELECTRICITY GUARD — the app blocks an identical meter payment on the
-      // same day, because double-vending a token is a common and expensive user error.
-      if (session.intent_data.intent === 'ELECTRICITY') {
-        const dup = await isDuplicateElectricity(
-          supabase,
-          globalUser?.wallet_address || '',
-          session.intent_data.destination_account,
-          Number(session.intent_data.amount_ngn)
-        );
-        if (dup) {
-          await supabase.from('deai_sessions').delete().eq('chat_id', platform_id);
-          return NextResponse.json({
-            action: 'REPLY',
-            message: `⚠️ *Looks like a duplicate.*\n\nYou already paid ₦${Number(session.intent_data.amount_ngn).toLocaleString()} to meter ${session.intent_data.destination_account} today.\n\nIf you really meant to pay again, please do it in the app so you can confirm it deliberately.`,
-          });
-        }
-      }
-
-      // Ask about a receipt email before PIN, unless already forced/answered (see the other
-      // AWAITING_PIN transition above for the full rationale).
-      if (needsEmailOptIn(session.intent_data)) {
-        await supabase.from('deai_sessions').upsert({
-          chat_id: platform_id, platform, intent_data: session.intent_data,
-          status: 'AWAITING_EMAIL_CHOICE',
-          expires_at: new Date(Date.now() + 300000).toISOString(),
-        }, { onConflict: 'chat_id' });
-        return NextResponse.json({ action: 'REPLY', message: `📧 Want an email receipt? Reply with your email, or say *skip*.` });
-      }
-
-      await supabase.from('deai_sessions').upsert({ chat_id: platform_id, platform, intent_data: session.intent_data, status: 'AWAITING_PIN', expires_at: new Date(Date.now() + 300000).toISOString() }, { onConflict: 'chat_id' });
-
-      let detailsRow = "";
-      // See the AWAITING_EMAIL_CHOICE checkout above: `variation_name` is never written
-      // anywhere — the chosen plan is stored as `variation_label`.
-      if (session.intent_data.intent === 'VEND_DATA') detailsRow = `Plan: ${session.intent_data.variation_label || session.intent_data.variation_name || 'selected plan'}\nNetwork: ${session.intent_data.provider?.toUpperCase()}`;
-      else if (session.intent_data.intent === 'VEND_AIRTIME') detailsRow = `Network: ${session.intent_data.provider?.toUpperCase()}`;
-      else if (session.intent_data.intent === 'BANK_TRANSFER') detailsRow = `Bank: ${session.intent_data.provider?.toUpperCase()}`;
-      else detailsRow = `Name: ${session.intent_data.verified_name || 'N/A'}`;
-
-      const total = Number(session.intent_data.amount_ngn || 0) + computeServiceFee(serviceCategoryForIntent(session.intent_data.intent), session.intent_data.provider);
-      return NextResponse.json({
-          action: 'REPLY',
-          message: `🤖 *Final Checkout*\n\nService: ${session.intent_data.intent.replace('_', ' ')}\nAccount: ${session.intent_data.destination_account}\n${detailsRow}\nAmount: ${currencySymbol}${session.intent_data.amount_ngn || 0}\nPayment: *${selected}*\n*Total: ${currencySymbol}${total}*\n\n🔒 Reply with your *PIN* to confirm.`
-      });
+      return await finishCheckout(session.intent_data, selected);
     }
     // STATE: METER TYPE
     else if (session?.status === 'AWAITING_METER_TYPE') {
@@ -4025,6 +4052,11 @@ async function handleCore(req: Request, ctx: HumanizeCtx): Promise<NextResponse>
         });
     }
 
+    // A preset token must exist on the chosen chain (an AI-named or form-supplied one may not).
+    if (intentData.selected_token && !tokensForChain(String(intentData.chain || 'CELO').toUpperCase()).includes(intentData.selected_token)) {
+        delete intentData.selected_token;
+    }
+
     // TOKEN SELECTION — only tokens that exist on the chosen chain, with REAL balances.
     if (!intentData.selected_token) {
         await supabase.from('deai_sessions').upsert({ chat_id: platform_id, platform, intent_data: intentData, status: 'AWAITING_TOKEN', expires_at: new Date(Date.now() + 300000).toISOString() }, { onConflict: 'chat_id' });
@@ -4036,6 +4068,11 @@ async function handleCore(req: Request, ctx: HumanizeCtx): Promise<NextResponse>
             action: 'REPLY',
             message: `${prependSystemMsg}⛓️ *${chosenChain}*\n\n💰 *Which token?*\n\n${list}\n\n_Reply with the number._`,
         });
+    }
+
+    // Chain and token both already set: go straight to the rest of checkout (parity, email, PIN).
+    if (intentData.chain && intentData.selected_token) {
+        return await finishCheckout(intentData, intentData.selected_token);
     }
 
     // Fallback — every real flow above returns; this only guards the (unreachable in practice)
