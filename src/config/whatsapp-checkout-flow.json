@@ -1,0 +1,174 @@
+{
+  "version": "6.3",
+  "data_api_version": "3.0",
+  "routing_model": {
+    "SERVICE": ["PROVIDER"],
+    "PROVIDER": ["DETAILS"],
+    "DETAILS": ["CONFIRM"],
+    "CONFIRM": []
+  },
+  "screens": [
+    {
+      "id": "SERVICE",
+      "title": "AbaPay",
+      "data": {
+        "error_message": { "type": "string", "__example__": "" },
+        "has_error": { "type": "boolean", "__example__": false }
+      },
+      "layout": {
+        "type": "SingleColumnLayout",
+        "children": [
+          {
+            "type": "Form",
+            "name": "service_form",
+            "children": [
+              { "type": "TextSubheading", "text": "What do you want to pay?" },
+              { "type": "TextBody", "text": "${data.error_message}", "visible": "${data.has_error}" },
+              {
+                "type": "RadioButtonsGroup",
+                "name": "service",
+                "label": "Service",
+                "required": true,
+                "data-source": [
+                  { "id": "AIRTIME", "title": "Airtime" },
+                  { "id": "DATA", "title": "Data" },
+                  { "id": "ELECTRICITY", "title": "Electricity" },
+                  { "id": "CABLE", "title": "Cable TV" },
+                  { "id": "EDUCATION", "title": "Exam PINs" }
+                ]
+              },
+              {
+                "type": "Footer",
+                "label": "Continue",
+                "on-click-action": { "name": "data_exchange", "payload": { "service": "${form.service}" } }
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "id": "PROVIDER",
+      "title": "Choose provider",
+      "data": {
+        "service": { "type": "string", "__example__": "DATA" },
+        "service_label": { "type": "string", "__example__": "Data" },
+        "providers": {
+          "type": "array",
+          "items": { "type": "object", "properties": { "id": { "type": "string" }, "title": { "type": "string" } } },
+          "__example__": [{ "id": "mtn-data", "title": "MTN Data" }]
+        }
+      },
+      "layout": {
+        "type": "SingleColumnLayout",
+        "children": [
+          {
+            "type": "Form",
+            "name": "provider_form",
+            "children": [
+              { "type": "TextSubheading", "text": "${data.service_label}" },
+              { "type": "Dropdown", "name": "provider", "label": "Provider", "required": true, "data-source": "${data.providers}" },
+              {
+                "type": "Footer",
+                "label": "Continue",
+                "on-click-action": { "name": "data_exchange", "payload": { "service": "${data.service}", "provider": "${form.provider}" } }
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "id": "DETAILS",
+      "title": "Details",
+      "data": {
+        "service": { "type": "string", "__example__": "DATA" },
+        "provider": { "type": "string", "__example__": "mtn-data" },
+        "provider_label": { "type": "string", "__example__": "MTN Data" },
+        "number_label": { "type": "string", "__example__": "Phone number" },
+        "show_plan": { "type": "boolean", "__example__": true },
+        "plans": {
+          "type": "array",
+          "items": { "type": "object", "properties": { "id": { "type": "string" }, "title": { "type": "string" }, "description": { "type": "string" } } },
+          "__example__": [{ "id": "mtn-10mb-100", "title": "₦100 · 110MB Daily Plan", "description": "110MB Daily Plan (1 Day) - N100" }]
+        },
+        "show_amount": { "type": "boolean", "__example__": false },
+        "amount_label": { "type": "string", "__example__": "Amount in naira" },
+        "show_meter_type": { "type": "boolean", "__example__": false },
+        "show_phone": { "type": "boolean", "__example__": false },
+        "show_email": { "type": "boolean", "__example__": false },
+        "error_message": { "type": "string", "__example__": "" },
+        "has_error": { "type": "boolean", "__example__": false }
+      },
+      "layout": {
+        "type": "SingleColumnLayout",
+        "children": [
+          {
+            "type": "Form",
+            "name": "details_form",
+            "children": [
+              { "type": "TextSubheading", "text": "${data.provider_label}" },
+              { "type": "TextBody", "text": "${data.error_message}", "visible": "${data.has_error}" },
+              { "type": "TextInput", "name": "number", "label": "${data.number_label}", "input-type": "number", "required": true },
+              {
+                "type": "RadioButtonsGroup",
+                "name": "meter_type",
+                "label": "Meter type",
+                "visible": "${data.show_meter_type}",
+                "data-source": [
+                  { "id": "prepaid", "title": "Prepaid" },
+                  { "id": "postpaid", "title": "Postpaid" }
+                ]
+              },
+              { "type": "Dropdown", "name": "plan", "label": "Plan", "visible": "${data.show_plan}", "data-source": "${data.plans}" },
+              { "type": "TextInput", "name": "amount", "label": "${data.amount_label}", "input-type": "number", "visible": "${data.show_amount}" },
+              { "type": "TextInput", "name": "phone", "label": "Your phone number", "input-type": "phone", "helper-text": "For your token or receipt", "visible": "${data.show_phone}" },
+              { "type": "TextInput", "name": "email", "label": "Email (optional)", "input-type": "email", "helper-text": "We'll email your token or PIN too", "visible": "${data.show_email}" },
+              {
+                "type": "Footer",
+                "label": "Review",
+                "on-click-action": {
+                  "name": "data_exchange",
+                  "payload": {
+                    "service": "${data.service}",
+                    "provider": "${data.provider}",
+                    "number": "${form.number}",
+                    "meter_type": "${form.meter_type}",
+                    "plan": "${form.plan}",
+                    "amount": "${form.amount}",
+                    "phone": "${form.phone}",
+                    "email": "${form.email}"
+                  }
+                }
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "id": "CONFIRM",
+      "title": "Confirm",
+      "terminal": true,
+      "data": {
+        "summary": { "type": "string", "__example__": "MTN Data\nPlan: 1.5GB Weekly\nPhone number: 08012345678\nAmount: ₦1,000" },
+        "footer_note": { "type": "string", "__example__": "Tap Confirm, then approve with your PIN in the chat." }
+      },
+      "layout": {
+        "type": "SingleColumnLayout",
+        "children": [
+          {
+            "type": "Form",
+            "name": "confirm_form",
+            "children": [
+              { "type": "TextSubheading", "text": "Check your order" },
+              { "type": "TextBody", "text": "${data.summary}" },
+              { "type": "TextCaption", "text": "${data.footer_note}" },
+              { "type": "Footer", "label": "Confirm", "on-click-action": { "name": "complete", "payload": { "confirmed": "yes" } } }
+            ]
+          }
+        ]
+      }
+    }
+  ]
+}
