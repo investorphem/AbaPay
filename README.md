@@ -482,6 +482,10 @@ WHATSAPP_SCHEDULE_TEMPLATE_LANG=en                # Must match the template's la
 WHATSAPP_PIN_FLOW_ID=                            # Published secure-PIN WhatsApp Flow (scripts/whatsapp-pin-flow.mjs). Set = PINs are entered in a masked WhatsApp form, never typed into the chat. Unset = PIN asked as text.
 WHATSAPP_PIN_FLOW_MODE=                          # 'draft' only while testing an unpublished Flow.
 WHATSAPP_BUSINESS_ACCOUNT_ID=                    # WABA id; only the Flow script needs it.
+WHATSAPP_DAILY_USER_CAP=20                       # Bot replies per user per day (src/lib/whatsappBudget.ts). Past it: one note pointing to Telegram/web, then silence until midnight WAT. A chat waiting for its PIN is never cut off.
+WHATSAPP_DAILY_USER_CAP_PAID=10                  # The cap once the month passes Meta's free allowance.
+WHATSAPP_FREE_MONTHLY_REPLIES=1000               # Meta's free service replies per number per month.
+WHATSAPP_MONTHLY_ALERT_AT=800                    # Telegram alert to the operator at this many replies in a month (and again past the free allowance).
 ```
 
 #### The 24-hour window, and why the scheduler needs a template

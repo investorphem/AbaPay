@@ -37,6 +37,7 @@ vi.stubGlobal('fetch', vi.fn(async (url: string, init?: RequestInit) => {
 process.env.WHATSAPP_APP_SECRET = SECRET;
 process.env.WHATSAPP_ACCESS_TOKEN = 'token';
 process.env.WHATSAPP_PHONE_NUMBER_ID = '111';
+process.env.WHATSAPP_DAILY_USER_CAP = '2';
 
 const { POST } = await import('@/app/api/whatsapp/webhook/route');
 
@@ -95,5 +96,23 @@ describe('receiving the PIN from the form', () => {
     await deliver(flowReply({ flow_token: 'abapay-pin:abc', pin: '12' }));
     expect(engineCalls).toHaveLength(0);
     expect(graphSends[0]).toMatchObject({ type: 'interactive', interactive: { type: 'flow' } });
+  });
+});
+
+describe('daily cap (src/lib/whatsappBudget.ts)', () => {
+  it('past the cap: one notice, then silence, and the engine is never called', async () => {
+    for (let i = 0; i < 5; i++) await deliver({ type: 'text', text: { body: `hi ${i}` } });
+    expect(engineCalls).toHaveLength(2);
+    const notices = graphSends.filter((m) => JSON.stringify(m).includes("today's WhatsApp chat limit"));
+    expect(notices).toHaveLength(1);
+    expect(graphSends).toHaveLength(3);
+  });
+
+  it('a chat waiting for its PIN still gets through past the cap', async () => {
+    for (let i = 0; i < 4; i++) await deliver({ type: 'text', text: { body: 'hi' } });
+    awaitingPin();
+    engineCalls.length = 0;
+    await deliver(flowReply({ flow_token: 'abapay-pin:abc', pin: '4821' }));
+    expect(engineCalls).toEqual([expect.objectContaining({ text: '4821' })]);
   });
 });

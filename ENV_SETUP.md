@@ -414,12 +414,21 @@ WHATSAPP_PHONE_NUMBER_ID=...
 WHATSAPP_VERIFY_TOKEN=<any string you make up yourself>
 WHATSAPP_APP_SECRET=...
 ```
-**Free tier for a limited number of conversations/month, then paid per-conversation** — Meta's
+**Free up to a monthly allowance, then paid per message** — Meta's
 WhatsApp Business Platform pricing is per delivered message. Replies inside the 24-hour
 customer-service window are free up to a monthly allowance per number (1,000 since
 1 October 2026), then billed; templates (such as the schedule-update fallback) are billed. Check
 [developers.facebook.com/docs/whatsapp/pricing](https://developers.facebook.com/docs/whatsapp/pricing)
 for current rates.
+
+**Cost controls (src/lib/whatsappBudget.ts).** Every message AbaPay sends on WhatsApp is counted
+per month, and the operator gets a Telegram alert at `WHATSAPP_MONTHLY_ALERT_AT` (default 800)
+and again when the free allowance (`WHATSAPP_FREE_MONTHLY_REPLIES`, default 1,000) is used up.
+Each user gets `WHATSAPP_DAILY_USER_CAP` bot replies a day (default 20; `WHATSAPP_DAILY_USER_CAP_PAID`,
+default 10, once the month is past the allowance). Past it they get one note pointing to Telegram
+or abapays.com, then no replies until midnight WAT, so nothing more is billed. A chat waiting for
+its PIN always gets through.
+
 1. Create a Meta App at [developers.facebook.com](https://developers.facebook.com) → add the
    **WhatsApp** product.
 2. Under **WhatsApp → API Setup**: copy the temporary access token to start (generate a

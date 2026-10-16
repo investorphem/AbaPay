@@ -1,5 +1,10 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
-import { sendWhatsAppMessage, isOutOfWindowError, toTemplateParameter } from '@/lib/whatsapp';
+
+// The monthly send counter (src/lib/whatsappBudget.ts) is covered in its own test.
+const countWhatsAppSend = vi.fn(async () => 0);
+vi.mock('@/lib/whatsappBudget', () => ({ countWhatsAppSend: () => countWhatsAppSend() }));
+
+const { sendWhatsAppMessage, isOutOfWindowError, toTemplateParameter } = await import('@/lib/whatsapp');
 
 /**
  * 🔴 THE 24-HOUR CUSTOMER SERVICE WINDOW. A business may only send free-form text within 24h
