@@ -140,6 +140,21 @@ column otp_requests.code text not null
 column otp_requests.created_at timestamp with time zone not null default timezone('utc'::text, now())
 column otp_requests.expires_at timestamp with time zone not null
 column otp_requests.phone text not null
+column payer_identities.checked_at timestamp with time zone not null default now()
+column payer_identities.erc8004_agents jsonb not null default '[]'::jsonb
+column payer_identities.lookup_error text
+column payer_identities.self_agent_id text
+column payer_identities.self_human_proof boolean
+column payer_identities.self_proof_fresh boolean
+column payer_identities.self_verified boolean
+column payer_identities.wallet text not null
+column payment_client_info.client_diag jsonb
+column payment_client_info.created_at timestamp with time zone not null default now()
+column payment_client_info.declared_agent text
+column payment_client_info.declared_agent_id text
+column payment_client_info.transaction_id uuid not null
+column payment_client_info.user_agent text
+column payment_client_info.wallet text
 column platform_settings.agent_autonomous_enabled boolean not null default true
 column platform_settings.agent_daily_cap_ngn numeric not null default 100000
 column platform_settings.agent_enabled boolean not null default true
@@ -333,6 +348,9 @@ constraint onchain_payments.onchain_payments_chain_check CHECK ((chain = ANY (AR
 constraint onchain_payments.onchain_payments_pkey PRIMARY KEY (chain, tx_hash, log_index)
 constraint onchain_payments.onchain_payments_rail_check CHECK ((rail = ANY (ARRAY['direct'::text, 'agent'::text, 'x402'::text])))
 constraint otp_requests.otp_requests_pkey PRIMARY KEY (phone)
+constraint payer_identities.payer_identities_pkey PRIMARY KEY (wallet)
+constraint payment_client_info.payment_client_info_pkey PRIMARY KEY (transaction_id)
+constraint payment_client_info.payment_client_info_transaction_id_fkey FOREIGN KEY (transaction_id) REFERENCES transactions(id) ON DELETE CASCADE
 constraint platform_settings.platform_settings_pkey PRIMARY KEY (id)
 constraint rate_limits.rate_limits_pkey PRIMARY KEY (key)
 constraint refund_queue.refund_queue_pkey PRIMARY KEY (id)
@@ -412,6 +430,8 @@ grant DELETE,INSERT,REFERENCES,SELECT,TRIGGER,TRUNCATE,UPDATE on onchain_payment
 grant DELETE,INSERT,REFERENCES,SELECT,TRIGGER,TRUNCATE,UPDATE on otp_requests to anon
 grant DELETE,INSERT,REFERENCES,SELECT,TRIGGER,TRUNCATE,UPDATE on otp_requests to authenticated
 grant DELETE,INSERT,REFERENCES,SELECT,TRIGGER,TRUNCATE,UPDATE on otp_requests to service_role
+grant DELETE,INSERT,REFERENCES,SELECT,TRIGGER,TRUNCATE,UPDATE on payer_identities to service_role
+grant DELETE,INSERT,REFERENCES,SELECT,TRIGGER,TRUNCATE,UPDATE on payment_client_info to service_role
 grant DELETE,INSERT,REFERENCES,SELECT,TRIGGER,TRUNCATE,UPDATE on platform_settings to anon
 grant DELETE,INSERT,REFERENCES,SELECT,TRIGGER,TRUNCATE,UPDATE on platform_settings to authenticated
 grant DELETE,INSERT,REFERENCES,SELECT,TRIGGER,TRUNCATE,UPDATE on platform_settings to service_role
@@ -503,6 +523,9 @@ index onchain_payments.onchain_payments_chain_payer CREATE INDEX onchain_payment
 index onchain_payments.onchain_payments_chain_time CREATE INDEX onchain_payments_chain_time ON public.onchain_payments USING btree (chain, block_time DESC)
 index onchain_payments.onchain_payments_pkey CREATE UNIQUE INDEX onchain_payments_pkey ON public.onchain_payments USING btree (chain, tx_hash, log_index)
 index otp_requests.otp_requests_pkey CREATE UNIQUE INDEX otp_requests_pkey ON public.otp_requests USING btree (phone)
+index payer_identities.payer_identities_pkey CREATE UNIQUE INDEX payer_identities_pkey ON public.payer_identities USING btree (wallet)
+index payment_client_info.payment_client_info_pkey CREATE UNIQUE INDEX payment_client_info_pkey ON public.payment_client_info USING btree (transaction_id)
+index payment_client_info.payment_client_info_wallet_idx CREATE INDEX payment_client_info_wallet_idx ON public.payment_client_info USING btree (wallet)
 index platform_settings.platform_settings_pkey CREATE UNIQUE INDEX platform_settings_pkey ON public.platform_settings USING btree (id)
 index rate_limits.idx_rate_limits_window_start CREATE INDEX idx_rate_limits_window_start ON public.rate_limits USING btree (window_start)
 index rate_limits.rate_limits_pkey CREATE UNIQUE INDEX rate_limits_pkey ON public.rate_limits USING btree (key)
@@ -551,6 +574,8 @@ table mcp_oauth_tokens rls=t
 table onchain_cursors rls=t
 table onchain_payments rls=t
 table otp_requests rls=t
+table payer_identities rls=t
+table payment_client_info rls=t
 table platform_settings rls=t
 table rate_limits rls=t
 table refund_queue rls=t

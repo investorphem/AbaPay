@@ -17,7 +17,7 @@ export default function PrivacyPolicy() {
           </div>
           <div className="text-right">
             <p className="text-xs font-bold text-slate-500 dark:text-slate-400 bg-slate-100 dark:bg-[#1a1a1f] px-3 py-1.5 rounded-lg inline-block transition-colors">
-              Effective Date: July 2026
+              Effective Date: October 2026
             </p>
           </div>
         </div>
@@ -63,6 +63,13 @@ export default function PrivacyPolicy() {
               <li><strong>Chat Message Content:</strong> Messages you send to the DeAI agent are processed to determine your intent (e.g. &quot;top up my phone with 500 naira&quot;) — including by our AI provider, Anthropic (Claude API). We do not use this content for advertising or sell it to third parties.</li>
               <li><strong>Hashed Transaction PIN:</strong> Your DeAI transaction PIN is stored as a salted cryptographic hash — never in plaintext. AbaPay staff cannot view your actual PIN.</li>
               <li><strong>On-Chain Allowance Data:</strong> The stablecoin, blockchain, and spending limit you&apos;ve approved for the agent — this is public on-chain data, visible to anyone who inspects the blockchain, not private data we control.</li>
+            </ul>
+
+            <h3 className="font-bold text-slate-800 dark:text-slate-200 mt-4 mb-2">D. Payments Made by Software Agents (x402)</h3>
+            <ul className="list-disc pl-5 space-y-2">
+              <li><strong>Client Details:</strong> For a payment to our x402 endpoint we record the request&apos;s User-Agent and, if the client sends them, the agent name and ERC-8004 agent ID it declares about itself.</li>
+              <li><strong>Public Agent Identity:</strong> We look up the paying wallet in public on-chain registries: the ERC-8004 agent identity registry (including the agent&apos;s published name, description and endpoints) and the Self Agent ID registry (whether the agent is verified, not any passport data). We read these through our RPC provider and the Blockscout explorer, and keep the result for up to a day before checking again.</li>
+              <li>This is used only by AbaPay staff in our admin dashboard, to know which agent made a payment and to support it. It is not shown on receipts or any public page.</li>
             </ul>
           </section>
 
