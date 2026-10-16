@@ -18,6 +18,7 @@ import { sigFingerprint } from '@/lib/redact';
 import { metric } from '@/lib/log';
 import { X402_DOMAINS_BY_CHAIN } from '@/lib/x402Domains';
 import { errorMessage } from '@/lib/errors';
+import { recordPayerAfterResponse, clientInfoFromRequest } from '@/lib/payerIdentity';
 
 // ⚡ THE RAW ERC-1271 CHECK — deliberately not viem's `verifyTypedData`/`verifyHash`, which
 // falls back to ecrecover on any failure here (see the long comment where this is used). This
@@ -1300,6 +1301,8 @@ async function handleX402Request(req: Request) {
     }
     intentRowId = intentRow.id;
     metric('payment_intents_total', 1, { rail: 'x402', chain: chainKey });
+    // Which agent is paying, for the admin ledger only (src/lib/payerIdentity.ts). After the response.
+    recordPayerAfterResponse(intentRow.id, payerLower, clientInfoFromRequest(req, body?._clientDiag));
 
     // ⚡ `resource` ON THE PAYLOAD, NOT ONLY ON THE REQUIREMENTS.
     //

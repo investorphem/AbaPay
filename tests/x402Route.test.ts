@@ -149,6 +149,22 @@ describe('/api/pay/x402 — discovery probe (GET)', () => {
 });
 
 describe('/api/pay/x402 — happy path', () => {
+  it('records what the paying agent said about itself for the admin ledger, and never echoes it back', async () => {
+    receipts[SETTLE_TX] = settledReceipt();
+    const res = await POST(new Request('http://localhost/api/pay/x402', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'x-payment': header(), 'user-agent': 'earmark/1.0', 'x-agent-name': 'Earmark', 'x-agent-id': '9806' },
+      body: JSON.stringify(bill),
+    }));
+    const json = await res.json();
+    await new Promise((r) => setTimeout(r, 0)); // the write runs after the response
+    expect(db.tables.payment_client_info).toEqual([expect.objectContaining({
+      transaction_id: db.tables.transactions[0].id, wallet: PAYER.toLowerCase(),
+      user_agent: 'earmark/1.0', declared_agent: 'Earmark', declared_agent_id: '9806',
+    })]);
+    expect(JSON.stringify(json)).not.toMatch(/Earmark|earmark\/1\.0/);
+  });
+
   it('answers a request with no payment with a 402 challenge and writes nothing', async () => {
     const r = await pay(bill, null);
     expect(r.status).toBe(402);

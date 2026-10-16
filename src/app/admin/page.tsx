@@ -15,6 +15,8 @@ import { getPublicClient as getResilientPublicClient } from "@/lib/chain";
 import { AdminAgentPanel } from "@/components/AdminAgentPanel";
 import { AdminDiscountsPanel } from "@/components/AdminDiscountsPanel";
 import { AdminOpsPanel } from "@/components/AdminOpsPanel";
+import { AdminPayerIdentity, type PaymentClientInfo } from "@/components/AdminPayerIdentity";
+import type { PayerIdentity } from "@/lib/payerIdentityTypes";
 import { signSiweHeaders } from "@/lib/siwe";
 
 import { useProviders } from "@/lib/useProviders";
@@ -136,6 +138,9 @@ export default function AdminDashboard() {
   const [dbUsers, setDbUsers] = useState<any[]>([]); 
   const [dbWallets, setDbWallets] = useState<any[]>([]); 
   const [allWalletsMap, setAllWalletsMap] = useState<any[]>([]); 
+  // Which agent paid (admin-only): payer identity by wallet, request claims by transaction.
+  const [payerIdentities, setPayerIdentities] = useState<Record<string, PayerIdentity>>({});
+  const [paymentClientInfo, setPaymentClientInfo] = useState<Record<string, PaymentClientInfo>>({});
 
   const [isFetching, setIsFetching] = useState(false);
   const [searchTerm, setSearchTerm] = useState("");
@@ -254,6 +259,8 @@ export default function AdminDashboard() {
             setDbUsers(data.users);
             setDbWallets(data.wallets);
             setAllWalletsMap(data.allWallets || []);
+            setPayerIdentities(Object.fromEntries((data.payerIdentities || []).map((p: PayerIdentity) => [p.wallet, p])));
+            setPaymentClientInfo(Object.fromEntries((data.paymentClientInfo || []).map((c: PaymentClientInfo) => [c.transaction_id, c])));
             if (data.settings) {
                 setCurrentExchangeRate(data.settings.exchange_rate.toString());
                 setNewExchangeRate(data.settings.exchange_rate.toString());
@@ -1074,11 +1081,14 @@ Switch the selected account in your wallet to the owner and click again. You sta
                             (tx.network || "").toLowerCase().includes(searchLower) ||
                             (tx.blockchain || "").toLowerCase().includes(searchLower) ||
                             (tx.wallet_address || "").toLowerCase().includes(searchLower) ||
-                            (tx.request_id || "").toLowerCase().includes(searchLower);
+                            (tx.request_id || "").toLowerCase().includes(searchLower) ||
+                            // The paying agent's registered name or ERC-8004 id ("earmark", "9806").
+                            (!!searchLower && (payerIdentities[String(tx.wallet_address || "").toLowerCase()]?.erc8004_agents || [])
+                              .some(a => (a.name || "").toLowerCase().includes(searchLower) || a.id === searchLower));
       const matchesStatus = filterStatus === "ALL" || tx.status === filterStatus;
       return matchesSearch && matchesStatus;
     });
-  }, [timeFilteredTransactions, searchTerm, filterStatus]);
+  }, [timeFilteredTransactions, searchTerm, filterStatus, payerIdentities]);
 
   const filteredIdentities = useMemo(() => {
       const searchLower = identitySearchTerm.toLowerCase();
@@ -1608,6 +1618,9 @@ Switch the selected account in your wallet to the owner and click again. You sta
                           <td className="py-4 px-2 min-w-[150px]">
                              <p className="text-[10px] text-slate-300 font-mono">Wallet: {tx.wallet_address ? `${tx.wallet_address.slice(0,6)}...${tx.wallet_address.slice(-4)}` : 'N/A'}</p>
                              <p className={`text-[10px] mt-1 font-bold ${verifiedPhone !== 'N/A' ? 'text-emerald-500' : 'text-slate-600'}`}>Phone: {verifiedPhone}</p>
+                             {tx.payment_method === 'X402' && (
+                               <AdminPayerIdentity identity={payerIdentities[String(tx.wallet_address || '').toLowerCase()]} client={paymentClientInfo[tx.id]} />
+                             )}
                           </td>
 
                           <td className="py-4 px-2 min-w-[180px]">
