@@ -37,8 +37,15 @@ vi.mock('@/lib/serviceRules', () => ({
 }));
 vi.mock('@/lib/chain', async (importOriginal) => {
   const actual = await importOriginal<typeof import('@/lib/chain')>();
-  return { ...actual, getPublicClient: () => fakeClient(receipts, authStates) };
+  return {
+    ...actual,
+    getPublicClient: () => ({
+      ...fakeClient(receipts, authStates),
+      simulateContract: async () => { if (simulateRevert) throw simulateRevert; return { result: undefined }; },
+    }),
+  };
 });
+let simulateRevert: Error | null = null;
 
 beforeAll(() => {
   process.env.NEXT_PUBLIC_NETWORK = 'celo';
@@ -49,6 +56,7 @@ beforeAll(() => {
 });
 
 // The facilitator and the route's own authorizationState RPC reads both go through fetch.
+let lastSettleBody: Record<string, unknown> = {};
 vi.stubGlobal('fetch', async (url: string, init?: RequestInit) => {
   const body = typeof init?.body === 'string' ? init.body : '';
   if (body.includes('"eth_call"')) {
@@ -60,6 +68,7 @@ vi.stubGlobal('fetch', async (url: string, init?: RequestInit) => {
   }
   if (String(url).endsWith('/settle')) {
     facilitatorCalls++;
+    lastSettleBody = JSON.parse(body || '{}');
     intentRowsAtSettle.push(db.tables.transactions.filter((t) => String(t.tx_hash).startsWith('preflight_x402_')).length);
     if (facilitator instanceof Error) throw facilitator;
     return new Response(JSON.stringify(facilitator.body), { status: facilitator.status });
@@ -117,6 +126,7 @@ beforeEach(() => {
   enqueueRefund.mockClear();
   sendTelegramAlert.mockClear();
   gate = { allowed: true };
+  simulateRevert = null;
 });
 
 describe('/api/pay/x402 — discovery probe (GET)', () => {
@@ -287,9 +297,77 @@ describe('/api/pay/x402 — refusals', () => {
     authStates[NONCE] = false;
     await pay();
     authStates[NONCE] = true; // the facilitator's queued submission landed after all
+    db.tables.onchain_payments = [{ chain: 'CELO', payer: PAYER.toLowerCase(), tx_hash: SETTLE_TX, amount_usd: 1, block_time: new Date().toISOString() }];
     await reconcileX402Intents({ force: true, now: later(3) });
     expect(intentRow()).toMatchObject({ status: 'FAILED_PAYMENT', error_code: 'X402_LATE_SETTLEMENT' });
     expect(sendTelegramAlert.mock.calls.some(([t]) => String(t).includes('LATE SETTLEMENT'))).toBe(true);
+  });
+});
+
+describe('x402 — cancelled authorizations and v2 payloads', () => {
+  it('a refused authorization that was CANCELLED (used, but no payment reached the vault) is closed as nothing owed, without an alarm', async () => {
+    facilitator = facilitatorRefuses();
+    authStates[NONCE] = false;
+    await pay();
+    authStates[NONCE] = true; // cancelAuthorization marks it used too
+    db.tables.onchain_payments = [];
+    sendTelegramAlert.mockClear();
+    await reconcileX402Intents({ force: true, now: later(3) });
+    expect(intentRow()).toMatchObject({ error_code: 'X402_SETTLE_REFUSED' }); // still waiting for the index
+    await reconcileX402Intents({ force: true, now: later(60) });
+    expect(intentRow()).toMatchObject({ status: 'FAILED_PAYMENT', error_code: 'X402_AUTH_CANCELLED' });
+    expect(sendTelegramAlert.mock.calls.some(([t]) => String(t).includes('LATE SETTLEMENT'))).toBe(false);
+  });
+
+  it('a v2 payment (scheme inside `accepted`) is settled as clean v1: scheme lifted, accepted dropped', async () => {
+    receipts[SETTLE_TX] = settledReceipt();
+    const flat = JSON.parse(Buffer.from(header(), 'base64').toString());
+    const { scheme: _s, ...noScheme } = flat;
+    void _s;
+    const v2 = Buffer.from(JSON.stringify({ ...noScheme, x402Version: 2, accepted: { scheme: 'exact', network: 'eip155:42220', asset: CELO_TOKENS.USDC.address } })).toString('base64');
+    const r = await pay(bill, v2);
+    expect(r.json.status).toBe('SUCCESS');
+    const sent = lastSettleBody.paymentPayload as Record<string, unknown>;
+    expect(sent).toMatchObject({ scheme: 'exact', x402Version: 1, network: 'celo' });
+    expect(sent).not.toHaveProperty('accepted');
+  });
+});
+
+describe('x402 — a resubmitted header whose authorization already settled', () => {
+  // 2026-10-16: an agent re-sent a USA₮ header that had just settled. Tether's revert for a spent
+  // nonce is "TetherToken: auth invalid"; it was reported as a signature mismatch and the agent
+  // was told nothing was charged.
+  it("reads Tether's \"auth invalid\" as already used and answers from the existing row", async () => {
+    receipts[SETTLE_TX] = settledReceipt();
+    await pay();
+    db.tables.transactions[0].status = 'SUCCESS';
+    simulateRevert = new Error('The contract function "transferWithAuthorization" reverted with the following reason:\nTetherToken: auth invalid');
+    sendTelegramAlert.mockClear();
+    const again = await pay();
+    expect(again.json).toMatchObject({ status: 'SUCCESS', tx_hash: SETTLE_TX });
+    expect(again.json.errorCode).toBeUndefined();
+    expect(facilitatorCalls).toBe(1);
+    expect(executeVend).toHaveBeenCalledTimes(1);
+    expect(sendTelegramAlert.mock.calls.some(([t]) => String(t).includes('SIGNATURE REFUSED'))).toBe(false);
+  });
+
+  it('asks the token when a revert names nothing it recognises, and a spent nonce is not a bad signature', async () => {
+    authStates[NONCE] = true;
+    simulateRevert = new Error('execution reverted');
+    db.tables.transactions.push({ id: 'prior', status: 'PROCESSING', tx_hash: SETTLE_TX, x402_payer: PAYER.toLowerCase(), x402_nonce: NONCE.toLowerCase() });
+    const r = await pay();
+    expect(r.json.errorCode).toBeUndefined();
+    expect(r.json).toMatchObject({ status: 'TIMEOUT' });
+    expect(facilitatorCalls).toBe(0);
+  });
+
+  it('still refuses a genuinely bad signature over an unspent nonce', async () => {
+    authStates[NONCE] = false;
+    simulateRevert = new Error('TetherToken: invalid signature');
+    const r = await pay();
+    expect(r.json.errorCode).toBe('SIGNATURE_MISMATCH');
+    expect(facilitatorCalls).toBe(0);
+    expect(db.tables.transactions).toHaveLength(0);
   });
 });
 

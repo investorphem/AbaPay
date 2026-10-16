@@ -927,6 +927,22 @@ async function handleX402Request(req: Request) {
       return NextResponse.json({ x402Version: 1, error: 'Malformed X-PAYMENT header', accepts: [acceptEntry] }, { status: 402 });
     }
 
+    // 🔴 x402 v2 PAYLOADS CARRY `scheme` INSIDE `accepted`, NOT AT THE TOP LEVEL.
+    //
+    // Our own app sends the flat v1 shape ({ x402Version, scheme, network, payload }). A generic
+    // v2 client (the kind an agent-facing endpoint gets from directories and Celo's buy CLI) sends
+    // { x402Version: 2, accepted: { scheme, network, asset, … }, payload }. We settle as v1 (see
+    // settleX402Version), so a v2 payload went to the facilitator with no top-level scheme and was
+    // refused "unsupported_scheme" after the payer had already signed. Normalize to v1 here:
+    // lift scheme from `accepted` and drop the v2-only block.
+    {
+      const accepted = decodedPayload.accepted as { scheme?: unknown } | undefined;
+      if (accepted && typeof accepted === 'object') {
+        if (!decodedPayload.scheme) decodedPayload.scheme = typeof accepted.scheme === 'string' ? accepted.scheme : 'exact';
+        delete decodedPayload.accepted;
+      }
+    }
+
     // 🔴 CHECK THE PAYLOAD BEFORE SPENDING A FACILITATOR ROUND-TRIP ON IT.
     //
     // An authorization that cannot settle comes back from the facilitator as
@@ -1150,7 +1166,13 @@ async function handleX402Request(req: Request) {
           // ⚠️ "Already used" is NOT a bad signature and MUST NOT fall back — the money has
           // moved. Let the settle path and authorizationWasConsumed handle it as they already do,
           // rather than sending the payer to sign a second payment for a bill they just paid.
-          authorizationAlreadyUsed = /authorization is used|already (been )?used|nonce.{0,20}used/i.test(reason);
+          //
+          // Tether's EIP3009 says it as "TetherToken: auth invalid" (a bad signature is "TetherToken:
+          // invalid signature"). 2026-10-16: an agent re-sent a USA₮ header that had just settled;
+          // that revert was reported as a signature mismatch and the agent told "nothing was
+          // charged". Wording differs per token, so when it matches nothing, ask the token itself.
+          authorizationAlreadyUsed = /authorization is used|already (been )?used|nonce.{0,20}used|auth invalid/i.test(reason)
+            || (await authorizationWasConsumed(chainKey, isMainnet, usdc.address, auth)) === true;
           signerOk = authorizationAlreadyUsed;
         }
         onChainAnswered = true;
