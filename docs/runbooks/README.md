@@ -13,7 +13,12 @@ component is at `GET /api/admin/health` (admin session required). It returns `co
 matches Vercel's. A 401 or 503 from the route means a secret problem. Then open the run in the
 Vercel logs.
 
-**Do:** re-run the job by hand with the secret. Until `/api/cleanup` runs, stuck payments and x402
+**Backup:** `/api/cleanup` (every 15 min) and `/api/schedules/run` (06:05 and 18:05 UTC) are also called by
+.github/workflows/cron-jobs.yml, and `/api/cron/onchain-index` by onchain-index.yml, so a
+cron-job.org job being disabled (it auto-disables after repeated failures or ~30s timeouts) no
+longer stops them. Set each healthchecks.io period to match (cleanup 15 min, schedules 12 h).
+
+**Do:** re-run the job by hand with the secret. Or Actions → Cron jobs → Run workflow, and pick the job. Until `/api/cleanup` runs, stuck payments and x402
 intents aren't reconciled, and until `/run-instant` runs, one-off schedules don't fire.
 
 ## Fulfilment job needs review (Telegram "FULFILMENT JOB NEEDS REVIEW")

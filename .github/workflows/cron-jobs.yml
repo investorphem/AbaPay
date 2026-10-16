@@ -1,0 +1,82 @@
+name: Cron jobs
+
+# Calls AbaPay's maintenance endpoints on a fixed cadence — the backup to cron-job.org, which
+# auto-disables a job after repeated failures (its ~30s timeout is tight for /api/cleanup).
+# On 2026-10-16 both checks below went DOWN on healthchecks.io with only cron-job.org calling
+# them; the on-chain index stayed up because onchain-index.yml was already its backup.
+#
+#   /api/cleanup         every 15 min — stuck-payment requery, x402 + NIM intent sweeps,
+#                        refund verification, provider balance alerts
+#   /api/schedules/run   twice a day  — recurring bills
+#
+# Running alongside cron-job.org is safe: cleanup is idempotent, and the scheduler claims each
+# bill atomically for the day before any money moves (src/lib/scheduler.ts), so a second caller
+# can never pay a bill twice. GitHub may start scheduled runs late; nothing is skipped by that.
+# Each endpoint pings its own healthchecks.io URL (HEALTHCHECK_URL_*) when it finishes.
+
+on:
+  schedule:
+    - cron: '*/15 * * * *'
+    - cron: '5 6,18 * * *'
+  workflow_dispatch:
+    inputs:
+      job:
+        description: 'Which job to run now'
+        type: choice
+        options: [cleanup, schedules]
+        default: cleanup
+
+jobs:
+  cleanup:
+    name: Cleanup sweep
+    if: github.event_name == 'workflow_dispatch' && inputs.job == 'cleanup' || github.event.schedule == '*/15 * * * *'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    concurrency:
+      group: cron-cleanup
+      cancel-in-progress: false
+    env:
+      APP_URL: ${{ secrets.APP_URL }}
+      CRON_SECRET: ${{ secrets.CRON_SECRET }}
+    steps:
+      - name: Call /api/cleanup
+        run: |
+          [ -n "$APP_URL" ] && [ -n "$CRON_SECRET" ] || { echo "::error::Missing APP_URL or CRON_SECRET repository secret."; exit 1; }
+          # APP_URL must be the canonical host (www): curl drops Authorization on a cross-host redirect.
+          code=$(curl -sS --max-time 300 -o /tmp/out.json -w '%{http_code}' -X POST \
+            -H "Authorization: Bearer $CRON_SECRET" "$APP_URL$ENDPOINT" || echo 000)
+          echo "HTTP $code"; head -c 4000 /tmp/out.json; echo
+          case "$code" in
+            200) ;;
+            401) echo "::error::CRON_SECRET is rejected by $APP_URL (401)."; exit 1 ;;
+            *)   echo "::error::$ENDPOINT failed (HTTP $code)."; exit 1 ;;
+          esac
+        env:
+          ENDPOINT: /api/cleanup
+
+  schedules:
+    name: Recurring schedules
+    if: github.event_name == 'workflow_dispatch' && inputs.job == 'schedules' || github.event.schedule == '5 6,18 * * *'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    concurrency:
+      group: cron-schedules
+      cancel-in-progress: false
+    env:
+      APP_URL: ${{ secrets.APP_URL }}
+      CRON_SECRET: ${{ secrets.CRON_SECRET }}
+    steps:
+      - name: Call /api/schedules/run
+        run: |
+          [ -n "$APP_URL" ] && [ -n "$CRON_SECRET" ] || { echo "::error::Missing APP_URL or CRON_SECRET repository secret."; exit 1; }
+          # APP_URL must be the canonical host (www): curl drops Authorization on a cross-host redirect.
+          code=$(curl -sS --max-time 300 -o /tmp/out.json -w '%{http_code}' -X POST \
+            -H "Authorization: Bearer $CRON_SECRET" "$APP_URL$ENDPOINT" || echo 000)
+          echo "HTTP $code"; head -c 4000 /tmp/out.json; echo
+          case "$code" in
+            200) ;;
+            401) echo "::error::CRON_SECRET is rejected by $APP_URL (401)."; exit 1 ;;
+            *)   echo "::error::$ENDPOINT failed (HTTP $code)."; exit 1 ;;
+          esac
+        env:
+          ENDPOINT: /api/schedules/run
