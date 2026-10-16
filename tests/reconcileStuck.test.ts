@@ -93,6 +93,17 @@ describe('reconcileStuckRow (VTpass)', () => {
     expect(alerts).toHaveLength(1);
   });
 
+  it("VTpass's code 015 (INVALID REQUEST ID) is no record too, with the reason on the row", async () => {
+    // 2026-10-16: /pay got an HTML page, VTpass never took the order, and its requery answered
+    // 015 — which was read as "still processing" and left the payment PROCESSING forever.
+    requery = { code: '015', response_description: 'INVALID REQUEST ID' };
+    expect(await reconcileStuckRow(row(), BASE)).toBe('alerted');
+    expect(tx().error_code).toBe('STUCK_ALERTED');
+    expect(String(tx().api_response)).toMatch(/no record.*015 INVALID REQUEST ID.*safe to refund/);
+    expect(alerts).toHaveLength(1);
+    expect(enqueueRefund).not.toHaveBeenCalled(); // a person decides, as before
+  });
+
   it('still processing at VTpass → pending, nothing written', async () => {
     requery = { content: { transactions: { status: 'pending' } }, response_description: 'TRANSACTION PROCESSING' };
     expect(await reconcileStuckRow(row(), BASE)).toBe('pending');
@@ -145,5 +156,18 @@ describe('reconcileStuckProcessing', () => {
     expect(await reconcileStuckProcessing({ force: true })).toMatchObject({ ok: true, reconciled: 1 });
     expect(db.tables.transactions.map((r) => r.status)).toEqual(['SUCCESS', 'PENDING', 'PROCESSING']);
     expect(await reconcileStuckProcessing()).toMatchObject({ skipped: true });
+  });
+});
+
+describe('vtpassHasNoRecord', () => {
+  it('reads every way VTpass says it never got the request, and nothing else', async () => {
+    const { vtpassHasNoRecord } = await import('@/lib/vtpassReply');
+    expect(vtpassHasNoRecord({})).toBe(true);
+    expect(vtpassHasNoRecord({ code: '015', response_description: 'INVALID REQUEST ID' })).toBe(true);
+    expect(vtpassHasNoRecord({ code: '000', response_description: 'Transaction does not exist' })).toBe(true);
+    expect(vtpassHasNoRecord({ code: '000', content: { transactions: { status: 'pending' } }, response_description: 'TRANSACTION PROCESSING' })).toBe(false);
+    expect(vtpassHasNoRecord({ code: '015', content: { transactions: { status: 'delivered' } } })).toBe(false);
+    expect(vtpassHasNoRecord({ code: '016', response_description: 'TRANSACTION FAILED' })).toBe(false);
+    expect(vtpassHasNoRecord(null)).toBe(false);
   });
 });
