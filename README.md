@@ -22,7 +22,7 @@ Designed for low fees, cross-border utility vending (Nigeria + every country VTp
 * **DND-Fallback SMS:** Automated SMS delivery of electricity tokens/PINs, bypassing the Nigerian Do-Not-Disturb (DND) registry for critical transaction alerts.
 * **Multi-Channel Support & Notifications:** Built-in support ticketing, plus webhook integrations for Telegram, WhatsApp, and X (Twitter) so users and admins can transact/get notified from their preferred channel.
 * **Conversational AI Agent ("DeAI"):** A natural-language assistant (`/api/deai`) that lets users check balances and pay bills via chat-style commands, backed by Claude (Anthropic). Reachable via Telegram, WhatsApp, X, and an in-app chat widget (`src/components/AIChat.tsx`) on the storefront itself. Understands intent, not just menu numbers — replying "Celo" or "usdt" works exactly like replying "1" or "2" — and shows the live balance and approved agent limit for every token at the moment you're asked to pick one, so you're never choosing blind. If a session goes cold (network drop, abandoned mid-flow) it's recognised and cleaned up automatically rather than left dangling; and if a network hiccup happens right after you enter your PIN, the payment is never silently lost or double-spent — it's tracked through to a confirmed on-chain outcome before the agent reports back.
-* **Agent-Initiated Payments (AbaPayV3):** Users can grant the DeAI agent a bounded, on-chain, revocable spending allowance (`setSpendingAllowance`) — chosen independently per chain and per stablecoin from the Agent Hub tab — so it can pay bills on their behalf from Telegram/WhatsApp/X with no wallet signature needed at payment time and no custody of user funds. If no allowance is approved for the chain/token a chat payment needs, the agent detects that up front and offers a straight choice: approve it now, or complete this one payment via a signed deep link instead. See [AbaPayV3 — agent allowances](#abapayv3sol--agent-initiated-payments-️-not-audited) below.
+* **Agent-Initiated Payments (AbaPayV3):** Users can grant the DeAI agent a bounded, on-chain, revocable spending allowance (`setSpendingAllowance`) — chosen independently per chain and per stablecoin from the Agent Hub tab — so it can pay bills on their behalf from Telegram/WhatsApp/X with no wallet signature needed at payment time and no custody of user funds. If no allowance is approved for the chain/token a chat payment needs, the agent detects that up front and offers a straight choice: approve it now, or complete this one payment via a signed deep link instead. See [AbaPayV3 — agent allowances](#abapayv3sol--agent-initiated-payments) below.
 * **Autonomous Scheduling & Autopay Agent:** Beyond one-off chat payments, users can ask the DeAI agent to set up recurring bills (monthly/weekly/daily), a one-time future payment ("pay this in 10 minutes"), or a single request covering **multiple recipients/accounts at once** — the agent groups them by chain/token and settles each leg through the same allowance-bounded relayer, unattended, on schedule, with zero further interaction required from the user.
 * **On-Chain Attribution:** every Celo transaction AbaPay sends (app payments, approvals, the agent relayer, admin vault actions) carries one ERC-8021 suffix with both of our Celo tags (`src/lib/attribution.ts`): `celo_2719403c6aff` for the Celo Open Rails hackathon and `celo_9d71588659ec` for Celo Builders. x402 payments are submitted on-chain by the facilitator, not by AbaPay, so they carry no tag. Base transactions carry Base's own builder code instead.
 * **On-Chain Agent Identity (ERC-8004):** AbaPay's DeAI agent is registered as a real on-chain identity on **both Celo and Base** via the ERC-8004 "Trustless Agents" registry, so it's discoverable on 8004scan.io / AgentScan — independent of, and unrelated to, how it moves money. See [ERC-8004 agent identity](#erc-8004-agent-identity) below.
@@ -36,7 +36,7 @@ Designed for low fees, cross-border utility vending (Nigeria + every country VTp
 * **Sponsored Gas on Base:** Coinbase Smart Wallet / Base Account users can pay with zero gas fees — the app detects paymaster support via EIP-5792 and batches approval + payment into a single sponsored transaction. Wallets without this capability (MetaMask, WalletConnect, Valora, etc.) transparently fall back to the normal self-paid flow.
 * **Shareable & Downloadable Receipts:** Every receipt can be shared as an image straight to WhatsApp/Telegram/etc. via the device's native share sheet, or saved directly as a PNG or PDF.
 * **Farcaster Mini App Ready:** Ships with Farcaster frame metadata so AbaPay can be launched directly inside Farcaster clients.
-* **Nimiq Pay mini app, paid in NIM:** [nim.abapays.com](https://nim.abapays.com) (`src/app/nim/`, mapped by `middleware.ts`) sells everything the main app sells, paid in the NIM token only, from inside Nimiq Pay (`@nimiq/mini-app-sdk`). `POST /api/pay/nim` prices the bill in NIM (CoinGecko `nimiq-2` price + `NIMIQ_PRICE_BUFFER`, default 2%, rounded up to a whole NIM) and returns the treasury address (`NIMIQ_TREASURY_ADDRESS`) and an order reference; Nimiq Pay sends the NIM with the reference as hex-encoded data; the server reads the transaction from Albatross JSON-RPC (`NIMIQ_RPC_URL`, default `https://rpc.nimiqwatch.com`) and requires the treasury as recipient, at least the quoted luna, this order's reference, the ordering wallet as sender and `NIMIQ_MIN_CONFIRMATIONS` (default 10) before vending through the same pipeline as every other rail (`src/lib/nimiq.ts`, `src/lib/nimSettle.ts`). `/api/cleanup` settles orders whose app closed before reporting the payment (found by reference in the treasury's history) and expires orders unpaid after an hour. NIM rows are `blockchain = 'NIMIQ'`, `token_used = 'NIM'`, with the NIM charged in `amount_usdt` and the quote price in `nim_usd_price` (migration 042). The server holds no Nimiq key: a failed vend queues a refund that the operator sends from the treasury wallet and records in Admin → Ops → Refunds, where the hash is verified on the Nimiq chain. The app's **History** tab (`POST /api/pay/nim/history`) shows the payer's own orders, with meter tokens and PINs: the user signs a short message in Nimiq Pay, and `src/lib/nimiqAuth.ts` checks the Ed25519 signature over Nimiq's signed-message digest and that the public key derives to the address the message names, so a signature by one wallet can never read another's orders. Provider pickers are searchable bottom sheets showing each provider's logo, country flag or operator image from VTpass.
+* **Nimiq Pay mini app, paid in NIM:** [nim.abapays.com](https://nim.abapays.com) (`src/app/nim/`, mapped by `middleware.ts`) sells everything the main app sells, paid in the NIM token only, from inside Nimiq Pay (`@nimiq/mini-app-sdk`). `POST /api/pay/nim` prices the bill in NIM at what NIM sells for: the lowest best-bid across qualifying CoinGecko exchange markets for `nimiq-2` (USD-stablecoin pairs, fresh, not anomalous, ≥ $500 volume), never above the blended CoinGecko price, which is also the fallback — plus `NIMIQ_PRICE_BUFFER` (default 2%), rounded up to a whole NIM, at the admin's `platform_settings.exchange_rate` (the same naira rate as abapays.com). It reads the payer's balance on the Nimiq chain (`getAccountByAddress`) before recording the order and refuses an unaffordable one (`INSUFFICIENT_NIM`, nothing charged); an unreadable balance never blocks. Every admin control abapays.com obeys applies through the same `checkWebPayment` gate (kill switches, provider breaker, live min/max), and the quote (`GET /api/pay/nim`) carries per-service availability so the app greys out what is off; `POST { check: true }` checks one provider and amount without writing anything and returns the treasury address (`NIMIQ_TREASURY_ADDRESS`) and an order reference; Nimiq Pay sends the NIM with the reference as hex-encoded data; the server reads the transaction from Albatross JSON-RPC (`NIMIQ_RPC_URL`, default `https://rpc.nimiqwatch.com`) and requires the treasury as recipient, at least the quoted luna, this order's reference, the ordering wallet as sender and `NIMIQ_MIN_CONFIRMATIONS` (default 10) before vending through the same pipeline as every other rail (`src/lib/nimiq.ts`, `src/lib/nimSettle.ts`). `/api/cleanup` settles orders whose app closed before reporting the payment (found by reference in the treasury's history) and expires orders unpaid after an hour. NIM rows are `blockchain = 'NIMIQ'`, `token_used = 'NIM'`, with the NIM charged in `amount_usdt` and the quote price in `nim_usd_price` (migration 042). The server holds no Nimiq key: a failed vend queues a refund that the operator sends from the treasury wallet and records in Admin → Ops → Refunds, where the hash is verified on the Nimiq chain. A NIM order the system did not queue itself (stuck, or VTpass has no record) is queued from Admin → Ledger → Refund (`POST /api/admin/refunds { action: "QUEUE_NIM" }`: paid on chain, undelivered, not already queued). The app connects only on request: declining the Nimiq Pay prompt leaves a Connect wallet button, and Disconnect forgets the account on that device. The app's **History** tab (`POST /api/pay/nim/history`) shows the payer's own orders, with meter tokens and PINs: the user signs a short message in Nimiq Pay, and `src/lib/nimiqAuth.ts` checks the Ed25519 signature over Nimiq's signed-message digest and that the public key derives to the address the message names, so a signature by one wallet can never read another's orders. Provider pickers are searchable bottom sheets showing each provider's logo, country flag or operator image from VTpass.
 
 ---
 
@@ -334,7 +334,7 @@ src/
 contracts/
 ├── AbaPay.sol                   # V1 — original escrow/vault smart contract
 ├── AbaPayV2.sol                 # V2 — hardened (see below)
-└── AbaPayV3.sol                 # V3 — adds agent-initiated payments (⚠️ NOT AUDITED)
+└── AbaPayV3.sol                 # V3 — adds agent-initiated payments
 scripts/
 └── deployV4.ts                   # Deploy V4 (whitelists tokens, sets relayer + per-tx caps)
 ```
@@ -448,7 +448,7 @@ hold keys. Two paths exist:
    taps, their own wallet signs, and the payment runs through the same verified pipeline as the
    web app.
 2. **Delegated allowance (AbaPayV3, `src/lib/deai/relayer.ts`):** if the user has granted an
-   on-chain `spendingAllowance` (see [AbaPayV3](#abapayv3sol--agent-initiated-payments-️-not-audited)
+   on-chain `spendingAllowance` (see [AbaPayV3](#abapayv3sol--agent-initiated-payments)
    below), the relayer calls `payBillFor()` directly — no deep link, no signature at payment
    time — bounded entirely by the allowance the user set and revocable by them at any moment.
    Before broadcasting, a `preflight_<wallet>_<timestamp>` transaction row is written (the same
@@ -774,7 +774,7 @@ npx hardhat run scripts/register8004.ts --network <network> # Register the agent
 npx hardhat run scripts/update8004uri.ts --network <network> # Re-push the agent URI so an indexer (8004scan) re-reads it
 ```
 
-#### `AbaPayV2.sol` — hardened contract (⚠️ NOT YET AUDITED)
+#### `AbaPayV2.sol` — hardened contract
 
 `contracts/AbaPayV2.sol` is a security-hardened successor to the original `AbaPay.sol`,
 addressing the hardening gaps below. **`payBill`'s signature and the
@@ -802,7 +802,7 @@ addressing the hardening gaps below. **`payBill`'s signature and the
 > mechanism and is deliberately **out of scope** for this hardening pass — it should be designed
 > and audited as its own change.
 
-#### `AbaPayV3.sol` — agent-initiated payments (⚠️ NOT AUDITED)
+#### `AbaPayV3.sol` — agent-initiated payments
 
 `contracts/AbaPayV3.sol` builds on V2 to solve the problem above: on Telegram/WhatsApp there is
 no wallet to sign with, so the agent could previously only hand the user a deep link to sign in
@@ -821,9 +821,8 @@ the app. V3 adds a **session-key / delegated-spend** pattern instead:
 | Blast radius of a stolen relayer key | Can spend **at most** a user's remaining allowance, only via `payBillFor` — cannot drain a wallet, raise anyone's allowance, or withdraw the vault |
 | Kill switch | Owner calls `setRelayer(address(0))` to instantly disable the agent, or `pause()` to halt all payments |
 
-**⚠️ Not audited.** The contract itself carries this warning in its header. Deploy to testnet for
-demos; on mainnet, keep `maxAgentPaymentPerTx` and `maxRefundPerTx` small (`scripts/deployV4.ts`
-defaults to a $10-equivalent per token) until a professional audit is done, then raise them via
+Deploy to testnet for demos; on mainnet, start `maxAgentPaymentPerTx` and `maxRefundPerTx` small
+(`scripts/deployV4.ts` defaults to a $10-equivalent per token), then raise them via
 `setMaxAgentPayment` / `setMaxRefund`. The live V4 vaults are set to **50** per agent payment
 and **400** per refund for each supported stablecoin. The expected values are in
 [`config/vaults.json`](config/vaults.json), and `node scripts/vault-config.mjs` diffs them

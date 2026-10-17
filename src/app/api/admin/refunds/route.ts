@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server';
 import { supabaseAdmin } from '@/utils/supabase';
 import { verifyAdminRequest } from '@/utils/adminAuth';
 import { verifyRefundOnChain, completeRefund, rememberRefundHash, refundHashAlreadyUsed } from '@/lib/refundVerify';
+import { enqueueRefund } from '@/lib/refunds';
 
 // ⚡ ADMIN: REFUND QUEUE
 //
@@ -56,7 +57,38 @@ export async function POST(req: Request) {
   if (!auth.authorized) return NextResponse.json({ success: false, message: 'Unauthorized' }, { status: 401 });
 
   try {
-    const { id, refund_tx_hash, action, notes } = await req.json();
+    const { id, refund_tx_hash, action, notes, transaction_id } = await req.json();
+
+    // ⚡ QUEUE A NIM REFUND BY HAND. A NIM order the system didn't queue itself (stuck, or VTpass
+    // has no record of it) had nowhere to record the treasury's refund: the Ops list only holds
+    // queued rows. This puts a PAID, undelivered NIM order on it; the operator then sends the NIM
+    // from the treasury and records the hash there as usual (verified on the Nimiq chain).
+    if (action === 'QUEUE_NIM') {
+      if (!transaction_id) return NextResponse.json({ success: false, message: 'Transaction id required' }, { status: 400 });
+      const { data: tx } = await supabaseAdmin.from('transactions').select('*').eq('id', transaction_id).maybeSingle();
+      if (!tx) return NextResponse.json({ success: false, message: 'Transaction not found' }, { status: 404 });
+      if (String(tx.blockchain || '').toUpperCase() !== 'NIMIQ') {
+        return NextResponse.json({ success: false, message: 'Only NIM orders are queued this way.' }, { status: 400 });
+      }
+      if (!/^[0-9a-f]{64}$/.test(String(tx.tx_hash || ''))) {
+        return NextResponse.json({ success: false, message: 'This order was never paid on the Nimiq chain — there is nothing to refund.' }, { status: 400 });
+      }
+      if (tx.status === 'SUCCESS' || tx.status === 'REFUNDED') {
+        return NextResponse.json({ success: false, message: `This order is ${tx.status === 'SUCCESS' ? 'delivered' : 'already refunded'} — nothing to refund.` }, { status: 409 });
+      }
+      const { data: existing } = await supabaseAdmin.from('refund_queue').select('id, status').eq('transaction_id', tx.id).in('status', ['PENDING', 'APPROVED', 'COMPLETED']);
+      if (existing?.length) return NextResponse.json({ success: false, message: 'A refund for this order is already in Ops → Refunds.' }, { status: 409 });
+
+      const queued = await enqueueRefund({
+        transactionId: tx.id, txHash: tx.tx_hash, walletAddress: tx.wallet_address || '',
+        tokenUsed: 'NIM', amountCrypto: Number(tx.amount_usdt), amountNaira: Number(tx.amount_naira),
+        blockchain: 'NIMIQ', reason: notes || `Queued by admin ${auth.address || ''}`.trim(),
+        serviceCategory: tx.service_category, sourceChannel: tx.source_channel || 'NIMIQ',
+        userMessage: "This didn't go through. Your NIM is being refunded.",
+      });
+      if (!queued.queued) return NextResponse.json({ success: false, message: queued.reason || 'Could not queue the refund.' }, { status: 400 });
+      return NextResponse.json({ success: true, message: 'Queued. Send the NIM from the treasury, then record the hash in Ops → Refunds.' });
+    }
 
     if (!id) return NextResponse.json({ success: false, message: 'Refund id required' }, { status: 400 });
 

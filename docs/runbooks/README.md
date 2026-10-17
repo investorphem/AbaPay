@@ -133,3 +133,21 @@ signed header is answered from the first attempt. Ask them to send `X-Agent-Name
 
 None of this is shown on receipts or any public page (migration 044; only `/api/admin/data`
 reads it).
+
+
+## Refunding a NIM order (nim.abapays.com)
+
+**When:** a NIM order failed to deliver (Telegram "refund queued"), or is stuck and VTpass has no
+record of it. AbaPay's servers hold no Nimiq key, so a person sends every NIM refund.
+
+**Do:**
+1. Admin → Ops → Refunds. A failed delivery is already listed. A stuck order isn't: open it in
+   Admin → Ledger and press **Refund**. It's queued only if it was paid on the Nimiq chain and
+   is neither delivered nor already refunded.
+2. In Nimiq Pay or the Nimiq Wallet, send **exactly the NIM shown** from the treasury wallet
+   (`NIMIQ_TREASURY_ADDRESS`) to the payer address shown.
+3. Paste the 64-character transaction hash into the row and press **Record NIM refund**. It's
+   verified on the Nimiq chain (right recipient, at least the amount) before the order is marked
+   refunded, and a hash can't be used for two refunds.
+
+The refund is the same number of NIM the customer paid, not a naira or dollar value (/terms).
