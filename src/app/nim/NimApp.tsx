@@ -88,6 +88,7 @@ export default function NimApp() {
   const [balanceLuna, setBalanceLuna] = useState<number | null>(null);
   const [connecting, setConnecting] = useState(false);
   const [connectError, setConnectError] = useState('');
+  const [addrCopied, setAddrCopied] = useState(false);
   // The Nimiq network Nimiq Pay is on. Balances and payments are read on that network, so a host
   // on testnet shows 0 NIM against our mainnet service — said plainly instead of a silent zero.
   const [hostNetwork, setHostNetwork] = useState<string | undefined>(undefined);
@@ -98,6 +99,14 @@ export default function NimApp() {
   const refreshBalance = useCallback(async (addr: string) => {
     const p = nimiq.current;
     if (!p || !addr) return;
+    // 🔴 THE CHAIN IS THE SOURCE OF TRUTH. Nimiq Pay's getBalance still answered 0 for funded
+    // wallets after the consensus wait below (2026-10-17), so the balance is read from the Nimiq
+    // chain by our server — the same read Pay uses — and the host's figure is only the fallback
+    // for when the chain can't be reached.
+    try {
+      const r = await getJson<{ balance_luna: number | null }>(`/api/pay/nim/balance?address=${encodeURIComponent(addr)}`);
+      if (typeof r?.balance_luna === 'number') { setBalanceLuna(r.balance_luna); return; }
+    } catch { /* fall back to the host below */ }
     try {
       const hasConsensusCheck = typeof (p as { isConsensusEstablished?: unknown }).isConsensusEstablished === 'function';
       for (let i = 0; hasConsensusCheck && i < 12; i++) {
@@ -487,10 +496,16 @@ export default function NimApp() {
           <p className="text-[10px] uppercase tracking-widest font-bold opacity-50">Balance</p>
           <p className="text-sm font-black tabular-nums">{balanceLuna === null ? '—' : nimBalanceFmt(balanceLuna / LUNA)}</p>
           {balanceUsd !== null && <p className="text-[10px] opacity-60 tabular-nums">≈ {usdFmt(balanceUsd)}</p>}
-          <button type="button" onClick={disconnect} disabled={busy} title={account}
-            className="mt-1 inline-flex items-center gap-1 text-[10px] font-bold opacity-60 hover:opacity-100 disabled:opacity-30">
-            {account ? `${account.replace(/\s+/g, '').slice(0, 4)}…${account.replace(/\s+/g, '').slice(-4)}` : ''} <LogOut size={10} /> Disconnect
-          </button>
+          {/* The address the balance is read for — copyable, so a wrong account is easy to spot. */}
+          <div className="mt-1 flex items-center justify-end gap-2 text-[10px] font-bold">
+            <button type="button" title={`Copy ${account}`} className="inline-flex items-center gap-1 opacity-60 hover:opacity-100"
+              onClick={() => { void navigator.clipboard?.writeText(account).then(() => { setAddrCopied(true); setTimeout(() => setAddrCopied(false), 1500); }).catch(() => {}); }}>
+              {account ? `${account.replace(/\s+/g, '').slice(0, 4)}…${account.replace(/\s+/g, '').slice(-4)}` : ''} {addrCopied ? <Check size={10} /> : <Copy size={10} />}
+            </button>
+            <button type="button" onClick={disconnect} disabled={busy} className="inline-flex items-center gap-1 opacity-60 hover:opacity-100 disabled:opacity-30">
+              <LogOut size={10} /> Disconnect
+            </button>
+          </div>
         </div>
       </header>
 
