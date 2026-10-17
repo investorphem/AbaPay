@@ -49,7 +49,9 @@ const STATS_HOST_SKIP = /^\/(api|stats)(\/|$)/;
 // page paths are prefixed with /nim, /api stays as-is (it calls /api/pay/nim, /api/variations,
 // /api/verify …), and so do static files, the receipt pages and paths already under /nim.
 const NIM_HOSTS = new Set(['nim.abapays.com']);
-const NIM_HOST_SKIP = /^\/(api|nim|receipt|terms|privacy)(\/|$)/;
+// /docs /terms /privacy are served here too, so their Back button (href="/") returns to the NIM
+// app instead of sending a NIM user to abapays.com.
+const NIM_HOST_SKIP = /^\/(api|nim|receipt|terms|privacy|docs)(\/|$)/;
 
 // ⚡ CORS FOR THE PUBLIC AGENT-FACING API SURFACE — exact-path allowlist, deliberately narrow.
 // Without this, a browser-based agent (including agents.abapays.com's own "try it" panels)

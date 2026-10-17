@@ -33,7 +33,8 @@ describe('nim.abapays.com', () => {
     expect(rewrittenTo(run('nim.abapays.com', path))).toBe(to);
   });
 
-  it.each(['/api/pay/nim', '/api/variations', '/receipt/abc', '/terms', '/nim', '/logo.png'])('leaves %s alone', (path) => {
+  // /docs /terms /privacy stay on this host, so their Back button ("/") lands in the NIM app.
+  it.each(['/api/pay/nim', '/api/variations', '/receipt/abc', '/terms', '/privacy', '/docs', '/nim', '/logo.png'])('leaves %s alone', (path) => {
     expect(rewrittenTo(run('nim.abapays.com', path))).toBeNull();
   });
 });
