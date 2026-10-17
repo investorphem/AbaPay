@@ -17,6 +17,8 @@ vi.mock('server-only', () => ({}));
 vi.mock('@/utils/supabase', () => ({ get supabaseAdmin() { return fakeSupabase(db); } }));
 vi.mock('@/lib/telegram', () => ({ sendTelegramAlert: async (m: string) => { alerts.push(m); } }));
 vi.mock('@/lib/vend', () => ({ executeVend: (...a: unknown[]) => executeVend(...(a as [])), getStrictRequestId: () => 'req-nim' }));
+const refunds: Record<string, unknown>[] = [];
+vi.mock('@/lib/refunds', () => ({ enqueueRefund: async (p: Record<string, unknown>) => { refunds.push(p); db.tables.refund_queue = [...(db.tables.refund_queue || []), { id: 'rq' + refunds.length, tx_hash: p.txHash }]; return { queued: true }; } }));
 vi.mock('@/lib/vendInput', () => ({ vendInputFromRow: (row: unknown, extra: unknown) => ({ row, extra }) }));
 vi.mock('@/lib/nimiq', async () => {
   const actual = await vi.importActual<typeof import('@/lib/nimiq')>('@/lib/nimiq');
@@ -41,6 +43,7 @@ const tx = () => db.tables.transactions[0];
 
 beforeEach(() => {
   alerts.length = 0;
+  refunds.length = 0;
   executeVend.mockClear();
   proof = { ok: true, tx: { hash: HASH } };
   treasury = new Map();
@@ -116,5 +119,53 @@ describe('reconcileNimIntents', () => {
     expect(r).toMatchObject({ ok: true, expired: 1 });
     expect(db.tables.transactions.find((t) => t.id === 'old')?.status).toBe('EXPIRED');
     expect(db.tables.transactions.find((t) => t.id === 'new')?.status).toBe('PENDING');
+  });
+});
+
+describe('reconcileNimIntents — a payment that arrives after its order expired', () => {
+  const LATE = 'b'.repeat(64);
+  const expired = (over: Record<string, unknown> = {}) => row({ status: 'EXPIRED', error_code: 'PREFLIGHT_UNCONFIRMED', request_id: 'req-late', created_at: new Date(Date.now() - 5 * 3600_000).toISOString(), ...over });
+
+  beforeEach(() => {
+    db = createFakeDb({ transactions: [expired()] });
+    treasury.set(paymentReference(INTENT), { hash: LATE });
+    proof = { ok: true, tx: { hash: LATE, value: 2_431 * 100_000 } as never };
+  });
+
+  it('refunds the NIM that arrived, to the ordering wallet, and alerts — never delivers late', async () => {
+    const r = await reconcileNimIntents({ force: true });
+    expect(r).toMatchObject({ ok: true, late: 1 });
+    expect(refunds).toEqual([expect.objectContaining({ txHash: LATE, walletAddress: 'NQ162SSN82TLSMQSKXT3Q01VCMALNU6F1LJG', amountCrypto: 2431, tokenUsed: 'NIM', blockchain: 'NIMIQ' })]);
+    expect(tx()).toMatchObject({ status: 'EXPIRED', error_code: 'NIM_LATE_PAYMENT' });
+    expect(executeVend).not.toHaveBeenCalled();
+    expect(alerts.some((a) => a.includes('LATE NIM PAYMENT'))).toBe(true);
+  });
+
+  it('never queues the same late payment twice', async () => {
+    await reconcileNimIntents({ force: true });
+    db.tables.transactions[0].error_code = 'PREFLIGHT_UNCONFIRMED'; // even if the mark were lost
+    await reconcileNimIntents({ force: true });
+    expect(refunds).toHaveLength(1);
+  });
+
+  it('only alerts (no refund) when the late transfer is not from the ordering wallet', async () => {
+    proof = { ok: false, code: 'SENDER_MISMATCH', detail: 'other wallet' };
+    await reconcileNimIntents({ force: true });
+    expect(refunds).toHaveLength(0);
+    expect(tx()).toMatchObject({ error_code: 'NIM_LATE_PAYMENT_UNVERIFIED' });
+    expect(alerts.some((a) => a.includes('NOT FROM THE ORDERING WALLET'))).toBe(true);
+  });
+
+  it('tries again next sweep when the chain cannot be read', async () => {
+    proof = { ok: false, code: 'RPC_UNAVAILABLE', detail: 'down' };
+    await reconcileNimIntents({ force: true });
+    expect(refunds).toHaveLength(0);
+    expect(tx()).toMatchObject({ error_code: 'PREFLIGHT_UNCONFIRMED' });
+  });
+
+  it('leaves orders that expired long ago alone', async () => {
+    db.tables.transactions = [expired({ created_at: new Date(Date.now() - 5 * 86_400_000).toISOString() })];
+    await reconcileNimIntents({ force: true });
+    expect(refunds).toHaveLength(0);
   });
 });
