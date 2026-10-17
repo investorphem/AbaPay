@@ -440,7 +440,7 @@ export default function DocsPage() {
                 a={<>
                   <p>If you have a wallet installed in this browser, AbaPay uses it directly — it opens that wallet&apos;s own approval window, and if several are installed it asks which one you want. No QR code, no third-party service involved.</p>
                   <p>WalletConnect is only used when there is no wallet in the browser at all. That is where this usually goes wrong: connecting that way goes through a background service that some networks block, and because it&apos;s a WebSocket it fails silently instead of showing an error.</p>
-                  <p>Open <a href="/network-check" className="text-emerald-600 dark:text-emerald-400 underline underline-offset-2">the network check</a> and it will tell you in a few seconds whether something is being blocked, and exactly what.</p>
+                  <p>Open <a href="https://www.abapays.com/network-check" className="text-emerald-600 dark:text-emerald-400 underline underline-offset-2">the network check</a> and it will tell you in a few seconds whether something is being blocked, and exactly what.</p>
                   <p>The quickest fix is to open AbaPay inside <strong>MiniPay</strong>, <strong>Base App</strong> or <strong>Farcaster</strong> — they connect your wallet directly and need none of the blocked services. Switching to a different network (mobile data instead of Wi-Fi, or the other way round) or turning on a VPN also works.</p>
                 </>}
               />

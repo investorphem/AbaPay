@@ -740,8 +740,8 @@ function Note({ tone, children }: { tone: 'ok' | 'warn'; children: React.ReactNo
 }
 
 // The abapays.com footer (src/components/AppFooter.tsx): X and Telegram community links, the
-// network badge, Docs / Terms / Privacy, and the company line. /docs lives on www (this host maps
-// page paths under /nim); /terms and /privacy are served here too.
+// network badge, Docs / Terms / Privacy, and the company line. All three pages are served on this
+// host (middleware.ts NIM_HOST_SKIP), so a NIM user's Back never lands on abapays.com.
 const footerLink = 'text-[10px] font-black opacity-60 hover:opacity-100 uppercase transition-opacity';
 const footerIcon = 'w-11 h-11 rounded-full border-2 border-black/10 dark:border-white/15 bg-white dark:bg-[#1F2348] flex items-center justify-center opacity-80 hover:opacity-100 transition';
 
@@ -763,7 +763,8 @@ function NimFooter() {
         <span className="text-[11px] font-bold opacity-70 uppercase tracking-widest">Secured by Nimiq Network</span>
       </div>
       <div className="flex items-center gap-5">
-        <a href="https://www.abapays.com/docs" className={footerLink}>Docs &amp; FAQ</a>
+        {/* On this host (middleware.ts serves /docs here), so its Back returns to the NIM app. */}
+        <a href="/docs" className={footerLink}>Docs &amp; FAQ</a>
         <a href="/terms" className={footerLink}>Terms</a>
         <a href="/privacy" className={footerLink}>Privacy</a>
       </div>
