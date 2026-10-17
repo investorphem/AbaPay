@@ -18,6 +18,8 @@ vi.stubGlobal('fetch', async (url: string, init?: RequestInit) => {
     if (account instanceof Error) throw account;
     return new Response(JSON.stringify(account));
   }
+  // No HTLCs funded by this wallet (HTLC balances: tests/nimHtlc.test.ts).
+  if (body.method === 'getTransactionsByAddress') return new Response(JSON.stringify({ result: { data: [] } }));
   throw new Error(`unexpected fetch ${u}`);
 });
 
