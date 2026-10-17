@@ -459,19 +459,18 @@ export default function NimApp() {
   }
   if (env === 'outside') {
     return (
-      <Centered>
+      <Centered footer>
         <Brand />
         <h1 className="text-2xl font-black mt-6 text-center">Pay Nigerian bills with NIM</h1>
         <p className="text-sm opacity-70 mt-2 text-center max-w-sm">Airtime, data, electricity, cable TV, exam PINs, bank transfers and international top-ups. This app runs inside Nimiq Pay.</p>
         <a href={OPEN_IN_NIMIQ_PAY} className="mt-6 px-6 py-3 rounded-full bg-[#E9B213] text-[#1F2348] font-black text-sm">Open in Nimiq Pay</a>
         <a href="https://www.abapays.com" className="mt-4 text-xs underline opacity-60">Paying with stablecoins? Use abapays.com</a>
-        <NimFooter />
       </Centered>
     );
   }
   if (env === 'disconnected') {
     return (
-      <Centered>
+      <Centered footer>
         <Brand />
         <h1 className="text-2xl font-black mt-6 text-center">Connect your wallet</h1>
         <p className="text-sm opacity-70 mt-2 text-center max-w-sm">AbaPay needs your Nimiq address to price your bill and confirm your payment. It can never move your NIM: every payment is approved by you in Nimiq Pay.</p>
@@ -480,7 +479,6 @@ export default function NimApp() {
           {connecting ? <Loader2 size={16} className="animate-spin" /> : <Wallet size={16} />} {connecting ? 'Waiting for Nimiq Pay…' : 'Connect wallet'}
         </button>
         {connectError && <div className="mt-4 max-w-sm"><Note tone="warn">{connectError}</Note></div>}
-        <NimFooter />
       </Centered>
     );
   }
@@ -489,7 +487,9 @@ export default function NimApp() {
   const balanceUsd = balanceLuna !== null && quote?.nim_usd ? (balanceLuna / LUNA) * quote.nim_usd : null;
 
   return (
-    <div className="max-w-md mx-auto px-4 py-5 pb-24">
+    // Full-height column: the footer (mt-auto) sits just above the tab bar on a short screen
+    // instead of leaving an empty band under it.
+    <div className="max-w-md mx-auto px-4 py-5 pb-24 min-h-[100dvh] flex flex-col">
       <header className="flex items-center justify-between mb-5">
         <Brand />
         <div className="text-right">
@@ -747,7 +747,10 @@ const footerIcon = 'w-11 h-11 rounded-full border-2 border-black/10 dark:border-
 
 function NimFooter() {
   return (
-    <footer className="mt-12 w-full border-t border-black/5 dark:border-white/10 pt-8 pb-4 flex flex-col items-center gap-5">
+    // mt-auto: pinned to the bottom of its full-height column (no empty band below it); the
+    // pt-12 wrapper keeps the gap above it when the page is long.
+    <div className="mt-auto pt-12 w-full">
+    <footer className="w-full border-t border-black/5 dark:border-white/10 pt-8 pb-4 flex flex-col items-center gap-5">
       <div className="flex items-center gap-4">
         <a href="https://x.com/AbaPays" target="_blank" rel="noopener noreferrer" aria-label="AbaPay on X" className={footerIcon}>
           <svg xmlns="http://www.w3.org/2000/svg" width="17" height="17" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
@@ -770,11 +773,18 @@ function NimFooter() {
       </div>
       <p className="text-[9px] font-medium opacity-40 uppercase tracking-[0.2em] text-center">© 2026 MASONODE TECHNOLOGIES LIMITED • RC 9524980 • v3.1</p>
     </footer>
+    </div>
   );
 }
 
-function Centered({ children }: { children: React.ReactNode }) {
-  return <div className="min-h-screen flex flex-col items-center justify-center px-6">{children}</div>;
+/** A centred screen; with `footer`, the footer sits at the bottom and the content stays centred. */
+function Centered({ children, footer = false }: { children: React.ReactNode; footer?: boolean }) {
+  return (
+    <div className="min-h-[100dvh] flex flex-col items-center px-6">
+      <div className="flex-1 w-full flex flex-col items-center justify-center">{children}</div>
+      {footer && <div className="w-full max-w-md"><NimFooter /></div>}
+    </div>
+  );
 }
 
 function Brand() {
