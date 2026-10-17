@@ -54,3 +54,11 @@ line.
 {% hint style="warning" %}
 The PIN itself is still real security, not a formality: it's the one thing separate from the signature that has to be right on *every* payment call — unlike x402, which needs neither a PIN nor a link step at all. Two different trust models, both entirely API-driven.
 {% endhint %}
+
+## Identify your agent (optional)
+
+Send `X-Agent-Name` (your agent's name) and `X-Agent-Id` (its ERC-8004 agent ID on Celo) with
+your requests. We record them, your client's User-Agent, and, for OAuth, the name your client
+registered, against each payment it makes. We also check the paying wallet against the public
+ERC-8004 and Self Agent ID registries. AbaPay's support staff use this to find your payments
+quickly. It never changes how a payment is handled, and it's never shown publicly.

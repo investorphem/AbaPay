@@ -8,6 +8,7 @@ import { validateAccessToken } from '@/lib/deai/mcpOAuth';
 import { TOOLS, NEEDS_AUTH, WWW_AUTH_MISSING, WWW_AUTH_INVALID, callTool } from '@/lib/deai/mcpTools';
 import { getAgentAppUrl } from '@/lib/agentAppUrl';
 import { errorMessage } from '@/lib/errors';
+import { runWithAgentClient, agentRequestClient } from '@/lib/payerIdentity';
 
 // ⚡ A2A SERVER — AbaPay over the Agent2Agent protocol (a2a-protocol.org), a FIFTH way in to
 // the same execution engine behind WhatsApp/Telegram/X/MCP. Discovery document lives at
@@ -196,7 +197,7 @@ export async function POST(req: Request) {
         // the tool reports its missing fields instead of reading properties off something else.
         const rawArgs = invocation.data.args;
         const args = rawArgs && typeof rawArgs === 'object' && !Array.isArray(rawArgs) ? (rawArgs as Record<string, unknown>) : {};
-        const result = await callTool(skill, args, identity ?? null);
+        const result = await runWithAgentClient(agentRequestClient(req, 'A2A'), () => callTool(skill, args, identity ?? null));
         if (result === NEEDS_AUTH) {
           return unauthorized(
             id,

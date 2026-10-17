@@ -1,9 +1,11 @@
 import 'server-only';
+import { AsyncLocalStorage } from 'node:async_hooks';
 import { after } from 'next/server';
 import { pad, parseAbi, parseAbiItem } from 'viem';
 import { supabaseAdmin as supabase } from '@/utils/supabase';
 import { getPublicClient, isMainnetEnv } from '@/lib/chain';
 import { errorMessage } from '@/lib/errors';
+import { oauthClientForAccessToken } from '@/lib/deai/mcpOAuth';
 import type { Erc8004Agent, PayerIdentity } from '@/lib/payerIdentityTypes';
 
 export type { Erc8004Agent, PayerIdentity };
@@ -220,16 +222,22 @@ export function clientInfoFromRequest(req: Request, clientDiag?: unknown) {
   };
 }
 
+export type PaymentClient = ReturnType<typeof clientInfoFromRequest>;
+type ClientSource = PaymentClient | (() => Promise<PaymentClient>);
+
 /**
  * Record the payment's client info and refresh the payer's identity — after the response is sent.
- * Outside a request (tests, scripts) `after` throws; the work then just runs detached.
+ * `client` may be a function, resolved only then (MCP/A2A: the OAuth client lookup costs a
+ * query that only a payment should pay for). Outside a request (tests, scripts) `after` throws;
+ * the work then just runs detached.
  */
-export function recordPayerAfterResponse(transactionId: string, wallet: string, client: ReturnType<typeof clientInfoFromRequest>) {
+export function recordPayerAfterResponse(transactionId: string, wallet: string, client: ClientSource) {
   const work = async () => {
     try {
-      const { error } = await supabase.from('payment_client_info').insert({ transaction_id: transactionId, wallet: wallet.toLowerCase(), ...client });
+      const info = typeof client === 'function' ? await client() : client;
+      const { error } = await supabase.from('payment_client_info').insert({ transaction_id: transactionId, wallet: wallet.toLowerCase(), ...info });
       if (error) console.warn('[PayerIdentity] client info write failed:', error.message);
-      await refreshPayerIdentity(wallet, { declaredAgentId: client.declared_agent_id });
+      await refreshPayerIdentity(wallet, { declaredAgentId: info.declared_agent_id });
     } catch (e) {
       console.warn('[PayerIdentity] lookup failed:', errorMessage(e));
     }
@@ -239,4 +247,39 @@ export function recordPayerAfterResponse(transactionId: string, wallet: string, 
   } catch {
     void work();
   }
+}
+
+// ⚡ MCP and A2A pay through executeAgentPayment (src/lib/deai/batch.ts), which our own chat
+// agent and the scheduler also use — and a tool can be authenticated by a header or by an
+// api_key argument deep inside it. So rather than thread the client through every tool, the two
+// routes run each call inside this context and executeAgentPayment records whatever is set.
+// Chat and the scheduler never set it, so nothing is recorded for them.
+const agentClient = new AsyncLocalStorage<() => Promise<PaymentClient>>();
+
+export function runWithAgentClient<T>(client: () => Promise<PaymentClient>, fn: () => Promise<T>): Promise<T> {
+  return agentClient.run(client, fn);
+}
+
+/** Called by executeAgentPayment once its row exists. A no-op outside an MCP/A2A request. */
+export function recordAgentPaymentClient(transactionId: string, wallet: string) {
+  const client = agentClient.getStore();
+  if (client) recordPayerAfterResponse(transactionId, wallet, client);
+}
+
+/**
+ * The client of an MCP/A2A request: its headers now, and — only when a payment needs it — the
+ * OAuth client the bearer token was issued to (its self-registered name, e.g. "Claude").
+ */
+export function agentRequestClient(req: Request, protocol: 'MCP' | 'A2A') {
+  const base = clientInfoFromRequest(req);
+  const bearer = (req.headers.get('authorization') || '').replace(/^Bearer\s+/i, '').trim();
+  const auth = !bearer ? 'api_key_argument' : bearer.startsWith('aba_mcp_') ? 'api_key' : 'oauth';
+  return async (): Promise<PaymentClient> => {
+    const oauth = auth === 'oauth' ? await oauthClientForAccessToken(bearer).catch(() => null) : null;
+    return {
+      ...base,
+      declared_agent: base.declared_agent ?? clip(oauth?.client_name, 80) ?? null,
+      client_diag: { protocol, auth, ...(oauth ? { oauth_client_id: oauth.client_id, oauth_client_name: oauth.client_name } : {}) },
+    };
+  };
 }

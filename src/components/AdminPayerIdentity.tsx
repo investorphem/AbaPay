@@ -32,10 +32,15 @@ export function AdminPayerIdentity({ identity, client }: { identity?: PayerIdent
   const primary = agents[0];
   const self = identity ? selfLabel(identity) : null;
   const claimedName = client?.declared_agent;
+  // MCP/A2A rows: how the client connected (src/lib/payerIdentity.ts agentRequestClient).
+  const diag = (client?.client_diag && typeof client.client_diag === "object" ? client.client_diag : {}) as Record<string, unknown>;
+  const protocol = typeof diag.protocol === "string" ? diag.protocol : null;
+  const auth = diag.auth === "oauth" ? "OAuth" : diag.auth === "api_key" ? "API key (header)" : diag.auth === "api_key_argument" ? "API key (tool argument)" : null;
 
   return (
     <div className="mt-1.5 max-w-[240px]">
       <button onClick={() => setOpen((o) => !o)} className="flex flex-wrap items-center gap-1 text-left">
+        {protocol && <span className="text-[9px] font-black px-1.5 py-0.5 rounded bg-sky-500/10 text-sky-300">{protocol}</span>}
         <span className="text-[9px] font-black px-1.5 py-0.5 rounded bg-purple-500/10 text-purple-300">
           🤖 {primary ? `${primary.name || "Unnamed agent"} #${primary.id}` : claimedName ? `“${claimedName}” (claimed)` : "No ERC-8004 identity"}
         </span>
@@ -68,6 +73,13 @@ export function AdminPayerIdentity({ identity, client }: { identity?: PayerIdent
           {client && (
             <div className="pt-1 border-t border-slate-800">
               <p className="text-slate-500 uppercase tracking-widest text-[8px]">Request claimed</p>
+              {protocol && (
+                <p>
+                  via {protocol}{auth ? ` · ${auth}` : ""}
+                  {typeof diag.oauth_client_name === "string" ? ` · OAuth client “${diag.oauth_client_name}”` : ""}
+                  {protocol && " · a linked AbaPay wallet (Agent Hub), PIN-approved"}
+                </p>
+              )}
               {client.declared_agent && <p>name: {client.declared_agent}</p>}
               {client.declared_agent_id && <p>ERC-8004 id: {client.declared_agent_id}{agents.some((a) => a.id === client.declared_agent_id) ? " ✓ matches chain" : " ✗ not this wallet's"}</p>}
               <p className="font-mono break-all">UA: {client.user_agent || "none"}</p>

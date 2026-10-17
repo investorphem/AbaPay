@@ -16,6 +16,7 @@ import {
 } from '@/lib/deai/mcpTools';
 import { MCP_UI_CARD_URI, MCP_UI_CARD_RESOURCE, MCP_UI_CARD_HTML } from '@/lib/deai/mcpUiTemplates';
 import { errorMessage } from '@/lib/errors';
+import { runWithAgentClient, agentRequestClient } from '@/lib/payerIdentity';
 
 // ⚡ MCP SERVER — lets an AI agent (Claude, or any MCP-speaking client) check a balance or
 // pay a bill on behalf of a wallet that has explicitly linked and PIN-protected an API key
@@ -164,7 +165,7 @@ export async function POST(req: Request) {
         if (!(await isChannelEnabled('MCP'))) {
           return rpcResult(id, errorResult('AbaPay MCP is temporarily paused for maintenance. Please try again shortly, or use the AbaPay app.'));
         }
-        const result = await callTool(toolName, params?.arguments || {}, oauthIdentity);
+        const result = await runWithAgentClient(agentRequestClient(req, 'MCP'), () => callTool(toolName, params?.arguments || {}, oauthIdentity));
         // The one and only in-band condition promoted to an HTTP-level failure: a tool that
         // needs an identity was called with none at all. Everything else — wrong key, wrong
         // PIN, bad arguments, insufficient allowance — stays a normal tool result.

@@ -55,3 +55,11 @@ unique id you pick for that one payment, 8–128 characters (a UUID is ideal).
 {% hint style="info" %}
 **Same PIN rules as A2A.** MCP and A2A share one execution engine, one linking flow, and one PIN model — set entirely by API, never through a browser. See [A2A](a2a.md) for the exact request that does it.
 {% endhint %}
+
+## Identify your agent (optional)
+
+Send `X-Agent-Name` (your agent's name) and `X-Agent-Id` (its ERC-8004 agent ID on Celo) with
+your requests. We record them, your client's User-Agent, and, for OAuth, the name your client
+registered, against each payment it makes. We also check the paying wallet against the public
+ERC-8004 and Self Agent ID registries. AbaPay's support staff use this to find your payments
+quickly. It never changes how a payment is handled, and it's never shown publicly.
