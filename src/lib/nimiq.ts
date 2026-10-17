@@ -154,6 +154,9 @@ export type NimTransaction = {
   confirmations: number;
   from: string;
   to: string;
+  /** Account types: 0 basic, 1 vesting, 2 HTLC, 3 staking. */
+  fromType?: number;
+  toType?: number;
   value: number;
   fee: number;
   recipientData: string;
@@ -184,18 +187,57 @@ async function rpc<T>(method: string, params: unknown[]): Promise<RpcResult<T>> 
 
 export const NIM_TX_HASH_RE = /^[0-9a-f]{64}$/;
 
+type HtlcAccount = { type?: string; balance?: number; sender?: string; recipient?: string; timeout?: number };
+
 /**
- * A wallet's spendable balance in luna, read from the Nimiq chain (Albatross getAccountByAddress)
- * — the source of truth at Pay, not the figure the app displayed when it opened. Null when the
- * chain can't be read: the caller then must not refuse on balance (Nimiq Pay refuses an
- * unaffordable send itself).
+ * Who funded an HTLC: the contract's own `sender` while it exists, else the sender of the
+ * transaction that created it (an emptied HTLC is gone from state but not from history).
+ * `undefined` = the chain couldn't be read (undecided); null = not an HTLC / no funder found.
  */
-export async function nimBalanceLuna(address: string): Promise<number | null> {
+export async function htlcFunder(htlcAddress: string): Promise<string | null | undefined> {
+  const acct = await rpc<HtlcAccount>('getAccountByAddress', [formatNimAddress(htlcAddress)]);
+  if (!acct.ok) return undefined;
+  if (acct.value?.type === 'htlc' && acct.value.sender) return canonicalNimAddress(acct.value.sender);
+  const hist = await rpc<NimTransaction[]>('getTransactionsByAddress', [formatNimAddress(htlcAddress), 50, null]);
+  if (!hist.ok) return undefined;
+  const target = canonicalNimAddress(htlcAddress);
+  const creation = (hist.value || []).find((t) => canonicalNimAddress(t.to) === target && t.toType === 2);
+  return creation ? canonicalNimAddress(creation.from) : null;
+}
+
+/**
+ * 🔴 NIMIQ PAY HOLDS A USER'S NIM IN HTLCs THEIR OWN ADDRESS FUNDED, not in the plain account
+ * (2026-10-17: a wallet Nimiq Pay showed at 6,789 NIM had a basic balance of 0 and the 6,789 NIM
+ * in an HTLC whose sender was that address, timing out in ~2 weeks). So a wallet's NIM is its
+ * basic balance PLUS every unexpired HTLC it is the sender of — found from its outgoing
+ * transactions into HTLCs (toType 2), each confirmed by reading the HTLC itself.
+ *
+ * Read from the Nimiq chain — the source of truth at Pay. Null when the chain can't be read:
+ * the caller then must not refuse on balance (Nimiq Pay refuses an unaffordable send itself).
+ */
+export async function nimBalanceLuna(address: string, now = Date.now()): Promise<number | null> {
   if (!isNimAddress(address)) return null;
+  const me = canonicalNimAddress(address);
   const read = await rpc<{ balance?: number }>('getAccountByAddress', [formatNimAddress(address)]);
   if (!read.ok || !read.value) return null;
-  const b = Number(read.value.balance);
-  return Number.isFinite(b) && b >= 0 ? b : null;
+  const basic = Number(read.value.balance);
+  if (!Number.isFinite(basic) || basic < 0) return null;
+
+  const hist = await rpc<NimTransaction[]>('getTransactionsByAddress', [formatNimAddress(address), 100, null]);
+  // Unknown, not the plain balance: for a Nimiq Pay wallet that is 0 and would refuse a funded one.
+  if (!hist.ok) return null;
+  const htlcs = [...new Set((hist.value || [])
+    .filter((t) => t.toType === 2 && canonicalNimAddress(t.from) === me)
+    .map((t) => canonicalNimAddress(t.to)))];
+  let locked = 0;
+  for (const h of htlcs.slice(0, 20)) {
+    const a = await rpc<HtlcAccount>('getAccountByAddress', [formatNimAddress(h)]);
+    if (!a.ok || a.value?.type !== 'htlc' || !a.value.sender || canonicalNimAddress(a.value.sender) !== me) continue;
+    if (Number(a.value.timeout) && Number(a.value.timeout) <= now) continue; // expired: refundable, not spendable via Pay
+    const b = Number(a.value.balance);
+    if (Number.isFinite(b) && b > 0) locked += b;
+  }
+  return basic + locked;
 }
 
 export async function getNimTransaction(hash: string): Promise<RpcResult<NimTransaction>> {
@@ -268,7 +310,18 @@ export async function verifyNimPayment(hash: string, expected: { minLuna: number
     return { ok: false, code: 'AMOUNT_SHORT', detail: `Received ${Number(tx.value) / LUNA_PER_NIM} NIM, order requires ${expected.minLuna / LUNA_PER_NIM} NIM.` };
   }
   if (expected.payer && isNimAddress(expected.payer) && canonicalNimAddress(tx.from) !== canonicalNimAddress(expected.payer)) {
-    return { ok: false, code: 'SENDER_MISMATCH', detail: `Sent from ${formatNimAddress(tx.from)}, not the wallet that placed the order.` };
+    // Nimiq Pay pays out of the HTLC the user's own address funded (see nimBalanceLuna), so the
+    // transfer can come FROM that HTLC. It's still the ordering wallet's NIM when the chain shows
+    // that wallet funded the HTLC; anything else is a different payer. An unreadable chain is
+    // undecided (retried), never a mismatch.
+    const funder = tx.fromType === 2 || tx.fromType === undefined ? await htlcFunder(tx.from) : null;
+    if (funder === undefined) {
+      metric('nim_rpc_errors_total', 1);
+      return { ok: false, code: 'RPC_UNAVAILABLE', detail: 'Could not read who funded the sending HTLC.' };
+    }
+    if (funder !== canonicalNimAddress(expected.payer)) {
+      return { ok: false, code: 'SENDER_MISMATCH', detail: `Sent from ${formatNimAddress(tx.from)}, not the wallet that placed the order.` };
+    }
   }
   if (Number(tx.confirmations) < MIN_CONFIRMATIONS) {
     return { ok: false, code: 'UNCONFIRMED', detail: `${tx.confirmations} of ${MIN_CONFIRMATIONS} confirmations.` };
