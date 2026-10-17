@@ -293,6 +293,24 @@ export async function validateAccessToken(rawToken: string): Promise<McpIdentity
 }
 
 /**
+ * Which registered OAuth client a raw access token was issued to, and the name it registered
+ * itself under (dynamic client registration: a claim, e.g. "Claude"). For the admin ledger's
+ * "which agent paid" view only (src/lib/payerIdentity.ts) — never an authorization input.
+ */
+export async function oauthClientForAccessToken(rawToken: string): Promise<{ client_id: string; client_name: string | null } | null> {
+  if (!rawToken || !rawToken.startsWith(ACCESS_PREFIX)) return null;
+  const { data: tok } = await supabaseAdmin
+    .from('mcp_oauth_tokens')
+    .select('client_id')
+    .eq('access_token_hash', hashOAuthToken(rawToken))
+    .maybeSingle();
+  const clientId = (tok as { client_id?: string | null } | null)?.client_id;
+  if (!clientId) return null;
+  const client = await getClient(clientId);
+  return { client_id: clientId, client_name: client?.client_name ?? null };
+}
+
+/**
  * Refresh-token grant, WITH ROTATION — the old pair is revoked and a brand new access +
  * refresh pair is issued. OAuth 2.1 requires this for public clients: a refresh token that
  * never changes is a permanent bearer credential sitting on a client that holds no secret,

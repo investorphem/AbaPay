@@ -102,3 +102,34 @@ contract-call rail.
 **Means:** the relayer that sends agent and scheduled payments is low on CELO / ETH.
 
 **Do:** send native gas to the relayer address in the alert. It needs gas only, never tokens.
+
+## Supporting a developer whose agent paid (x402, MCP, A2A)
+
+**Find the payment:** Admin → Ledger. Search the request ID, tx hash or wallet. You can also
+search the agent's name ("earmark") or its ERC-8004 ID ("9806"). Every x402, MCP and A2A row has
+an agent badge under the wallet. Click it for the detail. Our own Telegram/WhatsApp/X agent rows
+don't have one.
+
+**Reading the badge.** Facts come from the chain; claims come from the request:
+
+| Badge / line | Kind | Means |
+|---|---|---|
+| `🤖 Name #9806` | fact | The paying wallet owns ERC-8004 agent 9806, or the registry names it as that agent's wallet. Name, description, site and x402 endpoint are what the developer registered. 8004scan links to it. |
+| `No ERC-8004 identity` | fact | The wallet has no agent identity. You only know the wallet. |
+| `Self ✓` | fact | A Self Agent ID: a passport-verified human is behind the agent. It says **that** there is a person, never **who**. |
+| `Self ⚠ stale` / `Self ✗` / `Self ?` | fact | Proof expired / not registered / the registry couldn't be read (retried next payment). |
+| `MCP` / `A2A`, "via … · OAuth client “Claude”" | claim + fact | How the client connected. The wallet is a linked AbaPay user who approved with their PIN. The OAuth client name is what the client registered itself as. |
+| name, ERC-8004 id, UA | claim | `X-Agent-Name`, `X-Agent-Id` and User-Agent as the request sent them. "✗ not this wallet's" means the declared ID doesn't belong to the payer. |
+| `Agent: not looked up yet` | — | Paid before this existed, or the lookup hasn't run yet (it runs just after the payment). |
+
+**Contacting the developer:** use the site in the agent's ERC-8004 entry, or its 8004scan page.
+For MCP/A2A, the wallet belongs to a registered user. Their linked phone or messaging account is
+on the same row and under Identity. AbaPay never learns a Self-verified person's name.
+
+**Answering them:** state what moved on-chain (tx hash), what VTpass did (Check Status), and
+what we did about it (refund hash). If their agent resubmitted a payment, tell them the same
+signed header is answered from the first attempt. Ask them to send `X-Agent-Name` and
+`X-Agent-Id` (docs/gitbook/x402.md) if the badge shows no identity.
+
+None of this is shown on receipts or any public page (migration 044; only `/api/admin/data`
+reads it).

@@ -1618,7 +1618,7 @@ Switch the selected account in your wallet to the owner and click again. You sta
                           <td className="py-4 px-2 min-w-[150px]">
                              <p className="text-[10px] text-slate-300 font-mono">Wallet: {tx.wallet_address ? `${tx.wallet_address.slice(0,6)}...${tx.wallet_address.slice(-4)}` : 'N/A'}</p>
                              <p className={`text-[10px] mt-1 font-bold ${verifiedPhone !== 'N/A' ? 'text-emerald-500' : 'text-slate-600'}`}>Phone: {verifiedPhone}</p>
-                             {tx.payment_method === 'X402' && (
+                             {(tx.payment_method === 'X402' || tx.source_channel === 'MCP') && (
                                <AdminPayerIdentity identity={payerIdentities[String(tx.wallet_address || '').toLowerCase()]} client={paymentClientInfo[tx.id]} />
                              )}
                           </td>

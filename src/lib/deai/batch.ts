@@ -10,6 +10,7 @@ import { sendTelegramAlert } from '@/lib/telegram';
 import { computeServiceFee } from '@/lib/serviceRules';
 import { markCommitted } from '@/lib/idempotency';
 import { errorMessage } from '@/lib/errors';
+import { recordAgentPaymentClient } from '@/lib/payerIdentity';
 
 // ⚡ MULTI-RECIPIENT (BATCH) PAYMENTS — shared between the in-app chat (/api/deai/chat) and
 // the social channels (/api/deai/core). The intent engine emits `recipients` whenever a user
@@ -162,7 +163,7 @@ export async function executeAgentPayment(params: {
   let preflightTxHash: string | null = `preflight_${userWallet}_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
 
   try {
-    await supabase.from('transactions').upsert({
+    const { data: preflightRow } = await supabase.from('transactions').upsert({
       tx_hash: preflightTxHash, request_id: vtRequestId,
       service_category: item.serviceCategory, service_id: item.serviceID,
       variation_code: params.variationCode || null, network: item.provider || null, blockchain: item.chain,
@@ -177,7 +178,9 @@ export async function executeAgentPayment(params: {
       operator_id: item.operatorId || null, country_code: item.countryCode || null, product_type_id: item.productTypeId || null,
       foreign_amount: item.foreignAmount || null, display_amount: item.displayAmount || null,
       payment_method: 'AGENT_RELAY',
-    }, { onConflict: 'tx_hash' });
+    }, { onConflict: 'tx_hash' }).select('id').maybeSingle();
+    // MCP/A2A only: which client paid, for the admin ledger (src/lib/payerIdentity.ts). After the response.
+    if (preflightRow?.id) recordAgentPaymentClient(String(preflightRow.id), userWallet);
 
     const res = await relayPayBillFor({
       userWallet,
