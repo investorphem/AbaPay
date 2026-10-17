@@ -44,6 +44,12 @@ vi.mock('@/lib/rateLimit', () => ({ enforceRateLimit: async () => null }));
 vi.mock('@/lib/serviceRules', () => ({ isChannelEnabled: async () => channelEnabled }));
 vi.mock('@/lib/deai/mcpAuth', () => ({ resolveMcpIdentity: async () => identityResult }));
 vi.mock('@/lib/deai/mcpOAuth', () => ({ validateAccessToken: async () => identityResult }));
+// Which-client-paid recording is covered by agentPaymentClient.test.ts; here the call just passes through.
+const agentClientCalls: string[] = [];
+vi.mock('@/lib/payerIdentity', () => ({
+  runWithAgentClient: (_client: unknown, fn: () => Promise<unknown>) => fn(),
+  agentRequestClient: (_req: Request, protocol: string) => { agentClientCalls.push(protocol); return async () => ({}); },
+}));
 
 const { POST, GET } = await import('@/app/api/a2a/route');
 
@@ -84,6 +90,7 @@ describe('message/send — structured invocation', () => {
 
     expect(res.status).toBe(200);
     expect(callTool).toHaveBeenCalledWith('describe_capabilities', {}, null);
+    expect(agentClientCalls.at(-1)).toBe('A2A'); // run as an A2A client, so a payment records it
     expect(body.result.kind).toBe('message');
     expect(body.result.role).toBe('agent');
 
