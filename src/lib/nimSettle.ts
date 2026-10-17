@@ -5,6 +5,7 @@ import { executeVend, getStrictRequestId, type VendResult } from '@/lib/vend';
 import { vendInputFromRow } from '@/lib/vendInput';
 import { metric } from '@/lib/log';
 import { NIM_TX_HASH_RE, UNDECIDED_NIM_FAILURES, LUNA_PER_NIM, recentTreasuryPayments, paymentReference, verifyNimPayment } from '@/lib/nimiq';
+import { enqueueRefund } from '@/lib/refunds';
 
 // ⚡ SETTLING A NIM PAYMENT — shared by /api/pay/nim (the mini app reports its transaction hash)
 // and the cleanup sweep (the app closed before reporting it). Same shape as /api/pay's settle:
@@ -108,14 +109,17 @@ export async function reconcileNimIntents(opts: { force?: boolean } = {}) {
     .lt('created_at', new Date(now - 2 * 60_000).toISOString())
     .order('created_at', { ascending: true }).limit(100);
   if (error) return { ok: false, error: error.message, settled: 0, expired: 0 };
-  if (!rows?.length) return { ok: true, settled: 0, expired: 0 };
+  // No early return when nothing is pending: a late payment for an already-expired order (the
+  // case refundLatePayments exists for) is exactly when nothing else is pending.
 
   const payments = await recentTreasuryPayments();
-  if (!payments) return { ok: false, error: 'Treasury history unreadable.', settled: 0, expired: 0 };
+  // Unreadable with nothing pending is not a failed sweep (it would page the dead-man check); the
+  // late-payment re-check simply runs on the next one.
+  if (!payments) return rows?.length ? { ok: false, error: 'Treasury history unreadable.', settled: 0, expired: 0 } : { ok: true, settled: 0, expired: 0 };
 
   let settled = 0;
   let expired = 0;
-  for (const row of rows as IntentRow[]) {
+  for (const row of (rows || []) as IntentRow[]) {
     const tx = payments.get(paymentReference(row.tx_hash));
     if (tx) {
       const out = await settleNimIntent(row, tx.hash);
@@ -129,5 +133,53 @@ export async function reconcileNimIntents(opts: { force?: boolean } = {}) {
       if (!e) expired++;
     }
   }
-  return { ok: true, settled, expired };
+  const late = await refundLatePayments(payments, now);
+  return { ok: true, settled, expired, late };
+}
+
+const LATE_LOOKBACK_MS = 3 * 24 * 60 * 60_000;
+
+/**
+ * 🔴 A PAYMENT THAT ARRIVES AFTER ITS ORDER EXPIRED. Nimiq Pay can hold a send as "pending" and
+ * submit it later (2026-10-17: "outcome unknown", then "a transaction is still pending" on retry).
+ * An order expires after an hour and EXPIRED is terminal, so a payment landing after that used to
+ * match nothing: NIM in the treasury with no order and no refund. Recently expired NIM orders are
+ * re-checked; a verified late payment is refunded (the amount that arrived, to the ordering wallet)
+ * rather than delivered late, and the operator is alerted. Never queued twice.
+ */
+async function refundLatePayments(payments: NonNullable<Awaited<ReturnType<typeof recentTreasuryPayments>>>, now: number): Promise<number> {
+  const { data: rows } = await supabase.from('transactions').select('*')
+    .eq('status', 'EXPIRED').eq('error_code', 'PREFLIGHT_UNCONFIRMED').like('tx_hash', `${NIM_INTENT_PREFIX}%`)
+    .gte('created_at', new Date(now - LATE_LOOKBACK_MS).toISOString())
+    .limit(100);
+  let queued = 0;
+  for (const row of (rows || []) as IntentRow[]) {
+    const tx = payments.get(paymentReference(row.tx_hash));
+    if (!tx) continue;
+    const proof = await verifyNimPayment(tx.hash, { minLuna: 1, intentId: row.tx_hash, payer: row.wallet_address });
+    if (!proof.ok) {
+      if (UNDECIDED_NIM_FAILURES.has(proof.code)) continue; // try again next sweep
+      await alert(`⚠️ *LATE NIM PAYMENT — NOT FROM THE ORDERING WALLET*\nOrder \`${row.request_id}\` had expired; a transfer carrying its reference arrived but failed verification (${proof.code}): ${proof.detail}\nTx \`${tx.hash}\`. Check it by hand.`);
+      await supabase.from('transactions').update({ error_code: 'NIM_LATE_PAYMENT_UNVERIFIED', api_response: `Late transfer ${tx.hash} failed verification: ${proof.code}.` }).eq('id', row.id).eq('error_code', 'PREFLIGHT_UNCONFIRMED');
+      continue;
+    }
+    const { data: existing } = await supabase.from('refund_queue').select('id').eq('tx_hash', tx.hash).limit(1);
+    if (existing?.length) continue;
+    const amountNim = Number(proof.tx.value) / LUNA_PER_NIM;
+    const out = await enqueueRefund({
+      transactionId: String(row.id), txHash: tx.hash, walletAddress: String(row.wallet_address || ''),
+      tokenUsed: 'NIM', amountCrypto: amountNim, amountNaira: Number(row.amount_naira) || undefined, blockchain: 'NIMIQ',
+      reason: 'NIM payment arrived after the order expired — refunded, not delivered late.',
+      serviceCategory: String(row.service_category || ''), sourceChannel: 'NIMIQ',
+      userMessage: 'Your NIM payment arrived after the order had expired, so we are sending it back.',
+    });
+    if (!out.queued) continue;
+    await supabase.from('transactions').update({
+      error_code: 'NIM_LATE_PAYMENT',
+      api_response: `Paid ${amountNim} NIM in ${tx.hash} after the order expired; refund queued (Ops → Refunds).`,
+    }).eq('id', row.id).eq('error_code', 'PREFLIGHT_UNCONFIRMED');
+    await alert(`🕓 *LATE NIM PAYMENT — REFUND QUEUED*\nOrder \`${row.request_id}\` expired before its payment arrived.\n💰 ${amountNim} NIM in \`${tx.hash}\`\nSend it back from the treasury and record the hash in Ops → Refunds.`);
+    queued++;
+  }
+  return queued;
 }

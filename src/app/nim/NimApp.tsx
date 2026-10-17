@@ -414,20 +414,36 @@ export default function NimApp() {
 
     setPhase('signing'); setMessage(`Approve ${nimFmt(intent.nim)} in Nimiq Pay.`);
     let txHash = '';
+    let uncertain = false; // Nimiq Pay answered "outcome unknown"
     try {
       // No validityStartHeight: the wallet fills in the current height itself.
       const sent = unwrap(await nimiq.current.sendBasicTransactionWithData({ recipient: intent.recipient, value: intent.luna, data: utf8ToHex(intent.reference) }));
       if (typeof sent === 'string' && /^[0-9a-f]{64}$/i.test(sent)) txHash = sent.toLowerCase();
     } catch (e) {
       const text = e instanceof Error ? e.message : String(e);
-      setPhase('idle');
-      setMessage(/cancel|denied|reject|abort|dismiss|closed/i.test(text) ? 'Payment cancelled. Nothing was charged.' : `Nimiq Pay couldn’t send the payment: ${text}`);
-      return;
+      const type = String((e as { type?: unknown })?.type || '');
+      // Nimiq Pay is still holding an EARLIER send (2026-10-17, seen after "outcome unknown"):
+      // this order was never sent. That earlier order is delivered if its payment lands, and
+      // refunded by the cleanup sweep if it lands after expiry (nimSettle refundLatePayments).
+      if (/still pending/i.test(text)) {
+        setPhase('idle');
+        setMessage('Nimiq Pay is still processing your previous payment, so this one wasn’t sent and nothing was charged for it. If the previous payment goes through, that order is delivered; if it arrives too late, it’s refunded. Please wait a few minutes before paying again.');
+        return;
+      }
+      // "Outcome unknown": it may have been submitted. Don't stop here — watch the chain for this
+      // order's reference (the server finds it without a hash) and say what actually happened.
+      if (!(type === 'TRANSACTION_OUTCOME_UNKNOWN' || /outcome is unknown|may have been submitted/i.test(text))) {
+        setPhase('idle');
+        setMessage(/cancel|denied|reject|abort|dismiss|closed/i.test(text) ? 'Payment cancelled. Nothing was charged.' : `Nimiq Pay couldn’t send the payment: ${text}`);
+        return;
+      }
+      uncertain = true;
     }
 
-    setPhase('confirming'); setMessage('Payment sent. Waiting for the Nimiq network to confirm it…');
+    setPhase('confirming');
+    setMessage(uncertain ? 'Nimiq Pay isn’t sure the payment went out. Checking the Nimiq network for it…' : 'Payment sent. Waiting for the Nimiq network to confirm it…');
     const started = Date.now();
-    while (Date.now() - started < 5 * 60_000) {
+    while (Date.now() - started < (uncertain ? 3 : 5) * 60_000) {
       try {
         const d = await getJson<{ success: boolean; status: string; message?: string; purchased_code?: string | null; units?: string | null; request_id?: string; verifying?: boolean }>(
           '/api/pay/nim', { method: 'POST', body: JSON.stringify({ intent_id: intent.intent_id, tx_hash: txHash }) },
@@ -450,7 +466,9 @@ export default function NimApp() {
       await new Promise((r) => setTimeout(r, 4_000));
     }
     setPhase('failed');
-    setMessage('Still confirming after five minutes. Your payment is safe: the order completes, or the NIM is refunded, once the network confirms it.');
+    setMessage(uncertain
+      ? 'No payment from your wallet has reached AbaPay, so nothing has been charged so far. If Nimiq Pay sends it later, this order is delivered, or the NIM is refunded if it arrives after the order expires. Wait until Nimiq Pay no longer shows it as pending before paying again.'
+      : 'Still confirming after five minutes. Your payment is safe: the order completes, or the NIM is refunded, once the network confirms it.');
   };
 
   // ── Render ─────────────────────────────────────────────────────────────────────────────────
