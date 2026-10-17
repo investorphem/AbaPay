@@ -27,15 +27,16 @@ export async function POST(req: Request) {
   const since = new Date();
   since.setMonth(since.getMonth() - HISTORY_MONTHS);
 
-  // Unpaid orders (still a preflight_nim_ placeholder) and expired ones aren't payments.
+  // Every order, including ones still waiting for their NIM (a preflight_nim_ placeholder) and
+  // expired ones: when Nimiq Pay holds a send as "pending", the customer must be able to see the
+  // order is waiting, and later that it expired with nothing charged (or that a late payment is
+  // being refunded). The placeholder itself is internal, so it isn't returned (tx_hash: null).
   const { data, error } = await supabase
     .from('transactions')
     .select('created_at, status, service_category, service_id, network, account_number, amount_naira, display_amount, amount_usdt, token_used, tx_hash, request_id, purchased_code, units, error_code')
     .eq('blockchain', 'NIMIQ')
     .eq('wallet_address', session.address)
     .gte('created_at', since.toISOString())
-    .not('tx_hash', 'like', 'preflight_%')
-    .neq('status', 'EXPIRED')
     .order('created_at', { ascending: false })
     .limit(100);
 
@@ -43,5 +44,6 @@ export async function POST(req: Request) {
     console.error('[NIM history] read failed:', error.message);
     return NextResponse.json({ error: 'Could not load your history right now.' }, { status: 500 });
   }
-  return NextResponse.json({ address: session.address, transactions: data ?? [] });
+  const transactions = (data ?? []).map((t) => (String(t.tx_hash || '').startsWith('preflight_') ? { ...t, tx_hash: null } : t));
+  return NextResponse.json({ address: session.address, transactions });
 }

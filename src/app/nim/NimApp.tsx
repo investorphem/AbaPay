@@ -951,7 +951,7 @@ function Picker({ title, items, value, onSelect, searchable = false, placeholder
 type HistoryRow = {
   created_at: string; status: string; service_category: string | null; service_id: string | null; network: string | null;
   account_number: string | null; amount_naira: number | string | null; display_amount: string | null; amount_usdt: number | string | null;
-  tx_hash: string; request_id: string | null; purchased_code: string | null; units: string | null;
+  tx_hash: string | null; request_id: string | null; error_code?: string | null; purchased_code: string | null; units: string | null;
 };
 type HistorySession = { message: string; signature: string; publicKey: string };
 
@@ -1035,10 +1035,17 @@ function HistoryCard({ row, logo }: { row: HistoryRow; logo?: string }) {
   const [copied, setCopied] = useState(false);
   const category = String(row.service_category || '').toUpperCase();
   const svc = SERVICES.find((s) => s.id === (category.startsWith('INTL') ? 'INTL' : CATEGORY_OF[category]));
-  const status = row.status === 'SUCCESS' ? { text: 'Delivered', cls: 'bg-emerald-500/15 text-emerald-700 dark:text-emerald-300' }
-    : row.status === 'REFUNDED' ? { text: 'Refunded', cls: 'bg-sky-500/15 text-sky-700 dark:text-sky-300' }
-    : row.status === 'PROCESSING' || row.status === 'PENDING' ? { text: 'Processing', cls: 'bg-amber-500/15 text-amber-700 dark:text-amber-300' }
-    : { text: 'Failed · refund due', cls: 'bg-rose-500/15 text-rose-700 dark:text-rose-300' };
+  // An order with no payment hash yet is waiting for its NIM (Nimiq Pay may still be holding the
+  // send). Each state says, in a line, what it means for the customer's money.
+  const awaiting = row.status === 'PENDING' && !row.tx_hash;
+  const lateRefund = row.status === 'EXPIRED' && row.error_code === 'NIM_LATE_PAYMENT';
+  const status = row.status === 'SUCCESS' ? { text: 'Delivered', cls: 'bg-emerald-500/15 text-emerald-700 dark:text-emerald-300', note: '' }
+    : row.status === 'REFUNDED' ? { text: 'Refunded', cls: 'bg-sky-500/15 text-sky-700 dark:text-sky-300', note: '' }
+    : awaiting ? { text: 'Awaiting payment', cls: 'bg-amber-500/15 text-amber-700 dark:text-amber-300', note: 'Your NIM hasn’t reached AbaPay yet. If Nimiq Pay still shows this payment as pending, the order is delivered as soon as it arrives. If nothing arrives within an hour, it expires and nothing is charged.' }
+    : row.status === 'PROCESSING' || row.status === 'PENDING' ? { text: 'Processing', cls: 'bg-amber-500/15 text-amber-700 dark:text-amber-300', note: 'Payment received. Your order is being delivered.' }
+    : lateRefund ? { text: 'Refund on the way', cls: 'bg-sky-500/15 text-sky-700 dark:text-sky-300', note: 'Your NIM arrived after this order had expired, so it’s being sent back to your wallet.' }
+    : row.status === 'EXPIRED' ? { text: 'Expired · not paid', cls: 'bg-black/5 dark:bg-white/10', note: 'No NIM arrived for this order, so nothing was charged.' }
+    : { text: 'Failed · refund due', cls: 'bg-rose-500/15 text-rose-700 dark:text-rose-300', note: 'Your NIM is being refunded to your wallet.' };
   const naira = row.display_amount || (row.amount_naira ? ngn(Number(row.amount_naira)) : '');
   return (
     <li className="rounded-2xl bg-white dark:bg-[#1F2348] border border-black/5 dark:border-white/10 p-4">
@@ -1058,6 +1065,7 @@ function HistoryCard({ row, logo }: { row: HistoryRow; logo?: string }) {
           </div>
         </div>
       </div>
+      {status.note && <p className="mt-2 text-[11px] opacity-70 leading-snug">{status.note}</p>}
       {row.purchased_code && (
         <div className="mt-3 flex items-center justify-between gap-2 rounded-xl bg-black/5 dark:bg-white/5 px-3 py-2">
           <span className="min-w-0">
@@ -1072,7 +1080,7 @@ function HistoryCard({ row, logo }: { row: HistoryRow; logo?: string }) {
       )}
       <div className="mt-2 flex gap-4 text-[11px] font-bold">
         {row.request_id && row.status === 'SUCCESS' && <a href={`/receipt/${row.request_id}`} className="inline-flex items-center gap-1 underline">Receipt <ExternalLink size={10} /></a>}
-        {/^[0-9a-f]{64}$/.test(row.tx_hash) && <a href={`https://nimiq.watch/#${row.tx_hash}`} target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-1 underline opacity-70">Payment <ExternalLink size={10} /></a>}
+        {row.tx_hash && /^[0-9a-f]{64}$/.test(row.tx_hash) && <a href={`https://nimiq.watch/#${row.tx_hash}`} target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-1 underline opacity-70">Payment <ExternalLink size={10} /></a>}
       </div>
     </li>
   );
