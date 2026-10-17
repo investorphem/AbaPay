@@ -78,26 +78,62 @@ function hexToUtf8(hex: string): string {
 let priceCache: { usd: number; at: number } | null = null;
 const PRICE_TTL_MS = 60_000;
 
+// Exchanges whose NIM market counts: dollar-stablecoin quotes, fresh, not flagged, with real volume.
+const MIN_MARKET_VOLUME_USD = 500;
+const STALE_PRICE_MAX_MS = 3 * PRICE_TTL_MS;
+
+type CoinGeckoTicker = {
+  target?: string; is_stale?: boolean; is_anomaly?: boolean; trust_score?: string | null;
+  bid_ask_spread_percentage?: number | null;
+  converted_last?: { usd?: number }; converted_volume?: { usd?: number };
+};
+
 /**
- * NIM's US-dollar price (CoinGecko, id nimiq-2), cached for a minute. Null when it can't be read:
- * the caller must then refuse to price an intent rather than guess.
+ * The price NIM can actually be SOLD at, per exchange: the last trade less half the bid/ask
+ * spread (≈ the best bid), for each market that qualifies. Exported for tests.
+ */
+export function exchangeBidsUsd(tickers: CoinGeckoTicker[]): number[] {
+  return tickers
+    .filter((t) => ['USDT', 'USD', 'USDC'].includes(String(t.target || '').toUpperCase()))
+    .filter((t) => !t.is_stale && !t.is_anomaly && t.trust_score !== 'red')
+    .filter((t) => Number(t.converted_volume?.usd) >= MIN_MARKET_VOLUME_USD)
+    .map((t) => {
+      const last = Number(t.converted_last?.usd);
+      const spread = Math.min(Math.max(Number(t.bid_ask_spread_percentage) || 0, 0), 20) / 100;
+      return last * (1 - spread / 2);
+    })
+    .filter((p) => Number.isFinite(p) && p > 0);
+}
+
+/**
+ * NIM's US-dollar price for quoting, cached for a minute. Null when it can't be read: the caller
+ * must then refuse to price an intent rather than guess.
+ *
+ * 🔴 PRICED AT WHAT NIM SELLS FOR, NOT AT AN AVERAGE. CoinGecko's simple price is a volume-weighted
+ * blend of last trades; the NIM a customer pays is later sold on an exchange at its bid. So the
+ * quote uses the LOWEST bid across the qualifying exchange markets (Gate, KuCoin… — the ones an
+ * operator actually converts on), and never more than the blended price. The blended price alone
+ * is the fallback when no market qualifies. A lower NIM price means more NIM per naira: the
+ * conservative side for us, and NIMIQ_PRICE_BUFFER still sits on top.
  */
 export async function nimUsdPrice(): Promise<number | null> {
   if (priceCache && Date.now() - priceCache.at < PRICE_TTL_MS) return priceCache.usd;
-  try {
-    const res = await fetch('https://api.coingecko.com/api/v3/simple/price?ids=nimiq-2&vs_currencies=usd', {
-      cache: 'no-store',
-      signal: AbortSignal.timeout(8_000),
-    });
-    if (!res.ok) return priceCache?.usd ?? null;
-    const usd = Number((await res.json())?.['nimiq-2']?.usd);
-    if (!Number.isFinite(usd) || usd <= 0) return priceCache?.usd ?? null;
-    priceCache = { usd, at: Date.now() };
-    return usd;
-  } catch {
-    // A stale price up to ten minutes old is still usable; older than that, refuse.
-    return priceCache && Date.now() - priceCache.at < 10 * PRICE_TTL_MS ? priceCache.usd : null;
+  const get = (url: string) => fetch(url, { cache: 'no-store', signal: AbortSignal.timeout(8_000) })
+    .then((r) => (r.ok ? r.json() : null)).catch(() => null);
+  const [simple, tickers] = await Promise.all([
+    get('https://api.coingecko.com/api/v3/simple/price?ids=nimiq-2&vs_currencies=usd'),
+    get('https://api.coingecko.com/api/v3/coins/nimiq-2/tickers?order=volume_desc'),
+  ]);
+  const blended = Number(simple?.['nimiq-2']?.usd);
+  const bids = exchangeBidsUsd(Array.isArray(tickers?.tickers) ? tickers.tickers : []);
+  const candidates = [...bids, ...(Number.isFinite(blended) && blended > 0 ? [blended] : [])];
+  if (!candidates.length) {
+    // A stale price up to three minutes old is still usable; older than that, refuse.
+    return priceCache && Date.now() - priceCache.at < STALE_PRICE_MAX_MS ? priceCache.usd : null;
   }
+  const usd = Math.min(...candidates);
+  priceCache = { usd, at: Date.now() };
+  return usd;
 }
 
 /** A buffer on top of the spot price, covering the drift between quoting and converting NIM. */
@@ -147,6 +183,20 @@ async function rpc<T>(method: string, params: unknown[]): Promise<RpcResult<T>> 
 }
 
 export const NIM_TX_HASH_RE = /^[0-9a-f]{64}$/;
+
+/**
+ * A wallet's spendable balance in luna, read from the Nimiq chain (Albatross getAccountByAddress)
+ * — the source of truth at Pay, not the figure the app displayed when it opened. Null when the
+ * chain can't be read: the caller then must not refuse on balance (Nimiq Pay refuses an
+ * unaffordable send itself).
+ */
+export async function nimBalanceLuna(address: string): Promise<number | null> {
+  if (!isNimAddress(address)) return null;
+  const read = await rpc<{ balance?: number }>('getAccountByAddress', [formatNimAddress(address)]);
+  if (!read.ok || !read.value) return null;
+  const b = Number(read.value.balance);
+  return Number.isFinite(b) && b >= 0 ? b : null;
+}
 
 export async function getNimTransaction(hash: string): Promise<RpcResult<NimTransaction>> {
   return rpc<NimTransaction>('getTransactionByHash', [hash.toLowerCase()]);

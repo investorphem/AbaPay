@@ -2,8 +2,8 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
-import { init, type NimiqProvider } from '@nimiq/mini-app-sdk';
-import { Phone, Wifi, Lightbulb, Tv, GraduationCap, Landmark, Globe2, Loader2, CheckCircle2, XCircle, ExternalLink, Copy, Check, ChevronLeft, ChevronDown, Search, X, Home, History as HistoryIcon, Clock } from 'lucide-react';
+import { init, getHostNetwork, type NimiqProvider } from '@nimiq/mini-app-sdk';
+import { Phone, Wifi, Lightbulb, Tv, GraduationCap, Landmark, Globe2, Loader2, CheckCircle2, XCircle, ExternalLink, Copy, Check, ChevronLeft, ChevronDown, Search, X, Home, History as HistoryIcon, Clock, Send, ShieldCheck, LogOut, Wallet } from 'lucide-react';
 import { billCharges } from '@/lib/billCharges';
 
 // ⚡ THE NIMIQ PAY MINI APP — every service abapays.com sells, paid in NIM.
@@ -22,7 +22,11 @@ import { billCharges } from '@/lib/billCharges';
 type Svc = 'AIRTIME' | 'DATA' | 'ELECTRICITY' | 'CABLE' | 'EDUCATION' | 'BANK' | 'INTL';
 type Provider = { serviceID: string; displayName: string; logo?: string; minAmount?: number; maxAmount?: number };
 type Plan = { variation_code: string; name: string; variation_amount: string };
-type Quote = { available: boolean; nim_usd: number | null; ngn_per_usd: number; buffer: number };
+type Quote = {
+  available: boolean; nim_usd: number | null; ngn_per_usd: number; buffer: number;
+  /** Per tile, from the same gate abapays.com uses (kill switches, provider breaker). */
+  services?: Record<string, { available: boolean; reason?: string }>;
+};
 type Intent = { intent_id: string; recipient: string; luna: number; nim: number; reference: string };
 type Phase = 'idle' | 'ordering' | 'signing' | 'confirming' | 'done' | 'failed';
 
@@ -47,6 +51,14 @@ const OPEN_IN_NIMIQ_PAY = 'https://nimpay.app/miniapps/open/nim.abapays.com';
 
 const ngn = (v: number) => `₦${v.toLocaleString('en-NG', { maximumFractionDigits: 2 })}`;
 const nimFmt = (v: number) => `${v.toLocaleString('en-US', { maximumFractionDigits: 0 })} NIM`;
+// A wallet balance keeps its decimals: rounded to whole NIM, anything under 0.5 NIM read as "0 NIM".
+const nimBalanceFmt = (v: number) => `${v.toLocaleString('en-US', { maximumFractionDigits: 2 })} NIM`;
+// NIM is priced in USD (CoinGecko); NIM amounts are shown with their USD value, like abapays.com
+// shows stablecoins. Naira stays for Nigerian bills, the destination currency for international ones.
+const usdFmt = (v: number) => `$${v.toLocaleString('en-US', { minimumFractionDigits: v < 1 ? 4 : 2, maximumFractionDigits: v < 1 ? 4 : 2 })}`;
+// Set when the user taps Disconnect, so the app doesn't ask Nimiq Pay for the account again on
+// the next open; cleared by Connect wallet. A per-device preference, so localStorage.
+const DISCONNECTED_KEY = 'abapay_nim_disconnected';
 const utf8ToHex = (s: string) => Array.from(new TextEncoder().encode(s), (b) => b.toString(16).padStart(2, '0')).join('');
 const isPhone = (p: string) => /^0[789][01]\d{8}$/.test(p.replace(/\s+/g, ''));
 
@@ -69,33 +81,87 @@ export default function NimApp() {
   const nimiq = useRef<NimiqProvider | null>(null);
   // The same provider as state, for children that render with it (a ref can't be read during render).
   const [wallet, setWallet] = useState<NimiqProvider | null>(null);
-  const [env, setEnv] = useState<'loading' | 'ready' | 'outside'>('loading');
+  // 'outside' = not running in Nimiq Pay at all. 'disconnected' = inside Nimiq Pay, but the user
+  // declined the account prompt or tapped Disconnect: they get a Connect button, not a dead end.
+  const [env, setEnv] = useState<'loading' | 'ready' | 'disconnected' | 'outside'>('loading');
   const [account, setAccount] = useState('');
   const [balanceLuna, setBalanceLuna] = useState<number | null>(null);
+  const [connecting, setConnecting] = useState(false);
+  const [connectError, setConnectError] = useState('');
+  // The Nimiq network Nimiq Pay is on. Balances and payments are read on that network, so a host
+  // on testnet shows 0 NIM against our mainnet service — said plainly instead of a silent zero.
+  const [hostNetwork, setHostNetwork] = useState<string | undefined>(undefined);
 
+  // 🔴 THE "0 NIM" BALANCE: getBalance read once, the instant the app opened, can come back 0
+  // before Nimiq Pay has caught up with the network. Wait for consensus first (up to ~12s), and
+  // keep the figure fresh (below) rather than trusting the first read forever.
   const refreshBalance = useCallback(async (addr: string) => {
+    const p = nimiq.current;
+    if (!p || !addr) return;
     try {
-      const b = unwrap(await nimiq.current!.getBalance(addr));
+      const hasConsensusCheck = typeof (p as { isConsensusEstablished?: unknown }).isConsensusEstablished === 'function';
+      for (let i = 0; hasConsensusCheck && i < 12; i++) {
+        const ok = await (p as unknown as { isConsensusEstablished(): Promise<boolean | { error: unknown }> }).isConsensusEstablished().catch(() => true);
+        if (ok === true) break;
+        await new Promise((r) => setTimeout(r, 1_000));
+      }
+      const b = unwrap(await p.getBalance(addr));
       setBalanceLuna(Number(b));
     } catch { setBalanceLuna(null); }
+  }, []);
+
+  /** Ask Nimiq Pay for the account. Prompts the user; a decline leaves a Connect button. */
+  const connect = useCallback(async () => {
+    const p = nimiq.current;
+    if (!p) return;
+    setConnecting(true); setConnectError('');
+    try {
+      const accounts = unwrap(await p.listAccounts());
+      if (!accounts?.length) throw new Error('No Nimiq account');
+      try { localStorage.removeItem(DISCONNECTED_KEY); } catch { /* storage unavailable */ }
+      setAccount(accounts[0]);
+      setEnv('ready');
+      refreshBalance(accounts[0]);
+    } catch (e) {
+      setEnv('disconnected');
+      setConnectError(e instanceof Error && /reject|denied|declin|cancel/i.test(e.message) ? '' : 'Nimiq Pay didn’t share an account. Please try again.');
+    } finally {
+      setConnecting(false);
+    }
+  }, [refreshBalance]);
+
+  /** Forget the account in this app. Nimiq Pay keeps its own permission; Connect asks again. */
+  const disconnect = useCallback(() => {
+    try { localStorage.setItem(DISCONNECTED_KEY, '1'); } catch { /* storage unavailable */ }
+    try { sessionStorage.removeItem('abapay-nim-history-session'); } catch { /* storage unavailable */ } // HistoryView's SESSION_KEY
+    setAccount(''); setBalanceLuna(null); setEnv('disconnected');
   }, []);
 
   useEffect(() => {
     let cancelled = false;
     init({ timeout: 8_000 })
-      .then(async (p) => {
+      .then((p) => {
+        if (cancelled) return;
         nimiq.current = p;
         setWallet(p);
-        const accounts = unwrap(await p.listAccounts());
-        if (cancelled) return;
-        if (!accounts?.length) throw new Error('No Nimiq account');
-        setAccount(accounts[0]);
-        setEnv('ready');
-        refreshBalance(accounts[0]);
+        try { setHostNetwork(getHostNetwork()); } catch { /* older Nimiq Pay */ }
+        let wasDisconnected = false;
+        try { wasDisconnected = localStorage.getItem(DISCONNECTED_KEY) === '1'; } catch { /* storage unavailable */ }
+        if (wasDisconnected) setEnv('disconnected');
+        else void connect();
       })
       .catch(() => { if (!cancelled) setEnv('outside'); });
     return () => { cancelled = true; };
-  }, [refreshBalance]);
+  }, [connect]);
+
+  // Keep the balance current: every 20s while the app is open, and on returning to it.
+  useEffect(() => {
+    if (env !== 'ready' || !account) return;
+    const t = setInterval(() => refreshBalance(account), 20_000);
+    const onVisible = () => { if (document.visibilityState === 'visible') refreshBalance(account); };
+    document.addEventListener('visibilitychange', onVisible);
+    return () => { clearInterval(t); document.removeEventListener('visibilitychange', onVisible); };
+  }, [env, account, refreshBalance]);
 
   // ── Price ──────────────────────────────────────────────────────────────────────────────────
   const [quote, setQuote] = useState<Quote | null>(null);
@@ -272,11 +338,43 @@ export default function NimApp() {
     if (!bill || !quote?.nim_usd) return null;
     const { serviceFee, stampDutyNgn } = billCharges({ serviceCategory: bill.serviceCategory, serviceID: bill.serviceID, network: bill.network, amountNgn: bill.nairaAmount });
     const usd = (bill.nairaAmount + serviceFee + stampDutyNgn) / quote.ngn_per_usd;
-    return { nim: Math.ceil((usd / quote.nim_usd) * (1 + quote.buffer)), fee: serviceFee + stampDutyNgn };
+    const nim = Math.ceil((usd / quote.nim_usd) * (1 + quote.buffer));
+    const fee = serviceFee + stampDutyNgn;
+    return { nim, fee, nimUsd: nim * quote.nim_usd, feeUsd: fee / quote.ngn_per_usd };
   }, [bill, quote]);
+
+  // The provider's own limits from the VTpass catalog — the same numbers the server's
+  // checkWebPayment applies — shown and enforced as the amount is typed, as abapays.com does.
+  const providerLimits = useMemo(() => {
+    const p = providers.find((x) => x.serviceID === provider);
+    return { min: p?.minAmount || null, max: p?.maxAmount || null };
+  }, [providers, provider]);
+  const typedNaira = Number(amount) || 0;
+  const limitError = (svc === 'AIRTIME' || svc === 'ELECTRICITY') && typedNaira > 0
+    ? (providerLimits.min && typedNaira < providerLimits.min ? `The minimum for this provider is ${ngn(providerLimits.min)}.`
+      : providerLimits.max && typedNaira > providerLimits.max ? `The maximum for this provider is ${ngn(providerLimits.max)} per payment.` : '')
+    : '';
+
+  // 🔒 SAME CONTROLS AS abapays.com, asked of the server: the order as it stands goes through the
+  // exact checkWebPayment gate createIntent runs (kill switches for the service and the provider,
+  // the provider breaker, live min/max). Debounced; read-only. The server re-checks at Pay anyway.
+  // Each answer is kept with the order it was asked for, so a stale one never applies to a newer order.
+  const billKey = bill ? JSON.stringify(bill) : '';
+  const [gate, setGate] = useState<{ key: string; allowed: boolean; reason?: string } | null>(null);
+  useEffect(() => {
+    if (!billKey) return;
+    const t = setTimeout(() => {
+      getJson<{ allowed: boolean; reason?: string }>('/api/pay/nim', { method: 'POST', body: JSON.stringify({ check: true, ...JSON.parse(billKey) }) })
+        .then((g) => { if (typeof g?.allowed === 'boolean') setGate({ key: billKey, allowed: g.allowed, reason: g.reason }); })
+        .catch(() => { /* the server re-checks at Pay */ });
+    }, 400);
+    return () => clearTimeout(t);
+  }, [billKey]);
+  const gateError = gate && gate.key === billKey && !gate.allowed ? (gate.reason || 'This service is unavailable right now.') : '';
 
   const formReady = (() => {
     if (!bill) return false;
+    if (limitError || gateError) return false;
     if (svc === 'INTL') return !!(operator && intlPlan) && phone.replace(/\D/g, '').length >= 6;
     if (svc === 'BANK') return !!bankCode && !!verified?.name && isPhone(phone);
     if (!provider || !isPhone(phone)) return false;
@@ -295,15 +393,14 @@ export default function NimApp() {
     setPhase('ordering'); setMessage('Pricing your order in NIM…'); setResult(null);
     let intent: Intent;
     try {
-      const d = await getJson<Intent & { success: boolean; message?: string }>('/api/pay/nim', { method: 'POST', body: JSON.stringify({ intent: true, payer: account, ...bill }) });
+      // The server checks the balance on the Nimiq chain (INSUFFICIENT_NIM) — the displayed figure
+      // is never the judge, so a stale "0" can't block a funded wallet.
+      const d = await getJson<Intent & { success: boolean; message?: string; balance_luna?: number | null }>('/api/pay/nim', { method: 'POST', body: JSON.stringify({ intent: true, payer: account, ...bill }) });
+      if (typeof d.balance_luna === 'number') setBalanceLuna(d.balance_luna);
       if (!d.success) { setPhase('failed'); setMessage(d.message || 'This order could not be started.'); return; }
       intent = d;
     } catch {
       setPhase('failed'); setMessage('Network error. Nothing was charged.'); return;
-    }
-
-    if (balanceLuna !== null && balanceLuna < intent.luna) {
-      setPhase('failed'); setMessage(`This costs ${nimFmt(intent.nim)} and your wallet holds ${nimFmt(balanceLuna / LUNA)}. Nothing was charged.`); return;
     }
 
     setPhase('signing'); setMessage(`Approve ${nimFmt(intent.nim)} in Nimiq Pay.`);
@@ -359,11 +456,28 @@ export default function NimApp() {
         <p className="text-sm opacity-70 mt-2 text-center max-w-sm">Airtime, data, electricity, cable TV, exam PINs, bank transfers and international top-ups. This app runs inside Nimiq Pay.</p>
         <a href={OPEN_IN_NIMIQ_PAY} className="mt-6 px-6 py-3 rounded-full bg-[#E9B213] text-[#1F2348] font-black text-sm">Open in Nimiq Pay</a>
         <a href="https://www.abapays.com" className="mt-4 text-xs underline opacity-60">Paying with stablecoins? Use abapays.com</a>
+        <NimFooter />
+      </Centered>
+    );
+  }
+  if (env === 'disconnected') {
+    return (
+      <Centered>
+        <Brand />
+        <h1 className="text-2xl font-black mt-6 text-center">Connect your wallet</h1>
+        <p className="text-sm opacity-70 mt-2 text-center max-w-sm">AbaPay needs your Nimiq address to price your bill and confirm your payment. It can never move your NIM: every payment is approved by you in Nimiq Pay.</p>
+        <button type="button" onClick={() => void connect()} disabled={connecting}
+          className="mt-6 px-6 py-3 rounded-full bg-[#E9B213] text-[#1F2348] font-black text-sm inline-flex items-center gap-2 disabled:opacity-60">
+          {connecting ? <Loader2 size={16} className="animate-spin" /> : <Wallet size={16} />} {connecting ? 'Waiting for Nimiq Pay…' : 'Connect wallet'}
+        </button>
+        {connectError && <div className="mt-4 max-w-sm"><Note tone="warn">{connectError}</Note></div>}
+        <NimFooter />
       </Centered>
     );
   }
 
   const busy = phase === 'ordering' || phase === 'signing' || phase === 'confirming';
+  const balanceUsd = balanceLuna !== null && quote?.nim_usd ? (balanceLuna / LUNA) * quote.nim_usd : null;
 
   return (
     <div className="max-w-md mx-auto px-4 py-5 pb-24">
@@ -371,9 +485,18 @@ export default function NimApp() {
         <Brand />
         <div className="text-right">
           <p className="text-[10px] uppercase tracking-widest font-bold opacity-50">Balance</p>
-          <p className="text-sm font-black tabular-nums">{balanceLuna === null ? '—' : nimFmt(balanceLuna / LUNA)}</p>
+          <p className="text-sm font-black tabular-nums">{balanceLuna === null ? '—' : nimBalanceFmt(balanceLuna / LUNA)}</p>
+          {balanceUsd !== null && <p className="text-[10px] opacity-60 tabular-nums">≈ {usdFmt(balanceUsd)}</p>}
+          <button type="button" onClick={disconnect} disabled={busy} title={account}
+            className="mt-1 inline-flex items-center gap-1 text-[10px] font-bold opacity-60 hover:opacity-100 disabled:opacity-30">
+            {account ? `${account.replace(/\s+/g, '').slice(0, 4)}…${account.replace(/\s+/g, '').slice(-4)}` : ''} <LogOut size={10} /> Disconnect
+          </button>
         </div>
       </header>
+
+      {hostNetwork === 'testnet' && (
+        <div className="mb-4"><Note tone="warn">Nimiq Pay is on the test network, so your balance here is the testnet one. AbaPay takes mainnet NIM: switch Nimiq Pay to mainnet to pay.</Note></div>
+      )}
 
       {quote && !quote.available && (
         <div className="mb-4"><Note tone="warn">NIM payments are paused right now. Please try again shortly.</Note></div>
@@ -387,15 +510,21 @@ export default function NimApp() {
       ) : !svc ? (
         <>
           <h1 className="text-xl font-black mb-1">What do you want to pay?</h1>
-          <p className="text-xs opacity-60 mb-4">Paid in NIM, delivered in Nigeria and 140+ countries.{quote?.nim_usd ? ` 1 NIM ≈ ${ngn(quote.nim_usd * quote.ngn_per_usd)}.` : ''}</p>
+          <p className="text-xs opacity-60 mb-4">Paid in NIM, delivered in Nigeria and 140+ countries.{quote?.nim_usd ? ` 1 NIM ≈ ${usdFmt(quote.nim_usd)}.` : ''}</p>
           <div className="grid grid-cols-2 gap-3">
-            {SERVICES.map((s) => (
-              <button key={s.id} type="button" onClick={() => { resetForm(); setSvc(s.id); setPhase('idle'); setMessage(''); }}
-                className="flex flex-col items-start gap-3 p-4 rounded-2xl bg-white dark:bg-[#1F2348] border border-black/5 dark:border-white/10 text-left active:scale-[0.98] transition">
-                <span className={`w-10 h-10 rounded-xl flex items-center justify-center ${s.bg}`}><s.icon size={20} className={s.color} /></span>
-                <span className="text-sm font-black">{s.label}</span>
-              </button>
-            ))}
+            {SERVICES.map((s) => {
+              // Switched off in the admin for abapays.com → off here too (same gate, see the quote).
+              const off = quote?.services?.[s.id]?.available === false;
+              return (
+                <button key={s.id} type="button" disabled={off} title={off ? quote?.services?.[s.id]?.reason : undefined}
+                  onClick={() => { resetForm(); setSvc(s.id); setPhase('idle'); setMessage(''); }}
+                  className="flex flex-col items-start gap-3 p-4 rounded-2xl bg-white dark:bg-[#1F2348] border border-black/5 dark:border-white/10 text-left active:scale-[0.98] transition disabled:opacity-40 disabled:active:scale-100">
+                  <span className={`w-10 h-10 rounded-xl flex items-center justify-center ${s.bg}`}><s.icon size={20} className={s.color} /></span>
+                  <span className="text-sm font-black">{s.label}</span>
+                  {off && <span className="text-[10px] font-bold uppercase tracking-wider opacity-80">Unavailable</span>}
+                </button>
+              );
+            })}
           </div>
         </>
       ) : phase === 'done' || phase === 'failed' ? (
@@ -509,7 +638,7 @@ export default function NimApp() {
             )}
 
             {(svc === 'AIRTIME' || svc === 'ELECTRICITY' || svc === 'BANK') && (
-              <Field label="Amount (₦)">
+              <Field label={`Amount (₦)${providerLimits.min || providerLimits.max ? ` · ${providerLimits.min ? `min ${ngn(providerLimits.min)}` : ''}${providerLimits.min && providerLimits.max ? ', ' : ''}${providerLimits.max ? `max ${ngn(providerLimits.max)}` : ''}` : ''}`}>
                 <input inputMode="numeric" value={amount} onChange={(e) => setAmount(e.target.value.replace(/\D/g, ''))} className={input} />
                 <div className="flex flex-wrap gap-2 mt-2">
                   {(svc === 'ELECTRICITY' ? ELEC_PRESETS : AIRTIME_PRESETS).map((v) => (
@@ -530,14 +659,20 @@ export default function NimApp() {
             )}
 
             {formError && <Note tone="warn">{formError}</Note>}
+            {!formError && (limitError || gateError) && <Note tone="warn">{limitError || gateError}</Note>}
           </div>
 
           <div className="mt-5 rounded-2xl bg-white dark:bg-[#1F2348] border border-black/5 dark:border-white/10 p-4">
-            <div className="flex justify-between text-xs opacity-70"><span>Bill</span><span className="tabular-nums">{bill ? ngn(bill.nairaAmount) : '—'}</span></div>
-            {estimate && estimate.fee > 0 && <div className="flex justify-between text-xs opacity-70 mt-1"><span>Service fee</span><span className="tabular-nums">{ngn(estimate.fee)}</span></div>}
+            {/* A Nigerian bill is priced in naira; an international one in the destination's own
+                currency (as abapays.com shows it); what the customer pays is NIM, with its USD value. */}
+            <div className="flex justify-between text-xs opacity-70"><span>Bill</span><span className="tabular-nums">{!bill ? '—' : svc === 'INTL' && 'displayAmount' in bill && bill.displayAmount ? bill.displayAmount : ngn(bill.nairaAmount)}</span></div>
+            {estimate && estimate.fee > 0 && <div className="flex justify-between text-xs opacity-70 mt-1"><span>Service fee</span><span className="tabular-nums">{svc === 'INTL' ? usdFmt(estimate.feeUsd) : ngn(estimate.fee)}</span></div>}
             <div className="flex justify-between items-baseline mt-2">
               <span className="text-sm font-black">You pay</span>
-              <span className="text-xl font-black tabular-nums">{estimate ? `≈ ${nimFmt(estimate.nim)}` : '—'}</span>
+              <span className="text-right">
+                <span className="block text-xl font-black tabular-nums">{estimate ? `≈ ${nimFmt(estimate.nim)}` : '—'}</span>
+                {estimate && <span className="block text-[11px] opacity-60 tabular-nums">≈ {usdFmt(estimate.nimUsd)}</span>}
+              </span>
             </div>
             <p className="text-[10px] opacity-50 mt-1">Final NIM amount is fixed when you tap Pay.</p>
           </div>
@@ -553,10 +688,7 @@ export default function NimApp() {
         </div>
       )}
 
-      <footer className="mt-10 text-center text-[10px] opacity-50 space-y-1">
-        <p>AbaPay by Masonode Technologies Limited · <a href="/terms" className="underline">Terms</a> · <a href="/privacy" className="underline">Privacy</a></p>
-        <p>Open source · <a href="https://github.com/investorphem/AbaPay" className="underline">GitHub</a></p>
-      </footer>
+      <NimFooter />
 
       {/* Pay / History. Hidden mid-payment, so a tab switch can't hide a payment in progress. */}
       {!busy && (
@@ -589,6 +721,39 @@ function Field({ label, children }: { label: string; children: React.ReactNode }
 function Note({ tone, children }: { tone: 'ok' | 'warn'; children: React.ReactNode }) {
   return (
     <div className={`rounded-xl px-3 py-2.5 text-xs mt-3 ${tone === 'ok' ? 'bg-emerald-500/10 text-emerald-800 dark:text-emerald-300' : 'bg-amber-500/10 text-amber-800 dark:text-amber-300'}`}>{children}</div>
+  );
+}
+
+// The abapays.com footer (src/components/AppFooter.tsx): X and Telegram community links, the
+// network badge, Docs / Terms / Privacy, and the company line. /docs lives on www (this host maps
+// page paths under /nim); /terms and /privacy are served here too.
+const footerLink = 'text-[10px] font-black opacity-60 hover:opacity-100 uppercase transition-opacity';
+const footerIcon = 'w-11 h-11 rounded-full border-2 border-black/10 dark:border-white/15 bg-white dark:bg-[#1F2348] flex items-center justify-center opacity-80 hover:opacity-100 transition';
+
+function NimFooter() {
+  return (
+    <footer className="mt-12 w-full border-t border-black/5 dark:border-white/10 pt-8 pb-4 flex flex-col items-center gap-5">
+      <div className="flex items-center gap-4">
+        <a href="https://x.com/AbaPays" target="_blank" rel="noopener noreferrer" aria-label="AbaPay on X" className={footerIcon}>
+          <svg xmlns="http://www.w3.org/2000/svg" width="17" height="17" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+            <path d="M18.244 2.25h3.308l-7.227 8.26 8.502 11.24H16.17l-5.214-6.817L4.99 21.75H1.68l7.73-8.835L1.254 2.25H8.08l4.713 6.231zm-1.161 17.52h1.833L7.084 4.126H5.117z" />
+          </svg>
+        </a>
+        <a href="https://t.me/AbaPays" target="_blank" rel="noopener noreferrer" aria-label="AbaPay on Telegram" className={footerIcon}>
+          <Send size={18} className="ml-[-2px] mt-[2px]" />
+        </a>
+      </div>
+      <div className="flex items-center gap-2 px-4 py-1.5 rounded-full bg-white dark:bg-[#1F2348] border border-black/5 dark:border-white/10">
+        <ShieldCheck size={15} className="text-[#E9B213]" />
+        <span className="text-[11px] font-bold opacity-70 uppercase tracking-widest">Secured by Nimiq Network</span>
+      </div>
+      <div className="flex items-center gap-5">
+        <a href="https://www.abapays.com/docs" className={footerLink}>Docs &amp; FAQ</a>
+        <a href="/terms" className={footerLink}>Terms</a>
+        <a href="/privacy" className={footerLink}>Privacy</a>
+      </div>
+      <p className="text-[9px] font-medium opacity-40 uppercase tracking-[0.2em] text-center">© 2026 MASONODE TECHNOLOGIES LIMITED • RC 9524980 • v3.1</p>
+    </footer>
   );
 }
 

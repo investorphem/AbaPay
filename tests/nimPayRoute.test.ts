@@ -17,15 +17,20 @@ vi.mock('@/lib/vend', () => ({ getStrictRequestId: () => '202610171200nim0000001
 vi.mock('@/lib/discounts', () => ({ getActiveDiscountForService: async () => null, computeDiscountNgn: async () => ({ discountNgn: 0, discountPhone: null }) }));
 vi.mock('@/lib/parity', () => ({ isDuplicateElectricity: async () => false }));
 vi.mock('@/lib/rateLimit', () => ({ enforceRateLimit: async () => null }));
-vi.mock('@/lib/serviceRules', () => ({ checkWebPayment: async (a: Record<string, unknown>) => { gateCalls.push(a); return { allowed: true }; } }));
+let offCategories: string[] = [];
+vi.mock('@/lib/serviceRules', () => ({ checkWebPayment: async (a: Record<string, unknown>) => {
+  gateCalls.push(a);
+  return offCategories.includes(String(a.serviceCategory)) ? { allowed: false, code: 'SERVICE_UNAVAILABLE', reason: 'Switched off. Nothing was charged.' } : { allowed: true };
+} }));
 vi.mock('@/lib/billCharges', () => ({ billCharges: () => ({ serviceFee: 0, stampDutyNgn: 0 }) }));
 vi.mock('@/lib/nimSettle', () => ({ NIM_INTENT_PREFIX: 'nim_intent_', settleNimIntent: async () => ({}) }));
 vi.mock('@/lib/nimiq', async (importOriginal) => {
   const actual = await importOriginal<typeof import('@/lib/nimiq')>();
-  return { ...actual, treasuryAddress: () => 'NQ36 8QDJ 26LU ABEG 3E84 14NT 4HBB 91GC 36P3', nimUsdPrice: async () => 0.001 };
+  return { ...actual, treasuryAddress: () => 'NQ36 8QDJ 26LU ABEG 3E84 14NT 4HBB 91GC 36P3', nimUsdPrice: async () => 0.001, nimBalanceLuna: async () => balanceLuna };
 });
 
-const { POST } = await import('@/app/api/pay/nim/route');
+let balanceLuna: number | null = null;
+const { POST, GET } = await import('@/app/api/pay/nim/route');
 const PAYER = 'NQ16 2SSN 82TL SMQS KXT3 Q01V CMAL NU6F 1LJG';
 
 const order = (over: Record<string, unknown> = {}) => ({
@@ -43,6 +48,8 @@ beforeEach(() => {
   db.tables.platform_settings = [{ id: 1, exchange_rate: '1500' }];
   alerts.length = 0;
   gateCalls.length = 0;
+  offCategories = [];
+  balanceLuna = null;
 });
 
 describe('/api/pay/nim — creating an order', () => {
@@ -71,5 +78,53 @@ describe('/api/pay/nim — creating an order', () => {
     expect(String(r.json.message)).toMatch(/Nothing was charged/);
     expect(db.tables.transactions ?? []).toHaveLength(0);
     expect(alerts).toEqual([]);
+  });
+});
+
+describe('/api/pay/nim — the same admin settings as abapays.com', () => {
+  it('prices with the naira rate set in the admin (platform_settings.exchange_rate)', async () => {
+    db.tables.platform_settings = [{ id: 1, exchange_rate: '1000' }];
+    const r = await post(order({ nairaAmount: 1000 })); // $1 at 1000/$, NIM at $0.001, +buffer
+    expect(r.status).toBe(200);
+    expect(r.json.nim).toBe(Math.ceil(1000 * 1.02));
+  });
+
+  it('reports a service switched off in the admin as unavailable, through the same gate', async () => {
+    offCategories = ['ELECTRICITY'];
+    const q = await (await GET()).json();
+    expect(q.services.ELECTRICITY).toMatchObject({ available: false, reason: expect.stringMatching(/Switched off/) });
+    expect(q.services.AIRTIME).toEqual({ available: true });
+    expect(gateCalls.map((g) => g.serviceCategory)).toEqual(expect.arrayContaining(['AIRTIME', 'DATA', 'ELECTRICITY', 'CABLE', 'EDUCATION', 'BANK', 'INTERNATIONAL']));
+  });
+
+  it('checks one provider and amount without writing anything', async () => {
+    offCategories = ['AIRTIME'];
+    const r = await post({ check: true, serviceID: 'mtn', serviceCategory: 'airtime', nairaAmount: 200 });
+    expect(r.json).toMatchObject({ allowed: false, code: 'SERVICE_UNAVAILABLE' });
+    expect(gateCalls[0]).toMatchObject({ serviceCategory: 'AIRTIME', serviceID: 'mtn', amountNgn: 200 });
+    expect(db.tables.transactions ?? []).toHaveLength(0);
+  });
+});
+
+describe('/api/pay/nim — the balance is read on chain at Pay', () => {
+  it('refuses before recording when the chain says the wallet is short', async () => {
+    balanceLuna = 50 * 100_000; // 50 NIM; the order costs ~68
+    const r = await post(order());
+    expect(r.status).toBe(400);
+    expect(r.json).toMatchObject({ code: 'INSUFFICIENT_NIM', balance_luna: 50 * 100_000 });
+    expect(String(r.json.message)).toMatch(/Nothing was charged/);
+    expect(db.tables.transactions ?? []).toHaveLength(0);
+  });
+
+  it('goes ahead when the wallet covers it, and returns the on-chain balance', async () => {
+    balanceLuna = 10_000 * 100_000;
+    const r = await post(order());
+    expect(r.status).toBe(200);
+    expect(r.json.balance_luna).toBe(10_000 * 100_000);
+  });
+
+  it('never blocks on an unreadable balance (Nimiq Pay refuses an unaffordable send itself)', async () => {
+    balanceLuna = null;
+    expect((await post(order())).status).toBe(200);
   });
 });

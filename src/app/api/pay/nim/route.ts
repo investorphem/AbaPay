@@ -9,7 +9,7 @@ import { enforceRateLimit } from '@/lib/rateLimit';
 import { checkWebPayment } from '@/lib/serviceRules';
 import { billCharges } from '@/lib/billCharges';
 import { metric } from '@/lib/log';
-import { LUNA_PER_NIM, NIM_TX_HASH_RE, PRICE_BUFFER, canonicalNimAddress, formatNimAddress, isNimAddress, lunaForUsd, nimUsdPrice, paymentReference, recentTreasuryPayments, treasuryAddress } from '@/lib/nimiq';
+import { LUNA_PER_NIM, NIM_TX_HASH_RE, PRICE_BUFFER, canonicalNimAddress, formatNimAddress, isNimAddress, lunaForUsd, nimBalanceLuna, nimUsdPrice, paymentReference, recentTreasuryPayments, treasuryAddress } from '@/lib/nimiq';
 import { NIM_INTENT_PREFIX, settleNimIntent } from '@/lib/nimSettle';
 
 // ⚡ /api/pay/nim — THE NIM RAIL, used by the Nimiq Pay mini app on nim.abapays.com.
@@ -33,6 +33,8 @@ export const maxDuration = 120;
 
 interface NimPayRequest {
   intent?: boolean;
+  /** A read-only availability/limit check for one provider and amount (see checkOrder). */
+  check?: boolean;
   intent_id?: string; tx_hash?: string;
   payer?: string;
   serviceID?: string; serviceCategory?: string; network?: string; billersCode?: string;
@@ -51,16 +53,48 @@ const fail = (status: number, message: string, code?: string) =>
  * naira rate and the buffer. The intent's own quote is the binding one.
  */
 export async function GET() {
-  const [nimUsd, { data: settings }] = await Promise.all([
+  const [nimUsd, { data: settings }, services] = await Promise.all([
     nimUsdPrice(),
     supabase.from('platform_settings').select('exchange_rate').eq('id', 1).single(),
+    serviceAvailability(),
   ]);
   return NextResponse.json({
     available: !!treasuryAddress() && !!nimUsd,
     nim_usd: nimUsd,
     ngn_per_usd: parseFloat(settings?.exchange_rate || '1500'),
     buffer: PRICE_BUFFER,
+    services,
   }, { headers: { 'Cache-Control': 'public, max-age=30' } });
+}
+
+// The mini app's tiles → the category the web app pays them under. Each is asked through
+// checkWebPayment — the very gate /api/pay and createIntent below run — so a service switched
+// off for abapays.com (kill switch or provider breaker) is greyed out here too, not just refused
+// at Pay.
+const TILE_CATEGORIES: Record<string, string> = {
+  AIRTIME: 'AIRTIME', DATA: 'DATA', ELECTRICITY: 'ELECTRICITY', CABLE: 'CABLE', EDUCATION: 'EDUCATION', BANK: 'BANK', INTL: 'INTERNATIONAL',
+};
+
+async function serviceAvailability(): Promise<Record<string, { available: boolean; reason?: string }>> {
+  const entries = await Promise.all(Object.entries(TILE_CATEGORIES).map(async ([tile, category]) => {
+    const gate = await checkWebPayment({ serviceCategory: category, serviceID: null, amountNgn: 0 }).catch(() => ({ allowed: true, reason: undefined }));
+    return [tile, gate.allowed ? { available: true } : { available: false, reason: gate.reason }] as const;
+  }));
+  return Object.fromEntries(entries);
+}
+
+/**
+ * The same gate, for one provider and amount, so the app can say "unavailable" or "minimum ₦…"
+ * before the customer taps Pay. Read-only: writes nothing, prices nothing.
+ */
+async function checkOrder(body: NimPayRequest) {
+  const serviceCategory = String(body.serviceCategory || '').trim().toUpperCase();
+  const cat = serviceCategory;
+  const gate = await checkWebPayment({
+    serviceCategory, serviceID: body.serviceID, amountNgn: Number(body.nairaAmount) || 0,
+    isFixedPlan: ['INTERNET', 'DATA', 'CABLE', 'EDUCATION'].includes(cat) && !!body.variation_code && body.variation_code !== 'none',
+  });
+  return NextResponse.json({ allowed: gate.allowed, code: gate.code, reason: gate.reason });
 }
 
 export async function POST(req: Request) {
@@ -74,6 +108,7 @@ export async function POST(req: Request) {
   } catch {
     return fail(400, 'Invalid request.');
   }
+  if (body.check) return checkOrder(body);
   return body.intent ? createIntent(req, body) : settle(body);
 }
 
@@ -130,6 +165,18 @@ async function createIntent(req: Request, body: NimPayRequest) {
   if (!nimUsd) return fail(503, 'Couldn’t read the NIM price right now. Please try again in a minute.', 'PRICE_UNAVAILABLE');
   const luna = lunaForUsd(usd, nimUsd);
 
+  // The payer's balance, read from the Nimiq chain now — not the figure the app displayed when it
+  // opened, which can be a stale 0. Refused here only when the chain answers and it's short;
+  // unreadable means "don't block" (Nimiq Pay refuses an unaffordable send itself).
+  const balanceLuna = await nimBalanceLuna(payerCanonical);
+  if (balanceLuna !== null && balanceLuna < luna) {
+    return NextResponse.json({
+      success: false, status: 'FAILED_VENDING', code: 'INSUFFICIENT_NIM',
+      message: `This costs ${(luna / LUNA_PER_NIM).toLocaleString('en-US')} NIM and your wallet holds ${(balanceLuna / LUNA_PER_NIM).toLocaleString('en-US', { maximumFractionDigits: 2 })} NIM on the Nimiq network. Nothing was charged.`,
+      balance_luna: balanceLuna, luna,
+    }, { status: 400 });
+  }
+
   if (serviceCategory === 'ELECTRICITY' && await isDuplicateElectricity(supabase, payerCanonical, destinationAccount, vendAmount)) {
     return NextResponse.json({
       success: false, status: 'DUPLICATE',
@@ -171,6 +218,8 @@ async function createIntent(req: Request, body: NimPayRequest) {
     reference: paymentReference(intentId),
     nim_usd: nimUsd,
     charges: { serviceFee, stampDutyNgn, discountNgn },
+    // The on-chain balance just read (null if the chain couldn't be read), so the app shows it.
+    balance_luna: balanceLuna,
   });
 }
 

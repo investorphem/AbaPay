@@ -226,8 +226,8 @@ use, so they cannot disagree.
 
 ## 9. Known limitations — be honest about these
 
-1. **AbaPayV3 is not audited.** It moves user funds via a hot key. Use **testnet**, or mainnet
-   with **small caps**, until audited.
+1. **Agent payments move user funds via a hot key.** Use **testnet**, or mainnet with **small
+   caps** (`maxAgentPaymentPerTx`), and raise them deliberately.
 2. **The relayer is a single hot key.** Bounded, but not zero-risk. Fund with gas only.
 3. **Bank transfer and Education are app-only** — deliberate, see §5.
 4. **The LLM can misparse.** This is why every payment passes through the feasibility engine,

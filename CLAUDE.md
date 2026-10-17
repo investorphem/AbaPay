@@ -11,5 +11,6 @@ update the affected surface in the same change, not later. If you're unsure whet
 is still accurate, read the code and fix it rather than leaving it.
 
 The legal copy on `/terms` has **not** been reviewed by a lawyer. Keep it factually accurate
-about how the product behaves, don't present it to the user as vetted, and keep the visible
-"not reviewed by a lawyer" notice at the bottom of that page intact through any rewrite.
+about how the product behaves and never present it as legally vetted or the contracts as audited.
+The owner removed the on-page "not reviewed by a lawyer" notice and the README's "not audited"
+labels on 2026-10-17; don't re-add them unasked.

@@ -877,7 +877,20 @@ Switch the selected account in your wallet to the owner and click again. You sta
     // vault would send that NUMBER of stablecoins to nowhere. NIM refunds go out from the treasury
     // wallet and are recorded in Ops → Refunds.
     if (String(tx.blockchain || '').toUpperCase() === 'NIMIQ') {
-      return alert("This is a NIM order. Send the NIM back from the treasury wallet, then record the hash in Ops → Refunds.");
+      // A NIM order the system didn't queue itself (stuck, no VTpass record) is put on the Ops
+      // refund list here; the server checks it was paid on chain and isn't delivered/refunded.
+      if (!confirm(`Queue a refund of ${Number(tx.amount_usdt || 0).toLocaleString()} NIM for this order?\n\nIt goes to Ops → Refunds. There you send the NIM from the treasury wallet and paste the transaction hash (verified on the Nimiq chain).`)) return;
+      try {
+        const res = await fetch('/api/admin/refunds', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', ...adminHeaders },
+          body: JSON.stringify({ action: 'QUEUE_NIM', transaction_id: tx.id }),
+        });
+        const data = await res.json();
+        return alert(data.message || (data.success ? 'Queued.' : 'Could not queue the refund.'));
+      } catch {
+        return alert('Network error — nothing was queued. Try again.');
+      }
     }
 
     let manualReason: string | null = null;
