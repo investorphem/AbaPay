@@ -85,7 +85,7 @@ async function createIntent(req: Request, body: NimPayRequest) {
   if (!isNimAddress(payer)) return fail(400, 'Open this app inside Nimiq Pay to pay with NIM.', 'PAYER_REQUIRED');
 
   const {
-    serviceID, serviceCategory, network, billersCode, variation_code, phone, email,
+    serviceID, serviceCategory: rawCategory, network: rawNetwork, billersCode, variation_code, phone, email,
     nairaAmount, foreignAmount, displayAmount, subscription_type, meter_account_type,
     customer_name, customer_address, operator_id, country_code, product_type_id,
   } = body;
@@ -93,8 +93,21 @@ async function createIntent(req: Request, body: NimPayRequest) {
   const vendAmount = Number(nairaAmount);
   if (!Number.isFinite(vendAmount) || vendAmount <= 0) return fail(400, 'Invalid bill amount.');
 
+  // 🔴 REFUSE AN INCOMPLETE ORDER HERE, NOT AT THE INSERT. 2026-10-17: a request with
+  // serviceCategory "data" and no network reached the transactions insert, failed its NOT NULL
+  // on `network`, answered 500 and raised "NIM INTENT WRITE FAILED" — for an order that simply
+  // wasn't whole. Nothing was ever charged (this is before the NIM is sent), so say so plainly.
+  // The category is matched in upper case everywhere (kill switches, fees, vend), and a missing
+  // network is the provider the service id already names ("mtn-data" → "MTN"), as /api/pay/x402
+  // never leaves it empty either.
+  const serviceCategory = String(rawCategory || '').trim().toUpperCase();
+  if (!serviceID || !serviceCategory || !(billersCode || phone)) {
+    return fail(400, 'This order is missing bill details (service, account or phone number). Nothing was charged.', 'MISSING_BILL_DETAILS');
+  }
+  const network = String(rawNetwork || '').trim() || String(serviceID).replace(/-(data|airtime|sme)$/i, '').toUpperCase();
+
   // Same server-side service gate as /api/pay: kill switches and live provider limits.
-  const cat = String(serviceCategory || '').toUpperCase();
+  const cat = serviceCategory;
   const gate = await checkWebPayment({
     serviceCategory, serviceID, amountNgn: vendAmount,
     isFixedPlan: ['INTERNET', 'DATA', 'CABLE', 'EDUCATION'].includes(cat) && !!variation_code && variation_code !== 'none',
