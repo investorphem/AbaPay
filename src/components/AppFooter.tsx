@@ -106,6 +106,11 @@ export default function AppFooter({ network = "Base & Celo" }: AppFooterProps) {
          <span className="text-[11px] font-bold text-slate-500 dark:text-slate-400 uppercase tracking-widest">Secured by {network} Network</span>
       </div>
 
+      {/* The NIM app is listed in Nimiq Pay's Mini Apps (nimiq/awesome#45, merged 2026-10-20). */}
+      <a href="https://nim.abapays.com" className="text-[11px] font-bold text-slate-400 dark:text-slate-500 hover:text-emerald-600 dark:hover:text-emerald-400 transition-colors">
+        Also in Nimiq Pay — pay with NIM →
+      </a>
+
       <div className="flex items-center gap-5">
         <Link href="/docs" className="text-[10px] font-black text-slate-400 dark:text-slate-500 hover:text-emerald-600 dark:hover:text-emerald-400 uppercase transition-colors">Docs &amp; FAQ</Link>
         <Link href="/terms" className="text-[10px] font-black text-slate-400 dark:text-slate-500 hover:text-emerald-600 dark:hover:text-emerald-400 uppercase transition-colors">Terms</Link>
