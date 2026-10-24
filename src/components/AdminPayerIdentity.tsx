@@ -35,6 +35,8 @@ export function AdminPayerIdentity({ identity, client }: { identity?: PayerIdent
   // MCP/A2A rows: how the client connected (src/lib/payerIdentity.ts agentRequestClient).
   const diag = (client?.client_diag && typeof client.client_diag === "object" ? client.client_diag : {}) as Record<string, unknown>;
   const protocol = typeof diag.protocol === "string" ? diag.protocol : null;
+  // A Self Agent ID the request SIGNED (src/lib/selfAgent.ts) — stronger than the wallet lookup.
+  const signedSelf = diag.self_agent && typeof diag.self_agent === "object" ? diag.self_agent as { status?: string; agent_id?: string } : null;
   const auth = diag.auth === "oauth" ? "OAuth" : diag.auth === "api_key" ? "API key (header)" : diag.auth === "api_key_argument" ? "API key (tool argument)" : null;
 
   return (
@@ -73,6 +75,7 @@ export function AdminPayerIdentity({ identity, client }: { identity?: PayerIdent
           {client && (
             <div className="pt-1 border-t border-slate-800">
               <p className="text-slate-500 uppercase tracking-widest text-[8px]">Request claimed</p>
+              {signedSelf && <p className={signedSelf.status === "verified" ? "text-emerald-400 font-bold" : ""}>Signed Self Agent ID: {signedSelf.status}{signedSelf.agent_id ? ` #${signedSelf.agent_id}` : ""}</p>}
               {protocol && (
                 <p>
                   via {protocol}{auth ? ` · ${auth}` : ""}
