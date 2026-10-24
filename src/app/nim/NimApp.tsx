@@ -13,8 +13,8 @@ import { billCharges } from '@/lib/billCharges';
 //      network, variation and customer fields), so the vend pipeline can't tell the difference;
 //   2. POST { intent: true } → the server prices it in NIM and returns the treasury, the luna owed
 //      and a reference;
-//   3. Nimiq Pay sends the NIM with the reference as hex-encoded UTF-8 data (plain text is not
-//      valid hex, and the host would drop it);
+//   3. Nimiq Pay sends the NIM with the reference as the payment's PLAIN-TEXT message (the host
+//      stores it as UTF-8 recipient data; a basic transaction carries at most 64 bytes);
 //   4. POST { intent_id, tx_hash } until the server has checked the payment on chain and vended.
 //      Nimiq Pay doesn't always return a usable hash, so the server can also find the payment by
 //      its reference.
@@ -59,7 +59,6 @@ const usdFmt = (v: number) => `$${v.toLocaleString('en-US', { minimumFractionDig
 // Set when the user taps Disconnect, so the app doesn't ask Nimiq Pay for the account again on
 // the next open; cleared by Connect wallet. A per-device preference, so localStorage.
 const DISCONNECTED_KEY = 'abapay_nim_disconnected';
-const utf8ToHex = (s: string) => Array.from(new TextEncoder().encode(s), (b) => b.toString(16).padStart(2, '0')).join('');
 const isPhone = (p: string) => /^0[789][01]\d{8}$/.test(p.replace(/\s+/g, ''));
 
 async function getJson<T>(url: string, init?: RequestInit): Promise<T> {
@@ -417,7 +416,12 @@ export default function NimApp() {
     let uncertain = false; // Nimiq Pay answered "outcome unknown"
     try {
       // No validityStartHeight: the wallet fills in the current height itself.
-      const sent = unwrap(await nimiq.current.sendBasicTransactionWithData({ recipient: intent.recipient, value: intent.luna, data: utf8ToHex(intent.reference) }));
+      // 🔴 `data` IS PLAIN TEXT. Nimiq Pay writes it as UTF-8 recipient data (nimiq-pay-app
+      // src/lib/tx.ts: BufferUtils.fromUtf8(message)), and a basic transaction may carry at most
+      // 64 bytes (Albatross Policy::MAX_BASIC_TX_RECIPIENT_DATA_SIZE). We used to send it
+      // hex-encoded: the 47-byte reference became 94 bytes, the cosigner couldn't get it accepted,
+      // and Nimiq Pay showed the payment "Pending" → "outcome unknown" → failed (2026-10-17).
+      const sent = unwrap(await nimiq.current.sendBasicTransactionWithData({ recipient: intent.recipient, value: intent.luna, data: intent.reference }));
       if (typeof sent === 'string' && /^[0-9a-f]{64}$/i.test(sent)) txHash = sent.toLowerCase();
     } catch (e) {
       const text = e instanceof Error ? e.message : String(e);

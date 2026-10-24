@@ -79,6 +79,15 @@ describe('pricing', () => {
   it('ties a reference to one intent', () => {
     expect(nim.paymentReference(INTENT)).toBe('abapay:nim_1b9d6bcd-bbfd-4b2d-9b5d-ab8dfbbd4bed');
     expect(new TextEncoder().encode(nim.paymentReference(INTENT)).length).toBeLessThanOrEqual(64);
+    // Why the app must send it as PLAIN TEXT: Nimiq Pay stores `data` as UTF-8, so the hex form
+    // (what we used to send) would itself be the memo — 94 bytes, over the 64-byte limit, and the
+    // payment could never be accepted (stuck "Pending" in Nimiq Pay, 2026-10-17).
+    const hexForm = Buffer.from(nim.paymentReference(INTENT), 'utf8').toString('hex');
+    expect(new TextEncoder().encode(hexForm).length).toBeGreaterThan(nim.MAX_NIM_MEMO_BYTES);
+  });
+
+  it('refuses to issue a reference no Nimiq payment could carry', () => {
+    expect(() => nim.paymentReference(`preflight_nim_${'x'.repeat(80)}`)).toThrow(/at most 64/);
   });
 });
 
