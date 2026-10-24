@@ -758,7 +758,10 @@ async function handleX402Request(req: Request) {
     // explicitly rejected at the probe stage (parsePaymentRequiredBody requires the body's
     // x402Version to be exactly 1, since it's only consulted when no header is present) —
     // that mismatch is what caused "No valid x402 response found". So: header carries v2
-    // (for x402scan), body stays v1 for any generic/older client that only reads the body.
+    // (for x402scan). The BODY carries the same offers and also declares v2
+    // (X402_RESPONSE_VERSION): it used to say 1 while its networks were CAIP-2 ("eip155:42220"),
+    // the v2 form, so v1 clients couldn't recognise the Celo offers (celo-org/buy-skill#58).
+    // x402scan only reads the body when the header is absent, so it is unaffected.
     // thirdweb's own client (fetchWithPayment.ts) checks the header FIRST and falls back to
     // body only if absent, and its per-entry schema (maxAmountRequired etc.) doesn't change
     // with version — so this doesn't affect our own app's real payment flow either way.
@@ -787,8 +790,8 @@ async function handleX402Request(req: Request) {
       // above for what this declares and why it can no longer live only here.
       extensions: acceptEntry.extensions,
     };
-    const v1Body = {
-      x402Version: 1,
+    const challengeBody = {
+      x402Version: X402_RESPONSE_VERSION,
       error: 'Payment required',
       accepts: challengeAccepts,
       // ⚡ NOT PART OF THE x402 SPEC — additive, ignored by any client that only reads the
@@ -798,7 +801,7 @@ async function handleX402Request(req: Request) {
       // v2Challenge (the header) since x402scan's crawler validates that one more strictly.
       hint: `This is a machine-to-machine x402 endpoint. If your wallet can sign but has no client that runs the challenge/sign/retry sequence, pay this bill instead at https://www.abapays.com — no x402 required there. Full x402 flow: https://docs.abapays.com`,
     };
-    return NextResponse.json(v1Body, {
+    return NextResponse.json(challengeBody, {
       status: 402,
       headers: { 'payment-required': Buffer.from(JSON.stringify(v2Challenge)).toString('base64') },
     });
@@ -832,7 +835,7 @@ async function handleX402Request(req: Request) {
   //     names.
   if (requestedChain !== chainKey || vendAmount === null || !serviceID || !billersCode) {
     return NextResponse.json({
-      x402Version: 1,
+      x402Version: X402_RESPONSE_VERSION,
       error: requestedChain !== chainKey
         ? `x402 payments on ${requestedChain} are not available right now — nothing was charged.`
         : 'This payment is missing bill details (serviceID, billersCode, amount) — nothing was charged.',
@@ -854,7 +857,7 @@ async function handleX402Request(req: Request) {
     });
     if (!gate.allowed) {
       return NextResponse.json(
-        { x402Version: 1, error: gate.reason, errorCode: gate.code, retryable: false, accepts: [acceptEntry] },
+        { x402Version: X402_RESPONSE_VERSION, error: gate.reason, errorCode: gate.code, retryable: false, accepts: [acceptEntry] },
         { status: gate.code === 'AMOUNT_OUT_OF_RANGE' ? 400 : 409 },
       );
     }
@@ -925,7 +928,7 @@ async function handleX402Request(req: Request) {
     try {
       decodedPayload = JSON.parse(Buffer.from(paymentHeader, 'base64').toString('utf-8'));
     } catch {
-      return NextResponse.json({ x402Version: 1, error: 'Malformed X-PAYMENT header', accepts: [acceptEntry] }, { status: 402 });
+      return NextResponse.json({ x402Version: X402_RESPONSE_VERSION, error: 'Malformed X-PAYMENT header', accepts: [acceptEntry] }, { status: 402 });
     }
 
     // 🔴 x402 v2 PAYLOADS CARRY `scheme` INSIDE `accepted`, NOT AT THE TOP LEVEL.
@@ -982,7 +985,7 @@ async function handleX402Request(req: Request) {
         // `retryable` is what the client reads to decide between re-signing once on this rail
         // and dropping to the contract call — see X402PaymentError.retryable. `accepts` carries
         // a CURRENT challenge, so a re-sign is made against today's price and a fresh window.
-        { x402Version: 1, error: authCheck.message, errorCode: authCheck.code, retryable: authCheck.retryable, accepts: [acceptEntry] },
+        { x402Version: X402_RESPONSE_VERSION, error: authCheck.message, errorCode: authCheck.code, retryable: authCheck.retryable, accepts: [acceptEntry] },
         { status: 402 },
       );
     }
@@ -1003,7 +1006,7 @@ async function handleX402Request(req: Request) {
     // wallet this request names. Used to settle first and refund after (PAYER_MISMATCH).
     if (auth && wallet_address && auth.from.toLowerCase() !== String(wallet_address).toLowerCase()) {
       return NextResponse.json({
-        x402Version: 1,
+        x402Version: X402_RESPONSE_VERSION,
         error: 'This payment was signed by a different wallet than the one paying — nothing was charged.',
         errorCode: 'PAYER_MISMATCH',
         retryable: false,
@@ -1227,7 +1230,7 @@ async function handleX402Request(req: Request) {
 
         return NextResponse.json(
           {
-            x402Version: 1,
+            x402Version: X402_RESPONSE_VERSION,
             error: payerHasCode
               ? "Your wallet's smart-account mode can't authorise this fast payment, so nothing was charged. Switching to the standard payment — approve once more."
               : "That payment approval didn't match your wallet, so nothing was charged. Please try again.",
@@ -1255,7 +1258,7 @@ async function handleX402Request(req: Request) {
     // after here, src/lib/reconcileX402.ts finishes or expires the intent by asking the token
     // whether the authorization was spent.
     if (!auth) {
-      return NextResponse.json({ x402Version: 1, error: 'The payment authorization was incomplete.', retryable: false, accepts: [acceptEntry] }, { status: 402 });
+      return NextResponse.json({ x402Version: X402_RESPONSE_VERSION, error: 'The payment authorization was incomplete.', retryable: false, accepts: [acceptEntry] }, { status: 402 });
     }
     const payerLower = auth.from.toLowerCase();
     const nonceLower = auth.nonce.toLowerCase();
@@ -1295,7 +1298,7 @@ async function handleX402Request(req: Request) {
       ).catch(() => {});
       return NextResponse.json(
         // Retryable: nothing was sent to the facilitator, so a fresh signature cannot double-pay.
-        { x402Version: 1, error: "Couldn't start this payment — nothing was charged. Please try again.", retryable: true, accepts: [acceptEntry] },
+        { x402Version: X402_RESPONSE_VERSION, error: "Couldn't start this payment — nothing was charged. Please try again.", retryable: true, accepts: [acceptEntry] },
         { status: 503 },
       );
     }
@@ -1407,7 +1410,7 @@ async function handleX402Request(req: Request) {
     if (parsed === null) {
       console.error(`[Pay/x402] Settle returned non-JSON (${chainKey}):`, settleHttpStatus, settleRawText.slice(0, 500));
       return NextResponse.json(
-        { x402Version: 1, error: `Facilitator error (${settleHttpStatus})`, retryable: true, accepts: [acceptEntry] },
+        { x402Version: X402_RESPONSE_VERSION, error: `Facilitator error (${settleHttpStatus})`, retryable: true, accepts: [acceptEntry] },
         { status: 402 },
       );
     }
@@ -1417,7 +1420,7 @@ async function handleX402Request(req: Request) {
     // facilitator did with the request — it may have settled and lost the response. Signing
     // again here could pay twice; the contract-call rail at least prompts the user first.
     console.error(`[Pay/x402] ${chainKey} facilitator unreachable:`, errorMessage(err));
-    return NextResponse.json({ x402Version: 1, error: 'Facilitator temporarily unavailable', accepts: [acceptEntry] }, { status: 402 });
+    return NextResponse.json({ x402Version: X402_RESPONSE_VERSION, error: 'Facilitator temporarily unavailable', accepts: [acceptEntry] }, { status: 402 });
   }
 
   if (!settleResult.success) {
@@ -1513,7 +1516,7 @@ async function handleX402Request(req: Request) {
 
       return NextResponse.json(
         {
-          x402Version: 1,
+          x402Version: X402_RESPONSE_VERSION,
           // `settled` is what stops the page falling back to the contract call — see x402Pay.ts.
           settled: true,
           error: "Your payment went through, but we couldn't confirm it automatically. Don't pay again — check your History tab, and contact support if it hasn't appeared shortly.",
@@ -1655,7 +1658,7 @@ async function handleX402Request(req: Request) {
     }
 
     return NextResponse.json(
-      { x402Version: 1, error: reason, retryable, accepts: [acceptEntry] },
+      { x402Version: X402_RESPONSE_VERSION, error: reason, retryable, accepts: [acceptEntry] },
       { status: 402 }
     );
   }
@@ -1732,7 +1735,7 @@ async function handleX402Request(req: Request) {
     return NextResponse.json(
       // No tx_hash in the body on purpose: x402Pay.ts reads a tx_hash as "money moved", and on
       // the chain's own evidence it did not arrive where it should have.
-      { x402Version: 1, success: false, status: 'FAILED_VENDING', error: "We couldn't confirm this payment on-chain. It has been flagged for review — don't pay again; contact support if your balance changed.", retryable: false },
+      { x402Version: X402_RESPONSE_VERSION, success: false, status: 'FAILED_VENDING', error: "We couldn't confirm this payment on-chain. It has been flagged for review — don't pay again; contact support if your balance changed.", retryable: false },
       { status: 402 },
     );
   }
@@ -1842,6 +1845,15 @@ export async function POST(req: Request) {
 function sourceChannelFor(sent: unknown): 'WEB' | 'AGENT' {
   return String(sent || '').toUpperCase() === 'WEB' ? 'WEB' : 'AGENT';
 }
+
+/**
+ * The x402 version every reply to the client declares. 2: our offers name their network in CAIP-2
+ * ("eip155:42220"), which is the v2 form — a body that said 1 while carrying CAIP-2 networks made
+ * v1 clients (Celo's `buy` CLI, 2026-10-20, celo-org/buy-skill#58) read the Celo offers as
+ * "not Celo" and refuse to pay. The payment-required header already carried the same v2 challenge;
+ * now the body agrees with it. What we send the FACILITATOR is separate (settleX402Version).
+ */
+const X402_RESPONSE_VERSION = 2;
 
 export async function GET(req: Request) {
   try {
