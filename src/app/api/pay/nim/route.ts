@@ -9,7 +9,7 @@ import { enforceRateLimit } from '@/lib/rateLimit';
 import { checkWebPayment } from '@/lib/serviceRules';
 import { billCharges } from '@/lib/billCharges';
 import { metric } from '@/lib/log';
-import { LUNA_PER_NIM, NIM_TX_HASH_RE, PRICE_BUFFER, canonicalNimAddress, formatNimAddress, isNimAddress, lunaForUsd, nimBalanceLuna, nimUsdPrice, paymentReference, recentTreasuryPayments, treasuryAddress } from '@/lib/nimiq';
+import { LUNA_PER_NIM, NIM_TX_HASH_RE, PRICE_BUFFER, canonicalNimAddress, formatNimAddress, isNimAddress, lunaForUsd, nimUsdPrice, paymentReference, recentTreasuryPayments, treasuryAddress } from '@/lib/nimiq';
 import { NIM_INTENT_PREFIX, settleNimIntent } from '@/lib/nimSettle';
 
 // ⚡ /api/pay/nim — THE NIM RAIL, used by the Nimiq Pay mini app on nim.abapays.com.
@@ -165,17 +165,12 @@ async function createIntent(req: Request, body: NimPayRequest) {
   if (!nimUsd) return fail(503, 'Couldn’t read the NIM price right now. Please try again in a minute.', 'PRICE_UNAVAILABLE');
   const luna = lunaForUsd(usd, nimUsd);
 
-  // The payer's balance, read from the Nimiq chain now — not the figure the app displayed when it
-  // opened, which can be a stale 0. Refused here only when the chain answers and it's short;
-  // unreadable means "don't block" (Nimiq Pay refuses an unaffordable send itself).
-  const balanceLuna = await nimBalanceLuna(payerCanonical);
-  if (balanceLuna !== null && balanceLuna < luna) {
-    return NextResponse.json({
-      success: false, status: 'FAILED_VENDING', code: 'INSUFFICIENT_NIM',
-      message: `This costs ${(luna / LUNA_PER_NIM).toLocaleString('en-US')} NIM and your wallet holds ${(balanceLuna / LUNA_PER_NIM).toLocaleString('en-US', { maximumFractionDigits: 2 })} NIM on the Nimiq network. Nothing was charged.`,
-      balance_luna: balanceLuna, luna,
-    }, { status: 400 });
-  }
+  // 🔴 NO BALANCE GATE HERE. A Nimiq Pay wallet's NIM sits in HTLCs that Nimiq Pay creates and
+  // rolls over (src/lib/nimiq.ts nimBalanceLuna); the Mini App API has no wallet-total method
+  // ("getBalance … is not a wallet total", Nimiq's provider reference), and only Nimiq Pay's own
+  // cosigner knows every HTLC. Any figure we compute can miss one and read short, which refused
+  // funded wallets as INSUFFICIENT_NIM. Nimiq Pay itself refuses an unaffordable send with its
+  // exact balance, and nothing is charged until the payment is on chain, so the order goes ahead.
 
   if (serviceCategory === 'ELECTRICITY' && await isDuplicateElectricity(supabase, payerCanonical, destinationAccount, vendAmount)) {
     return NextResponse.json({
@@ -218,8 +213,6 @@ async function createIntent(req: Request, body: NimPayRequest) {
     reference: paymentReference(intentId),
     nim_usd: nimUsd,
     charges: { serviceFee, stampDutyNgn, discountNgn },
-    // The on-chain balance just read (null if the chain couldn't be read), so the app shows it.
-    balance_luna: balanceLuna,
   });
 }
 
