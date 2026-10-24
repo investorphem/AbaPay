@@ -401,10 +401,9 @@ export default function NimApp() {
     setPhase('ordering'); setMessage('Pricing your order in NIM…'); setResult(null);
     let intent: Intent;
     try {
-      // The server checks the balance on the Nimiq chain (INSUFFICIENT_NIM) — the displayed figure
-      // is never the judge, so a stale "0" can't block a funded wallet.
-      const d = await getJson<Intent & { success: boolean; message?: string; balance_luna?: number | null }>('/api/pay/nim', { method: 'POST', body: JSON.stringify({ intent: true, payer: account, ...bill }) });
-      if (typeof d.balance_luna === 'number') setBalanceLuna(d.balance_luna);
+      // No balance check of our own: neither the displayed figure nor a chain read sees every HTLC
+      // Nimiq Pay holds, so Nimiq Pay — which knows the exact balance — refuses an unaffordable send.
+      const d = await getJson<Intent & { success: boolean; message?: string }>('/api/pay/nim', { method: 'POST', body: JSON.stringify({ intent: true, payer: account, ...bill }) });
       if (!d.success) { setPhase('failed'); setMessage(d.message || 'This order could not be started.'); return; }
       intent = d;
     } catch {
@@ -506,7 +505,11 @@ export default function NimApp() {
   }
 
   const busy = phase === 'ordering' || phase === 'signing' || phase === 'confirming';
-  const balanceUsd = balanceLuna !== null && quote?.nim_usd ? (balanceLuna / LUNA) * quote.nim_usd : null;
+  // Only a figure we actually found is shown. Nimiq Pay keeps NIM in HTLCs that only its own
+  // cosigner fully knows, so a 0 here usually means "not found", not "empty": show "—" and point to
+  // Nimiq Pay rather than a misleading "0 NIM". Never used to refuse a payment.
+  const balanceKnown = balanceLuna !== null && balanceLuna > 0;
+  const balanceUsd = balanceKnown && quote?.nim_usd ? (balanceLuna! / LUNA) * quote.nim_usd : null;
 
   return (
     // Full-height column: the footer (mt-auto) sits just above the tab bar on a short screen
@@ -516,8 +519,10 @@ export default function NimApp() {
         <Brand />
         <div className="text-right">
           <p className="text-[10px] uppercase tracking-widest font-bold opacity-50">Balance</p>
-          <p className="text-sm font-black tabular-nums">{balanceLuna === null ? '—' : nimBalanceFmt(balanceLuna / LUNA)}</p>
-          {balanceUsd !== null && <p className="text-[10px] opacity-60 tabular-nums">≈ {usdFmt(balanceUsd)}</p>}
+          <p className="text-sm font-black tabular-nums">{balanceKnown ? nimBalanceFmt(balanceLuna! / LUNA) : '—'}</p>
+          {balanceUsd !== null
+            ? <p className="text-[10px] opacity-60 tabular-nums">≈ {usdFmt(balanceUsd)}</p>
+            : <p className="text-[10px] opacity-60">See Nimiq Pay</p>}
           {/* The address the balance is read for — copyable, so a wrong account is easy to spot. */}
           <div className="mt-1 flex items-center justify-end gap-2 text-[10px] font-bold">
             <button type="button" title={`Copy ${account}`} className="inline-flex items-center gap-1 opacity-60 hover:opacity-100"

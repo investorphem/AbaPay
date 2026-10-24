@@ -106,25 +106,18 @@ describe('/api/pay/nim — the same admin settings as abapays.com', () => {
   });
 });
 
-describe('/api/pay/nim — the balance is read on chain at Pay', () => {
-  it('refuses before recording when the chain says the wallet is short', async () => {
-    balanceLuna = 50 * 100_000; // 50 NIM; the order costs ~68
-    const r = await post(order());
-    expect(r.status).toBe(400);
-    expect(r.json).toMatchObject({ code: 'INSUFFICIENT_NIM', balance_luna: 50 * 100_000 });
-    expect(String(r.json.message)).toMatch(/Nothing was charged/);
-    expect(db.tables.transactions ?? []).toHaveLength(0);
-  });
-
-  it('goes ahead when the wallet covers it, and returns the on-chain balance', async () => {
-    balanceLuna = 10_000 * 100_000;
+// A computed balance can miss a Nimiq Pay HTLC and read short (even 0) for a funded wallet, so it
+// never refuses an order: Nimiq Pay refuses an unaffordable send itself, with its exact balance.
+describe('/api/pay/nim — a computed balance never refuses an order', () => {
+  it.each([
+    ['reads 0 (an HTLC we could not see)', 0],
+    ['reads short', 50 * 100_000],
+    ['is unreadable', null],
+  ])('goes ahead when the balance %s', async (_label, value) => {
+    balanceLuna = value;
     const r = await post(order());
     expect(r.status).toBe(200);
-    expect(r.json.balance_luna).toBe(10_000 * 100_000);
-  });
-
-  it('never blocks on an unreadable balance (Nimiq Pay refuses an unaffordable send itself)', async () => {
-    balanceLuna = null;
-    expect((await post(order())).status).toBe(200);
+    expect(r.json.code).not.toBe('INSUFFICIENT_NIM');
+    expect(db.tables.transactions).toHaveLength(1);
   });
 });
