@@ -149,6 +149,20 @@ describe('/api/pay/x402 — discovery probe (GET)', () => {
 });
 
 describe('/api/pay/x402 — happy path', () => {
+  // Our web app always sends source_channel 'WEB'; anything else on this rail is an outside agent
+  // and must not be announced as "🌐 Web App" (2026-10-24).
+  it('labels a payment that names no source (an outside agent) AGENT, and only the web app WEB', async () => {
+    receipts[SETTLE_TX] = settledReceipt();
+    await pay(bill);
+    expect(db.tables.transactions[0].source_channel).toBe('AGENT');
+  });
+
+  it('keeps WEB for the first-party web app', async () => {
+    receipts[SETTLE_TX] = settledReceipt();
+    await pay({ ...bill, source_channel: 'WEB' });
+    expect(db.tables.transactions[0].source_channel).toBe('WEB');
+  });
+
   it('records what the paying agent said about itself for the admin ledger, and never echoes it back', async () => {
     receipts[SETTLE_TX] = settledReceipt();
     const res = await POST(new Request('http://localhost/api/pay/x402', {

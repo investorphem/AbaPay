@@ -11,7 +11,8 @@ import { tripCircuit } from '@/lib/circuitBreaker';
 import { Resend } from 'resend';
 import { normalizePurchasedCode, issuesTokenOrPin } from '@/lib/purchasedCode';
 import { log, metric } from '@/lib/log';
-import { errorMessage } from '@/lib/errors';
+import { errorMessage } from '@/lib/errors';
+import { channelLabel } from '@/lib/channelLabel';
 
 const resend = new Resend(process.env.RESEND_API_KEY || 're_dummy_key_for_build');
 
@@ -49,15 +50,8 @@ const FLOAT_EXHAUSTED_CODES = new Set(['018']);
 
 // ⚡ Where did this transaction come from? Operators need to distinguish a web payment
 // from an agent payment from an unattended autonomous schedule — very different risk.
-function channelBadge(src: string | null | undefined): string {
-  switch (String(src || 'WEB').toUpperCase()) {
-    case 'TELEGRAM': return '💬 Telegram Agent';
-    case 'WHATSAPP': return '💬 WhatsApp Agent';
-    case 'X':        return '💬 X Agent';
-    case 'SCHEDULE': return '🤖 Autonomous Schedule';
-    default:         return '🌐 Web App';
-  }
-}
+// The sale/failure alerts' Source line — shared with refunds and the admin panel (src/lib/channelLabel.ts).
+const channelBadge = channelLabel;
 
 export interface VendInput {
   vtRequestId: string;

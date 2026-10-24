@@ -912,7 +912,7 @@ async function handleX402Request(req: Request) {
     account_number: billersCode || phone || 'N/A', phone: phone || null,
     amount_naira: vendAmount, fee_naira: serviceFee, stamp_duty_ngn: stampDutyNgn,
     customer_name: customer_name || null, customer_address: customer_address || null,
-    source_channel: source_channel || 'WEB', token_used: requestedTokenSymbol,
+    source_channel: sourceChannelFor(source_channel), token_used: requestedTokenSymbol,
     meter_account_type: meter_account_type || null, customer_email: email || null,
     operator_id: operator_id || null, country_code: country_code || null, product_type_id: product_type_id || null,
     subscription_type: subscription_type || null,
@@ -1796,7 +1796,7 @@ async function handleX402Request(req: Request) {
           vtpassError: 'FAILED_VERIFICATION',
           userMessage: reason,
           serviceCategory: serviceCategory || undefined,
-          sourceChannel: source_channel || 'WEB',
+          sourceChannel: sourceChannelFor(source_channel),
         });
       } catch (refundErr) {
         console.error('[Pay/x402] Failed to queue refund for failed verification:', refundErr);
@@ -1833,6 +1833,16 @@ export async function POST(req: Request) {
 // a 405 (no handler for GET) instead of the 402 challenge they're looking for. AbaPay's own
 // app never uses this path (it always POSTs full bill details), so a GET here always falls
 // back to the nominal minimum price and can never actually vend anything.
+/**
+ * Who paid, for transactions.source_channel and the Telegram alerts (src/lib/channelLabel.ts). Our own
+ * web app always sends source_channel: 'WEB' (src/app/page.tsx). Anything else on this public rail
+ * — an x402 client, the SDKs, curl — is an outside agent, so it is 'AGENT': before 2026-10-24 a
+ * missing value defaulted to 'WEB' and every agent payment was announced as "🌐 Web App".
+ */
+function sourceChannelFor(sent: unknown): 'WEB' | 'AGENT' {
+  return String(sent || '').toUpperCase() === 'WEB' ? 'WEB' : 'AGENT';
+}
+
 export async function GET(req: Request) {
   try {
     return await handleX402Request(req);

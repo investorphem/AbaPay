@@ -3,6 +3,7 @@ import { supabaseAdmin } from '@/utils/supabase';
 import { sendTelegramAlert, sendTelegramToUser } from '@/lib/telegram';
 import { Resend } from 'resend';
 import type { RefundQueueRow } from '@/lib/rows';
+import { channelLabel } from '@/lib/channelLabel';
 
 const resend = new Resend(process.env.RESEND_API_KEY || 're_dummy_key_for_build');
 
@@ -81,7 +82,7 @@ export async function enqueueRefund(p: EnqueueParams): Promise<{ queued: boolean
       const via = String(p.sourceChannel || 'WEB').toUpperCase();
       await sendTelegramAlert(
         `💸 *REFUND QUEUED*\n` +
-        `📲 *Source:* ${via === 'SCHEDULE' ? '🤖 Autonomous Schedule' : via === 'WEB' ? '🌐 Web App' : `💬 ${via} Agent`}\n` +
+        `📲 *Source:* ${channelLabel(via)}\n` +
         `🛒 *Service:* ${p.serviceCategory || 'N/A'}\n` +
         `💰 *Owed:* ${p.amountCrypto} ${p.tokenUsed}${p.amountNaira ? ` (₦${p.amountNaira.toLocaleString()})` : ''}\n` +
         `👤 *Wallet:* \`${p.walletAddress.slice(0, 6)}...${p.walletAddress.slice(-4)}\`\n` +
