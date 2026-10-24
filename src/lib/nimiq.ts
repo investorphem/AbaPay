@@ -60,9 +60,24 @@ export function treasuryAddress(): string | null {
 
 // ── Payment reference ─────────────────────────────────────────────────────────────────────────
 
-/** The text a payment carries in its recipient data: ties it to exactly one intent. */
+/**
+ * Most bytes of recipient data a basic Nimiq transaction may carry (Albatross
+ * Policy::MAX_BASIC_TX_RECIPIENT_DATA_SIZE). A longer memo makes the payment invalid: Nimiq Pay's
+ * cosigner can't get it accepted and the send sits "Pending" → "outcome unknown".
+ */
+export const MAX_NIM_MEMO_BYTES = 64;
+
+/**
+ * The text a payment carries in its recipient data: ties it to exactly one intent. The app sends
+ * it as PLAIN TEXT (Nimiq Pay stores `data` as UTF-8), so its byte length is what goes on chain —
+ * "abapay:nim_<uuid>" is 47 bytes. Throws rather than issue a reference no payment could carry.
+ */
 export function paymentReference(intentId: string): string {
-  return `abapay:${intentId.replace(/^preflight_/, '')}`;
+  const ref = `abapay:${intentId.replace(/^preflight_/, '')}`;
+  if (Buffer.byteLength(ref, 'utf8') > MAX_NIM_MEMO_BYTES) {
+    throw new Error(`NIM payment reference is ${Buffer.byteLength(ref, 'utf8')} bytes; a Nimiq payment carries at most ${MAX_NIM_MEMO_BYTES}.`);
+  }
+  return ref;
 }
 
 function hexToUtf8(hex: string): string {
