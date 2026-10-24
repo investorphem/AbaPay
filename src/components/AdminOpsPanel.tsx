@@ -2,6 +2,7 @@
 
 import React, { useState, useEffect, useCallback } from "react";
 import { Banknote, LifeBuoy, Loader2, Check, X, Send, ExternalLink } from "lucide-react";
+import { channelLabel } from '@/lib/channelLabel';
 
 // ⚡ ADMIN — REFUNDS & SUPPORT
 //
@@ -142,15 +143,8 @@ export function AdminOpsPanel({ adminHeaders, onExecuteRefund }: Props) {
   // had this bug); only this dashboard's display fell behind. Named explicitly rather than
   // just widening the fallback, so a genuinely new channel is still visually distinct from
   // "MCP" specifically the day it's added, not lumped into one more generic bucket.
-  const channelIcon = (c: string) =>
-    c === 'TELEGRAM' ? '💬 Telegram'
-    : c === 'WHATSAPP' ? '💬 WhatsApp'
-    : c === 'X' ? '💬 X'
-    : c === 'SCHEDULE' ? '🤖 Schedule'
-    : c === 'MCP' ? '🤖 MCP Agent'
-    : c === 'A2A' ? '🤖 A2A Agent'
-    : c === 'WEB' ? '🌐 Web'
-    : `🤖 ${c}`;
+  // Same words as the Telegram alerts (src/lib/channelLabel.ts): x402 agents, MCP/A2A and Nimiq Pay included.
+  const channelIcon = (c: string) => channelLabel(c);
 
   return (
     <div className="space-y-4">
