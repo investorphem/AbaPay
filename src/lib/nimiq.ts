@@ -241,16 +241,37 @@ export async function nimBalanceLuna(address: string, now = Date.now()): Promise
   const hist = await rpc<NimTransaction[]>('getTransactionsByAddress', [formatNimAddress(address), 100, null]);
   // Unknown, not the plain balance: for a Nimiq Pay wallet that is 0 and would refuse a funded one.
   if (!hist.ok) return null;
-  const htlcs = [...new Set((hist.value || [])
+  // 🔴 NIMIQ PAY ROLLS THE HTLC OVER. Before the old one times out it moves the remainder
+  // HTLC → new HTLC (2026-10-24: 6,006.055 NIM from NQ41 339U… into NQ34 V8N1…, sender still the
+  // wallet), so the new contract is NOT funded from the wallet's own address and a scan of the
+  // wallet's outgoing transactions alone read 0. So walk the chain: every HTLC the wallet funded,
+  // and every HTLC one of those moved funds into, counted when its `sender` is this wallet.
+  const queue = [...new Set((hist.value || [])
     .filter((t) => t.toType === 2 && canonicalNimAddress(t.from) === me)
     .map((t) => canonicalNimAddress(t.to)))];
+  const seen = new Set<string>();
   let locked = 0;
-  for (const h of htlcs.slice(0, 20)) {
+  while (queue.length && seen.size < 20) {
+    const h = queue.shift()!;
+    if (seen.has(h)) continue;
+    seen.add(h);
     const a = await rpc<HtlcAccount>('getAccountByAddress', [formatNimAddress(h)]);
-    if (!a.ok || a.value?.type !== 'htlc' || !a.value.sender || canonicalNimAddress(a.value.sender) !== me) continue;
-    if (Number(a.value.timeout) && Number(a.value.timeout) <= now) continue; // expired: refundable, not spendable via Pay
-    const b = Number(a.value.balance);
-    if (Number.isFinite(b) && b > 0) locked += b;
+    if (!a.ok) return null; // part of the wallet unreadable: unknown, never a short figure
+    const live = a.value?.type === 'htlc' && !!a.value.sender && canonicalNimAddress(a.value.sender) === me
+      && !(Number(a.value.timeout) && Number(a.value.timeout) <= now); // expired: refundable, not spendable via Pay
+    if (live) {
+      const b = Number(a.value!.balance);
+      if (Number.isFinite(b) && b > 0) locked += b;
+    }
+    // Follow where this HTLC sent funds into another HTLC (a rollover) — whether or not it is
+    // still live, since an emptied one is exactly the one that rolled over.
+    if (live || a.value?.type !== 'htlc') {
+      const out = await rpc<NimTransaction[]>('getTransactionsByAddress', [formatNimAddress(h), 50, null]);
+      if (!out.ok) return null;
+      for (const t of out.value || []) {
+        if (t.toType === 2 && canonicalNimAddress(t.from) === h) queue.push(canonicalNimAddress(t.to));
+      }
+    }
   }
   return basic + locked;
 }

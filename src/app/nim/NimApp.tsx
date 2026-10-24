@@ -787,11 +787,6 @@ function NimFooter() {
         <ShieldCheck size={15} className="text-[#E9B213]" />
         <span className="text-[11px] font-bold opacity-70 uppercase tracking-widest">Secured by Nimiq Network</span>
       </div>
-      {/* Listed in Nimiq's official Mini Apps catalogue (nimiq/awesome#45, merged 2026-10-20). */}
-      <a href="https://github.com/nimiq/awesome" target="_blank" rel="noopener noreferrer"
-        className="inline-flex items-center gap-1.5 text-[11px] font-bold opacity-70 hover:opacity-100 transition-opacity">
-        <CheckCircle2 size={13} className="text-[#E9B213]" /> Listed in Nimiq Pay Mini Apps
-      </a>
       <div className="flex items-center gap-5">
         {/* On this host (middleware.ts serves /docs here), so its Back returns to the NIM app. */}
         <a href="/docs" className={footerLink}>Docs &amp; FAQ</a>

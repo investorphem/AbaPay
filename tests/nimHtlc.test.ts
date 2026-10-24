@@ -63,6 +63,25 @@ describe('nimBalanceLuna — counts NIM in HTLCs the wallet funded', () => {
     expect(await nim.nimBalanceLuna(ME, NOW)).toBe(0);
   });
 
+  // 2026-10-24: Nimiq Pay moved the remainder HTLC → HTLC (NQ41 339U… → NQ34 V8N1…, sender still
+  // the wallet). The new contract isn't funded from the wallet's own address; it must still count.
+  it('follows a rollover into a new HTLC funded from the old one', async () => {
+    const NEXT = 'NQ34 V8N1 9TBL R0QU HRV9 2H4Q 9K8J EV6L DB01';
+    const REST = 600_605_500;
+    accounts[key(HTLC)] = { balance: 0, type: 'basic' }; // emptied by the rollover
+    accounts[key(NEXT)] = htlcAccount({ balance: REST });
+    history[key(HTLC)] = [funding, { from: HTLC, fromType: 2, to: TREASURY, toType: 0, value: 52_200_000 }, { from: HTLC, fromType: 2, to: NEXT, toType: 2, value: REST }];
+    expect(await nim.nimBalanceLuna(ME, NOW)).toBe(REST);
+  });
+
+  it('does not follow into an HTLC someone else is the sender of', async () => {
+    const NEXT = 'NQ34 V8N1 9TBL R0QU HRV9 2H4Q 9K8J EV6L DB01';
+    accounts[key(HTLC)] = { balance: 0, type: 'basic' };
+    accounts[key(NEXT)] = htlcAccount({ balance: 999_000, sender: OTHER });
+    history[key(HTLC)] = [funding, { from: HTLC, fromType: 2, to: NEXT, toType: 2, value: 999_000 }];
+    expect(await nim.nimBalanceLuna(ME, NOW)).toBe(0);
+  });
+
   it('is null (unknown, never 0) when the chain cannot be read', async () => {
     down = true;
     expect(await nim.nimBalanceLuna(ME, NOW)).toBeNull();
