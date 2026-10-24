@@ -141,6 +141,19 @@ describe('/api/pay/x402 — discovery probe (GET)', () => {
     expect(db.tables.transactions).toHaveLength(0);
   });
 
+  // celo-org/buy-skill#58 (2026-10-20): the body said x402Version 1 while its networks were CAIP-2
+  // (the v2 form), so Celo's `buy` CLI read the Celo offers as "not Celo" and couldn't pay.
+  it('declares x402 v2 in the body as in the header, since every offer names its network in CAIP-2', async () => {
+    const res = await GET(new Request('http://localhost/api/pay/x402'));
+    const body = await res.json();
+    expect(body.x402Version).toBe(2);
+    expect(body.accepts.length).toBeGreaterThan(0);
+    expect(body.accepts.every((a: { network: string }) => /^eip155:\d+$/.test(a.network))).toBe(true);
+    const header = JSON.parse(Buffer.from(String(res.headers.get('payment-required')), 'base64').toString());
+    expect(header.x402Version).toBe(2);
+    expect(header.accepts.map((a: { network: string }) => a.network)).toEqual(body.accepts.map((a: { network: string }) => a.network));
+  });
+
   it("carries each token's own EIP-712 domain, so a payer signs against the right contract", async () => {
     const { accepts } = await (await GET(new Request('http://localhost/api/pay/x402'))).json();
     const usdc = accepts.find((a: { asset: string }) => a.asset.toLowerCase() === CELO_TOKENS.USDC.address);
