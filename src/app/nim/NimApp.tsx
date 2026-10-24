@@ -965,6 +965,7 @@ type HistoryRow = {
 type HistorySession = { message: string; signature: string; publicKey: string };
 
 const SESSION_KEY = 'abapay-nim-history-session';
+const HISTORY_PAGE_SIZE = 10;
 
 /**
  * The signed-in history, scoped server-side to the address the signature proves
@@ -975,6 +976,10 @@ function HistoryView({ nimiq, account, logos }: { nimiq: NimiqProvider | null; a
   const [rows, setRows] = useState<HistoryRow[] | null>(null);
   const [state, setState] = useState<'idle' | 'signing' | 'loading' | 'error'>('idle');
   const [error, setError] = useState('');
+  // Ten orders a page; swipe left/right (or the arrows) for the next/previous ten.
+  const [page, setPage] = useState(0);
+  const touchStart = useRef<{ x: number; y: number } | null>(null);
+  const listTop = useRef<HTMLDivElement | null>(null);
 
   const load = useCallback(async (session: HistorySession) => {
     setState('loading'); setError('');
@@ -984,7 +989,7 @@ function HistoryView({ nimiq, account, logos }: { nimiq: NimiqProvider | null; a
       try { sessionStorage.removeItem(SESSION_KEY); } catch { /* storage unavailable */ }
       setState('error'); setError(d.error || 'Could not load your history.'); return;
     }
-    setRows(d.transactions || []); setState('idle');
+    setRows(d.transactions || []); setPage(0); setState('idle');
   }, []);
 
   // Reuse this session's signature when it was made by the same address.
@@ -1033,10 +1038,49 @@ function HistoryView({ nimiq, account, logos }: { nimiq: NimiqProvider | null; a
     return <div className="rounded-3xl bg-white dark:bg-[#1F2348] border border-black/5 dark:border-white/10 p-8 text-center text-sm opacity-70">No orders yet. Your NIM payments will show up here.</div>;
   }
 
+  const pages = Math.ceil(rows.length / HISTORY_PAGE_SIZE);
+  const current = Math.min(page, pages - 1);
+  const shown = rows.slice(current * HISTORY_PAGE_SIZE, (current + 1) * HISTORY_PAGE_SIZE);
+  const go = (to: number) => {
+    const next = Math.max(0, Math.min(pages - 1, to));
+    if (next === current) return;
+    setPage(next);
+    listTop.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  };
+
   return (
-    <ul className="space-y-3">
-      {rows.map((r) => <HistoryCard key={r.tx_hash} row={r} logo={r.service_id ? logos[r.service_id] : undefined} />)}
-    </ul>
+    <div ref={listTop} className="scroll-mt-4">
+      {/* A horizontal swipe changes page; a mostly-vertical drag is left to scrolling. */}
+      <ul className="space-y-3 touch-pan-y"
+        onTouchStart={(e) => { const t = e.touches[0]; touchStart.current = { x: t.clientX, y: t.clientY }; }}
+        onTouchEnd={(e) => {
+          const s = touchStart.current; touchStart.current = null;
+          if (!s) return;
+          const t = e.changedTouches[0];
+          const dx = t.clientX - s.x, dy = t.clientY - s.y;
+          if (Math.abs(dx) < 50 || Math.abs(dx) < Math.abs(dy) * 1.5) return;
+          go(dx < 0 ? current + 1 : current - 1);
+        }}>
+        {/* Unpaid and expired orders have no payment hash (null), so the key can't be the hash. */}
+        {shown.map((r, i) => <HistoryCard key={`${r.created_at}-${r.tx_hash ?? 'unpaid'}-${current * HISTORY_PAGE_SIZE + i}`} row={r} logo={r.service_id ? logos[r.service_id] : undefined} />)}
+      </ul>
+      {pages > 1 && (
+        <div className="mt-4 flex items-center justify-between text-xs font-bold">
+          <button type="button" onClick={() => go(current - 1)} disabled={current === 0} aria-label="Newer orders"
+            className="w-10 h-10 rounded-full bg-white dark:bg-[#1F2348] border border-black/5 dark:border-white/10 flex items-center justify-center disabled:opacity-30">
+            <ChevronLeft size={16} />
+          </button>
+          <span className="opacity-70 tabular-nums text-center">
+            {current * HISTORY_PAGE_SIZE + 1}–{current * HISTORY_PAGE_SIZE + shown.length} of {rows.length}
+            <span className="block text-[10px] opacity-70 font-normal">Swipe for more</span>
+          </span>
+          <button type="button" onClick={() => go(current + 1)} disabled={current >= pages - 1} aria-label="Older orders"
+            className="w-10 h-10 rounded-full bg-white dark:bg-[#1F2348] border border-black/5 dark:border-white/10 flex items-center justify-center disabled:opacity-30">
+            <ChevronLeft size={16} className="rotate-180" />
+          </button>
+        </div>
+      )}
+    </div>
   );
 }
 
