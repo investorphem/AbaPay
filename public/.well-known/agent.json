@@ -32,6 +32,13 @@
       ]
     },
     {
+      "name": "Self Agent ID",
+      "endpoint": "https://docs.abapays.com/start-here/self-agent-id",
+      "agentId": 196,
+      "agentAddress": "0xDffF9AbaCcc4402D23cb856d0544bab622577A93",
+      "agentRegistry": "eip155:42220:0xaC3DF9ABf80d0F5c020C06B04Cced27763355944"
+    },
+    {
       "name": "OASF",
       "endpoint": "https://github.com/agntcy/oasf/",
       "version": "1.1.0",

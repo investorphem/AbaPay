@@ -13,7 +13,7 @@ Agent ID **9687** — a verifiable identity any agent's tooling can check indepe
 | Verify on 8004scan | [8004scan.io/agents/celo/9687](https://8004scan.io/agents/celo/9687) |
 | Agent Card | `/.well-known/agent-card.json` |
 
-Calling agents can prove they are backed by a real, passport-verified human with a **Self Agent ID**; AbaPay shows them as verified on every response. See [Self Agent ID](self-agent-id.md).
+Calling agents can prove they are backed by a real, passport-verified human with a **Self Agent ID**; AbaPay shows them as verified on every response. AbaPay itself is Self agent **#196**, owned by the same wallet as ERC-8004 #9687. See [Self Agent ID](self-agent-id.md).
 
 ## MCP Registry
 
