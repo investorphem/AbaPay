@@ -12,7 +12,7 @@ handbook.
 | | |
 |---|---|
 | Telegram | [@AbaPays](https://t.me/AbaPays) |
-| WhatsApp | [+234 707 541 8792](https://wa.me/2347075418792) |
+| WhatsApp | **@abapays** (search the username in WhatsApp) or [+234 707 541 8792](https://wa.me/2347075418792) |
 
 ## What this is — and isn't
 
