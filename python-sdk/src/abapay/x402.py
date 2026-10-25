@@ -22,6 +22,13 @@ from .types import AbaPayError, BillDetails, X402PayResult
 
 DEFAULT_BASE_URL = "https://agents.abapays.com"
 
+CELO_NETWORK = "eip155:42220"
+# Celo mainnet token contracts (both EIP-3009, 6 decimals), lowercased for comparison.
+CELO_TOKENS = {
+    "USDC": "0xceba9300f2b948710d2653dd7b07f33a8b32118c",
+    "USDT": "0x48065fbbe25f71c9282ddf5e1cd6d6a887483d5e",
+}
+
 # ⚡ MUST MATCH src/lib/x402Settle.ts's TRANSFER_WITH_AUTHORIZATION_TYPES BYTE-FOR-BYTE (and
 # sdk/src/x402.ts's copy of the same) — that's the code that reconstructs this signature
 # server-side to verify it. Three independent copies now (TypeScript app, TypeScript SDK,
@@ -98,10 +105,22 @@ def pay_bill_via_x402(
     if status != 402:
         raise AbaPayError(f"Expected HTTP 402 (payment required), got {status}.", response=challenge)
 
+    # The challenge offers several tokens (and chains); pay with the one asked for, on Celo —
+    # never just the first entry, which would quietly swap USDT for USDC (or Celo for Base).
     accepts = challenge.get("accepts") or []
-    accept = next((a for a in accepts if a.get("scheme") == "exact"), None)
+    wanted = CELO_TOKENS.get(bill.token)
+    accept = next(
+        (
+            a
+            for a in accepts
+            if a.get("scheme") == "exact"
+            and a.get("network") == CELO_NETWORK
+            and str(a.get("asset", "")).lower() == wanted
+        ),
+        None,
+    )
     if accept is None:
-        raise AbaPayError("402 challenge carried no usable 'exact' payment option.", response=challenge)
+        raise AbaPayError(f"402 challenge offered no 'exact' {bill.token} payment on Celo.", response=challenge)
 
     # ── 2. Sign the exact amount the challenge named, with the wallet's OWN key. ─────────────
     chain_id = _caip2_chain_id(accept["network"])

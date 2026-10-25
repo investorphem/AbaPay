@@ -13,7 +13,8 @@ GitHub](https://github.com/investorphem/AbaPay/commits/main).
   Each request is signed afresh, and the result (`self_agent`) comes back with the payment.
   Bills take a `variation_code` (data, cable and exam plans), `phone` and `meter_account_type`,
   so x402 covers more than airtime. **Fix:** `payBillViaX402` now pays with the token you asked for on Celo;
-  earlier versions signed the first option in the 402 challenge, so a USDT request paid in USDC. The README now opens with a Celo quickstart. See [Self Agent ID](self-agent-id.md).
+  earlier versions signed the first option in the 402 challenge, so a USDT request paid in USDC.
+* **`abapay` 0.3.1 (PyPI):** the same token fix for `pay_bill_via_x402`. The README now opens with a Celo quickstart. See [Self Agent ID](self-agent-id.md).
 
 ## 2026-10-13
 
