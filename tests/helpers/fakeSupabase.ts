@@ -41,6 +41,7 @@ class Query implements PromiseLike<Result> {
   private returning = false;
   private cardinality: 'many' | 'single' | 'maybeSingle' = 'many';
   private limitN: number | null = null;
+  private rangeFrom = 0;
 
   constructor(private db: FakeDb, private table: string) {
     db.tables[table] ??= [];
@@ -68,6 +69,8 @@ class Query implements PromiseLike<Result> {
   lt(col: string, v: number | string) { this.filters.push((r) => (r[col] as number | string) < v); return this; }
   order() { return this; }
   limit(n: number) { this.limitN = n; return this; }
+  // PostgREST range(from, to) is inclusive on both ends.
+  range(from: number, to: number) { this.rangeFrom = from; this.limitN = to - from + 1; return this; }
   single() { this.cardinality = 'single'; return this; }
   maybeSingle() { this.cardinality = 'maybeSingle'; return this; }
 
@@ -103,7 +106,7 @@ class Query implements PromiseLike<Result> {
     this.db.log.push({ table: this.table, op: this.op, payload: this.payload });
     switch (this.op) {
       case 'select':
-        return this.shape(this.matching());
+        return this.shape(this.rangeFrom ? this.matching().slice(this.rangeFrom) : this.matching());
       case 'insert': {
         if (this.db.failNextInsert === this.table) {
           this.db.failNextInsert = undefined;

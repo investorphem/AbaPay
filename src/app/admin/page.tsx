@@ -15,6 +15,7 @@ import { getPublicClient as getResilientPublicClient } from "@/lib/chain";
 import { AdminAgentPanel } from "@/components/AdminAgentPanel";
 import { AdminDiscountsPanel } from "@/components/AdminDiscountsPanel";
 import { AdminOpsPanel } from "@/components/AdminOpsPanel";
+import { AdminGrantPanel } from "@/components/AdminGrantPanel";
 import { AdminPayerIdentity, type PaymentClientInfo } from "@/components/AdminPayerIdentity";
 import type { PayerIdentity } from "@/lib/payerIdentityTypes";
 import { signSiweHeaders } from "@/lib/siwe";
@@ -1321,7 +1322,7 @@ Switch the selected account in your wallet to the owner and click again. You sta
 
             <div className="bg-[#111114] p-1.5 rounded-2xl border border-slate-800 flex justify-between items-center max-w-full">
               <div className="flex gap-1 overflow-x-auto no-scrollbar pr-4">
-                  {['analytics', 'system', 'agent', 'discounts', 'ops', 'ledger', 'vault', 'contract', 'identity'].map((t) => (
+                  {['analytics', 'system', 'agent', 'discounts', 'ops', 'ledger', 'vault', 'contract', 'identity', 'grant'].map((t) => (
                     <button key={t} onClick={() => setActiveTab(t)} className={`px-6 py-2 rounded-xl text-xs font-black uppercase transition-all whitespace-nowrap ${activeTab === t ? 'bg-slate-800 text-emerald-400' : 'text-slate-500 hover:text-slate-300'}`}>
                         {t === 'system' ? 'Controls' : t}
                     </button>
@@ -1417,6 +1418,13 @@ Switch the selected account in your wallet to the owner and click again. You sta
             {activeTab === 'ops' && (
               <div className="animate-in fade-in">
                 <AdminOpsPanel adminHeaders={adminHeaders} onExecuteRefund={executeRefundOnChain} />
+              </div>
+            )}
+
+            {/* PREZENTI GRANT — external agent payments (src/lib/grantReport.ts) */}
+            {activeTab === 'grant' && (
+              <div className="animate-in fade-in">
+                <AdminGrantPanel adminHeaders={adminHeaders} />
               </div>
             )}
 
