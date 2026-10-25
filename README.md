@@ -905,7 +905,9 @@ already backs Telegram/WhatsApp/X, not a parallel system with its own rules:
 > that wrote it) is what actually verified it. Prefer a full book over a single doc? **[`docs/
 > gitbook/`](docs/gitbook)** covers the same ground as 12 chapters (`SUMMARY.md` is the table
 > of contents — Markdown, ready to sync into GitBook or any docs host that reads a repo
-> directly).
+> directly). Want a working agent to start from? **[abapay-reference-agent](https://github.com/investorphem/abapay-reference-agent)**
+> (MIT) pays bills on Celo over x402 from its own wallet, with a spending cap, an approval prompt,
+> optional plain-English requests via Claude, and optional Self Agent ID. Quickstart under 10 minutes.
 
 | Tool | What it does | Needs |
 |---|---|---|
