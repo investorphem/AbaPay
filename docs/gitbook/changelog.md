@@ -8,13 +8,18 @@ GitHub](https://github.com/investorphem/AbaPay/commits/main).
 
 ## 2026-10-25
 
+* **Fix: Node.js agents can read AbaPay's x402 price again.** The `payment-required` header had
+  grown to about 22 KB, over Node's 16 KB limit, so Node's `fetch` failed before seeing the
+  price. The header now carries the discovery block once instead of on every offer (about 6.5 KB).
 * **`abapay-sdk` 0.5.0: Self Agent ID signing.** Pass `selfAgent` to `payBillViaX402`, call
   `agent.withSelfAgent(key)` for MCP tool calls, or set `SELF_AGENT_KEY` for the `abapay` CLI.
   Each request is signed afresh, and the result (`self_agent`) comes back with the payment.
   Bills take a `variation_code` (data, cable and exam plans), `phone` and `meter_account_type`,
-  so x402 covers more than airtime. **Fix:** `payBillViaX402` now pays with the token you asked for on Celo;
-  earlier versions signed the first option in the 402 challenge, so a USDT request paid in USDC.
-* **`abapay` 0.3.1 (PyPI):** the same token fix for `pay_bill_via_x402`. The README now opens with a Celo quickstart. See [Self Agent ID](self-agent-id.md).
+  so x402 covers more than airtime. The README now opens with a Celo quickstart. See
+  [Self Agent ID](self-agent-id.md). **Fix:** `payBillViaX402` now pays with the token you asked
+  for on Celo; earlier versions signed the first option in the 402 challenge, so a USDT request
+  paid in USDC.
+* **`abapay` 0.3.1 (PyPI):** the same token fix for `pay_bill_via_x402`.
 
 ## 2026-10-13
 
