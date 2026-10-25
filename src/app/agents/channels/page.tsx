@@ -17,7 +17,7 @@ const CHANNELS = [
   {
     name: "WhatsApp",
     icon: MessageCircle,
-    handle: "+234 707 541 8792",
+    handle: "@abapays · +234 707 541 8792",
     href: "https://wa.me/2347075418792",
   },
 ];

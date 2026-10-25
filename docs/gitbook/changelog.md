@@ -8,6 +8,9 @@ GitHub](https://github.com/investorphem/AbaPay/commits/main).
 
 ## 2026-10-25
 
+* **WhatsApp username.** AbaPay's WhatsApp agent can now be found by its username, **@abapays**,
+  as well as by its number, +234 707 541 8792.
+
 * **Reference agent.** [abapay-reference-agent](https://github.com/investorphem/abapay-reference-agent)
   is an open-source (MIT) agent that pays bills on Celo over x402, with a spending cap and
   optional Self Agent ID. See [Reference agent](reference-agent.md).
