@@ -80,6 +80,19 @@ describe("selfAgent on payments", () => {
     expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 
+  it("pays with the token asked for, on Celo, whatever order the challenge lists its options in", async () => {
+    const opt = (network: string, asset: string, name: string) => ({ scheme: "exact", network, amount: "76758", maxAmountRequired: "76758", payTo: "0x5df8aE2B963165b735B18Ca86B1ea448d2AA032C", asset, maxTimeoutSeconds: 3600, extra: { name, version: "1", primaryType: "TransferWithAuthorization" } });
+    const challenge = { x402Version: 2, error: "Payment required", accepts: [
+      opt("eip155:8453", "0x833589fcd6edb6e08f4c7c32d4f71b54bda02913", "USD Coin"),
+      opt("eip155:42220", "0xceba9300f2b948710d2653dd7b07f33a8b32118c", "USDC"),
+      opt("eip155:42220", "0x48065fbbe25f71c9282ddf5e1cd6d6a887483d5e", "Tether USD"),
+    ] };
+    fetchMock.mockResolvedValueOnce(new Response(JSON.stringify(challenge), { status: 402 }));
+    const confirm = vi.fn(() => false);
+    await expect(payBillViaX402({ signer: agent, confirm, bill: { serviceID: "mtn", serviceCategory: "AIRTIME", network: "MTN", billersCode: "1", nairaAmount: 100, token: "USDT" } })).rejects.toThrow(/declined/);
+    expect(confirm).toHaveBeenCalledWith(expect.objectContaining({ token: "Tether USD", network: "eip155:42220" }));
+  });
+
   it("AbaPayAgent.withSelfAgent signs MCP calls over the exact body sent", async () => {
     fetchMock.mockResolvedValueOnce(new Response(JSON.stringify({ result: { content: [{ type: "text", text: "ok" }] } })));
     await AbaPayAgent.fromApiKey("key", agent.address).withSelfAgent(agent).checkBalance();

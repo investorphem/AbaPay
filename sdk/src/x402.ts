@@ -32,6 +32,13 @@ interface X402Accept {
   extra: { name: string; version: string; primaryType: string };
 }
 
+const CELO_NETWORK = "eip155:42220";
+// Celo mainnet token contracts (both EIP-3009, 6 decimals), lowercased for comparison.
+const CELO_TOKENS: Record<BillDetails["token"], string> = {
+  USDC: "0xceba9300f2b948710d2653dd7b07f33a8b32118c",
+  USDT: "0x48065fbbe25f71c9282ddf5e1cd6d6a887483d5e",
+};
+
 /** What a 402 challenge asks for. `amount` is in the token's smallest unit (USDC and USDT on Celo: 6 decimals). */
 export interface X402Offer {
   amount: string;
@@ -145,9 +152,14 @@ export async function payBillViaX402(params: {
   }
 
   const challenge: X402Challenge = await readJson(challengeRes);
-  const accept = challenge.accepts?.find((a) => a.scheme === "exact");
+  // The challenge offers several tokens (and chains); pay with the one the caller asked for, on
+  // Celo — never just the first entry, which would quietly swap USDT for USDC (or Celo for Base).
+  const wanted = CELO_TOKENS[bill.token];
+  const accept = challenge.accepts?.find(
+    (a) => a.scheme === "exact" && a.network === CELO_NETWORK && a.asset?.toLowerCase() === wanted,
+  );
   if (!accept) {
-    throw new AbaPayError("402 challenge carried no usable 'exact' payment option.", undefined, challenge);
+    throw new AbaPayError(`402 challenge offered no 'exact' ${bill.token} payment on Celo.`, undefined, challenge);
   }
 
   // ── 2. Sign the exact amount the challenge named, with the wallet's OWN key. ─────────────

@@ -101,13 +101,13 @@ describe("payBillViaX402", () => {
     await expect(payBillViaX402({ signer: fakeSigner(), bill })).rejects.toThrow(AbaPayError);
   });
 
-  it("throws AbaPayError on a non-EVM / unrecognized network in the challenge", async () => {
+  it("refuses a challenge that offers the token only on a non-Celo network", async () => {
     const badChallenge = {
       ...CHALLENGE,
       accepts: [{ ...CHALLENGE.accepts[0], network: "solana:mainnet" }],
     };
     fetchMock.mockResolvedValueOnce(new Response(JSON.stringify(badChallenge), { status: 402 }));
-    await expect(payBillViaX402({ signer: fakeSigner(), bill })).rejects.toThrow(/Unsupported x402 network/);
+    await expect(payBillViaX402({ signer: fakeSigner(), bill })).rejects.toThrow(/no .exact. USDT payment on Celo/);
   });
 
   it("throws AbaPayError when the final settlement reports success: false", async () => {
