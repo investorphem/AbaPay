@@ -6,6 +6,7 @@ import { supabaseAdmin as supabase } from '@/utils/supabase';
 import { getPublicClient, isMainnetEnv } from '@/lib/chain';
 import { errorMessage } from '@/lib/errors';
 import { oauthClientForAccessToken } from '@/lib/deai/mcpOAuth';
+import { selfAgentFor, selfAgentSummary } from '@/lib/selfAgent';
 import type { Erc8004Agent, PayerIdentity } from '@/lib/payerIdentityTypes';
 
 export type { Erc8004Agent, PayerIdentity };
@@ -214,11 +215,16 @@ export async function refreshPayerIdentity(wallet: string, opts: { declaredAgent
 export function clientInfoFromRequest(req: Request, clientDiag?: unknown) {
   const h = (name: string, n: number) => clip(req.headers.get(name), n) ?? null;
   const declaredId = h('x-agent-id', 40);
+  // The request's verified Self Agent ID result (src/lib/selfAgent.ts), when it carried one —
+  // recorded with the payment for the admin ledger and the grant report.
+  const selfAgent = selfAgentFor(req);
+  const self = selfAgent ? selfAgentSummary(selfAgent) : null;
+  const diag = clientDiag && typeof clientDiag === 'object' ? clientDiag as Record<string, unknown> : null;
   return {
     user_agent: h('user-agent', 300),
     declared_agent: h('x-agent-name', 80),
     declared_agent_id: declaredId && /^\d{1,20}$/.test(declaredId) ? declaredId : null,
-    client_diag: clientDiag && typeof clientDiag === 'object' ? clientDiag : null,
+    client_diag: (diag || self ? { ...(diag || {}), ...(self ? { self_agent: self } : {}) } : null) as Record<string, unknown> | null,
   };
 }
 
@@ -279,7 +285,7 @@ export function agentRequestClient(req: Request, protocol: 'MCP' | 'A2A') {
     return {
       ...base,
       declared_agent: base.declared_agent ?? clip(oauth?.client_name, 80) ?? null,
-      client_diag: { protocol, auth, ...(oauth ? { oauth_client_id: oauth.client_id, oauth_client_name: oauth.client_name } : {}) },
+      client_diag: { ...(base.client_diag || {}), protocol, auth, ...(oauth ? { oauth_client_id: oauth.client_id, oauth_client_name: oauth.client_name } : {}) },
     };
   };
 }

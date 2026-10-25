@@ -6,6 +6,7 @@
 
 * [Quickstart](quickstart.md)
 * [Identity & discovery](identity.md)
+* [Self Agent ID](self-agent-id.md)
 
 ## Protocols
 
