@@ -19,6 +19,7 @@
 
 * [TypeScript SDK](sdk.md)
 * [Python SDK](python-sdk.md)
+* [Reference agent](reference-agent.md)
 
 ## Trust & safety
 

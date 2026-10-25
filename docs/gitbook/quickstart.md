@@ -1,5 +1,11 @@
 # Quickstart
 
+{% hint style="success" %}
+**Just want to pay a bill from an agent?** The [reference agent](reference-agent.md) does it over
+x402 in under 10 minutes: clone, fund a Celo wallet with about $1, pay. No allowance or PIN.
+The script below is the linked-wallet (MCP) path.
+{% endhint %}
+
 One runnable script that links a wallet, sets an on-chain allowance, and calls
 `check_balance` against production. Verified live against mainnet with a throwaway wallet
 before publication. Full script: [examples/agent-quickstart.mjs](https://github.com/investorphem/AbaPay/blob/main/examples/agent-quickstart.mjs).

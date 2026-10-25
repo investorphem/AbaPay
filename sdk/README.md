@@ -36,6 +36,9 @@ PRIVATE_KEY=0x... npx abapay pay --service AIRTIME --provider mtn --to 080123456
 The output carries the Celo transaction hash: look it up on [celoscan.io](https://celoscan.io)
 to see the payment. The same thing in code is below.
 
+For a complete agent built on this package (spending cap, approval prompt, plain-English
+requests), see [abapay-reference-agent](https://github.com/investorphem/abapay-reference-agent).
+
 ## Zero setup: pay a bill via x402
 
 ```ts

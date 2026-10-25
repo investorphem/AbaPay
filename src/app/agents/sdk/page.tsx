@@ -1,6 +1,6 @@
 import type { Metadata } from "next";
 import Link from "next/link";
-import { ArrowLeft, PackageCheck } from "lucide-react";
+import { ArrowLeft, Bot, PackageCheck } from "lucide-react";
 import CopyBlock from "../CopyBlock";
 
 export const metadata: Metadata = {
@@ -36,6 +36,21 @@ export default function SDKPage() {
           </span>
         </div>
         <span className="text-xs font-bold text-emerald-600 dark:text-emerald-400 flex-shrink-0">npmjs.com →</span>
+      </a>
+
+      <a
+        href="https://github.com/investorphem/abapay-reference-agent"
+        target="_blank"
+        rel="noopener noreferrer"
+        className="flex items-center justify-between gap-3 bg-white dark:bg-[#111114] border border-slate-100 dark:border-slate-800/60 rounded-2xl p-4 mb-6 hover:border-emerald-200 dark:hover:border-emerald-800/50 transition-colors"
+      >
+        <div className="flex items-center gap-3">
+          <Bot size={18} className="text-emerald-600 dark:text-emerald-400 flex-shrink-0" />
+          <span className="text-sm text-slate-700 dark:text-slate-300">
+            <strong className="text-slate-900 dark:text-white">Reference agent</strong>: an open-source (MIT) agent built on this SDK that pays bills on Celo with a spending cap and optional Self Agent ID. Quickstart under 10 minutes.
+          </span>
+        </div>
+        <span className="text-xs font-bold text-emerald-600 dark:text-emerald-400 flex-shrink-0">GitHub →</span>
       </a>
 
       <section className="bg-white dark:bg-[#111114] border border-slate-100 dark:border-slate-800/60 rounded-[2rem] p-6 sm:p-8 mb-6">

@@ -8,6 +8,10 @@ GitHub](https://github.com/investorphem/AbaPay/commits/main).
 
 ## 2026-10-25
 
+* **Reference agent.** [abapay-reference-agent](https://github.com/investorphem/abapay-reference-agent)
+  is an open-source (MIT) agent that pays bills on Celo over x402, with a spending cap and
+  optional Self Agent ID. See [Reference agent](reference-agent.md).
+
 * **Fix: Node.js agents can read AbaPay's x402 price again.** The `payment-required` header had
   grown to about 22 KB, over Node's 16 KB limit, so Node's `fetch` failed before seeing the
   price. The header now carries the discovery block once instead of on every offer (about 6.5 KB).
