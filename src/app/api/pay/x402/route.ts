@@ -19,6 +19,7 @@ import { metric } from '@/lib/log';
 import { X402_DOMAINS_BY_CHAIN } from '@/lib/x402Domains';
 import { errorMessage } from '@/lib/errors';
 import { recordPayerAfterResponse, clientInfoFromRequest } from '@/lib/payerIdentity';
+import { withSelfAgent } from '@/lib/selfAgent';
 
 // ⚡ THE RAW ERC-1271 CHECK — deliberately not viem's `verifyTypedData`/`verifyHash`, which
 // falls back to ecrecover on any failure here (see the long comment where this is used). This
@@ -1824,7 +1825,13 @@ async function handleX402Request(req: Request) {
 
 export async function POST(req: Request) {
   try {
-    return await handleX402Request(req);
+    // Self Agent ID (src/lib/selfAgent.ts): verified agents are shown as verified (header +
+    // `self_agent` on the JSON); a Self signature that doesn't check out is refused before anything
+    // is priced or settled; no Self headers at all changes nothing.
+    return await withSelfAgent(req, handleX402Request, (detail) => NextResponse.json(
+      { x402Version: X402_RESPONSE_VERSION, success: false, errorCode: 'SELF_AGENT_INVALID', error: `${detail} Nothing was charged.`, retryable: false },
+      { status: 401 },
+    ));
   } catch (error) {
     console.error('[Pay/x402] error:', error);
     return NextResponse.json({ success: false, status: 'SYSTEM_CRASH', message: 'System error settling payment.' }, { status: 500 });

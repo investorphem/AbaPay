@@ -16,6 +16,7 @@ import {
 } from '@/lib/deai/mcpTools';
 import { MCP_UI_CARD_URI, MCP_UI_CARD_RESOURCE, MCP_UI_CARD_HTML } from '@/lib/deai/mcpUiTemplates';
 import { errorMessage } from '@/lib/errors';
+import { withSelfAgent } from '@/lib/selfAgent';
 import { runWithAgentClient, agentRequestClient } from '@/lib/payerIdentity';
 
 // ⚡ MCP SERVER — lets an AI agent (Claude, or any MCP-speaking client) check a balance or
@@ -50,7 +51,7 @@ function unauthorized(id: unknown, wwwAuthenticate: string, message: string) {
   );
 }
 
-export async function POST(req: Request) {
+async function handleMcpRequest(req: Request): Promise<Response> {
   const limited = await enforceRateLimit(req, 'mcp', 60, 60);
   if (limited) return limited;
 
@@ -254,4 +255,14 @@ export async function GET(req: Request) {
     transport: 'streamable-http',
     tools: TOOLS.map((t) => t.name),
   });
+}
+
+// Self Agent ID (src/lib/selfAgent.ts): a verified calling agent is shown as verified (response
+// header + result._meta["abapay/self_agent"]); a Self signature that does not check out is
+// refused before any tool runs; no Self headers at all changes nothing.
+export async function POST(req: Request) {
+  return withSelfAgent(req, handleMcpRequest, (detail) => NextResponse.json(
+    { jsonrpc: '2.0', id: null, error: { code: -32001, message: 'SELF_AGENT_INVALID: ' + detail } },
+    { status: 401 },
+  ));
 }

@@ -8,6 +8,7 @@ import { validateAccessToken } from '@/lib/deai/mcpOAuth';
 import { TOOLS, NEEDS_AUTH, WWW_AUTH_MISSING, WWW_AUTH_INVALID, callTool } from '@/lib/deai/mcpTools';
 import { getAgentAppUrl } from '@/lib/agentAppUrl';
 import { errorMessage } from '@/lib/errors';
+import { withSelfAgent } from '@/lib/selfAgent';
 import { runWithAgentClient, agentRequestClient } from '@/lib/payerIdentity';
 
 // ⚡ A2A SERVER — AbaPay over the Agent2Agent protocol (a2a-protocol.org), a FIFTH way in to
@@ -131,7 +132,7 @@ async function identityFromHeader(req: Request): Promise<McpIdentity | null | un
   return token.startsWith('aba_mcp_') ? await resolveMcpIdentity(token) : await validateAccessToken(token);
 }
 
-export async function POST(req: Request) {
+async function handleA2aRequest(req: Request): Promise<Response> {
   const limited = await enforceRateLimit(req, 'a2a', 60, 60);
   if (limited) return limited;
 
@@ -245,4 +246,14 @@ export async function GET() {
     skills: TOOLS.map((t) => t.name),
     hint: 'POST JSON-RPC 2.0 here. Supported method: message/send.',
   });
+}
+
+// Self Agent ID (src/lib/selfAgent.ts): a verified calling agent is shown as verified (response
+// header + result._meta["abapay/self_agent"]); a Self signature that does not check out is
+// refused before any tool runs; no Self headers at all changes nothing.
+export async function POST(req: Request) {
+  return withSelfAgent(req, handleA2aRequest, (detail) => NextResponse.json(
+    { jsonrpc: '2.0', id: null, error: { code: -32001, message: 'SELF_AGENT_INVALID: ' + detail } },
+    { status: 401 },
+  ));
 }
