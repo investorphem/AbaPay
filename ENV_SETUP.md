@@ -545,6 +545,16 @@ GET https://<your-domain>/api/internal/jobs/run   (Authorization: Bearer <CRON_S
 Jobs that stay unresolved after 8 attempts are parked as `needs_review` and alerted once. See
 [docs/runbooks/README.md](docs/runbooks/README.md).
 
+## Grant report — optional
+
+Admin → Grant counts external-agent payments for the Prezenti grant (`src/lib/grantReport.ts`).
+The admin, relayer, server and owner wallets are always left out; list any other AbaPay-controlled
+or test wallets here so they never count:
+
+```
+GRANT_EXCLUDED_WALLETS=0xabc…,0xdef…
+```
+
 ## 14a. Observability — optional
 
 ```
