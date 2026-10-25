@@ -786,7 +786,13 @@ async function handleX402Request(req: Request) {
         // so it already self-reports whichever host actually served the request.
         iconUrl: 'https://www.abapays.com/logo.png',
       },
-      accepts: challengeAccepts,
+      // 🔴 THE HEADER CARRIES THE BAZAAR BLOCK ONCE, AT THE TOP LEVEL (where x402 v2 puts
+      // `extensions`), NOT ON EVERY OFFER. With four offers each carrying its own ~2.8 KB copy the
+      // header reached ~21.7 KB base64, over Node's 16 KB response-header limit: Node's fetch
+      // (undici) threw UND_ERR_HEADERS_OVERFLOW before any client — abapay-sdk included — could
+      // read the price. Settlement is unaffected: `settleRequirements` is built from
+      // `acceptEntry`, which still carries the block CDP catalogues from.
+      accepts: challengeAccepts.map((offer) => Object.fromEntries(Object.entries(offer).filter(([k]) => k !== 'extensions'))),
       // Same object `acceptEntry.extensions` carries into settle — see `bazaarExtension`
       // above for what this declares and why it can no longer live only here.
       extensions: acceptEntry.extensions,

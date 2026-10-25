@@ -6,6 +6,12 @@ test-tooling fixes are left out. Full history: [commits on
 GitHub](https://github.com/investorphem/AbaPay/commits/main).
 {% endhint %}
 
+## 2026-10-25
+
+* **Fix: Node.js agents can read AbaPay's x402 price again.** The `payment-required` header had
+  grown to about 22 KB, over Node's 16 KB limit, so Node's `fetch` failed before seeing the
+  price. The header now carries the discovery block once instead of on every offer (about 6.5 KB).
+
 ## 2026-10-13
 
 * **Pay with NIM in Nimiq Pay.** [nim.abapays.com](https://nim.abapays.com) is AbaPay as a

@@ -154,6 +154,18 @@ describe('/api/pay/x402 — discovery probe (GET)', () => {
     expect(header.accepts.map((a: { network: string }) => a.network)).toEqual(body.accepts.map((a: { network: string }) => a.network));
   });
 
+  // 2026-10-25: four offers each carrying the Bazaar block made the header ~21.7 KB, over Node's
+  // 16 KB response-header limit, so Node's fetch threw UND_ERR_HEADERS_OVERFLOW before reading it.
+  it('keeps the payment-required header small enough for Node clients, with the Bazaar block once at the top level', async () => {
+    const res = await GET(new Request('http://localhost/api/pay/x402'));
+    const raw = String(res.headers.get('payment-required'));
+    expect(raw.length).toBeLessThan(8 * 1024);
+    const header = JSON.parse(Buffer.from(raw, 'base64').toString());
+    expect(header.extensions?.bazaar).toBeTruthy();
+    expect(header.accepts.length).toBeGreaterThan(1);
+    expect(header.accepts.every((a: Record<string, unknown>) => !('extensions' in a))).toBe(true);
+  });
+
   it("carries each token's own EIP-712 domain, so a payer signs against the right contract", async () => {
     const { accepts } = await (await GET(new Request('http://localhost/api/pay/x402'))).json();
     const usdc = accepts.find((a: { asset: string }) => a.asset.toLowerCase() === CELO_TOKENS.USDC.address);
