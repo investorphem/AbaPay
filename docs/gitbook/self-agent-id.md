@@ -98,6 +98,17 @@ Only secp256k1 (EVM) agent keys are supported today. A request marked
 ## AbaPay's own identity
 
 AbaPay itself is registered under [ERC-8004 as agent #9687](https://8004scan.io/agents/celo/9687)
-(see [Identity & discovery](identity.md)). Its own Self Agent ID registration on the
-SelfAgentRegistry is in progress; this page will list its agent ID and registration transaction
-once it is complete.
+(see [Identity & discovery](identity.md)), and holds its own Self Agent ID on the
+SelfAgentRegistry, backed by a passport proof of a real human. No personal data was disclosed:
+only the proof is on-chain.
+
+| | |
+|---|---|
+| Self agent ID | **#196** |
+| Agent address | `0xDffF9AbaCcc4402D23cb856d0544bab622577A93` |
+| Human owner | `0xec24bAfBc989a9bE5f6F0eAD8848753B5E4aE0B6`, the same wallet that owns ERC-8004 #9687 |
+| Registered | 25 October 2026, [tx 0x31cd31f2…75a4](https://celoscan.io/tx/0x31cd31f264e25c6128af9b4eff63cd74c5b5d348d3633856c2dee371bf6b75a4) |
+| Registry | [`0xaC3DF9AB…3355944`](https://celoscan.io/address/0xaC3DF9ABf80d0F5c020C06B04Cced27763355944) on Celo |
+
+Check it yourself: `isVerifiedAgent` on the registry returns true for the agent address (left-padded
+to 32 bytes), and `hasHumanProof(196)` and `isProofFresh(196)` return true.

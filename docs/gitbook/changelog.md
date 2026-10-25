@@ -8,6 +8,10 @@ GitHub](https://github.com/investorphem/AbaPay/commits/main).
 
 ## 2026-10-25
 
+* **AbaPay has a Self Agent ID.** It is registered on the SelfAgentRegistry as agent **#196**, backed
+  by a passport proof of a real human and owned by the same wallet as ERC-8004 #9687. See
+  [Self Agent ID](self-agent-id.md).
+
 * **WhatsApp username.** AbaPay's WhatsApp agent can now be found by its username, **@abapays**,
   as well as by its number, +234 707 541 8792.
 
