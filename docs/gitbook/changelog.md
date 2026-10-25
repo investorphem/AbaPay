@@ -6,6 +6,14 @@ test-tooling fixes are left out. Full history: [commits on
 GitHub](https://github.com/investorphem/AbaPay/commits/main).
 {% endhint %}
 
+## 2026-10-25
+
+* **`abapay-sdk` 0.5.0: Self Agent ID signing.** Pass `selfAgent` to `payBillViaX402`, call
+  `agent.withSelfAgent(key)` for MCP tool calls, or set `SELF_AGENT_KEY` for the `abapay` CLI.
+  Each request is signed afresh, and the result (`self_agent`) comes back with the payment.
+  Bills take a `variation_code` (data, cable and exam plans), `phone` and `meter_account_type`,
+  so x402 covers more than airtime. The README now opens with a Celo quickstart. See [Self Agent ID](self-agent-id.md).
+
 ## 2026-10-13
 
 * **Pay with NIM in Nimiq Pay.** [nim.abapays.com](https://nim.abapays.com) is AbaPay as a

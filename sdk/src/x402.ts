@@ -1,6 +1,7 @@
 import type { Hex } from "viem";
 import type { BillDetails, Signer, X402PayResult } from "./types.js";
 import { AbaPayError } from "./types.js";
+import { selfAgentHeaders, type SelfAgentKey } from "./selfAgent.js";
 
 export const DEFAULT_BASE_URL = "https://agents.abapays.com";
 
@@ -29,6 +30,15 @@ interface X402Accept {
   asset: string;
   maxTimeoutSeconds: number;
   extra: { name: string; version: string; primaryType: string };
+}
+
+/** What a 402 challenge asks for. `amount` is in the token's smallest unit (USDC and USDT on Celo: 6 decimals). */
+export interface X402Offer {
+  amount: string;
+  asset: string;
+  token: string;
+  network: string;
+  payTo: string;
 }
 
 interface X402Challenge {
@@ -92,6 +102,10 @@ async function readJson(res: Response): Promise<any> {
  * `AbaPayError` thrown when the challenge has no matching `accepts[]` entry, not a silent
  * fallback to a token you didn't ask for.
  *
+ * Pass `selfAgent` (the agent key registered at https://app.ai.self.xyz) to sign both requests
+ * with Self Agent ID; AbaPay then records and shows the payment as coming from a human-backed
+ * agent (`result.self_agent.status === "verified"`). Optional — without it the payment is the same.
+ *
  * @throws {AbaPayError} on any HTTP failure, a challenge this SDK version can't act on, or a
  *   final response AbaPay itself reports as unsuccessful (`success: false`).
  */
@@ -99,16 +113,23 @@ export async function payBillViaX402(params: {
   signer: Signer;
   bill: Omit<BillDetails, "wallet_address"> & { wallet_address?: string };
   baseUrl?: string;
+  selfAgent?: SelfAgentKey;
+  /** Sees the exact price before anything is signed; return false to stop (e.g. a spending cap). */
+  confirm?: (offer: X402Offer) => boolean | Promise<boolean>;
 }): Promise<X402PayResult> {
-  const { signer, baseUrl = DEFAULT_BASE_URL } = params;
+  const { signer, baseUrl = DEFAULT_BASE_URL, selfAgent } = params;
   const bill: BillDetails = { ...params.bill, wallet_address: params.bill.wallet_address ?? signer.address };
   const endpoint = `${baseUrl.replace(/\/$/, "")}/api/pay/x402`;
+  const requestBody = JSON.stringify(bill);
+  // A fresh Self signature per request: AbaPay refuses one it has already seen.
+  const self = async (): Promise<Record<string, string>> =>
+    selfAgent ? selfAgentHeaders(selfAgent, { method: "POST", url: endpoint, body: requestBody }) : {};
 
   // ── 1. Ask for a price. No X-PAYMENT header yet — this MUST come back 402. ──────────────
   const challengeRes = await fetch(endpoint, {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(bill),
+    headers: { "Content-Type": "application/json", ...(await self()) },
+    body: requestBody,
   });
 
   if (challengeRes.status !== 402) {
@@ -131,6 +152,12 @@ export async function payBillViaX402(params: {
 
   // ── 2. Sign the exact amount the challenge named, with the wallet's OWN key. ─────────────
   const chainId = caip2ChainId(accept.network);
+  if (params.confirm) {
+    const offer: X402Offer = { amount: accept.amount, asset: accept.asset, token: accept.extra.name, network: accept.network, payTo: accept.payTo };
+    if (!(await params.confirm(offer))) {
+      throw new AbaPayError("Payment declined before signing; nothing was paid.", undefined, offer);
+    }
+  }
   const now = Math.floor(Date.now() / 1000);
   const authorization = {
     from: signer.address,
@@ -178,8 +205,8 @@ export async function payBillViaX402(params: {
 
   const settleRes = await fetch(endpoint, {
     method: "POST",
-    headers: { "Content-Type": "application/json", "X-PAYMENT": paymentHeader },
-    body: JSON.stringify(bill),
+    headers: { "Content-Type": "application/json", "X-PAYMENT": paymentHeader, ...(await self()) },
+    body: requestBody,
   });
   const result: X402PayResult = await readJson(settleRes);
 

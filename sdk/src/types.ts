@@ -1,4 +1,5 @@
 import type { Account } from "viem";
+import type { SelfAgentResult } from "./selfAgent.js";
 
 /**
  * Anything that can produce an EIP-712 signature — a viem `Account` from
@@ -31,6 +32,12 @@ export interface BillDetails {
   /** Celo mainnet only — see the SDK's file-level comments for why. */
   token: "USDC" | "USDT";
   wallet_address: string;
+  /** Plan code for DATA, CABLE and EDUCATION, from GET /api/variations?serviceID=… (e.g. "mtn-10mb-100"). */
+  variation_code?: string;
+  /** Phone for the delivery receipt (electricity, cable); airtime and data use billersCode. */
+  phone?: string;
+  /** Prepaid or postpaid meter, for ELECTRICITY. */
+  meter_account_type?: "prepaid" | "postpaid";
 }
 
 export interface X402PayResult {
@@ -41,6 +48,8 @@ export interface X402PayResult {
   request_id?: string;
   tx_hash?: string;
   message?: string;
+  /** Present when the request was signed with a Self Agent ID — see `selfAgent` on payBillViaX402. */
+  self_agent?: SelfAgentResult;
 }
 
 export class AbaPayError extends Error {

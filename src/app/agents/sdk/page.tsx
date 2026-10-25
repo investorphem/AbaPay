@@ -93,9 +93,11 @@ await agent.payBill({
             </thead>
             <tbody className="divide-y divide-slate-100 dark:divide-slate-800/60 align-top">
               {[
-                ["payBillViaX402", "(params: { signer, bill, baseUrl? }) => Promise<X402PayResult>", "Zero-setup path. Fetches the 402 challenge, signs it, retries, returns the settlement."],
+                ["payBillViaX402", "(params: { signer, bill, baseUrl?, selfAgent? }) => Promise<X402PayResult>", "Zero-setup path. Fetches the 402 challenge, signs it, retries, returns the settlement. With selfAgent, both requests are signed with a Self Agent ID."],
                 ["AbaPayAgent.link", "static (params: LinkParams) => Promise<AbaPayAgent>", "Links a wallet with a plain signed message and mints an api_key. Does NOT grant any on-chain allowance itself — approve() + setSpendingAllowance() stay a separate, explicit step."],
                 ["AbaPayAgent.fromApiKey", "static (apiKey, walletAddress, baseUrl?) => AbaPayAgent", "Reattach to an api_key minted earlier — no new signature needed."],
+                ["agent.withSelfAgent", "(key: SelfAgentKey) => AbaPayAgent", "The same session, with every MCP call signed by a Self Agent ID (the key registered at app.ai.self.xyz)."],
+                ["selfAgentHeaders", "(key, { method, url, body? }) => Promise<Record<string, string>>", "The x-self-agent-* headers for one request, for calling AbaPay without the rest of the SDK."],
                 ["agent.callTool", "(name: string, args?: object) => Promise<string>", "Low-level: call any of the 11 MCP tools by name. Every typed method below is a thin wrapper over this."],
                 ["agent.checkBalance", "(chain?: 'CELO') => Promise<string>", "Wraps check_balance."],
                 ["agent.payBill", "(args: { pin, service, provider, account_number, amount_ngn, chain?, token?, variation_code? }) => Promise<string>", "Wraps pay_bill."],
@@ -123,8 +125,9 @@ await agent.payBill({
             </thead>
             <tbody className="divide-y divide-slate-100 dark:divide-slate-800/60 align-top">
               {[
-                ["BillDetails", "{ serviceID, serviceCategory, network, billersCode, nairaAmount, token: 'USDC'|'USD₮'|'USA₮', wallet_address }"],
-                ["X402PayResult", "{ success, status: 'SUCCESS'|'FAILED_VENDING'|'TIMEOUT'|string, purchased_code?, units?, request_id?, tx_hash?, message? }"],
+                ["BillDetails", "{ serviceID, serviceCategory, network, billersCode, nairaAmount, token: 'USDC'|'USDT', wallet_address, variation_code?, phone?, meter_account_type? }"],
+                ["X402PayResult", "{ success, status: 'SUCCESS'|'FAILED_VENDING'|'TIMEOUT'|string, purchased_code?, units?, request_id?, tx_hash?, message?, self_agent? }"],
+                ["SelfAgentKey", "{ address, signMessage } — a viem account for the agent key registered on the SelfAgentRegistry"],
                 ["LinkParams", "{ signer, pin, approvedChain?: 'CELO', approvedToken?, label?, baseUrl? }"],
                 ["AbaPayError", "extends Error — carries .cause and .response for the original failure"],
               ].map(([name, shape]) => (

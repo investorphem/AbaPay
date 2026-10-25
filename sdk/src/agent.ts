@@ -3,6 +3,7 @@ import { createSiweMessage } from "viem/siwe";
 import type { Signer } from "./types.js";
 import { AbaPayError } from "./types.js";
 import { DEFAULT_BASE_URL } from "./x402.js";
+import { selfAgentHeaders, type SelfAgentKey } from "./selfAgent.js";
 
 // ⚡ THE OTHER WAY IN — a reusable version of examples/agent-quickstart.mjs (verified live
 // against production 2026-09-11: a throwaway key ran this exact request shape, got a real
@@ -44,7 +45,16 @@ export class AbaPayAgent {
     public readonly apiKey: string,
     public readonly walletAddress: string,
     private readonly baseUrl: string,
+    private readonly selfAgent?: SelfAgentKey,
   ) {}
+
+  /**
+   * The same session, with every MCP call signed by a Self Agent ID (the agent key registered at
+   * https://app.ai.self.xyz). AbaPay shows the result on each response and with each payment.
+   */
+  withSelfAgent(key: SelfAgentKey): AbaPayAgent {
+    return new AbaPayAgent(this.apiKey, this.walletAddress, this.baseUrl, key);
+  }
 
   /**
    * Prove ownership of a wallet with a plain signed message (no OAuth, no browser) and mint an
@@ -119,15 +129,18 @@ export class AbaPayAgent {
 
   /** Low-level: call any MCP tool by name. `checkBalance`/`payBill`/etc. below cover the common ones with typed args. */
   async callTool(name: string, args: Record<string, unknown> = {}): Promise<string> {
-    const res = await fetch(`${this.baseUrl.replace(/\/$/, "")}/api/mcp`, {
+    const url = `${this.baseUrl.replace(/\/$/, "")}/api/mcp`;
+    const body = JSON.stringify({
+      jsonrpc: "2.0",
+      id: 1,
+      method: "tools/call",
+      params: { name, arguments: { api_key: this.apiKey, ...args } },
+    });
+    const self = this.selfAgent ? await selfAgentHeaders(this.selfAgent, { method: "POST", url, body }) : {};
+    const res = await fetch(url, {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        jsonrpc: "2.0",
-        id: 1,
-        method: "tools/call",
-        params: { name, arguments: { api_key: this.apiKey, ...args } },
-      }),
+      headers: { "Content-Type": "application/json", ...self },
+      body,
     });
     const data = (await res.json()) as McpCallResponse;
     if (data.error) throw new AbaPayError(data.error.message || "MCP tool call failed.", undefined, data);
