@@ -35,6 +35,24 @@ console.log(result.status, result.tx_hash);
 ```
 {% endcode %}
 
+## Self Agent ID
+
+If your agent is registered at [app.ai.self.xyz](https://app.ai.self.xyz), pass its key and
+every request is signed with it. AbaPay checks the SelfAgentRegistry on Celo and records the
+payment as coming from a human-backed agent. See [Self Agent ID](self-agent-id.md).
+
+{% code title="pay-as-self-agent.ts" %}
+```ts
+const selfAgent = privateKeyToAccount(process.env.SELF_AGENT_KEY);
+
+const result = await payBillViaX402({ signer: account, selfAgent, bill });
+console.log(result.self_agent); // { status: "verified", agent_id: "…" }
+
+// MCP: the same, on every tool call
+const signed = agent.withSelfAgent(selfAgent);
+```
+{% endcode %}
+
 ## Linked wallet: AbaPayAgent
 
 Links once, sets the PIN in that same call, then reuses the api_key for the full tool

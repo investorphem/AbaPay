@@ -142,3 +142,12 @@ describe('withSelfAgent', () => {
     expect((await res.json()).echoed).toEqual(JSON.parse(BODY));
   });
 });
+
+describe('abapay-sdk interop', () => {
+  it('headers made by the published SDK (sdk/src/selfAgent.ts) verify here', async () => {
+    const { selfAgentHeaders } = await import('../sdk/src/selfAgent');
+    const headers = await selfAgentHeaders(agent, { method: 'POST', url: URL_, body: BODY });
+    const req = new Request(URL_, { method: 'POST', headers: { 'content-type': 'application/json', ...headers }, body: BODY });
+    expect(await verifySelfAgentRequest(req, BODY)).toMatchObject({ present: true, status: 'verified', agentId: '42' });
+  });
+});

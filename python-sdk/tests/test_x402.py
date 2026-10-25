@@ -127,3 +127,44 @@ def test_unsupported_network_raises():
         assert False, "expected AbaPayError"
     except AbaPayError as e:
         assert "eip155" in e.message
+
+
+def test_pays_with_the_token_asked_for_on_celo(httpserver):
+    """The challenge lists several options; a USDT bill must sign the Celo USDT one, not the first."""
+    account = Account.from_key(TEST_PRIVATE_KEY)
+    usdt = CHALLENGE["accepts"][0]
+    base_usdc = {**usdt, "network": "eip155:8453", "asset": "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913", "extra": {"name": "USD Coin", "version": "2", "primaryType": "TransferWithAuthorization"}}
+    celo_usdc = {**usdt, "asset": "0xcebA9300f2b948710d2653dD7B07f33A8B32118C", "extra": {"name": "USDC", "version": "2", "primaryType": "TransferWithAuthorization"}}
+    challenge = {**CHALLENGE, "accepts": [base_usdc, celo_usdc, usdt]}
+    captured = {}
+
+    def handler(request):
+        from werkzeug.wrappers import Response
+
+        payment_header = request.headers.get("X-PAYMENT")
+        if payment_header is None:
+            return Response(json.dumps(challenge), status=402, content_type="application/json")
+        captured["payment_header"] = payment_header
+        return Response(json.dumps({"success": True, "status": "SUCCESS"}), status=200, content_type="application/json")
+
+    httpserver.expect_request("/api/pay/x402", method="POST").respond_with_handler(handler)
+
+    bill = BillDetails(serviceID="mtn", serviceCategory="AIRTIME", network="MTN", billersCode="08012345678", nairaAmount=1000, token="USDT")
+    pay_bill_via_x402(account, bill, base_url=httpserver.url_for(""))
+
+    import base64
+
+    decoded = json.loads(base64.b64decode(captured["payment_header"]))
+    auth = decoded["payload"]["authorization"]
+    # Recovers only under the Celo USDT domain, so this proves which option was signed.
+    domain = {"name": "Tether USD", "version": "1", "chainId": 42220, "verifyingContract": USDT}
+    message = {
+        "from": auth["from"],
+        "to": auth["to"],
+        "value": int(auth["value"]),
+        "validAfter": int(auth["validAfter"]),
+        "validBefore": int(auth["validBefore"]),
+        "nonce": auth["nonce"],
+    }
+    signable = encode_typed_data(domain_data=domain, message_types=TRANSFER_WITH_AUTHORIZATION_TYPES, message_data=message)
+    assert Account.recover_message(signable, signature=decoded["payload"]["signature"]).lower() == account.address.lower()

@@ -36,6 +36,8 @@ ENV
   PRIVATE_KEY   0x-prefixed private key. Required for 'pay' (signs the x402 authorization)
                 and 'link' (signs the linking message). Never sent anywhere — signing happens
                 locally via viem.
+  SELF_AGENT_KEY  optional, for 'pay': the agent key registered at app.ai.self.xyz. Signs
+                the request with Self Agent ID so AbaPay shows it as a human-backed agent.
 
 EXAMPLES
   PRIVATE_KEY=0x... abapay pay --service AIRTIME --provider mtn --to 08012345678 --amount 1000
@@ -61,10 +63,14 @@ async function cmdPay(argv: string[]) {
     fail("pay requires --service, --to, and --amount (--provider recommended).");
   }
   const account = privateKeyToAccount(requirePrivateKey());
+  const selfKey = process.env.SELF_AGENT_KEY;
+  if (selfKey && !/^0x[0-9a-fA-F]{64}$/.test(selfKey)) fail("SELF_AGENT_KEY must be a 0x-prefixed 32-byte hex string.");
+  const selfAgent = selfKey ? privateKeyToAccount(selfKey as Hex) : undefined;
   console.log(`Paying as ${account.address} — ${values.service} ${values.amount} NGN to ${values.to}…`);
   try {
     const result = await payBillViaX402({
       signer: account,
+      selfAgent,
       bill: {
         serviceID: (values.provider || values.service!).toLowerCase(),
         serviceCategory: values.service as any,
@@ -75,6 +81,8 @@ async function cmdPay(argv: string[]) {
       },
     });
     console.log(`✓ ${result.status} — tx: ${result.tx_hash ?? "(pending)"}`);
+    if (result.tx_hash) console.log(`  https://celoscan.io/tx/${result.tx_hash}`);
+    if (result.self_agent) console.log(`  Self Agent ID: ${result.self_agent.status}${result.self_agent.agent_id ? ` (#${result.self_agent.agent_id})` : ""}`);
   } catch (e) {
     if (e instanceof AbaPayError) fail(`${e.message}${e.response ? `\n${JSON.stringify(e.response, null, 2)}` : ""}`);
     throw e;

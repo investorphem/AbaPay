@@ -20,6 +20,22 @@ npm install abapay-sdk viem
 `viem` is a peer dependency — this package signs through whatever `Account`/`WalletClient` your
 own viem install already gives you, rather than bundling a second copy.
 
+## Quickstart on Celo (about 5 minutes)
+
+1. **A wallet.** Any EVM key works; for a fresh one:
+   `node -e "console.log(require('viem/accounts').generatePrivateKey())"`
+2. **Fund it on Celo** with about $1 of USDC or USDT. You don't need CELO: with x402 the
+   facilitator submits the transfer and pays the gas.
+3. **Pay** ₦100 of MTN airtime (well under $1, fees included):
+
+```bash
+npm install abapay-sdk viem
+PRIVATE_KEY=0x... npx abapay pay --service AIRTIME --provider mtn --to 08012345678 --amount 100
+```
+
+The output carries the Celo transaction hash: look it up on [celoscan.io](https://celoscan.io)
+to see the payment. The same thing in code is below.
+
 ## Zero setup: pay a bill via x402
 
 ```ts
@@ -93,6 +109,27 @@ const agent = AbaPayAgent.fromApiKey(savedApiKey, walletAddress);
 | Credential per call      | None — just the signature           | api_key + PIN, every payment            |
 | Tool catalog             | Pay a bill, that's it               | Balance, history, schedules, batch, more |
 | Best for                 | An external agent that already has a wallet and wants to pay, now | An agent that will call AbaPay repeatedly and wants the full catalog |
+
+## Self Agent ID
+
+If your agent is registered at [app.ai.self.xyz](https://app.ai.self.xyz) (the SelfAgentRegistry
+on Celo, which ties the agent key to a verified human), pass that key and every request is
+signed with it:
+
+```ts
+const selfAgent = privateKeyToAccount(process.env.SELF_AGENT_KEY as `0x${string}`);
+
+const result = await payBillViaX402({ signer: account, selfAgent, bill: { /* … */ } });
+console.log(result.self_agent); // { status: "verified", agent_id: "…" }
+
+const signedAgent = agent.withSelfAgent(selfAgent); // MCP calls, signed
+```
+
+The CLI reads `SELF_AGENT_KEY`. The agent key need not be the paying wallet. Each request is
+signed afresh (AbaPay refuses a repeated or stale signature with `401 SELF_AGENT_INVALID`);
+an agent that is expired, revoked or not registered still pays, just unverified. For other
+languages, `selfSigningDigest` and `selfAgentHeaders` are exported. Protocol details:
+[docs/gitbook/self-agent-id.md](https://github.com/investorphem/AbaPay/blob/main/docs/gitbook/self-agent-id.md).
 
 ## Errors
 

@@ -28,7 +28,9 @@ keccak256( timestamp + METHOD + path?query + keccak256(rawBody) )
 ```
 
 for example `1793212345678` + `POST` + `/api/pay/x402` + `0x…` (the hash of the exact JSON body
-you send). Self's own SDK (`@selfxyz/agent-sdk`, `SelfAgent`) signs requests this way for you.
+you send). `abapay-sdk` (0.5.0+) signs for you: pass `selfAgent` to `payBillViaX402`, call
+`agent.withSelfAgent(key)` for MCP, or set `SELF_AGENT_KEY` for the `abapay` CLI. Self's own SDK
+(`@selfxyz/agent-sdk`, `SelfAgent`) signs requests the same way.
 
 {% code title="Signing a request with viem" %}
 ```ts
