@@ -482,6 +482,11 @@ export default function Home() {
   // start of every verify/resolve attempt; each call captures its own generation number and
   // discards its result entirely if a newer attempt has since started.
   const bankVerifyGenerationRef = useRef(0);
+  // The same guard for meter / smartcard / JAMB / Smile checks. 2026-10-26: typing a meter
+  // number started a check as prepaid (the default); switching to postpaid started a second
+  // one. The postpaid check answered first and showed the name, then the slower prepaid check
+  // came back failed and replaced it with "not verified", on a meter that paid fine.
+  const merchantVerifyGenerationRef = useRef(0);
 
   const [meterAddress, setMeterAddress] = useState<string | null>(null);
   const [dynamicElecMin, setDynamicElecMin] = useState<number>(1000);
@@ -1223,6 +1228,9 @@ export default function Home() {
       showToast("You're Offline", "Check your internet connection and try again.", "error");
       return;
     }
+    // Claims the generation for THIS check; an answer to an older one is discarded.
+    const myGeneration = ++merchantVerifyGenerationRef.current;
+    setStatus((prev) => (prev === "Account could not be verified." ? "" : prev));
     setIsVerifying(true); setCustomerName(null); setCableCurrentBouquet(null); setCableRenewAmount(null); setInternetAccountId(null);
     setMeterAddress(null); setDynamicElecMin(1000); setMeterAccountType(null);
 
@@ -1236,6 +1244,7 @@ export default function Home() {
 
         const res = await fetch(`/api/verify`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ billersCode: accountNumber, serviceID: serviceID, type: reqType }), signal: timeoutSignal(20000) });
         const data = await res.json();
+        if (merchantVerifyGenerationRef.current !== myGeneration) return; // superseded — discard
 
         if (data.code === '000') {
           // 🔴 THE BUG THIS FIXES: VTpass doesn't consistently case this field — some
@@ -1259,11 +1268,12 @@ export default function Home() {
           }
         } else { setStatus("Account could not be verified."); }
     } catch (e) {
+      if (merchantVerifyGenerationRef.current !== myGeneration) return;
       const name = (e as { name?: unknown } | null)?.name;
       const timedOut = name === 'TimeoutError' || name === 'AbortError';
       showToast("Verification Failed", timedOut ? "This is taking too long — check your connection and try again." : "Network error — check your connection and try again.", "error");
     }
-    setIsVerifying(false);
+    if (merchantVerifyGenerationRef.current === myGeneration) setIsVerifying(false);
   };
 
   // ⚡ SHARED: which service is being paid, and the payload /api/pay (and /api/pay/x402)
@@ -3843,13 +3853,13 @@ export default function Home() {
       }
       else if (activeTab === "education" && educationProvider === "jamb") {
          if (accountNumber.length >= 10 && selectedEducationPlan) verifyMerchant(); 
-         else { setCustomerName(null); setMeterAddress(null); setDynamicElecMin(1000); setMeterAccountType(null); }
+         else { merchantVerifyGenerationRef.current++; setCustomerName(null); setMeterAddress(null); setDynamicElecMin(1000); setMeterAccountType(null); }
       }
       else if (activeTab === "pay" && !isInternational) {
          if (activeService.id === "ELECTRICITY" && accountNumber.length >= 10) verifyMerchant();
          else if (activeService.id === "CABLE" && cableProvider !== "showmax" && accountNumber.length >= 10) verifyMerchant();
          else if (activeService.id === "INTERNET" && internetProvider === "smile-direct" && accountNumber.includes('@') && accountNumber.includes('.')) verifyMerchant(); 
-         else { setCustomerName(null); setMeterAddress(null); setDynamicElecMin(1000); setMeterAccountType(null); }
+         else { merchantVerifyGenerationRef.current++; setCustomerName(null); setMeterAddress(null); setDynamicElecMin(1000); setMeterAccountType(null); }
       }
     }, 800); 
     return () => clearTimeout(timeoutId);
