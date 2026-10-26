@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeAll, beforeEach } from 'vitest';
-import { CELO_VAULT, CELO_TOKENS, PAYER, celoPayment, fakeClient, hash, paymentReceivedLog, type FakeReceipt } from './helpers/chain';
+import { CELO_VAULT, CELO_TOKENS, OTHER_CONTRACT, PAYER, celoPayment, fakeClient, hash, paymentReceivedLog, transferLog, type FakeReceipt } from './helpers/chain';
 import { createFakeDb, fakeSupabase, type FakeDb } from './helpers/fakeSupabase';
 import { parseUnits } from 'viem';
 
@@ -172,12 +172,36 @@ describe('/api/pay settle', () => {
     expect(db.tables.transactions[0]).toMatchObject({ tx_hash: i.intent_id, status: 'FAILED_VENDING', error_code: 'REVERTED' });
   });
 
-  it('refuses a settle for a hash with no intent row, and alerts', async () => {
-    receipts[hash(1)] = goodReceipt();
+  it('refuses a settle for a hash with no intent row, and alerts with what reached the vault', async () => {
+    receipts[hash(1)] = { status: 'success', logs: [
+      transferLog({ token: CELO_TOKENS.USDC.address, from: PAYER, to: CELO_VAULT, value: parseUnits('1', 6) }),
+      celoPayment('USDC', '1.0', 'mtn', '08012345678'),
+    ] };
     const r = await post({ ...bill, txHash: hash(1), preflight_hash: 'preflight_does_not_exist' });
     expect(r.status).toBe(404);
     expect(executeVend).not.toHaveBeenCalled();
-    expect(sendTelegramAlert).toHaveBeenCalled();
+    expect(sendTelegramAlert).toHaveBeenCalledTimes(1);
+    expect(sendTelegramAlert.mock.calls[0][0]).toMatch(/1 USDC into the CELO vault/);
+  });
+
+  // 2026-10-25: a test script posting made-up and x402 hashes here paged "funds may be on-chain"
+  // five times. A hash that moved nothing into a vault is not a payment to recover.
+  it('does not alert for a no-intent hash that moved nothing into a vault', async () => {
+    receipts[hash(2)] = { status: 'success', logs: [transferLog({ token: CELO_TOKENS.USDC.address, from: PAYER, to: OTHER_CONTRACT, value: parseUnits('1', 6) })] };
+    for (const h of [hash(2), hash(3)]) { // hash(3): not on any chain
+      const r = await post({ ...bill, txHash: h });
+      expect(r.status).toBe(404);
+    }
+    expect(sendTelegramAlert).not.toHaveBeenCalled();
+    expect(executeVend).not.toHaveBeenCalled();
+  });
+
+  it('still alerts, as unreadable, when the chain cannot be asked about a no-intent hash', async () => {
+    receipts[hash(4)] = new Error('socket hang up');
+    const r = await post({ ...bill, txHash: hash(4) });
+    expect(r.status).toBe(404);
+    expect(sendTelegramAlert).toHaveBeenCalledTimes(1);
+    expect(sendTelegramAlert.mock.calls[0][0]).toMatch(/CHAIN UNREADABLE/);
   });
 });
 
