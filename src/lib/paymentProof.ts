@@ -1,6 +1,6 @@
 import 'server-only';
-import { decodeEventLog, parseUnits, type PublicClient } from 'viem';
-import { ABAPAY_CONTRACT_ABI_EVENTS, LEGACY_RECORD_CHAIN, normalizeChainName, resolveTokenOnChain } from '@/constants';
+import { decodeEventLog, formatUnits, parseUnits, type PublicClient } from 'viem';
+import { ABAPAY_CONTRACT_ABI_EVENTS, LEGACY_RECORD_CHAIN, normalizeChainName, resolveTokenOnChain, tokenSymbolsForChain } from '@/constants';
 import { getPublicClient, isMainnetEnv } from '@/lib/chain';
 import { metric } from '@/lib/log';
 
@@ -277,4 +277,51 @@ async function verifyVaultPaymentImpl(
   }
 
   return firstFailure ?? { ok: false, code: 'NO_EVENT', detail: 'The AbaPay vault emitted no PaymentReceived in this transaction.' };
+}
+
+export type VaultInflow =
+  | { found: true; chain: 'BASE' | 'CELO'; token: string; amount: string; from: string }
+  | { found: false; undecided: boolean };
+
+/**
+ * Did `txHash` move a supported stablecoin into an AbaPay vault, on any configured chain? Used
+ * where there is no record to check against (a settle naming a hash no row knows): only a real
+ * inflow needs a person. `undecided` means a chain could not be asked.
+ */
+export async function findVaultInflow(
+  txHash: string,
+  opts: { clientFor?: (chain: string) => PublicClient } = {},
+): Promise<VaultInflow> {
+  if (!/^0x[0-9a-fA-F]{64}$/.test(txHash)) return { found: false, undecided: false };
+  let undecided = false;
+  for (const chain of ['CELO', 'BASE'] as const) {
+    const vault = vaultAddressFor(chain);
+    if (!vault) continue;
+    let receipt;
+    try {
+      receipt = await (opts.clientFor ?? getPublicClient)(chain).getTransactionReceipt({ hash: txHash as `0x${string}` });
+    } catch (err) {
+      if ((err as { name?: string })?.name !== 'TransactionReceiptNotFoundError') undecided = true;
+      continue;
+    }
+    if (receipt.status !== 'success') continue;
+    const tokens = new Map<string, { symbol: string; decimals: number }>();
+    for (const symbol of tokenSymbolsForChain(chain)) {
+      const t = resolveTokenOnChain(symbol, chain, isMainnetEnv());
+      if (t) tokens.set(t.address, { symbol, decimals: t.decimals });
+    }
+    for (const log of receipt.logs) {
+      const token = tokens.get(norm(log.address));
+      if (!token) continue;
+      try {
+        const { args } = decodeEventLog({ abi: ERC20_TRANSFER_EVENT, data: log.data, topics: log.topics });
+        const t = args as { from: string; to: string; value: bigint };
+        if (norm(t.to) !== vault) continue;
+        return { found: true, chain, token: token.symbol, amount: formatUnits(t.value, token.decimals), from: norm(t.from) };
+      } catch {
+        continue;
+      }
+    }
+  }
+  return { found: false, undecided };
 }

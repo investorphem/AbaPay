@@ -9,7 +9,7 @@ import { isDuplicateElectricity } from '@/lib/parity';
 import { enforceRateLimit } from '@/lib/rateLimit';
 import { checkWebPayment } from '@/lib/serviceRules';
 import { explorerBaseFor } from '@/lib/chain';
-import { verifyVaultPayment, UNDECIDED_PROOF_FAILURES } from '@/lib/paymentProof';
+import { verifyVaultPayment, findVaultInflow, UNDECIDED_PROOF_FAILURES } from '@/lib/paymentProof';
 import { normalizeChainName, LEGACY_RECORD_CHAIN } from '@/constants';
 import { metric } from '@/lib/log';
 import { billCharges } from '@/lib/billCharges';
@@ -244,9 +244,15 @@ async function settle(body: PayRequest) {
   // it, never vend again. Still PENDING -> fall through and verify it now.
   const row = byIntent || byHash;
   if (!row) {
-    // Money is on-chain (the client only settles after its receipt) but there's no row to
-    // attach it to — the one case nothing downstream can recover by itself.
-    await alert(`🚨 *PREFLIGHT RECONCILE FAILED*\nNo intent row for \`${intentId || '(none sent)'}\` when settling real tx \`${txHash}\`. Funds may be on-chain — this payment needs manual recovery.`);
+    // No row to attach this hash to. This endpoint is public, so anyone can send any hash here
+    // (a test script, a probe, an x402 hash posted to the wrong route): page a human only when
+    // the hash really moved money into a vault, or when the chain couldn't be asked.
+    const inflow = await findVaultInflow(txHash);
+    if (inflow.found) {
+      await alert(`🚨 *PREFLIGHT RECONCILE FAILED*\nNo intent row for \`${intentId || '(none sent)'}\`, but tx \`${txHash}\` paid ${inflow.amount} ${inflow.token} into the ${inflow.chain} vault from \`${inflow.from}\`. If no other record holds this hash, it needs manual recovery.`);
+    } else if (inflow.undecided) {
+      await alert(`⚠️ *PREFLIGHT RECONCILE: CHAIN UNREADABLE*\nNo intent row for \`${intentId || '(none sent)'}\` and tx \`${txHash}\` couldn't be checked on-chain. Check it by hand.`);
+    }
     return NextResponse.json({ success: false, status: 'TIMEOUT', code: 'INTENT_NOT_FOUND', message: "We're confirming this payment in the background — check History shortly." }, { status: 404 });
   }
 
