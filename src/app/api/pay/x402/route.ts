@@ -20,6 +20,7 @@ import { X402_DOMAINS_BY_CHAIN } from '@/lib/x402Domains';
 import { errorMessage } from '@/lib/errors';
 import { recordPayerAfterResponse, clientInfoFromRequest } from '@/lib/payerIdentity';
 import { withSelfAgent } from '@/lib/selfAgent';
+import { electricityMeterType } from '@/lib/meterType';
 
 // ⚡ THE RAW ERC-1271 CHECK — deliberately not viem's `verifyTypedData`/`verifyHash`, which
 // falls back to ecrecover on any failure here (see the long comment where this is used). This
@@ -419,6 +420,9 @@ async function handleX402Request(req: Request) {
   // `amount` is the PUBLISHED name, `nairaAmount` the one the first-party client has always
   // sent. Accept both; the first-party name wins so nothing about the existing flow shifts.
   const nairaAmount = params.nairaAmount ?? params.amount;
+  // Prepaid/postpaid arrives as variation_code (web app) or meter_account_type (agents, SDK);
+  // the vend reads variation_code and merchant-verify needs it as `type`. See src/lib/meterType.ts.
+  const meterType = serviceCategory === 'ELECTRICITY' ? electricityMeterType(variation_code, meter_account_type) : undefined;
 
   const isMainnet = process.env.NEXT_PUBLIC_NETWORK === 'mainnet' || process.env.NEXT_PUBLIC_NETWORK === 'celo' || process.env.NEXT_PUBLIC_NETWORK === 'base';
   const isForeign = serviceID === 'foreign-airtime';
@@ -918,7 +922,7 @@ async function handleX402Request(req: Request) {
   let intentKey = '';
   const intentRowFields = {
     service_category: serviceCategory || 'UNKNOWN', service_id: serviceID || 'UNKNOWN',
-    variation_code: variation_code, network: network || 'UNKNOWN', blockchain: chainKey,
+    variation_code: meterType ?? variation_code, network: network || 'UNKNOWN', blockchain: chainKey,
     account_number: billersCode || phone || 'N/A', phone: phone || null,
     amount_naira: vendAmount, fee_naira: serviceFee, stamp_duty_ngn: stampDutyNgn,
     customer_name: customer_name || null, customer_address: customer_address || null,
@@ -1789,7 +1793,7 @@ async function handleX402Request(req: Request) {
     // product/bank code as `variation_code` — same split /api/verify's own comment documents
     // ("pass the variation code for JAMB, Bank Transfers, and Electricity"). Cable never sends
     // a type here, matching MCP's own verifyAccount call.
-    const verifyType = serviceCategory === 'ELECTRICITY' ? (meter_account_type || undefined) : (variation_code || undefined);
+    const verifyType = serviceCategory === 'ELECTRICITY' ? meterType : (variation_code || undefined);
     const va = await verifyAccount(serviceID, billersCode, verifyType);
     if (!va.success) {
       const reason = va.message || 'Could not verify that account.';
