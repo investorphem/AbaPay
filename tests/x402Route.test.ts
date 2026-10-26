@@ -28,7 +28,8 @@ vi.mock('@/lib/vend', () => {
 });
 vi.mock('@/lib/refunds', () => ({ enqueueRefund: () => enqueueRefund() }));
 vi.mock('@/lib/parity', () => ({ isDuplicateElectricity: async () => false }));
-vi.mock('@/lib/deai/services', () => ({ verifyAccount: async () => ({ success: true }) }));
+const verifyAccount = vi.fn<(...args: unknown[]) => Promise<{ success: boolean }>>(async () => ({ success: true }));
+vi.mock('@/lib/deai/services', () => ({ verifyAccount: (...args: unknown[]) => verifyAccount(...args) }));
 let gate: { allowed: boolean; code?: string; reason?: string } = { allowed: true };
 vi.mock('@/lib/serviceRules', () => ({
   getServiceRules: async () => ({ exchangeRate: 1340, x402FacilitatorFeeUsd: 0 }),
@@ -123,6 +124,7 @@ beforeEach(() => {
   facilitatorCalls = 0;
   intentRowsAtSettle = [];
   executeVend.mockClear();
+  verifyAccount.mockClear();
   enqueueRefund.mockClear();
   sendTelegramAlert.mockClear();
   gate = { allowed: true };
@@ -502,5 +504,28 @@ describe('/api/pay/x402 — Celo is the agent default, Base is offered after it'
     const r = await pay(unnamed, v2);
     expect(r.json.status).toBe('SUCCESS');
     expect(db.tables.transactions[0]).toMatchObject({ blockchain: 'CELO', token_used: 'USD₮' });
+  });
+});
+
+// 2026-10-26: a MiniPay postpaid Ibadan meter was refunded as "not a valid NMD meter" with no
+// purchase ever reaching VTpass. The web app sends prepaid/postpaid as variation_code and the
+// VTpass account class ("NMD") as meter_account_type; the route verified with "NMD" as the type.
+describe('/api/pay/x402 — electricity meter type', () => {
+  const electricity = { ...bill, serviceID: 'ibadan-electric', serviceCategory: 'ELECTRICITY', network: 'IBADAN-ELECTRIC', billersCode: '45012345678', nairaAmount: '1340' }; // 1 USDC at the mocked rate
+
+  it('web app shape: verifies and vends as postpaid, not as the NMD account class', async () => {
+    receipts[SETTLE_TX] = settledReceipt();
+    await pay({ ...electricity, variation_code: 'postpaid', meter_account_type: 'NMD' });
+    expect(verifyAccount).toHaveBeenCalledWith('ibadan-electric', '45012345678', 'postpaid');
+    expect(executeVend).toHaveBeenCalledTimes(1);
+    expect(executeVend.mock.calls[0][0]).toMatchObject({ variation_code: 'postpaid' });
+  });
+
+  it('agent/SDK shape: meter_account_type alone becomes the vend variation_code', async () => {
+    receipts[SETTLE_TX] = settledReceipt();
+    const noVariation: Record<string, unknown> = { ...electricity }; delete noVariation.variation_code;
+    await pay({ ...noVariation, meter_account_type: 'prepaid' });
+    expect(verifyAccount).toHaveBeenCalledWith('ibadan-electric', '45012345678', 'prepaid');
+    expect(executeVend.mock.calls[0][0]).toMatchObject({ variation_code: 'prepaid' });
   });
 });

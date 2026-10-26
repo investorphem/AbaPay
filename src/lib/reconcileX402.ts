@@ -9,6 +9,7 @@ import { verifyAccount } from '@/lib/deai/services';
 import { getPublicClient, isMainnetEnv, explorerBaseFor } from '@/lib/chain';
 import { resolveTokenOnChain, normalizeChainName } from '@/constants';
 import { verifyTokenTransfer, vaultAddressFor, UNDECIDED_PROOF_FAILURES } from '@/lib/paymentProof';
+import { electricityMeterType } from '@/lib/meterType';
 
 // ⚡ x402 INTENT RECONCILER — the safety net for the one gap the x402 route cannot close itself.
 //
@@ -162,7 +163,7 @@ async function resolveWithHash(row: Row): Promise<'vended' | 'flagged' | 'pendin
     (row.service_category === 'CABLE' && row.network !== 'SHOWMAX')
   );
   if (needsVerification) {
-    const verifyType = row.service_category === 'ELECTRICITY' ? (row.meter_account_type || undefined) : (row.variation_code || undefined);
+    const verifyType = row.service_category === 'ELECTRICITY' ? electricityMeterType(row.variation_code, row.meter_account_type) : (row.variation_code || undefined);
     const va = await verifyAccount(row.service_id, row.account_number, verifyType);
     if (!va.success) {
       const reason = va.message || 'Could not verify that account.';
