@@ -264,11 +264,18 @@ export default function NimApp() {
   }, [operator, product]);
 
   // ── Verification (meter, smartcard, bank account) ────────────────────────────────────────────
+  // An answer to an older check (say, before the meter type changed) never overwrites a newer one.
+  const verifyGeneration = useRef(0);
+  // Changing what is being checked cancels any check still in flight.
+  useEffect(() => { verifyGeneration.current++; }, [svc, provider, meterType, account_, bankCode]);
   const verify = async () => {
+    const gen = ++verifyGeneration.current;
+    const stale = () => verifyGeneration.current !== gen;
     setVerifying(true); setVerified(null); setFormError('');
     try {
       if (svc === 'BANK') {
         const d = await getJson<{ success: boolean; accountName?: string; message?: string }>('/api/monnify/verify', { method: 'POST', body: JSON.stringify({ accountNumber: account_, bankCode }) });
+        if (stale()) return;
         if (d.success && d.accountName) setVerified({ name: d.accountName });
         else setFormError(d.message || 'Could not verify this account.');
       } else {
@@ -276,6 +283,7 @@ export default function NimApp() {
           method: 'POST',
           body: JSON.stringify({ billersCode: account_, serviceID: provider, type: svc === 'ELECTRICITY' ? meterType : undefined }),
         });
+        if (stale()) return;
         const c = d.content || {};
         if (d.code === '000' && !c.error) {
           setVerified({
@@ -289,9 +297,9 @@ export default function NimApp() {
         } else setFormError('This number could not be verified. Check it and the provider.');
       }
     } catch {
-      setFormError('Network error. Check your connection and try again.');
+      if (!stale()) setFormError('Network error. Check your connection and try again.');
     } finally {
-      setVerifying(false);
+      if (!stale()) setVerifying(false);
     }
   };
 
