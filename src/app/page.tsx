@@ -16,6 +16,7 @@ import { WALLET_SESSION_MAX_AGE_MS } from "@/lib/walletSession";
 import { signSiweHeaders, siweChainId, SIWE_HEADER } from "@/lib/siwe";
 import { celoAttributionSuffix } from "@/lib/attribution";
 import { useProviders, useValidSelection, useProviderLimits } from "@/lib/useProviders";
+import { billAmountLimits } from "@/lib/amountLimits";
 import { useAccount, useConnect, useDisconnect, useWalletClient, useSwitchChain, type Connector } from 'wagmi';
 import { payWithX402, X402PaymentError } from "@/lib/x402Pay";
 
@@ -702,7 +703,7 @@ export default function Home() {
     // which is a pricing change nobody asked for. Where VTpass is STRICTER (Airtel's ₦50 floor,
     // Ibadan's ₦2,000) it wins, because those are vends that would otherwise be paid for and
     // then rejected.
-    if (activeService.id === "AIRTIME") return Math.max(100, telecomLimits.min ?? 0);
+    if (activeService.id === "AIRTIME") return billAmountLimits("AIRTIME", { min: telecomLimits.min }).min ?? 100;
     return 100;
   }, [activeService, activeTab, telecomLimits.min]);
 
@@ -710,15 +711,15 @@ export default function Home() {
     if (activeTab === "bank") return 5000000;
     // Falls back to the previous flat number when VTpass publishes no ceiling, so "unknown"
     // never accidentally becomes "unlimited".
-    if (activeService.id === "ELECTRICITY") return elecLimits.max ?? 1000000;
-    if (activeService.id === "AIRTIME") return telecomLimits.max ?? 50000;
+    if (activeService.id === "ELECTRICITY") return billAmountLimits("ELECTRICITY", { max: elecLimits.max }).max ?? 1000000;
+    if (activeService.id === "AIRTIME") return billAmountLimits("AIRTIME", { max: telecomLimits.max }).max ?? 50000;
     return Infinity;
   }, [activeService, activeTab, telecomLimits.max, elecLimits.max]);
 
   // The electricity floor is the stricter of VTpass's published disco minimum and whatever the
   // meter verification came back with (a postpaid balance owed sets dynamicElecMin).
   const effectiveElecMin = useMemo(
-    () => Math.max(dynamicElecMin, elecLimits.min ?? 0),
+    () => billAmountLimits("ELECTRICITY", { min: elecLimits.min }, dynamicElecMin).min ?? dynamicElecMin,
     [dynamicElecMin, elecLimits.min]
   );
 

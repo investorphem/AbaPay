@@ -5,6 +5,7 @@ import { createPortal } from 'react-dom';
 import { init, getHostNetwork, type NimiqProvider } from '@nimiq/mini-app-sdk';
 import { Phone, Wifi, Lightbulb, Tv, GraduationCap, Landmark, Globe2, Loader2, CheckCircle2, XCircle, ExternalLink, Copy, Check, ChevronLeft, ChevronDown, Search, X, Home, History as HistoryIcon, Clock, Send, ShieldCheck, LogOut, Wallet } from 'lucide-react';
 import { billCharges } from '@/lib/billCharges';
+import { billAmountLimits } from '@/lib/amountLimits';
 
 // ⚡ THE NIMIQ PAY MINI APP — every service abapays.com sells, paid in NIM.
 //
@@ -361,10 +362,12 @@ export default function NimApp() {
 
   // The provider's own limits from the VTpass catalog — the same numbers the server's
   // checkWebPayment applies — shown and enforced as the amount is typed, as abapays.com does.
+  // Same rule as abapays.com (src/lib/amountLimits.ts): AbaPay's ₦100 airtime floor and ₦1,000
+  // electricity floor (or the checked meter's own minimum) on top of VTpass's numbers.
   const providerLimits = useMemo(() => {
     const p = providers.find((x) => x.serviceID === provider);
-    return { min: p?.minAmount || null, max: p?.maxAmount || null };
-  }, [providers, provider]);
+    return billAmountLimits(svc ?? '', { min: p?.minAmount ?? null, max: p?.maxAmount ?? null }, svc === 'ELECTRICITY' ? verified?.min ?? null : undefined);
+  }, [providers, provider, svc, verified?.min]);
   const typedNaira = Number(amount) || 0;
   const limitError = (svc === 'AIRTIME' || svc === 'ELECTRICITY') && typedNaira > 0
     ? (providerLimits.min && typedNaira < providerLimits.min ? `The minimum for this provider is ${ngn(providerLimits.min)}.`
