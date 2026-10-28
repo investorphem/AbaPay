@@ -2,6 +2,7 @@
 
 import { useMemo, useState } from "react";
 import { Send, Copy, Check, Loader2 } from "lucide-react";
+import CopyBlock from "./CopyBlock";
 
 const X402_ENDPOINT = "https://agents.abapays.com/api/pay/x402";
 
@@ -125,7 +126,7 @@ export default function X402Playground() {
                   </span>
                 )}
               </div>
-              <pre className="bg-slate-900 dark:bg-black border border-slate-800 rounded-xl p-4 text-xs text-emerald-300 overflow-x-auto max-h-56">{response}</pre>
+              <CopyBlock code={response} preClassName="max-h-56 overflow-y-auto text-emerald-300" />
             </>
           )}
         </div>

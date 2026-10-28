@@ -8,7 +8,7 @@ import { Check, Copy } from "lucide-react";
 // client component wrapping each <pre>, rather than making every page a client component just
 // to get a button: the pages themselves stay server components (faster, simpler), and this is
 // the one island of interactivity each of them needs.
-export default function CopyBlock({ code, label }: { code: string; label?: string }) {
+export default function CopyBlock({ code, label, preClassName = "" }: { code: string; label?: string; preClassName?: string }) {
   const [copied, setCopied] = useState(false);
 
   async function handleCopy() {
@@ -36,7 +36,7 @@ export default function CopyBlock({ code, label }: { code: string; label?: strin
             <CopyIconButton copied={copied} onClick={handleCopy} />
           </div>
         )}
-        <pre className="p-4 text-slate-300 overflow-x-auto whitespace-pre">{code}</pre>
+        <pre className={`p-4 text-slate-300 overflow-x-auto whitespace-pre ${preClassName}`}>{code}</pre>
       </div>
     </div>
   );
