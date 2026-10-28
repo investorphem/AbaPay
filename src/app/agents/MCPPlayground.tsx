@@ -3,6 +3,7 @@
 import { useMemo, useState } from "react";
 import { Send, Copy, Check, Loader2, ShieldAlert } from "lucide-react";
 import { TOOLS } from "./toolSchemas";
+import CopyBlock from "./CopyBlock";
 
 const MCP_ENDPOINT = "https://agents.abapays.com/api/mcp";
 
@@ -159,7 +160,7 @@ export default function MCPPlayground() {
           {response && (
             <>
               <label className="block text-[10px] font-black uppercase tracking-widest text-slate-400 dark:text-slate-500 mt-4 mb-2">Response</label>
-              <pre className="bg-slate-900 dark:bg-black border border-slate-800 rounded-xl p-4 text-xs text-emerald-300 overflow-x-auto max-h-64">{response}</pre>
+              <CopyBlock code={response} preClassName="max-h-64 overflow-y-auto text-emerald-300" />
             </>
           )}
         </div>
