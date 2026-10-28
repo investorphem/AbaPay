@@ -1,4 +1,4 @@
-import { ONCHAIN_CHAINS, HACKATHON_TAG, type OnchainChain } from '@/lib/onchain/config';
+import { ONCHAIN_CHAINS, type OnchainChain } from '@/lib/onchain/config';
 import { getLatestPayments, getOnchainSummary, getOnchainWindows, type OnchainSummary, type OnchainWindows } from '@/lib/onchain/stats';
 import Dashboard from './Dashboard';
 
@@ -67,7 +67,6 @@ export default async function StatsView({ chain }: { chain: OnchainChain | null 
             active: windows?.active ?? [],
             daily: summary.daily,
             latest,
-            hackathonTag: chain === 'BASE' ? null : HACKATHON_TAG,
             csvHref: `/api/onchain/export?chain=${chain ?? 'ALL'}`,
           }}
         />
