@@ -5,7 +5,7 @@ import { getServiceRules, checkServiceAllowed, checkAgentSpendAllowed, computeSe
 import { describeCapabilities, capabilityForIntent, getCapability, getCapabilitiesForCard } from '@/lib/deai/capabilities';
 import { resolveServiceId, fetchCryptoBalances, verifyAccount } from '@/lib/deai/services';
 import { getRemainingAllowance, getMaxAgentPayment } from '@/lib/deai/relayer';
-import { LEGACY_RECORD_CHAIN, tokenSymbolsForChain } from '@/constants';
+import { LEGACY_RECORD_CHAIN, canonicalTokenSymbol, tokenSymbolsForChain } from '@/constants';
 import { providersForIntent } from '@/lib/vtpassCatalog';
 import { checkAccountNumber, checkAmountLive, requiresVariation, requiresVerifiedName } from '@/lib/parity';
 import { checkAutonomousCapacity, groupByChainToken, executeAgentPayment, type BatchItem, type AgentPaymentResult } from '@/lib/deai/batch';
@@ -1042,7 +1042,7 @@ async function callPayBill(args: Record<string, unknown>, oauthIdentity: McpIden
   const customerName = args?.customer_name ? String(args.customer_name) : null;
   const customerEmail = args?.customer_email ? String(args.customer_email) : null;
   const chainOverride = args?.chain === 'BASE' || args?.chain === 'CELO' ? args.chain : null;
-  const tokenOverride = args?.token ? String(args.token) : null;
+  const tokenOverride = canonicalTokenSymbol(args?.token as string | undefined) ?? null;
 
   // No credential of ANY kind → this is the "you need to authenticate" case, and the only
   // one that becomes a real HTTP 401. Checked before argument validation so a caller with no
@@ -1271,7 +1271,7 @@ async function callScheduleBill(args: Record<string, unknown>, oauthIdentity: Mc
   const scheduleInMinutes = args?.schedule_in_minutes !== undefined ? Number(args.schedule_in_minutes) : null;
   const customerEmail = args?.customer_email ? String(args.customer_email) : null;
   const chainOverride = args?.chain === 'BASE' || args?.chain === 'CELO' ? args.chain : null;
-  const tokenOverride = args?.token ? String(args.token) : null;
+  const tokenOverride = canonicalTokenSymbol(args?.token as string | undefined) ?? null;
 
   if (!apiKey && !oauthIdentity) return NEEDS_AUTH;
   if (!/^\d{4,6}$/.test(pin)) return errorResult('pin must be 4-6 digits.');
@@ -1568,7 +1568,7 @@ async function callPayBillBatch(args: Record<string, unknown>, oauthIdentity: Mc
   const pin = String(args?.pin || '');
   const rawRecipients = Array.isArray(args?.recipients) ? args.recipients : null;
   const batchChainOverride = args?.chain === 'BASE' || args?.chain === 'CELO' ? args.chain : null;
-  const batchTokenOverride = args?.token ? String(args.token) : null;
+  const batchTokenOverride = canonicalTokenSymbol(args?.token as string | undefined) ?? null;
   const customerEmail = args?.customer_email ? String(args.customer_email) : null;
 
   if (!apiKey && !oauthIdentity) return NEEDS_AUTH;
