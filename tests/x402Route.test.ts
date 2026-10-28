@@ -529,3 +529,27 @@ describe('/api/pay/x402 — electricity meter type', () => {
     expect(executeVend.mock.calls[0][0]).toMatchObject({ variation_code: 'prepaid' });
   });
 });
+
+// 2026-10-28: abapay-sdk sends token "USDT" (ASCII). The route only knew "USD₮", fell back to
+// USDC, and checked a USD₮ signature against the USDC contract: "FiatTokenV2: invalid signature".
+describe('/api/pay/x402 — ASCII token names from agents and the SDK', () => {
+  it('"USDT" challenges and settles as USD₮', async () => {
+    const usdt = CELO_TOKENS['USD₮'].address;
+    const challenge = await pay({ ...bill, token: 'USDT' }, null);
+    expect(challenge.json.accepts[0].asset.toLowerCase()).toBe(usdt);
+    receipts[SETTLE_TX] = { status: 'success', logs: [transferLog({ token: usdt, from: PAYER, to: CELO_VAULT, value: BigInt(1_000_000) })] };
+    const r = await pay({ ...bill, token: 'USDT' });
+    expect(r.json.status).toBe('SUCCESS');
+    expect(db.tables.transactions[0]).toMatchObject({ token_used: 'USD₮' });
+  });
+
+  it('canonicalTokenSymbol maps the ASCII spellings and leaves the rest alone', async () => {
+    const { canonicalTokenSymbol } = await import('@/constants');
+    expect(canonicalTokenSymbol('usdt')).toBe('USD₮');
+    expect(canonicalTokenSymbol('USAT')).toBe('USA₮');
+    expect(canonicalTokenSymbol('USD₮')).toBe('USD₮');
+    expect(canonicalTokenSymbol('usdc')).toBe('USDC');
+    expect(canonicalTokenSymbol('USDm')).toBe('USDm');
+    expect(canonicalTokenSymbol(undefined)).toBeUndefined();
+  });
+});

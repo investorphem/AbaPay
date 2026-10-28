@@ -215,6 +215,22 @@ export const SUPPORTED_TOKENS: SupportedToken[] = [
 // Used by the webhook to cross-check the PaymentReceived event's token & amount against
 // the pending record, so a manually-sent transfer of a DIFFERENT token/amount can't be
 // matched to an unrelated pending intent.
+/**
+ * AbaPay's own spelling of a token symbol from whatever a caller typed. Tether's tokens are
+ * keyed "USD₮" and "USA₮", but agents and the SDK send plain ASCII "USDT" / "USAT". 2026-10-28:
+ * an SDK payment in USDT fell back to USDC, so the server checked a USD₮ signature against the
+ * USDC contract and refused it. Unknown symbols pass through unchanged.
+ */
+export function canonicalTokenSymbol(symbol: string | null | undefined): string | undefined {
+  if (symbol == null) return undefined;
+  const s = String(symbol).trim();
+  const upper = s.toUpperCase();
+  if (upper === 'USDT' || upper === 'USD₮') return 'USD₮';
+  if (upper === 'USAT' || upper === 'USA₮') return 'USA₮';
+  if (upper === 'USDC') return 'USDC';
+  return s || undefined;
+}
+
 export function resolveTokenOnChain(symbol: string, blockchain: string, isMainnet: boolean): { address: string; decimals: number } | null {
   const token = SUPPORTED_TOKENS.find(t => t.symbol === symbol);
   if (!token) return null;

@@ -2,7 +2,7 @@ import { NextResponse } from 'next/server';
 import { supabaseAdmin as supabase } from '@/utils/supabase';
 import { executeVend, getStrictRequestId } from '@/lib/vend';
 import { vendInputFromRow } from '@/lib/vendInput';
-import { resolveTokenOnChain, AGENT_DEFAULT_CHAIN } from '@/constants';
+import { resolveTokenOnChain, canonicalTokenSymbol, AGENT_DEFAULT_CHAIN } from '@/constants';
 import { sendTelegramAlert } from '@/lib/telegram';
 import { getServiceRules, computeServiceFee, checkWebPayment } from '@/lib/serviceRules';
 import { isDuplicateElectricity } from '@/lib/parity';
@@ -411,12 +411,15 @@ async function handleX402Request(req: Request) {
 
   const {
     serviceID, serviceCategory, network, billersCode, phone,
-    token: tokenSymbol, variation_code, subscription_type,
+    token: rawTokenSymbol, variation_code, subscription_type,
     foreignAmount, displayAmount, wallet_address,
     operator_id, country_code, product_type_id, email,
     meter_account_type, blockchain,
     customer_name, customer_address, source_channel,
   } = params;
+  // "USDT" / "USAT" (what agents and the SDK send) mean USD₮ / USA₮; see canonicalTokenSymbol.
+  const tokenSymbol = canonicalTokenSymbol(rawTokenSymbol);
+
   // `amount` is the PUBLISHED name, `nairaAmount` the one the first-party client has always
   // sent. Accept both; the first-party name wins so nothing about the existing flow shifts.
   const nairaAmount = params.nairaAmount ?? params.amount;
