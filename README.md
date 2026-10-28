@@ -708,9 +708,8 @@ pick them up.
 the old `agents.abapays.com/stats` links redirect there. It shows every payment into an AbaPay
 vault as a dashboard. One sticky 7D / 30D / 90D / All switch drives every range-able panel:
 counters (payments, unique wallets, volume, agent-native share, new and returning wallets,
-average payment, hackathon-tagged payments), interactive daily charts (payments and volume by
-rail, new vs returning wallets, cumulative volume), pie charts (volume by chain, rail and token)
-and attribution-tag counts. An Active wallets section shows DAU, WAU and MAU as of today, DAU/MAU
+average payment, rails in use), interactive daily charts (payments and volume by
+rail, new vs returning wallets, cumulative volume) and pie charts (volume by chain, rail and token). An Active wallets section shows DAU, WAU and MAU as of today, DAU/MAU
 stickiness, and a DAU/WAU/MAU line chart. Then come the latest payments, each
 linked to its transaction. Every panel has a description, a "How it's calculated" note, a
 camera button that saves the panel as a PNG, a shareable link (`#panel-id`), and a

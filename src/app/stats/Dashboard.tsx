@@ -57,7 +57,6 @@ export type DashboardData = {
     volume_direct?: Num; volume_agent?: Num; volume_x402?: Num;
   }[];
   latest: { chain: string; tx_hash: string; log_index: number; block_time: string; payer: string; token_symbol: string; amount_usd: Num; rail: Rail }[];
-  hackathonTag: string | null;
   csvHref: string;
 };
 
@@ -343,7 +342,6 @@ export default function Dashboard({ d }: { d: DashboardData }) {
   const volume = n(w.volume_usd);
   const agentPct = volume > 0 ? (100 * n(w.agent_volume_usd)) / volume : 0;
   const returning = Math.max(n(w.wallets) - n(w.new_wallets), 0);
-  const hackathon = d.hackathonTag ? w.tags.find((t) => t.tag === d.hackathonTag) : undefined;
   const since = d.firstPayment
     ? new Date(d.firstPayment).toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric', year: 'numeric', timeZone: TZ })
     : '';
@@ -376,9 +374,7 @@ export default function Dashboard({ d }: { d: DashboardData }) {
     { id: 'new-wallets', title: 'New wallets', value: nf.format(n(w.new_wallets)), description: `Wallets whose first ever payment was ${inRange}.`, how: <>A wallet is new in the range if its first payment on {d.overview ? 'either chain' : 'this chain'} falls inside it.{rolling}</> },
     { id: 'returning-wallets', title: 'Returning wallets', value: nf.format(returning), description: `Wallets that paid ${inRange} and had paid before it.`, how: <>Unique wallets in the range minus new wallets.</> },
     { id: 'avg-payment', title: 'Average payment', value: usdSmart(n(w.payments) > 0 ? volume / n(w.payments) : 0), description: `Mean payment size ${inRange}.`, how: <>Volume divided by payments, for the range.</> },
-    d.hackathonTag
-      ? { id: 'hackathon', title: 'Hackathon-tagged payments', value: nf.format(hackathon ? n(hackathon.payments) : 0), description: `Celo payments ${inRange} carrying the Open Rails hackathon tag ${d.hackathonTag}.`, how: <>Read from the ERC-8021 attribution suffix on each contract payment&apos;s calldata. x402 payments can&apos;t carry it: the x402 facilitator submits those transactions, not AbaPay.</> }
-      : { id: 'rails', title: 'Rails in use', value: nf.format(w.by_rail.length), description: `Settlement rails that carried at least one payment ${inRange}.`, how: <>Direct wallet, agent relayer and x402.</> },
+    { id: 'rails', title: 'Rails in use', value: nf.format(w.by_rail.length), description: `Settlement rails that carried at least one payment ${inRange}.`, how: <>Direct wallet, agent relayer and x402.</> },
   ];
 
   const ACTIVE: { id: string; title: string; value: string; description: string; how: ReactNode }[] = today ? [
@@ -486,21 +482,6 @@ export default function Dashboard({ d }: { d: DashboardData }) {
         <Panel id="token-share" title="Volume by token" description={`Which stablecoins were used to pay, ${inRange}.`} footer={footer}
           how={<>Volume per token in the range. USDm is a legacy 18-decimal token, still counted for older contract payments.</>}>
           <Donut data={w.by_token.map((t) => ({ name: t.token_symbol, value: n(t.volume_usd), detail: `${nf.format(n(t.payments))} payments` }))} format={usdSmart} />
-        </Panel>
-        <Panel id="tags" title="Attribution tags" description={`ERC-8021 builder tags found on contract payments ${inRange}.`} footer={footer}
-          how={<>Decoded from the data suffix at the end of each contract payment&apos;s calldata. A transaction can carry several tags; each is counted.</>}>
-          {w.tags.length === 0 ? (
-            <p className="text-sm text-slate-500 dark:text-slate-400">No tagged payments in this range.</p>
-          ) : (
-            <div className="overflow-x-auto"><table className="w-full text-sm">
-              <thead><tr className="text-left text-[11px] uppercase tracking-wider text-slate-400 dark:text-slate-500"><th className="pb-2 pr-4">Tag</th><th className="pb-2 pr-4 text-right">Payments</th><th className="pb-2 text-right">Last seen</th></tr></thead>
-              <tbody className="divide-y divide-slate-100 dark:divide-slate-800/60 text-slate-600 dark:text-slate-300">
-                {w.tags.map((t) => (
-                  <tr key={t.tag}><td className="py-2 pr-4 font-mono text-xs">{t.tag}</td><td className="py-2 pr-4 text-right tabular-nums">{nf.format(n(t.payments))}</td><td className="py-2 text-right whitespace-nowrap">{when(t.last_payment)}</td></tr>
-                ))}
-              </tbody>
-            </table></div>
-          )}
         </Panel>
       </div>
 
