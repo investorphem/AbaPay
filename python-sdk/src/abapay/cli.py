@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import argparse
 import os
+import re
 import sys
 
 from .agent import AbaPayAgent
@@ -24,6 +25,8 @@ def _require_private_key() -> str:
     pk = os.environ.get("PRIVATE_KEY")
     if not pk:
         _fail("PRIVATE_KEY env var is required (a 0x-prefixed hex private key).")
+    if not re.fullmatch(r"0x[0-9a-fA-F]{64}", pk):  # type: ignore[arg-type]
+        _fail("PRIVATE_KEY must be a 0x-prefixed 32-byte hex string.")
     return pk  # type: ignore[return-value]
 
 

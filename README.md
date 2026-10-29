@@ -51,7 +51,7 @@ Designed for low fees, cross-border utility vending (Nigeria + every country VTp
 * **Self Agent ID on MCP, A2A and x402** (`src/lib/selfAgent.ts`): an agent may sign its request (`x-self-agent-address` / `-signature` / `-timestamp`, over keccak256(timestamp + METHOD + path?query + keccak256(body))); AbaPay checks the signer on the SelfAgentRegistry (verified, fresh human proof, Self's provider) and shows the result on every response (`X-AbaPay-Self-Agent` header; `self_agent` on JSON; `result._meta["abapay/self_agent"]` on JSON-RPC) and with the payment. Self is optional; a signature that doesn't check out is refused with 401 `SELF_AGENT_INVALID`; expired, revoked or unregistered agents still pay, unverified. Policy and examples: docs/gitbook/self-agent-id.md.
 * **Grant report (admin → Grant):** `/api/admin/grant-report?from=&to=[&format=csv]` (`src/lib/grantReport.ts`) counts, for a window, the successful Celo payments external agents made through the agent rails — x402 agents (`source_channel` AGENT) and MCP/A2A agents via the relayer — excluding the web app, AbaPay's own chat agent, refunds/failures and `GRANT_EXCLUDED_WALLETS` (+ admin/relayer/server wallets), with per-agent attribution (ERC-8004, OAuth client, Self Agent ID) against the Prezenti targets, and the per-payment CSV for the final report.
 * **Who Paid (admin only):** every x402, MCP and A2A payment records the request's User-Agent and any agent name / ERC-8004 id it declares (`X-Agent-Name`, `X-Agent-Id`) in `payment_client_info` — for MCP/A2A also the protocol, the sign-in method and the OAuth client's registered name (the routes run each tool call under `runWithAgentClient`, and `executeAgentPayment` records it; our own chat agent and the scheduler record nothing) — and after the response looks the paying wallet up on-chain (`src/lib/payerIdentity.ts`): the ERC-8004 agent identities it owns or is the declared wallet of, each confirmed with `ownerOf`/`getAgentWallet` (ids from Blockscout, falling back to the registry's log on `CELO_RPC_URL`), and its Self Agent ID status (verified, human proof, proof fresh) from the SelfAgentRegistry. Cached a day in `payer_identities`. Both tables are service-role only (migration 044) and shown only on the admin ledger, never on receipts or public APIs; a lookup never affects the payment. How support reads it: docs/runbooks/README.md, "Supporting a developer whose agent paid".
-* **Agent Tool Access:** MCP (Model Context Protocol) — Streamable HTTP/JSON-RPC server at `/api/mcp` exposing balance-check and bill-pay tools to any MCP client — and A2A (Agent2Agent) at `/api/a2a`, card at `/.well-known/agent-card.json`, exposing the same tools to peer agents. The x402 endpoint is also listed in an x402 discovery manifest at `/.well-known/x402` (`{ version: 1, resources: [...] }`), the file x402 indexers such as agent402.tools read before probing the live 402 challenge; AbaPay is indexed there ([agent402.tools/api/index?seller=agents.abapays.com](https://agent402.tools/api/index?seller=agents.abapays.com)). **Cursor:** listed at [cursor.directory/plugins/abapay](https://cursor.directory/plugins/abapay); the plugin lives in `integrations/cursor-plugin/` (`.cursor-plugin/plugin.json` + `mcp.json` pointing at `https://agents.abapays.com/api/mcp`, registered for the marketplace by the repo-root `.cursor-plugin/marketplace.json`); OAuth accepts Cursor's native callback (`cursor://anysphere.cursor-mcp/oauth/callback`, exact match only, PKCE required) and its newer loopback one. **Grok:** add it at grok.com/connectors → New Connector → Custom with the same URL
+* **Agent Tool Access:** MCP (Model Context Protocol) — Streamable HTTP/JSON-RPC server at `/api/mcp` exposing balance-check and bill-pay tools to any MCP client — and A2A (Agent2Agent) at `/api/a2a`, card at `/.well-known/agent-card.json`, exposing the same tools to peer agents. The x402 endpoint is also listed in an x402 discovery manifest at `/.well-known/x402` (`{ version: 1, resources: [...] }`), the file x402 indexers such as agent402.tools read before probing the live 402 challenge; AbaPay is indexed there ([agent402.tools/api/index?seller=agents.abapays.com](https://agent402.tools/api/index?seller=agents.abapays.com)). **Celo `buy`:** listed in its skills registry as `abapay/bill-payments` (experimental) since `@celo/buy` 0.8.5 ([celo-org/buy-skill#58](https://github.com/celo-org/buy-skill/issues/58)); agents find it with `buy skills search airtime` or `buy_discover` over MCP. If the x402 routes, prices or tokens change, open a new request there so the listing is updated. **Cursor:** listed at [cursor.directory/plugins/abapay](https://cursor.directory/plugins/abapay); the plugin lives in `integrations/cursor-plugin/` (`.cursor-plugin/plugin.json` + `mcp.json` pointing at `https://agents.abapays.com/api/mcp`, registered for the marketplace by the repo-root `.cursor-plugin/marketplace.json`); OAuth accepts Cursor's native callback (`cursor://anysphere.cursor-mcp/oauth/callback`, exact match only, PKCE required) and its newer loopback one. **Grok:** add it at grok.com/connectors → New Connector → Custom with the same URL
 * **Utility Provider:** VTpass API (bills, airtime, data, education, international airtime)
 * **Bank Transfer Provider:** Monnify API (Moniepoint Inc.) — account auto-detect, Name Enquiry verification, and the real NUBAN payout, debited from a Moniepoint Microfinance Bank business account
 * **Database / Ledger:** Supabase (PostgreSQL) — transactions, platform settings, points, refunds
@@ -1475,6 +1475,27 @@ npm run test:watch    # Watch mode
 npm run test:coverage # Coverage report
 npm run typecheck     # tsc --noEmit — catches type errors before they hit a deploy
 ```
+
+### How to run the checks (no secrets, wallets or network needed)
+
+```
+# Web app (repo root) — Node.js 20+
+npm ci
+npm run typecheck
+npm test
+npm run build          # set the dummy NEXT_PUBLIC_* values from .github/workflows/ci.yml's Build step first
+
+# TypeScript SDK
+cd sdk && npm ci && npm test
+
+# Python SDK — install the dev extra, it brings pytest-httpserver
+cd python-sdk && pip install -e ".[dev]" && pytest
+```
+
+The Python tests that make HTTP round-trips run against a local server and need
+`pytest-httpserver`; without the dev extra they skip (with the install command) instead of
+erroring, and the rest still run. npm may print `Unknown env config "manage-package-manager-versions"`
+— that comes from the machine's own npm config, not this repo, and doesn't affect the build.
 
 Tests currently cover the security-critical pure logic: PIN hashing/verification, internal
 service auth, and the payment amount/token verification invariants (the checks that stand

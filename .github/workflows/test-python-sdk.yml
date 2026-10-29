@@ -26,6 +26,9 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: ${{ matrix.python-version }}
+      # Without the dev extra first: the httpserver tests must skip cleanly, not error.
+      - run: pip install -e . pytest
+      - run: pytest -v
       - run: pip install -e ".[dev]"
       - run: pytest -v
       - run: python -c "import abapay; print(abapay.__version__)"
