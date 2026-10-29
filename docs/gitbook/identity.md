@@ -26,6 +26,15 @@ AbaPay's x402 endpoint is indexed on [agent402.tools](https://agent402.tools/api
 an open index of x402 sellers. It found us through the `/.well-known/x402` manifest on
 `agents.abapays.com` and re-crawls the live 402 challenge for price, networks and assets.
 
+## Celo buy
+
+Listed in Celo's `buy` skills registry as `abapay/bill-payments`, shipped in `@celo/buy` 0.8.5
+([celo-org/buy-skill#58](https://github.com/celo-org/buy-skill/issues/58)). Agents find it with
+`buy skills search airtime` or `buy_discover` over MCP, then pay the x402 endpoint in USDC,
+USD₮ or USA₮ on Celo. Third-party listings are tagged experimental for now, and the listing tells
+agents to confirm the recipient, the naira amount and the quoted price before every payment. If
+the routes, prices or tokens change, open a new request on that repo so the listing is updated.
+
 ## Cursor
 
 Listed as a Cursor plugin at [cursor.directory/plugins/abapay](https://cursor.directory/plugins/abapay). Installing it
