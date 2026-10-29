@@ -43,5 +43,5 @@ and legal terms.
 {% endhint %}
 
 {% hint style="success" %}
-**Wider agent-registry discovery — shipped.** Listed on the official MCP Registry, as a plugin on [cursor.directory](https://cursor.directory/plugins/abapay), on-chain via ERC-8004, approved on Glama's server and connector directories, live on MCP Playground's server registry, and merged into `awesome-mcp-servers` (95k+ stars), and the x402 endpoint is indexed on [agent402.tools](https://agent402.tools/api/index?seller=agents.abapays.com).
+**Wider agent-registry discovery — shipped.** Listed on the official MCP Registry, as a plugin on [cursor.directory](https://cursor.directory/plugins/abapay), on-chain via ERC-8004, approved on Glama's server and connector directories, live on MCP Playground's server registry, and merged into `awesome-mcp-servers` (95k+ stars), and the x402 endpoint is indexed on [agent402.tools](https://agent402.tools/api/index?seller=agents.abapays.com) and listed in Celo's [`buy`](https://github.com/celo-org/buy-skill/issues/58) skills registry as `abapay/bill-payments`.
 {% endhint %}

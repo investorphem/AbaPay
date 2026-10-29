@@ -81,7 +81,9 @@ npm run agent -- pay airtime mtn 08031234567 100`}
           code={`import { privateKeyToAccount } from "viem/accounts";
 import { payBillViaX402 } from "abapay-sdk";
 
-const account = privateKeyToAccount(process.env.PRIVATE_KEY);
+const key = process.env.PRIVATE_KEY;
+if (!/^0x[0-9a-fA-F]{64}$/.test(key ?? "")) throw new Error("PRIVATE_KEY must be 0x + 64 hex characters");
+const account = privateKeyToAccount(key);
 
 const result = await payBillViaX402({
   signer: account,
@@ -103,7 +105,9 @@ console.log(result.status, result.tx_hash);`}
           code={`import { privateKeyToAccount } from "viem/accounts";
 import { AbaPayAgent } from "abapay-sdk";
 
-const account = privateKeyToAccount(process.env.PRIVATE_KEY);
+const key = process.env.PRIVATE_KEY;
+if (!/^0x[0-9a-fA-F]{64}$/.test(key ?? "")) throw new Error("PRIVATE_KEY must be 0x + 64 hex characters");
+const account = privateKeyToAccount(key);
 
 // One-time -- no browser, PIN chosen right here.
 const agent = await AbaPayAgent.link({ signer: account, pin: "123456" });
