@@ -19,6 +19,8 @@ CHAIN=CELO TOKEN=USD₮ node agent-quickstart.mjs
 ```
 {% endcode %}
 
+`TOKEN` can be USD₮, USDC or USA₮ on Celo (USDC or USD₮ on Base).
+
 Talks to production and real mainnet contracts — fund the wallet with a trivial amount
 first. Full env var reference (`ALLOWANCE`, `PIN`, `PAY`, …) is in the script's own header
 comment on GitHub.

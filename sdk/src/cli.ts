@@ -27,7 +27,7 @@ function requirePrivateKey(): Hex {
 const HELP = `abapay-cli — pay real-world bills from a Celo wallet, no browser required.
 
 USAGE
-  abapay pay --service <S> --provider <P> --to <account> --amount <ngn> [--token USDT|USDC]
+  abapay pay --service <S> --provider <P> --to <account> --amount <ngn> [--token USDT|USDC|USAT]
   abapay link --pin <6 digits> [--chain CELO] [--token USDT|USDC] [--label <name>]
   abapay balance --api-key <aba_mcp_...> [--chain CELO]
   abapay history --api-key <aba_mcp_...> [--limit N] [--offset N]
@@ -77,7 +77,7 @@ async function cmdPay(argv: string[]) {
         network: values.network || values.provider?.toUpperCase() || String(values.service),
         billersCode: values.to!,
         nairaAmount: Number(values.amount),
-        token: (values.token as "USDT" | "USDC") ?? "USDT",
+        token: (values.token as "USDT" | "USDC" | "USAT") ?? "USDT",
       },
     });
     console.log(`✓ ${result.status} — tx: ${result.tx_hash ?? "(pending)"}`);

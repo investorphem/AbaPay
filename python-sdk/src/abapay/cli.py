@@ -92,7 +92,7 @@ def main() -> None:
     p_pay.add_argument("--provider")
     p_pay.add_argument("--to", required=True)
     p_pay.add_argument("--amount", required=True)
-    p_pay.add_argument("--token", default="USDT")
+    p_pay.add_argument("--token", default="USDT", help="USDT, USDC or USAT (USA₮)")
     p_pay.add_argument("--network")
     p_pay.set_defaults(func=cmd_pay)
 

@@ -96,6 +96,26 @@ describe("payBillViaX402", () => {
     expect(decoded.payload.authorization.nonce).toMatch(/^0x[0-9a-f]{64}$/);
   });
 
+  it("pays in USA₮ when asked (token: 'USAT'), signing USA₮'s own domain from a multi-token challenge", async () => {
+    const usat = {
+      ...CHALLENGE.accepts[0],
+      asset: "0xD2ab3C9A02DBBAB236BfEC45D1d755DF4267F771",
+      amount: "1490000",
+      maxAmountRequired: "1490000",
+      extra: { name: "Tether America USD", version: "1", primaryType: "TransferWithAuthorization" },
+    };
+    fetchMock
+      .mockResolvedValueOnce(new Response(JSON.stringify({ ...CHALLENGE, accepts: [CHALLENGE.accepts[0], usat] }), { status: 402 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ success: true, status: "SUCCESS", tx_hash: "0xusat", request_id: "r" }), { status: 200 }));
+
+    const signer = fakeSigner();
+    const result = await payBillViaX402({ signer, bill: { ...bill, token: "USAT" } });
+
+    expect(result.tx_hash).toBe("0xusat");
+    expect(signer.calls[0].domain).toEqual({ name: "Tether America USD", version: "1", chainId: 42220, verifyingContract: usat.asset });
+    expect(signer.calls[0].message.value).toBe(BigInt("1490000"));
+  });
+
   it("throws AbaPayError when the first response isn't a 402", async () => {
     fetchMock.mockResolvedValueOnce(new Response(JSON.stringify({ error: "bad request" }), { status: 400 }));
     await expect(payBillViaX402({ signer: fakeSigner(), bill })).rejects.toThrow(AbaPayError);

@@ -24,7 +24,7 @@ own viem install already gives you, rather than bundling a second copy.
 
 1. **A wallet.** Any EVM key works; for a fresh one:
    `node -e "console.log(require('viem/accounts').generatePrivateKey())"`
-2. **Fund it on Celo** with about $1 of USDC or USDT. You don't need CELO: with x402 the
+2. **Fund it on Celo** with about $1 of USDC, USD₮ or USA₮. You don't need CELO: with x402 the
    facilitator submits the transfer and pays the gas.
 3. **Pay** ₦100 of MTN airtime (well under $1, fees included):
 
@@ -57,7 +57,7 @@ const result = await payBillViaX402({
     network: "MTN",
     billersCode: "08012345678",
     nairaAmount: 1000,
-    token: "USDT",
+    token: "USDT", // or "USDC", "USAT" (USA₮)
   },
 });
 

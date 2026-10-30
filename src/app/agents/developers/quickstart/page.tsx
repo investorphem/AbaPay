@@ -35,7 +35,7 @@ export default function QuickstartPage() {
 CHAIN=CELO TOKEN=USD₮ node agent-quickstart.mjs`}
         />
         <p className="text-xs text-slate-400 dark:text-slate-500 mt-3">
-          Talks to production and real mainnet contracts — fund the wallet with a trivial amount first. Full env var reference (ALLOWANCE, PIN, PAY, …) is in the script&apos;s own header comment on GitHub.
+          Talks to production and real mainnet contracts — fund the wallet with a trivial amount first. <code>TOKEN</code> can be USD₮, USDC or USA₮ on Celo (USDC or USD₮ on Base). Full env var reference (ALLOWANCE, PIN, PAY, …) is in the script&apos;s own header comment on GitHub.
         </p>
       </section>
 

@@ -8,6 +8,10 @@ GitHub](https://github.com/investorphem/AbaPay/commits/main).
 
 ## 2026-10-30
 
+* **USA₮ in the SDKs.** `abapay-sdk` 0.5.1 and `abapay` 0.3.2 (PyPI) pay in USA₮ on Celo with
+  `token: "USAT"`, next to USDC and USD₮; the `abapay pay` CLIs take `--token USAT`. The x402 docs,
+  quickstarts and `openapi.json` now list all three Celo tokens.
+
 * **NIM discount.** The Nimiq Pay mini app (nim.abapays.com) has its own discount, switched on or
   off with a percentage from the admin dashboard, separate from abapays.com's campaigns. While it
   runs, each NIM order shows "NIM discount applied: X% off" at checkout, on the result, in History

@@ -23,10 +23,11 @@ from .types import AbaPayError, BillDetails, X402PayResult
 DEFAULT_BASE_URL = "https://agents.abapays.com"
 
 CELO_NETWORK = "eip155:42220"
-# Celo mainnet token contracts (both EIP-3009, 6 decimals), lowercased for comparison.
+# Celo mainnet token contracts (all EIP-3009, 6 decimals), lowercased for comparison. USAT is USA₮.
 CELO_TOKENS = {
     "USDC": "0xceba9300f2b948710d2653dd7b07f33a8b32118c",
     "USDT": "0x48065fbbe25f71c9282ddf5e1cd6d6a887483d5e",
+    "USAT": "0xd2ab3c9a02dbbab236bfec45d1d755df4267f771",
 }
 
 # ⚡ MUST MATCH src/lib/x402Settle.ts's TRANSFER_WITH_AUTHORIZATION_TYPES BYTE-FOR-BYTE (and

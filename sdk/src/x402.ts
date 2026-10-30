@@ -33,13 +33,14 @@ interface X402Accept {
 }
 
 const CELO_NETWORK = "eip155:42220";
-// Celo mainnet token contracts (both EIP-3009, 6 decimals), lowercased for comparison.
+// Celo mainnet token contracts (all EIP-3009, 6 decimals), lowercased for comparison. USAT is USA₮.
 const CELO_TOKENS: Record<BillDetails["token"], string> = {
   USDC: "0xceba9300f2b948710d2653dd7b07f33a8b32118c",
   USDT: "0x48065fbbe25f71c9282ddf5e1cd6d6a887483d5e",
+  USAT: "0xd2ab3c9a02dbbab236bfec45d1d755df4267f771",
 };
 
-/** What a 402 challenge asks for. `amount` is in the token's smallest unit (USDC and USDT on Celo: 6 decimals). */
+/** What a 402 challenge asks for. `amount` is in the token's smallest unit (USDC, USD₮ and USA₮ on Celo: 6 decimals). */
 export interface X402Offer {
   amount: string;
   asset: string;
@@ -105,7 +106,7 @@ async function readJson(res: Response): Promise<any> {
  * see there for the full request/response shapes this function builds.
  *
  * Celo mainnet only in this version. `bill.token` must be a token the challenge actually offers
- * (USDC or USDT on Celo, both EIP-3009-capable) — offering an unsupported token surfaces as the
+ * (USDC, USDT or USAT — USA₮ — on Celo, all EIP-3009-capable) — offering an unsupported token surfaces as the
  * `AbaPayError` thrown when the challenge has no matching `accepts[]` entry, not a silent
  * fallback to a token you didn't ask for.
  *

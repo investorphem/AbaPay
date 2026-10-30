@@ -32,7 +32,7 @@ result = pay_bill_via_x402(
     account,
     BillDetails(
         serviceID="mtn", serviceCategory="AIRTIME", network="MTN",
-        billersCode="08012345678", nairaAmount=1000, token="USDT",
+        billersCode="08012345678", nairaAmount=1000, token="USDT",  # or "USDC", "USAT" (USA₮)
     ),
 )
 print(result.status, result.tx_hash)
