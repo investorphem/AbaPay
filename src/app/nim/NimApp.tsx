@@ -6,6 +6,7 @@ import { init, getHostNetwork, type NimiqProvider } from '@nimiq/mini-app-sdk';
 import { Phone, Wifi, Lightbulb, Tv, GraduationCap, Landmark, Globe2, Loader2, CheckCircle2, XCircle, ExternalLink, Copy, Check, ChevronLeft, ChevronDown, Search, X, Home, History as HistoryIcon, Clock, Send, ShieldCheck, LogOut, Wallet } from 'lucide-react';
 import { billCharges } from '@/lib/billCharges';
 import { billAmountLimits } from '@/lib/amountLimits';
+import { nimDiscountNgn, percentLabel, type NimDiscount } from '@/lib/nimDiscountMath';
 
 // ⚡ THE NIMIQ PAY MINI APP — every service abapays.com sells, paid in NIM.
 //
@@ -27,9 +28,12 @@ type Quote = {
   available: boolean; nim_usd: number | null; ngn_per_usd: number; buffer: number;
   /** Per tile, from the same gate abapays.com uses (kill switches, provider breaker). */
   services?: Record<string, { available: boolean; reason?: string }>;
+  /** The NIM discount switched on in the admin (src/lib/nimDiscount.ts). */
+  discount?: NimDiscount;
 };
-type Intent = { intent_id: string; recipient: string; luna: number; nim: number; reference: string };
+type Intent = { intent_id: string; recipient: string; luna: number; nim: number; reference: string; charges?: { discountNgn?: number; discountPercent?: number | null } };
 type Phase = 'idle' | 'ordering' | 'signing' | 'confirming' | 'done' | 'failed';
+type ResultInfo = { code?: string | null; units?: string | null; requestId?: string; txHash?: string; discountNgn?: number; discountPercent?: number };
 
 // Same icon colours as the main app's service tiles (src/constants SERVICES).
 const SERVICES: { id: Svc; label: string; icon: typeof Phone; color: string; bg: string; category?: string }[] = [
@@ -354,10 +358,12 @@ export default function NimApp() {
   const estimate = useMemo(() => {
     if (!bill || !quote?.nim_usd) return null;
     const { serviceFee, stampDutyNgn } = billCharges({ serviceCategory: bill.serviceCategory, serviceID: bill.serviceID, network: bill.network, amountNgn: bill.nairaAmount });
-    const usd = (bill.nairaAmount + serviceFee + stampDutyNgn) / quote.ngn_per_usd;
+    // Same rule as the server (src/lib/nimDiscountMath.ts): a percentage off the bill, fees in full.
+    const discount = nimDiscountNgn(bill.nairaAmount, quote.discount);
+    const usd = (bill.nairaAmount + serviceFee + stampDutyNgn - discount) / quote.ngn_per_usd;
     const nim = Math.ceil((usd / quote.nim_usd) * (1 + quote.buffer));
     const fee = serviceFee + stampDutyNgn;
-    return { nim, fee, nimUsd: nim * quote.nim_usd, feeUsd: fee / quote.ngn_per_usd };
+    return { nim, fee, nimUsd: nim * quote.nim_usd, feeUsd: fee / quote.ngn_per_usd, discount, discountUsd: discount / quote.ngn_per_usd, discountPercent: discount > 0 ? quote.discount!.percent : null };
   }, [bill, quote]);
 
   // The provider's own limits from the VTpass catalog — the same numbers the server's
@@ -405,7 +411,7 @@ export default function NimApp() {
   // ── Payment ────────────────────────────────────────────────────────────────────────────────
   const [phase, setPhase] = useState<Phase>('idle');
   const [message, setMessage] = useState('');
-  const [result, setResult] = useState<{ code?: string | null; units?: string | null; requestId?: string; txHash?: string } | null>(null);
+  const [result, setResult] = useState<ResultInfo | null>(null);
 
   const pay = async () => {
     if (!bill || !nimiq.current) return;
@@ -421,6 +427,9 @@ export default function NimApp() {
       setPhase('failed'); setMessage('Network error. Nothing was charged.'); return;
     }
 
+    // The discount the server actually bound to this order (not the estimate's), for the result card.
+    const applied = intent.charges?.discountNgn && intent.charges.discountPercent
+      ? { discountNgn: intent.charges.discountNgn, discountPercent: intent.charges.discountPercent } : {};
     setPhase('signing'); setMessage(`Approve ${nimFmt(intent.nim)} in Nimiq Pay.`);
     let txHash = '';
     let uncertain = false; // Nimiq Pay answered "outcome unknown"
@@ -463,12 +472,12 @@ export default function NimApp() {
           '/api/pay/nim', { method: 'POST', body: JSON.stringify({ intent_id: intent.intent_id, tx_hash: txHash }) },
         );
         if (d.status === 'SUCCESS') {
-          setPhase('done'); setResult({ code: d.purchased_code, units: d.units, requestId: d.request_id, txHash });
+          setPhase('done'); setResult({ code: d.purchased_code, units: d.units, requestId: d.request_id, txHash, ...applied });
           setMessage(svc === 'BANK' ? 'Done! Your transfer has been sent.' : 'Done! Your purchase was delivered.');
           refreshBalance(account); return;
         }
         if (d.status === 'TIMEOUT' && !d.verifying) {
-          setPhase('done'); setResult({ requestId: d.request_id, txHash });
+          setPhase('done'); setResult({ requestId: d.request_id, txHash, ...applied });
           setMessage('Paid. Your order is finishing in the background; you’ll get a receipt by email if you added one.');
           refreshBalance(account); return;
         }
@@ -720,6 +729,12 @@ export default function NimApp() {
                 currency (as abapays.com shows it); what the customer pays is NIM, with its USD value. */}
             <div className="flex justify-between text-xs opacity-70"><span>Bill</span><span className="tabular-nums">{!bill ? '—' : svc === 'INTL' && 'displayAmount' in bill && bill.displayAmount ? bill.displayAmount : ngn(bill.nairaAmount)}</span></div>
             {estimate && estimate.fee > 0 && <div className="flex justify-between text-xs opacity-70 mt-1"><span>Service fee</span><span className="tabular-nums">{svc === 'INTL' ? usdFmt(estimate.feeUsd) : ngn(estimate.fee)}</span></div>}
+            {estimate && estimate.discount > 0 && estimate.discountPercent != null && (
+              <div className="flex justify-between text-xs font-bold text-emerald-600 dark:text-emerald-400 mt-1">
+                <span>NIM discount ({percentLabel(estimate.discountPercent)} off)</span>
+                <span className="tabular-nums">−{svc === 'INTL' ? usdFmt(estimate.discountUsd) : ngn(estimate.discount)}</span>
+              </div>
+            )}
             <div className="flex justify-between items-baseline mt-2">
               <span className="text-sm font-black">You pay</span>
               <span className="text-right">
@@ -837,7 +852,7 @@ function Brand() {
 
 function ResultCard({ ok, message, result, onDone, onRetry }: {
   ok: boolean; message: string;
-  result: { code?: string | null; units?: string | null; requestId?: string; txHash?: string } | null;
+  result: ResultInfo | null;
   onDone: () => void; onRetry: () => void;
 }) {
   const [copied, setCopied] = useState(false);
@@ -845,6 +860,11 @@ function ResultCard({ ok, message, result, onDone, onRetry }: {
     <div className="rounded-3xl bg-white dark:bg-[#1F2348] border border-black/5 dark:border-white/10 p-6 text-center">
       {ok ? <CheckCircle2 size={44} className="mx-auto text-emerald-500" /> : <XCircle size={44} className="mx-auto text-rose-500" />}
       <p className="mt-3 text-sm font-bold">{message}</p>
+      {ok && result?.discountNgn && result.discountPercent ? (
+        <p className="mt-2 inline-block rounded-full bg-emerald-500/15 text-emerald-700 dark:text-emerald-300 px-3 py-1 text-xs font-black">
+          NIM discount applied: {percentLabel(result.discountPercent)} off (−{ngn(result.discountNgn)})
+        </p>
+      ) : null}
       {result?.code && (
         <div className="mt-4 rounded-xl bg-black/5 dark:bg-white/5 p-3">
           <p className="text-[10px] uppercase tracking-widest opacity-60">Token / PIN</p>
@@ -972,6 +992,7 @@ type HistoryRow = {
   created_at: string; status: string; service_category: string | null; service_id: string | null; network: string | null;
   account_number: string | null; amount_naira: number | string | null; display_amount: string | null; amount_usdt: number | string | null;
   tx_hash: string | null; request_id: string | null; error_code?: string | null; purchased_code: string | null; units: string | null;
+  discount_ngn?: number | string | null; discount_percent?: number | string | null;
 };
 type HistorySession = { message: string; signature: string; publicKey: string };
 
@@ -1129,6 +1150,11 @@ function HistoryCard({ row, logo }: { row: HistoryRow; logo?: string }) {
           </div>
         </div>
       </div>
+      {Number(row.discount_ngn) > 0 && Number(row.discount_percent) > 0 && (
+        <p className="mt-2 text-[11px] font-bold text-emerald-600 dark:text-emerald-400">
+          NIM discount applied: {percentLabel(Number(row.discount_percent))} off (−{ngn(Number(row.discount_ngn))})
+        </p>
+      )}
       {status.note && <p className="mt-2 text-[11px] opacity-70 leading-snug">{status.note}</p>}
       {row.purchased_code && (
         <div className="mt-3 flex items-center justify-between gap-2 rounded-xl bg-black/5 dark:bg-white/5 px-3 py-2">

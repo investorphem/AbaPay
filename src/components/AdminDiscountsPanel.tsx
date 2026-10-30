@@ -2,7 +2,7 @@
 
 import React, { useState, useEffect, useCallback } from "react";
 import { Percent, Loader2, Save, Trash2, Plus, ShieldAlert } from "lucide-react";
-import { buildDiscountCreateMessage } from "@/lib/adminActionMessages";
+import { buildDiscountCreateMessage, buildNimDiscountMessage } from "@/lib/adminActionMessages";
 
 // ⚡ ADMIN — DISCOUNT / PROMO CAMPAIGNS
 //
@@ -54,7 +54,9 @@ export function AdminDiscountsPanel({ adminHeaders, onSignAdminAction }: Props) 
   const [campaigns, setCampaigns] = useState<any[] | null>(null);
   const [stats, setStats] = useState<any>(null);
   const [exclusions, setExclusions] = useState<any[]>([]);
-  const [settings, setSettings] = useState<{ fraudFlaggingEnabled: boolean }>({ fraudFlaggingEnabled: true });
+  const [settings, setSettings] = useState<{ fraudFlaggingEnabled: boolean; nimDiscount?: { enabled: boolean; percent: number } }>({ fraudFlaggingEnabled: true });
+  // The NIM discount's percentage as typed, before it is saved.
+  const [nimPercent, setNimPercent] = useState('');
   const [saving, setSaving] = useState(false);
   const [msg, setMsg] = useState('');
   const [showForm, setShowForm] = useState(false);
@@ -69,7 +71,13 @@ export function AdminDiscountsPanel({ adminHeaders, onSignAdminAction }: Props) 
     try {
       const res = await fetch('/api/admin/discounts', { headers: adminHeaders });
       const data = await res.json();
-      if (data.success) { setCampaigns(data.campaigns); setStats(data.stats); setExclusions(data.exclusions || []); if (data.settings) setSettings(data.settings); }
+      if (data.success) {
+        setCampaigns(data.campaigns); setStats(data.stats); setExclusions(data.exclusions || []);
+        if (data.settings) {
+          setSettings(data.settings);
+          if (data.settings.nimDiscount?.percent > 0) setNimPercent(String(data.settings.nimDiscount.percent));
+        }
+      }
     } catch { /* non-fatal */ }
   }, [adminHeaders]);
 
@@ -96,6 +104,25 @@ export function AdminDiscountsPanel({ adminHeaders, onSignAdminAction }: Props) 
   };
 
   const toggleFraudFlagging = (v: boolean) => post({ fraud_flagging_enabled: v });
+
+  // ⚡ NIM DISCOUNT (nim.abapays.com) — separate from the campaigns below. Switching it on, or
+  // changing the percentage while it's on, needs a fresh wallet signature (same step-up as
+  // creating a campaign); switching it off only restores normal prices, so it doesn't.
+  const saveNimDiscount = async (enabled: boolean) => {
+    const percent = Number(nimPercent);
+    if (enabled) {
+      if (!Number.isFinite(percent) || percent <= 0 || percent >= 100) { setMsg('Enter a NIM discount above 0% and below 100%.'); return; }
+      const timestamp = Date.now();
+      setMsg('Confirm the signature request in your wallet…');
+      const confirmSignature = await onSignAdminAction(buildNimDiscountMessage({ enabled, percent, timestamp }));
+      if (!confirmSignature) { setMsg('Cancelled — NIM discount not changed.'); return; }
+      await post({ nim_discount: { enabled, percent, confirmSignature, confirmTimestamp: timestamp } });
+      return;
+    }
+    await post({ nim_discount: { enabled: false, percent: settings.nimDiscount?.percent ?? 0 } });
+  };
+  const nimOn = settings.nimDiscount?.enabled === true;
+  const nimPercentChanged = Number(nimPercent) !== (settings.nimDiscount?.percent ?? 0);
 
   const createCampaign = async () => {
     if (!form.name.trim() || !form.value) { setMsg('Name and value are required.'); return; }
@@ -194,6 +221,40 @@ export function AdminDiscountsPanel({ adminHeaders, onSignAdminAction }: Props) 
 
   return (
     <div className="space-y-4">
+      {/* NIM discount — nim.abapays.com only, independent of the campaigns */}
+      <div className="bg-[#111114] rounded-2xl border border-amber-900/50 p-5">
+        <div className="flex items-center justify-between gap-4 mb-1">
+          <div className="flex items-center gap-2">
+            <Percent size={16} className="text-amber-400" />
+            <h3 className="text-xs font-black uppercase tracking-widest text-amber-300">NIM discount (nim.abapays.com)</h3>
+          </div>
+          <MiniToggle value={nimOn} onChange={(v) => saveNimDiscount(v)} disabled={saving} />
+        </div>
+        <p className="text-[10px] text-slate-500 mb-3 leading-relaxed">
+          While on, every NIM order is discounted by this percentage of the bill (fees are charged in full), and the customer sees
+          &quot;NIM discount applied: X% off&quot; at checkout, on the result and in their history and receipt. While off, NIM orders are priced
+          normally. Separate from the campaigns below: those never apply to NIM orders. Changes are live within a minute.
+        </p>
+        <div className="flex items-center gap-2">
+          <input
+            type="number" inputMode="decimal" min={0} max={99.99} step="0.01" value={nimPercent}
+            onChange={(e) => setNimPercent(e.target.value)} placeholder="e.g. 10"
+            className="w-28 bg-[#1a1a1f] border border-slate-800 rounded-lg px-3 py-2 text-sm text-slate-100"
+          />
+          <span className="text-sm text-slate-400">% off</span>
+          {nimOn && nimPercentChanged && (
+            <button type="button" onClick={() => saveNimDiscount(true)} disabled={saving}
+              className="ml-auto flex items-center gap-1 bg-amber-600 hover:bg-amber-500 text-white text-xs font-black px-3 py-2 rounded-lg disabled:opacity-50">
+              <Save size={12} /> Save percentage
+            </button>
+          )}
+        </div>
+        <p className="text-[10px] text-slate-500 mt-2">
+          Status: <span className={nimOn ? 'text-emerald-400 font-bold' : 'text-slate-400 font-bold'}>{nimOn ? `ON — ${settings.nimDiscount?.percent}% off` : 'OFF'}</span>
+          {' · '}Given so far: ₦{(stats?.nim?.discountNgn ?? 0).toLocaleString()} on {stats?.nim?.count ?? 0} order{(stats?.nim?.count ?? 0) === 1 ? '' : 's'}
+        </p>
+      </div>
+
       {/* Monitoring */}
       <div className="bg-[#111114] rounded-2xl border border-slate-800/60 p-5">
         <div className="flex items-center gap-2 mb-4">

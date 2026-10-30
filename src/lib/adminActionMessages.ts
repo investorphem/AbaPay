@@ -14,4 +14,9 @@ export function buildDiscountCreateMessage(params: { name: string; type: string;
   return `AbaPay Admin Action: CREATE_DISCOUNT_CAMPAIGN\nName: ${params.name}\nType: ${params.type}\nValue: ${params.value}\nTimestamp: ${params.timestamp}`;
 }
 
+/** Switching the NIM discount on or off, or changing its percentage (nim.abapays.com). */
+export function buildNimDiscountMessage(params: { enabled: boolean; percent: number; timestamp: number }): string {
+  return `AbaPay Admin Action: SET_NIM_DISCOUNT\nEnabled: ${params.enabled ? 'yes' : 'no'}\nPercent: ${params.percent}\nTimestamp: ${params.timestamp}`;
+}
+
 export const CONFIRM_SIGNATURE_MAX_AGE_MS = 5 * 60 * 1000; // 5 minutes — long enough for a slow wallet popup, short enough to make a replayed old signature useless

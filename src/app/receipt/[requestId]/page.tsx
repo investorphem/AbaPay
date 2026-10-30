@@ -127,6 +127,12 @@ export default async function ReceiptPage({ params }: { params: Promise<{ reques
             <Row label={isElectricity ? 'Meter Number' : 'Account'} value={tx.account_number} />
             {tx.customer_name ? <Row label="Name" value={tx.customer_name} /> : null}
             {tx.customer_address ? <Row label="Address" value={tx.customer_address} /> : null}
+            {Number(tx.discount_ngn) > 0 ? (
+              <Row
+                label="Discount"
+                value={`${tx.discount_percent ? `${Number(Number(tx.discount_percent).toFixed(2))}% off · ` : ''}−₦${Number(tx.discount_ngn).toLocaleString()}`}
+              />
+            ) : null}
             <Row label="Date" value={date} />
             {tx.request_id ? <Row label="Reference" value={tx.request_id} mono /> : null}
           </div>

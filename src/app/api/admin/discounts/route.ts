@@ -2,7 +2,8 @@ import { NextResponse } from 'next/server';
 import { supabaseAdmin } from '@/utils/supabase';
 import { verifyAdminRequest } from '@/utils/adminAuth';
 import { verifySignatureAcrossChains } from '@/utils/walletAuth';
-import { buildDiscountCreateMessage, CONFIRM_SIGNATURE_MAX_AGE_MS } from '@/lib/adminActionMessages';
+import { buildDiscountCreateMessage, buildNimDiscountMessage, CONFIRM_SIGNATURE_MAX_AGE_MS } from '@/lib/adminActionMessages';
+import { clearNimDiscountCache } from '@/lib/nimDiscount';
 
 // ⚡ ADMIN: discount/promo campaigns — create, edit, activate/deactivate, and monitor how much
 // has actually been given away. Enforcement lives in src/lib/discounts.ts (checked fresh inside
@@ -31,7 +32,7 @@ export async function GET(req: Request) {
   // Monitoring: how much has actually been discounted, and by which campaign.
   const { data: discounted } = await supabaseAdmin
     .from('transactions')
-    .select('discount_ngn, discount_campaign_id, status')
+    .select('discount_ngn, discount_campaign_id, status, blockchain')
     .gt('discount_ngn', 0);
 
   const rows = discounted || [];
@@ -48,10 +49,15 @@ export async function GET(req: Request) {
   // panel entirely when disabled, not just hide it client-side.
   const { data: settingsRow } = await supabaseAdmin
     .from('platform_settings')
-    .select('discount_fraud_flagging_enabled')
+    .select('discount_fraud_flagging_enabled, nim_discount_enabled, nim_discount_percent')
     .eq('id', 1)
     .single();
   const fraudFlaggingEnabled = settingsRow?.discount_fraud_flagging_enabled !== false;
+  const nimDiscount = { enabled: settingsRow?.nim_discount_enabled === true, percent: Number(settingsRow?.nim_discount_percent) || 0 };
+
+  // What the NIM discount has given away so far (rows on the NIM rail with a discount).
+  const nimRows = (countedRows as { blockchain: string | null; discount_ngn: number | null }[]).filter((r) => r.blockchain === 'NIMIQ');
+  const nimStats = { discountNgn: nimRows.reduce((sum, r) => sum + Number(r.discount_ngn || 0), 0), count: nimRows.length };
 
   let suspiciousClusters: any[] = [];
   if (fraudFlaggingEnabled) {
@@ -114,9 +120,10 @@ export async function GET(req: Request) {
   return NextResponse.json({
     success: true,
     campaigns: campaigns || [],
-    settings: { fraudFlaggingEnabled },
+    settings: { fraudFlaggingEnabled, nimDiscount },
     exclusions: exclusions || [],
     stats: {
+      nim: nimStats,
       totalDiscountNgn: countedRows.reduce((sum: number, r: any) => sum + Number(r.discount_ngn || 0), 0),
       discountedTxCount: countedRows.length,
       byCampaign,
@@ -140,6 +147,40 @@ export async function POST(req: Request) {
         .update({ discount_fraud_flagging_enabled: body.fraud_flagging_enabled })
         .eq('id', 1);
       if (error) return NextResponse.json({ success: false, message: 'Could not save setting.' }, { status: 500 });
+      return NextResponse.json({ success: true });
+    }
+
+    // The NIM discount (nim.abapays.com): one switch and one percentage, separate from the
+    // campaigns. Switching it on, or changing the percentage while on, is a live lever on revenue,
+    // so it takes the same fresh wallet signature as creating a campaign. Switching it off only
+    // restores normal prices, so the admin session alone is enough.
+    if (body.nim_discount && typeof body.nim_discount === 'object') {
+      const enabled = body.nim_discount.enabled === true;
+      const percent = Number(body.nim_discount.percent);
+      if (!Number.isFinite(percent) || percent < 0 || percent >= 100) {
+        return NextResponse.json({ success: false, message: 'The NIM discount must be at least 0% and below 100%.' }, { status: 400 });
+      }
+      if (enabled && percent <= 0) {
+        return NextResponse.json({ success: false, message: 'Set a percentage above 0% to switch the NIM discount on.' }, { status: 400 });
+      }
+      if (enabled) {
+        const { confirmSignature, confirmTimestamp } = body.nim_discount;
+        if (!confirmSignature || !confirmTimestamp) {
+          return NextResponse.json({ success: false, message: 'Missing wallet confirmation — please sign to confirm the NIM discount.' }, { status: 400 });
+        }
+        const ts = Number(confirmTimestamp);
+        if (!Number.isFinite(ts) || Date.now() - ts > CONFIRM_SIGNATURE_MAX_AGE_MS || ts > Date.now() + 60_000) {
+          return NextResponse.json({ success: false, message: 'Confirmation expired — please try again.' }, { status: 401 });
+        }
+        const valid = await verifySignatureAcrossChains(String(auth.address), buildNimDiscountMessage({ enabled, percent, timestamp: ts }), String(confirmSignature));
+        if (!valid) return NextResponse.json({ success: false, message: 'Signature does not match — NIM discount not changed.' }, { status: 401 });
+      }
+      const { error } = await supabaseAdmin
+        .from('platform_settings')
+        .update({ nim_discount_enabled: enabled, nim_discount_percent: percent })
+        .eq('id', 1);
+      if (error) return NextResponse.json({ success: false, message: 'Could not save the NIM discount.' }, { status: 500 });
+      clearNimDiscountCache();
       return NextResponse.json({ success: true });
     }
 

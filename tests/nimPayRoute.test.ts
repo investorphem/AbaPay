@@ -14,7 +14,13 @@ const gateCalls: Record<string, unknown>[] = [];
 vi.mock('@/utils/supabase', () => ({ get supabaseAdmin() { return fakeSupabase(db); } }));
 vi.mock('@/lib/telegram', () => ({ sendTelegramAlert: async (t: string) => { alerts.push(t); } }));
 vi.mock('@/lib/vend', () => ({ getStrictRequestId: () => '202610171200nim0000001' }));
-vi.mock('@/lib/discounts', () => ({ getActiveDiscountForService: async () => null, computeDiscountNgn: async () => ({ discountNgn: 0, discountPhone: null }) }));
+let nimDiscount = { enabled: false, percent: 0 };
+vi.mock('@/lib/nimDiscount', () => ({ getNimDiscount: async () => nimDiscount }));
+// abapays.com's campaigns must never reach a NIM order: if the route asked them, this throws.
+vi.mock('@/lib/discounts', () => ({
+  getActiveDiscountForService: async () => { throw new Error('NIM orders must not use discount campaigns'); },
+  computeDiscountNgn: async () => { throw new Error('NIM orders must not use discount campaigns'); },
+}));
 vi.mock('@/lib/parity', () => ({ isDuplicateElectricity: async () => false }));
 vi.mock('@/lib/rateLimit', () => ({ enforceRateLimit: async () => null }));
 let offCategories: string[] = [];
@@ -50,6 +56,7 @@ beforeEach(() => {
   gateCalls.length = 0;
   offCategories = [];
   balanceLuna = null;
+  nimDiscount = { enabled: false, percent: 0 };
 });
 
 describe('/api/pay/nim — creating an order', () => {
@@ -103,6 +110,35 @@ describe('/api/pay/nim — the same admin settings as abapays.com', () => {
     expect(r.json).toMatchObject({ allowed: false, code: 'SERVICE_UNAVAILABLE' });
     expect(gateCalls[0]).toMatchObject({ serviceCategory: 'AIRTIME', serviceID: 'mtn', amountNgn: 200 });
     expect(db.tables.transactions ?? []).toHaveLength(0);
+  });
+});
+
+// The NIM discount: one switch and one percentage in the admin (migration 045), separate from
+// abapays.com's campaigns. Off → priced exactly as before; on → the percentage off the bill.
+describe('/api/pay/nim — the NIM discount', () => {
+  it('off: no discount, priced as before, nothing recorded', async () => {
+    db.tables.platform_settings = [{ id: 1, exchange_rate: '1000' }];
+    const r = await post(order({ nairaAmount: 1000 }));
+    expect(r.json.nim).toBe(Math.ceil(1000 * 1.02));
+    expect(r.json.charges).toMatchObject({ discountNgn: 0, discountPercent: null });
+    expect(db.tables.transactions[0]).toMatchObject({ discount_ngn: 0, discount_percent: null });
+  });
+
+  it('on at 10%: takes 10% off the bill, records the naira and the percentage', async () => {
+    nimDiscount = { enabled: true, percent: 10 };
+    db.tables.platform_settings = [{ id: 1, exchange_rate: '1000' }];
+    const r = await post(order({ nairaAmount: 1000 })); // ₦900 = $0.90 at 1000/$, NIM at $0.001, +buffer
+    expect(r.status).toBe(200);
+    expect(r.json.nim).toBe(Math.ceil(900 * 1.02));
+    expect(r.json.charges).toMatchObject({ discountNgn: 100, discountPercent: 10 });
+    expect(db.tables.transactions[0]).toMatchObject({ amount_naira: 1000, discount_ngn: 100, discount_percent: 10 });
+    expect(db.tables.transactions[0].discount_campaign_id ?? null).toBeNull(); // not a campaign discount
+  });
+
+  it('the quote tells the mini app the discount, so its estimate matches', async () => {
+    nimDiscount = { enabled: true, percent: 12.5 };
+    const q = await (await GET()).json();
+    expect(q.discount).toEqual({ enabled: true, percent: 12.5 });
   });
 });
 

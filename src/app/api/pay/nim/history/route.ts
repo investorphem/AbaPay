@@ -33,7 +33,7 @@ export async function POST(req: Request) {
   // being refunded). The placeholder itself is internal, so it isn't returned (tx_hash: null).
   const { data, error } = await supabase
     .from('transactions')
-    .select('created_at, status, service_category, service_id, network, account_number, amount_naira, display_amount, amount_usdt, token_used, tx_hash, request_id, purchased_code, units, error_code')
+    .select('created_at, status, service_category, service_id, network, account_number, amount_naira, display_amount, amount_usdt, token_used, discount_ngn, discount_percent, tx_hash, request_id, purchased_code, units, error_code')
     .eq('blockchain', 'NIMIQ')
     .eq('wallet_address', session.address)
     .gte('created_at', since.toISOString())

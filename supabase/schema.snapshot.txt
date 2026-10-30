@@ -164,6 +164,8 @@ column platform_settings.discount_fraud_flagging_enabled boolean not null defaul
 column platform_settings.exchange_rate numeric not null
 column platform_settings.id integer not null
 column platform_settings.kill_switches jsonb default '{"BANK": true, "CABLE": true, "AIRTIME": true, "INTERNET": true, "EDUCATION": true, "ELECTRICITY": true, "MASTER_INTERNATIONAL": true}'::jsonb
+column platform_settings.nim_discount_enabled boolean not null default false
+column platform_settings.nim_discount_percent numeric not null default 0
 column platform_settings.provider_circuits jsonb not null default '{}'::jsonb
 column platform_settings.x402_facilitator_fee_usd numeric not null default 0.001
 column rate_limits.count integer not null default 0
@@ -252,6 +254,7 @@ column transactions.customer_email text
 column transactions.customer_name text
 column transactions.discount_campaign_id uuid
 column transactions.discount_ngn numeric not null default 0
+column transactions.discount_percent numeric
 column transactions.discount_phone text
 column transactions.display_amount text
 column transactions.error_code text
@@ -351,6 +354,7 @@ constraint otp_requests.otp_requests_pkey PRIMARY KEY (phone)
 constraint payer_identities.payer_identities_pkey PRIMARY KEY (wallet)
 constraint payment_client_info.payment_client_info_pkey PRIMARY KEY (transaction_id)
 constraint payment_client_info.payment_client_info_transaction_id_fkey FOREIGN KEY (transaction_id) REFERENCES transactions(id) ON DELETE CASCADE
+constraint platform_settings.platform_settings_nim_discount_percent_check CHECK (((nim_discount_percent >= (0)::numeric) AND (nim_discount_percent < (100)::numeric)))
 constraint platform_settings.platform_settings_pkey PRIMARY KEY (id)
 constraint rate_limits.rate_limits_pkey PRIMARY KEY (key)
 constraint refund_queue.refund_queue_pkey PRIMARY KEY (id)
