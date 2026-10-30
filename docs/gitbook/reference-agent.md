@@ -6,7 +6,7 @@ open-source (MIT) agent that pays real bills from its own Celo wallet through x4
 or copy it as the starting point for your own.
 {% endhint %}
 
-It quotes and pays airtime, data, electricity, cable TV and exam PINs in USDC or USDT on Celo.
+It quotes and pays airtime, data, electricity, cable TV and exam PINs in USDC, USD₮ or USA₮ on Celo (set `TOKEN=USAT` for USA₮).
 It needs no account, no API key and no CELO for gas. It is built on the
 [TypeScript SDK](sdk.md)'s `payBillViaX402`.
 
@@ -22,7 +22,7 @@ It needs no account, no API key and no CELO for gas. It is built on the
 
 ## Quickstart
 
-You need Node.js 20.6 or newer and about $1 of USDC or USDT on Celo.
+You need Node.js 20.6 or newer and about $1 of USDC, USD₮ or USA₮ on Celo.
 
 {% code title="Terminal" %}
 ```bash

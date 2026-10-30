@@ -55,7 +55,7 @@ export default function SDKPage() {
 
       <section className="bg-white dark:bg-[#111114] border border-slate-100 dark:border-slate-800/60 rounded-[2rem] p-6 sm:p-8 mb-6">
         <h2 className="font-black text-slate-900 dark:text-white mb-1.5">Reference agent quickstart</h2>
-        <p className="text-sm text-slate-500 dark:text-slate-400 mb-4">Needs Node.js 20.6+ and about $1 of USDC or USDT on Celo. Run the first block, put the printed <code>PRIVATE_KEY</code> line in <code>.env</code>, fund the address, then run the second.</p>
+        <p className="text-sm text-slate-500 dark:text-slate-400 mb-4">Needs Node.js 20.6+ and about $1 of USDC, USD₮ or USA₮ on Celo. Run the first block, put the printed <code>PRIVATE_KEY</code> line in <code>.env</code>, fund the address, then run the second.</p>
         <div className="grid gap-3">
           <CopyBlock
             label="1. Install and make a wallet"
