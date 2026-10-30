@@ -6,6 +6,13 @@ test-tooling fixes are left out. Full history: [commits on
 GitHub](https://github.com/investorphem/AbaPay/commits/main).
 {% endhint %}
 
+## 2026-10-30
+
+* **NIM discount.** The Nimiq Pay mini app (nim.abapays.com) has its own discount, switched on or
+  off with a percentage from the admin dashboard, separate from abapays.com's campaigns. While it
+  runs, each NIM order shows "NIM discount applied: X% off" at checkout, on the result, in History
+  and on the receipt. While it's off, NIM orders are priced as before.
+
 ## 2026-10-25
 
 * **AbaPay has a Self Agent ID.** It is registered on the SelfAgentRegistry as agent **#196**, backed

@@ -18,6 +18,7 @@ export interface TransactionRow {
   customer_name: string | null;
   discount_campaign_id: string | null;
   discount_ngn: number;
+  discount_percent: number | null;
   discount_phone: string | null;
   display_amount: string | null;
   error_code: string | null;

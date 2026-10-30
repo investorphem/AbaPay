@@ -3,7 +3,8 @@ import { randomUUID } from 'crypto';
 import { supabaseAdmin as supabase } from '@/utils/supabase';
 import { sendTelegramAlert } from '@/lib/telegram';
 import { getStrictRequestId } from '@/lib/vend';
-import { getActiveDiscountForService, computeDiscountNgn } from '@/lib/discounts';
+import { getNimDiscount } from '@/lib/nimDiscount';
+import { nimDiscountNgn } from '@/lib/nimDiscountMath';
 import { isDuplicateElectricity } from '@/lib/parity';
 import { enforceRateLimit } from '@/lib/rateLimit';
 import { checkWebPayment } from '@/lib/serviceRules';
@@ -50,13 +51,14 @@ const fail = (status: number, message: string, code?: string) =>
 
 /**
  * What the mini app needs to show a live NIM estimate before an order exists: the NIM price, the
- * naira rate and the buffer. The intent's own quote is the binding one.
+ * naira rate, the buffer and the NIM discount. The intent's own quote is the binding one.
  */
 export async function GET() {
-  const [nimUsd, { data: settings }, services] = await Promise.all([
+  const [nimUsd, { data: settings }, services, discount] = await Promise.all([
     nimUsdPrice(),
     supabase.from('platform_settings').select('exchange_rate').eq('id', 1).single(),
     serviceAvailability(),
+    getNimDiscount(),
   ]);
   return NextResponse.json({
     available: !!treasuryAddress() && !!nimUsd,
@@ -64,6 +66,7 @@ export async function GET() {
     ngn_per_usd: parseFloat(settings?.exchange_rate || '1500'),
     buffer: PRICE_BUFFER,
     services,
+    discount,
   }, { headers: { 'Cache-Control': 'public, max-age=30' } });
 }
 
@@ -154,11 +157,13 @@ async function createIntent(req: Request, body: NimPayRequest) {
   const { data: settingsData } = await supabase.from('platform_settings').select('exchange_rate').eq('id', 1).single();
   const baseRate = parseFloat(settingsData?.exchange_rate || '1500');
 
-  const discountServiceKey = cat.startsWith('INTL') ? 'INTERNATIONAL' : serviceCategory;
   const destinationAccount = billersCode || phone || 'N/A';
   const payerCanonical = canonicalNimAddress(payer);
-  const activeDiscount = await getActiveDiscountForService(discountServiceKey || null);
-  const { discountNgn, discountPhone } = await computeDiscountNgn(vendAmount, activeDiscount, payerCanonical, destinationAccount);
+  // The NIM discount, set in the admin Discounts tab and separate from abapays.com's campaigns
+  // (migration 045). Off → 0, and the order is priced exactly as it always was.
+  const nimDiscount = await getNimDiscount();
+  const discountNgn = nimDiscountNgn(vendAmount, nimDiscount);
+  const discountPercent = discountNgn > 0 ? nimDiscount.percent : null;
 
   const usd = (vendAmount + serviceFee + stampDutyNgn - discountNgn) / baseRate;
   const nimUsd = await nimUsdPrice();
@@ -189,7 +194,7 @@ async function createIntent(req: Request, body: NimPayRequest) {
     // receipt and refund path reads. nim_usd_price keeps the quote so totals can be shown in USD.
     amount_usdt: luna / LUNA_PER_NIM, nim_usd_price: nimUsd, token_used: 'NIM',
     amount_naira: vendAmount, fee_naira: serviceFee, stamp_duty_ngn: stampDutyNgn, discount_ngn: discountNgn,
-    discount_campaign_id: activeDiscount?.id || null, discount_phone: discountPhone, client_ip: clientIp,
+    discount_percent: discountPercent, client_ip: clientIp,
     status: 'PENDING', wallet_address: payerCanonical, source_channel: 'NIMIQ',
     customer_name: customer_name || null, customer_address: customer_address || null,
     meter_account_type: meter_account_type || null, customer_email: email || null,
@@ -212,7 +217,7 @@ async function createIntent(req: Request, body: NimPayRequest) {
     nim: luna / LUNA_PER_NIM,
     reference: paymentReference(intentId),
     nim_usd: nimUsd,
-    charges: { serviceFee, stampDutyNgn, discountNgn },
+    charges: { serviceFee, stampDutyNgn, discountNgn, discountPercent },
   });
 }
 
