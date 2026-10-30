@@ -28,7 +28,7 @@ class BillDetails:
     network: str
     billersCode: str
     nairaAmount: float
-    token: str  # "USDC" or "USDT"
+    token: str  # "USDC", "USDT" or "USAT" (USA₮)
     wallet_address: Optional[str] = None
 
     def to_dict(self) -> dict:

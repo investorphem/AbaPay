@@ -165,7 +165,7 @@ await agent.payBill({
             </thead>
             <tbody className="divide-y divide-slate-100 dark:divide-slate-800/60 align-top">
               {[
-                ["BillDetails", "{ serviceID, serviceCategory, network, billersCode, nairaAmount, token: 'USDC'|'USDT', wallet_address, variation_code?, phone?, meter_account_type? }"],
+                ["BillDetails", "{ serviceID, serviceCategory, network, billersCode, nairaAmount, token: 'USDC'|'USDT'|'USAT', wallet_address, variation_code?, phone?, meter_account_type? }"],
                 ["X402PayResult", "{ success, status: 'SUCCESS'|'FAILED_VENDING'|'TIMEOUT'|string, purchased_code?, units?, request_id?, tx_hash?, message?, self_agent? }"],
                 ["SelfAgentKey", "{ address, signMessage } — a viem account for the agent key registered on the SelfAgentRegistry"],
                 ["LinkParams", "{ signer, pin, approvedChain?: 'CELO', approvedToken?, label?, baseUrl? }"],

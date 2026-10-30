@@ -168,3 +168,40 @@ def test_pays_with_the_token_asked_for_on_celo(httpserver):
     }
     signable = encode_typed_data(domain_data=domain, message_types=TRANSFER_WITH_AUTHORIZATION_TYPES, message_data=message)
     assert Account.recover_message(signable, signature=decoded["payload"]["signature"]).lower() == account.address.lower()
+
+
+USAT = "0xD2ab3C9A02DBBAB236BfEC45D1d755DF4267F771"
+
+
+def test_pays_in_usat_with_its_own_domain(httpserver):
+    """A challenge offering USD₮ and USA₮: token="USAT" picks USA₮ and signs its domain
+    ("Tether America USD", not the symbol), which is what AbaPay's server verifies."""
+    import base64
+
+    account = Account.from_key(TEST_PRIVATE_KEY)
+    usat_offer = dict(CHALLENGE["accepts"][0], asset=USAT, amount="1490000", maxAmountRequired="1490000",
+                      extra={"name": "Tether America USD", "version": "1", "primaryType": "TransferWithAuthorization"})
+    challenge = dict(CHALLENGE, accepts=[CHALLENGE["accepts"][0], usat_offer])
+    captured = {}
+
+    def handler(request):
+        from werkzeug.wrappers import Response
+
+        header = request.headers.get("X-PAYMENT")
+        if header is None:
+            return Response(json.dumps(challenge), status=402, content_type="application/json")
+        captured["header"] = header
+        return Response(json.dumps({"success": True, "status": "SUCCESS", "tx_hash": "0xusat", "request_id": "r"}), status=200, content_type="application/json")
+
+    httpserver.expect_request("/api/pay/x402", method="POST").respond_with_handler(handler)
+    bill = BillDetails(serviceID="mtn", serviceCategory="AIRTIME", network="MTN", billersCode="08012345678", nairaAmount=1000, token="USAT")
+    assert pay_bill_via_x402(account, bill, base_url=httpserver.url_for("")).success is True
+
+    decoded = json.loads(base64.b64decode(captured["header"]))
+    auth, signature = decoded["payload"]["authorization"], decoded["payload"]["signature"]
+    domain = {"name": "Tether America USD", "version": "1", "chainId": 42220, "verifyingContract": USAT}
+    message = {"from": auth["from"], "to": auth["to"], "value": int(auth["value"]), "validAfter": int(auth["validAfter"]),
+               "validBefore": int(auth["validBefore"]), "nonce": auth["nonce"]}
+    signable = encode_typed_data(domain_data=domain, message_types=TRANSFER_WITH_AUTHORIZATION_TYPES, message_data=message)
+    assert Account.recover_message(signable, signature=signature).lower() == account.address.lower()
+    assert auth["value"] == "1490000"

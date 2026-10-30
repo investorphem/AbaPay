@@ -32,7 +32,7 @@
                   "network": { "type": "string", "description": "Provider name, e.g. MTN, IKEJA-ELECTRIC, DSTV" },
                   "billersCode": { "type": "string", "description": "Phone number, meter number, or smartcard/IUC number being paid for" },
                   "nairaAmount": { "type": "number", "description": "Bill amount denominated in NGN — the source of truth for pricing this request, including for international bills (the local-currency figure travels separately as foreignAmount)" },
-                  "token": { "type": "string", "enum": ["USDC", "USD₮"], "description": "On Celo, both USDC and USDT (Tether) settle via x402 — each implements EIP-3009 transferWithAuthorization. On Base, USDC only (Base USDT has no transferWithAuthorization). cUSD/USDm are never supported (no transferWithAuthorization)." },
+                  "token": { "type": "string", "enum": ["USDC", "USD₮", "USA₮", "USDT", "USAT"], "description": "On Celo, USDC, USD₮ (Tether) and USA₮ (Tether America USD) all settle via x402 — each implements EIP-3009 transferWithAuthorization. \"USDT\" and \"USAT\" are accepted as plain-ASCII spellings of USD₮ and USA₮. On Base, USDC only (Base USD₮ has no transferWithAuthorization). cUSD/USDm are never supported (no transferWithAuthorization)." },
                   "blockchain": { "type": "string", "enum": ["CELO", "BASE"], "description": "Celo settles through Celo's own x402 facilitator; Base settles through Coinbase's CDP facilitator" },
                   "wallet_address": { "type": "string", "description": "The paying wallet's address, for cross-checking against the x402 payment authorization's payer" }
                 }

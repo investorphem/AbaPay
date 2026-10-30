@@ -16,6 +16,7 @@ export const metadata: Metadata = {
 // live NGN rate at request time); everything else is exactly what a real call gets back.
 const CELO_NETWORK = "eip155:42220";
 const CELO_USDC = "0xcebA9300f2b948710d2653dD7B07f33A8B32118C";
+const CELO_USAT = "0xD2ab3C9A02DBBAB236BfEC45D1d755DF4267F771";
 const CELO_USDT = "0x48065fbBE25f71C9282ddf5e1cD6D6A887483D5e";
 const CELO_VAULT = "0x5df8aE2B963165b735B18Ca86B1ea448d2AA032C";
 
@@ -105,7 +106,7 @@ export default function X402Page() {
 }`}
         />
         <p className="text-xs text-slate-400 dark:text-slate-500 mt-4">
-          Both USDC (<code className="text-slate-500">{CELO_USDC.slice(0, 10)}…</code>) and USD₮ settle via Celo&apos;s own x402 facilitator — each implements EIP-3009. Full field reference: <a href="/openapi.json" className="underline hover:text-emerald-500">openapi.json</a>. Every way a challenge or settlement can fail, with real error codes: <Link href="/agents/errors" className="underline hover:text-emerald-500">/agents/errors</Link>.
+          USDC (<code className="text-slate-500">{CELO_USDC.slice(0, 10)}…</code>), USD₮ and USA₮ (<code className="text-slate-500">{CELO_USAT.slice(0, 10)}…</code>) all settle via Celo&apos;s own x402 facilitator — each implements EIP-3009. The challenge offers all three; sign the one you hold. Full field reference: <a href="/openapi.json" className="underline hover:text-emerald-500">openapi.json</a>. Every way a challenge or settlement can fail, with real error codes: <Link href="/agents/errors" className="underline hover:text-emerald-500">/agents/errors</Link>.
         </p>
       </section>
 

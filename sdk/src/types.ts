@@ -30,7 +30,7 @@ export interface BillDetails {
   billersCode: string;
   nairaAmount: number;
   /** Celo mainnet only — see the SDK's file-level comments for why. */
-  token: "USDC" | "USDT";
+  token: "USDC" | "USDT" | "USAT";
   wallet_address: string;
   /** Plan code for DATA, CABLE and EDUCATION, from GET /api/variations?serviceID=… (e.g. "mtn-10mb-100"). */
   variation_code?: string;
