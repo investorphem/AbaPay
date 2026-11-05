@@ -32,6 +32,11 @@
       ]
     },
     {
+      "name": "ENS",
+      "endpoint": "abapay.eth",
+      "version": "v1"
+    },
+    {
       "name": "Self Agent ID",
       "endpoint": "https://docs.abapays.com/start-here/self-agent-id",
       "agentId": 196,
