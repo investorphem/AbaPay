@@ -19,6 +19,7 @@ import { AdminGrantPanel } from "@/components/AdminGrantPanel";
 import { AdminPayerIdentity, type PaymentClientInfo } from "@/components/AdminPayerIdentity";
 import type { PayerIdentity } from "@/lib/payerIdentityTypes";
 import { signSiweHeaders } from "@/lib/siwe";
+import { canOfferRefund, paymentLandedOnChain } from "@/lib/refundEligibility";
 
 import { useProviders } from "@/lib/useProviders";
 
@@ -841,6 +842,10 @@ Switch the selected account in your wallet to the owner and click again. You sta
     // attempt is visible; there is still nothing to refund.
     if (tx.error_code === 'AGENT_PREFLIGHT_FAILED') {
       return alert("This agent payment never broadcast on-chain — nothing was ever charged, so there is nothing to refund.");
+    }
+    // The general rule behind both guards above: refund only a payment that landed on chain.
+    if (!tx.refund_hash && !paymentLandedOnChain(tx)) {
+      return alert("No payment for this order reached AbaPay on-chain (no confirmed transaction), so there is nothing to refund.");
     }
 
     // 🔴 DOUBLE-REFUND GUARD — the row already carries a refund transaction.
@@ -1738,7 +1743,7 @@ Switch the selected account in your wallet to the owner and click again. You sta
                                   that status anyway (it verifies the on-chain refund tx itself, not
                                   the row's prior status), so this was a UI gap, not a real
                                   safeguard. */}
-                              {(tx.status === 'PENDING' || tx.status === 'PROCESSING') && tx.error_code !== 'REVERTED' && (
+                              {(tx.status === 'PENDING' || tx.status === 'PROCESSING') && canOfferRefund(tx) && (
                                 <button
                                   onClick={() => handleRefund(tx)}
                                   disabled={processingRefundId === tx.id}
@@ -1760,7 +1765,9 @@ Switch the selected account in your wallet to the owner and click again. You sta
                               {/* AGENT_PREFLIGHT_FAILED is the same class of danger as REVERTED above:
                                   the payment never broadcast, so no crypto ever left the agent's
                                   wallet or reached the vault. Same exclusion, same reason. */}
-                              {tx.status?.startsWith('FAILED') && tx.error_code !== 'REVERTED' && tx.error_code !== 'AGENT_PREFLIGHT_FAILED' && (
+                              {/* Only when the payment provably landed on chain (src/lib/refundEligibility.ts):
+                                  never a placeholder hash, FAILED_PAYMENT, refused or cancelled x402. */}
+                              {tx.status?.startsWith('FAILED') && canOfferRefund(tx) && (
                                 <button
                                   onClick={() => handleRefund(tx)}
                                   disabled={processingRefundId === tx.id}
