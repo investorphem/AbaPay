@@ -44,6 +44,17 @@ describe('externalRail', () => {
     [{ payment_method: 'CONTRACT', source_channel: 'WEB' }, null],
   ])('%o → %s', (t, rail) => expect(externalRail(t)).toBe(rail));
   it('reads A2A from the recorded protocol', () => expect(externalRail({ payment_method: 'AGENT_RELAY', source_channel: 'MCP' }, { protocol: 'A2A' })).toBe('A2A'));
+
+  // Before 2026-10-24 an x402 call that didn't name its source was stored as 'WEB' (Earmark's
+  // October payments). Our web app is a browser that declares no agent.
+  it.each([
+    ['a declared agent name', { declared_agent: 'Earmark', declared_agent_id: '9806', user_agent: 'node' }, 'x402'],
+    ['a declared agent id only', { declared_agent: null, declared_agent_id: '9806', user_agent: null }, 'x402'],
+    ['a non-browser client', { declared_agent: null, declared_agent_id: null, user_agent: 'python-requests/2.34.2' }, 'x402'],
+    ['our web app in a browser', { declared_agent: null, declared_agent_id: null, user_agent: 'Mozilla/5.0 (Linux; Android 16)' }, null],
+    ['nothing recorded', null, null],
+  ])("x402 stored as 'WEB' with %s → %s", (_label, client, rail) =>
+    expect(externalRail({ payment_method: 'X402', source_channel: 'WEB' }, null, client)).toBe(rail));
 });
 
 describe('buildGrantReport — counted from the chain', () => {
@@ -92,6 +103,23 @@ describe('buildGrantReport — counted from the chain', () => {
     db.tables.transactions = [order(p, { amount_usdt: 999, token_used: 'USDC', created_at: '2026-11-20T00:00:00Z' })];
     const [pay] = (await buildGrantReport(...WINDOW)).payments;
     expect(pay).toMatchObject({ amount: 1.137364, token: 'USD₮', date: '2026-11-16T21:14:31Z', onchain_only: false });
+  });
+
+  it("counts an October agent payment stored as 'WEB', but not our web app's", async () => {
+    const earmarkOct = chain({ payer: W1, amount_usd: 0.152515, block_time: '2026-11-16T19:39:00Z' });
+    const webApp = chain({ payer: W2 });
+    db.tables.onchain_payments = [earmarkOct, webApp];
+    const eo = order(earmarkOct, { source_channel: 'WEB' });
+    const wa = order(webApp, { source_channel: 'WEB' });
+    db.tables.transactions = [eo, wa];
+    db.tables.payment_client_info = [
+      { transaction_id: eo.id, declared_agent: 'Earmark', declared_agent_id: '9806', user_agent: 'node', client_diag: null },
+      { transaction_id: wa.id, declared_agent: null, declared_agent_id: null, user_agent: 'Mozilla/5.0 (Linux; Android 16)', client_diag: null },
+    ];
+    const r = await buildGrantReport(...WINDOW);
+    expect(r.payments.map((p) => p.sender)).toEqual([W1]);
+    expect(r.agents[0]).toMatchObject({ agent: 'Earmark', identified: true, payments: 1 });
+    expect(r.excluded.abapay_web_app_or_own_agent).toBe(1);
   });
 
   it('never makes an agent of each unnamed wallet', async () => {

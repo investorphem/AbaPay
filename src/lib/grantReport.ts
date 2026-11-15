@@ -98,13 +98,29 @@ type TxRow = {
   id: string; status: string; tx_hash: string; x402_settle_tx: string | null; request_id: string | null;
   payment_method: string | null; source_channel: string | null; service_category: string | null; network: string | null;
 };
-type ClientRow = { transaction_id: string; declared_agent: string | null; declared_agent_id: string | null; client_diag: Record<string, unknown> | null };
+type ClientRow = { transaction_id: string; declared_agent: string | null; declared_agent_id: string | null; user_agent?: string | null; client_diag: Record<string, unknown> | null };
+
+/**
+ * An x402 row stored as 'WEB' that was really an outside agent. Before 2026-10-24 (#164) an x402
+ * call that didn't name its source was stored as 'WEB', so Earmark's October payments read as our
+ * web app. Our web app runs in a browser and declares no agent; a row that declared an agent name
+ * or ID, or came from a non-browser client (node, python-requests…), is an outside agent.
+ */
+function agentCalledAsWeb(client?: Pick<ClientRow, 'declared_agent' | 'declared_agent_id' | 'user_agent'> | null): boolean {
+  if (!client) return false;
+  if (client.declared_agent || client.declared_agent_id) return true;
+  return !!client.user_agent && !/mozilla/i.test(client.user_agent);
+}
 
 /** Which agent rail a row came through, or null when it isn't an external-agent payment. */
-export function externalRail(t: Pick<TxRow, 'payment_method' | 'source_channel'>, diag?: Record<string, unknown> | null): GrantPayment['integration'] | null {
+export function externalRail(
+  t: Pick<TxRow, 'payment_method' | 'source_channel'>,
+  diag?: Record<string, unknown> | null,
+  client?: Pick<ClientRow, 'declared_agent' | 'declared_agent_id' | 'user_agent'> | null,
+): GrantPayment['integration'] | null {
   const method = String(t.payment_method || '').toUpperCase();
   const src = String(t.source_channel || '').toUpperCase();
-  if (method === 'X402') return src === 'AGENT' ? 'x402' : null;
+  if (method === 'X402') return src === 'AGENT' || (src === 'WEB' && agentCalledAsWeb(client)) ? 'x402' : null;
   if (method === 'AGENT_RELAY' && (src === 'MCP' || src === 'A2A')) {
     return String(diag?.protocol || src).toUpperCase() === 'A2A' ? 'A2A' : 'MCP';
   }
@@ -153,7 +169,7 @@ export async function buildGrantReport(fromIso: string, toIso: string): Promise<
   const orderIds = [...new Set([...orders.values()].map((o) => o.id))];
   const clients = new Map<string, ClientRow>();
   for (let i = 0; i < orderIds.length; i += 500) {
-    const { data } = await supabase.from('payment_client_info').select('transaction_id, declared_agent, declared_agent_id, client_diag').in('transaction_id', orderIds.slice(i, i + 500));
+    const { data } = await supabase.from('payment_client_info').select('transaction_id, declared_agent, declared_agent_id, user_agent, client_diag').in('transaction_id', orderIds.slice(i, i + 500));
     for (const c of (data || []) as ClientRow[]) clients.set(c.transaction_id, c);
   }
   const wallets = [...new Set(onchain.map((r) => lower(r.payer)))];
@@ -180,7 +196,7 @@ export async function buildGrantReport(fromIso: string, toIso: string): Promise<
     let integration: GrantPayment['integration'];
     if (order) {
       if (order.status !== 'SUCCESS') { excluded.not_delivered++; continue; }
-      const rail = externalRail(order, diag);
+      const rail = externalRail(order, diag, client);
       if (!rail) { excluded.abapay_web_app_or_own_agent++; continue; }
       integration = rail;
     } else if (r.rail === 'x402') {
