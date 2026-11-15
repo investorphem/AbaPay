@@ -6,6 +6,8 @@ import { isMainnetEnv } from '@/lib/chain';
 import { indexChain, type IndexResult } from '@/lib/onchain/indexer';
 import { indexerRpc, supabaseIndexerStore } from '@/lib/onchain/runtime';
 import type { OnchainChain } from '@/lib/onchain/config';
+import { recheckAgentPayers, type RecheckResult } from '@/lib/onchain/payerRecheck';
+import { sendTelegramAlert } from '@/lib/telegram';
 
 // ⚡ ON-CHAIN INDEX — reads new vault payments from each chain into onchain_payments.
 //
@@ -53,5 +55,22 @@ export async function POST(req: Request) {
   const caughtUp = results.every((r) => 'caughtUp' in r && r.caughtUp);
   // HEALTHCHECK_URL_ONCHAIN: pages someone if the index stops being fed (src/lib/deadman.ts).
   await pingDeadman('ONCHAIN', !failed);
-  return NextResponse.json({ caughtUp, results }, { status: failed ? 502 : 200 });
+
+  // With the index caught up, re-read a batch of x402/relayer payer wallets from the chain, so a
+  // wallet that registered as an agent after paying is named (src/lib/onchain/payerRecheck.ts).
+  // Never fails the run: the index is what the deadman watches.
+  let payers: RecheckResult | { error: string } | undefined;
+  const left = TOTAL_BUDGET_MS - (Date.now() - started);
+  if (caughtUp && !param && left > 30_000) {
+    try {
+      payers = await recheckAgentPayers({ deadline: Date.now() + left - 10_000 });
+      if (payers.newly_identified.length) {
+        await sendTelegramAlert(`🪪 *Agent payer identified on chain*\n${payers.newly_identified.length} wallet(s) that paid through x402/the relayer now have an ERC-8004 or Self identity:\n${payers.newly_identified.map((w) => `\`${w}\``).join('\n')}`).catch(() => {});
+      }
+    } catch (err) {
+      console.error('[onchain-index] payer re-check failed:', err);
+      payers = { error: err instanceof Error ? err.message : String(err) };
+    }
+  }
+  return NextResponse.json({ caughtUp, results, payers }, { status: failed ? 502 : 200 });
 }
