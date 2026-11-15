@@ -15,7 +15,7 @@ export async function POST(req: Request) {
   const flood = await enforceRateLimitByKey('support:global', SUPPORT_GLOBAL_PER_HOUR, 3600);
   if (flood) {
     return NextResponse.json(
-      { success: false, message: 'Support is receiving a lot of messages right now. Please try again in a few minutes, or email hello@abapays.com.' },
+      { success: false, message: 'Support is receiving a lot of messages right now. Please try again in a few minutes.' },
       { status: 429 },
     );
   }
