@@ -1619,6 +1619,8 @@ Switch the selected account in your wallet to the owner and click again. You sta
 
                         // ⚡ DB BLOCKCHAIN UI FIX APPLIED ⚡
                         const isBaseTx = (tx.blockchain || "").toUpperCase().includes("BASE");
+                        // A NIM order's hash is a Nimiq transaction: nimiq.watch, as the mini app links it.
+                        const isNimTx = (tx.blockchain || "").toUpperCase() === "NIMIQ";
 
                         return (
                         <tr key={tx.id} className="hover:bg-slate-900/40">
@@ -1632,7 +1634,7 @@ Switch the selected account in your wallet to the owner and click again. You sta
                             {tx.tx_hash?.startsWith('preflight_') ? (
                               <p className="text-[9px] text-slate-600 italic mt-1">Never broadcast on-chain</p>
                             ) : (
-                              <a href={`https://${isMainnet ? '' : 'sepolia.'}${isBaseTx ? 'basescan.org' : 'celoscan.io'}/tx/${tx.tx_hash}`} target="_blank" className={`text-[9px] ${isBaseTx ? 'text-blue-400' : 'text-emerald-400'} hover:underline flex items-center gap-1 mt-1 font-mono tracking-wider`}>Hash: {tx.tx_hash.slice(0, 8)}... <ExternalLink size={8} /></a>
+                              <a href={isNimTx ? `https://nimiq.watch/#${tx.tx_hash}` : `https://${isMainnet ? '' : 'sepolia.'}${isBaseTx ? 'basescan.org' : 'celoscan.io'}/tx/${tx.tx_hash}`} target="_blank" className={`text-[9px] ${isNimTx ? 'text-amber-400' : isBaseTx ? 'text-blue-400' : 'text-emerald-400'} hover:underline flex items-center gap-1 mt-1 font-mono tracking-wider`}>Hash: {tx.tx_hash.slice(0, 8)}... <ExternalLink size={8} /></a>
                             )}
                           </td>
 

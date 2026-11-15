@@ -9,7 +9,7 @@ vi.mock('server-only', () => ({}));
 let db: FakeDb;
 vi.mock('@/utils/supabase', () => ({ get supabaseAdmin() { return fakeSupabase(db); } }));
 
-const chainSays: Record<string, { agents: { id: string; relation: string; name?: string }[]; self?: boolean } | Error> = {};
+const chainSays: Record<string, { agents: { id: string; relation: string; name?: string }[]; self?: boolean; error?: string } | Error> = {};
 const looked: string[] = [];
 vi.mock('@/lib/payerIdentity', () => ({
   lookupPayerIdentity: async (w: string) => {
@@ -18,7 +18,7 @@ vi.mock('@/lib/payerIdentity', () => ({
     if (c instanceof Error) throw c;
     return {
       wallet: w, erc8004_agents: c?.agents ?? [], self_verified: c?.self ?? false, self_agent_id: null,
-      self_human_proof: null, self_proof_fresh: null, checked_at: new Date(NOW).toISOString(), lookup_error: null,
+      self_human_proof: null, self_proof_fresh: null, checked_at: new Date(NOW).toISOString(), lookup_error: c?.error ?? null,
     };
   },
 }));
@@ -63,6 +63,36 @@ describe('recheckAgentPayers', () => {
     db.tables.onchain_payments = [pay(w(1))];
     db.tables.payer_identities = [identity(w(1), 30, { erc8004_agents: [{ id: '9806', relation: 'owner' }] })];
     chainSays[w(1)] = { agents: [{ id: '9806', relation: 'owner' }] };
+    expect((await recheckAgentPayers({ now: NOW })).newly_identified).toEqual([]);
+  });
+
+  it('does not alert on a first-ever read, only names the wallet', async () => {
+    db.tables.onchain_payments = [pay(w(5))];
+    chainSays[w(5)] = { agents: [{ id: '777', relation: 'owner' }] };
+    const r = await recheckAgentPayers({ now: NOW });
+    expect(r.newly_identified).toEqual([]);
+    expect(db.tables.payer_identities.find((p) => p.wallet === w(5))).toMatchObject({ erc8004_agents: [{ id: '777' }] });
+  });
+
+  it("never alerts for AbaPay's own or excluded wallets", async () => {
+    const owner = '0x9999999999999999999999999999999999999999';
+    process.env.GRANT_EXCLUDED_WALLETS = owner;
+    db.tables.onchain_payments = [pay(owner)];
+    db.tables.payer_identities = [identity(owner, 48)];
+    chainSays[owner] = { agents: [{ id: '9687', relation: 'owner' }] };
+    expect((await recheckAgentPayers({ now: NOW })).newly_identified).toEqual([]);
+    delete process.env.GRANT_EXCLUDED_WALLETS;
+  });
+
+  it('a half-failed lookup keeps the known identity, so the next clean read is not a second alert', async () => {
+    db.tables.onchain_payments = [pay(w(6))];
+    db.tables.payer_identities = [identity(w(6), 48, { erc8004_agents: [{ id: '10006', relation: 'owner' }] })];
+    chainSays[w(6)] = { agents: [], error: 'erc8004 ids: blockscout down' }; // empty because the read failed
+    const r1 = await recheckAgentPayers({ now: NOW });
+    expect(r1).toMatchObject({ checked: 0, errors: 1, newly_identified: [] });
+    expect(db.tables.payer_identities.find((p) => p.wallet === w(6))?.erc8004_agents).toEqual([{ id: '10006', relation: 'owner' }]);
+
+    chainSays[w(6)] = { agents: [{ id: '10006', relation: 'owner' }] }; // a clean read later
     expect((await recheckAgentPayers({ now: NOW })).newly_identified).toEqual([]);
   });
 

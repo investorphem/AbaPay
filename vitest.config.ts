@@ -8,7 +8,17 @@ import dotenv from 'dotenv';
 // ANTHROPIC_API_KEY calls) skipped itself even on a machine that has one configured.
 // quiet: true suppresses dotenv's own stdout banner (a promotional "tip" line unrelated to
 // this project) — this call still loads every var exactly the same.
-dotenv.config({ path: path.resolve(__dirname, '.env.local'), quiet: true });
+//
+// 🔴 ONLY ANTHROPIC_API_KEY. Loading the whole file also handed every test the real
+// TELEGRAM_BOT_TOKEN / TELEGRAM_ADMIN_CHAT_ID (and VTpass and other live keys), so a test that
+// didn't mock src/lib/telegram — tests/x402Settle.test.ts — sent its fixtures ("AMOUNT_MISMATCH",
+// payer 0x1111…, nonce 0xabab…) to the real ops channel whenever the suite ran on a dev machine.
+// CI never has those secrets, so this keeps a local run identical to CI apart from the one key
+// the live intent test needs.
+const LOCAL_ONLY_KEYS = ['ANTHROPIC_API_KEY'];
+const local: Record<string, string> = {};
+dotenv.config({ path: path.resolve(__dirname, '.env.local'), quiet: true, processEnv: local });
+for (const key of LOCAL_ONLY_KEYS) if (local[key] && !process.env[key]) process.env[key] = local[key];
 
 // The four routes that take or settle a payment.
 const MONEY_ROUTES = [

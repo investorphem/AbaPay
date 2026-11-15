@@ -1,6 +1,7 @@
 import 'server-only';
 import { supabaseAdmin as supabase } from '@/utils/supabase';
 import { lookupPayerIdentity } from '@/lib/payerIdentity';
+import { excludedWallets } from '@/lib/grantReport';
 import type { PayerIdentity } from '@/lib/payerIdentityTypes';
 
 // 🔁 RE-CHECK EVERY AGENT PAYER ON CHAIN.
@@ -71,18 +72,27 @@ export async function recheckAgentPayers(opts: { batch?: number; staleMs?: numbe
     .filter((x) => now - x.at >= staleMs)
     .sort((a, b) => a.at - b.at);
 
+  const excluded = excludedWallets();
   const result: RecheckResult = { payers: payers.length, due: due.length, checked: 0, newly_identified: [], errors: 0 };
   for (const { w } of due.slice(0, batch)) {
     if (opts.deadline && Date.now() > opts.deadline) break;
     try {
-      const { data: before } = await supabase.from('payer_identities').select('erc8004_agents, self_verified').eq('wallet', w).maybeSingle();
+      const { data } = await supabase.from('payer_identities').select('erc8004_agents, self_verified, lookup_error').eq('wallet', w).maybeSingle();
+      const before = data as Pick<PayerIdentity, 'erc8004_agents' | 'self_verified' | 'lookup_error'> | null;
       const identity = await lookupPayerIdentity(w);
+      const had = (before?.erc8004_agents ?? []).length > 0 || before?.self_verified === true;
+      const has = identity.erc8004_agents.length > 0 || identity.self_verified === true;
+      // A lookup that half-failed must not wipe an identity we already know: that is what would make
+      // the same wallet look "newly identified" again on the next clean read.
+      if (identity.lookup_error && had && !has) throw new Error(`lookup failed, kept the known identity: ${identity.lookup_error}`);
       const { error } = await supabase.from('payer_identities').upsert(identity, { onConflict: 'wallet' });
       if (error) throw new Error(error.message);
       result.checked++;
-      const had = ((before as Pick<PayerIdentity, 'erc8004_agents'> | null)?.erc8004_agents ?? []).length > 0 || (before as Pick<PayerIdentity, 'self_verified'> | null)?.self_verified === true;
-      const has = identity.erc8004_agents.length > 0 || identity.self_verified === true;
-      if (has && !had) result.newly_identified.push(w);
+      // Alert once, only for a real change: the wallet was read cleanly before with no identity and
+      // now has one. A first-ever read (no earlier row) is not "newly" anything — it is just being
+      // looked at — and AbaPay's own / excluded wallets are never news.
+      const changed = !!before && !before.lookup_error && !had && has && !identity.lookup_error;
+      if (changed && !excluded.has(w)) result.newly_identified.push(w);
     } catch (e) {
       result.errors++;
       console.warn('[payerRecheck]', w, e instanceof Error ? e.message : e);
