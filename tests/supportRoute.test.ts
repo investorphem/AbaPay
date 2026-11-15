@@ -46,6 +46,15 @@ beforeEach(() => {
 });
 
 describe('/api/support — flood limits', () => {
+  it.each([
+    ['an empty body', undefined, {}],
+    ['JSON', JSON.stringify({ message: 'hi' }), { 'Content-Type': 'application/json' }],
+  ])('answers 400, not 500, to %s, and forwards nothing', async (_label, body, headers) => {
+    const res = await POST(new Request('http://localhost/api/support', { method: 'POST', headers: { 'x-real-ip': '9.9.9.9', ...headers }, body }));
+    expect(res.status).toBe(400);
+    expect(telegram).not.toHaveBeenCalled();
+  });
+
   it('forwards a normal ticket', async () => {
     expect((await send()).status).toBe(200);
     expect(telegram).toHaveBeenCalledTimes(1);

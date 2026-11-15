@@ -23,7 +23,14 @@ export async function POST(req: Request) {
   if (limited) return limited;
 
   try {
-    const formData = await req.formData();
+    // A body that isn't a form (empty, JSON, junk) is the sender's mistake: 400, not a 500 that
+    // reads as "our server failed".
+    let formData: FormData;
+    try {
+      formData = await req.formData();
+    } catch {
+      return NextResponse.json({ success: false, message: 'Invalid request. Please send the support form.' }, { status: 400 });
+    }
     const message = formData.get('message') as string;
     const email = formData.get('email') as string; // ⚡ NEW: Catch the email
     const file = formData.get('file') as File;
