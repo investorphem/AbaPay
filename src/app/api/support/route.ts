@@ -1,24 +1,26 @@
 import { NextResponse } from 'next/server';
+import { createHash } from 'crypto';
 import { enforceRateLimit, enforceRateLimitByKey } from '@/lib/rateLimit';
 import { errorMessage } from '@/lib/errors';
 
+/** Tickets one sender (IP, email or wallet) may send per window. */
+const SUPPORT_PER_SENDER = 5;
+const SUPPORT_WINDOW_SECONDS = 300;
 /** Tickets forwarded to the support Telegram per hour across ALL senders. */
 const SUPPORT_GLOBAL_PER_HOUR = 20;
 
+const tooMany = () => NextResponse.json(
+  { success: false, message: 'Support is receiving a lot of messages right now. Please try again in a few minutes.' },
+  { status: 429 },
+);
+
+/** The email as a rate-limit key: trimmed, lower-cased and hashed, so the table never holds addresses. */
+const emailKey = (email: string) => createHash('sha256').update(email.trim().toLowerCase()).digest('hex').slice(0, 32);
+
 export async function POST(req: Request) {
-  // 🛡️ Prevent ticket spam / notification flooding (5 per 5 min per IP).
-  const limited = await enforceRateLimit(req, 'support', 5, 300);
+  // 🛡️ Prevent ticket spam / notification flooding: 5 per 5 min per IP…
+  const limited = await enforceRateLimit(req, 'support', SUPPORT_PER_SENDER, SUPPORT_WINDOW_SECONDS);
   if (limited) return limited;
-  // 🛡️ …and a site-wide cap. 2026-11-15: "probe" tickets arrived from rotating Tor exit nodes
-  // (185.220.100.246, 185.220.101.140) and a VPN, each getting a fresh per-IP allowance. Real
-  // support traffic is a handful a day, so this only ever bites a flood.
-  const flood = await enforceRateLimitByKey('support:global', SUPPORT_GLOBAL_PER_HOUR, 3600);
-  if (flood) {
-    return NextResponse.json(
-      { success: false, message: 'Support is receiving a lot of messages right now. Please try again in a few minutes, or email hello@abapays.com.' },
-      { status: 429 },
-    );
-  }
 
   try {
     const formData = await req.formData();
@@ -29,7 +31,18 @@ export async function POST(req: Request) {
     const chain = formData.get('chain') as string || 'Unknown';
 
     // UPGRADED: Catch the hidden transaction hash!
-    const txHash = formData.get('txHash') as string; 
+    const txHash = formData.get('txHash') as string;
+
+    // 🛡️ …and 5 per 5 min per email and per wallet, so changing IP (Tor, VPN) doesn't reset the
+    // count for the same sender. 2026-11-15: "probe" tickets came from rotating Tor exit nodes
+    // (185.220.100.246, 185.220.101.140) and a VPN, each getting a fresh per-IP allowance.
+    const cleanEmail = String(email || '').trim().toLowerCase();
+    if (cleanEmail && await enforceRateLimitByKey(`support:email:${emailKey(cleanEmail)}`, SUPPORT_PER_SENDER, SUPPORT_WINDOW_SECONDS)) return tooMany();
+    const wallet = String(userAddress || '').trim().toLowerCase();
+    if (wallet && wallet !== 'anonymous' && await enforceRateLimitByKey(`support:wallet:${wallet}`, SUPPORT_PER_SENDER, SUPPORT_WINDOW_SECONDS)) return tooMany();
+    // …and a site-wide cap: real support traffic is a handful a day, so this only bites a flood
+    // that rotates IP, email and wallet all at once.
+    if (await enforceRateLimitByKey('support:global', SUPPORT_GLOBAL_PER_HOUR, 3600)) return tooMany();
 
     // 🔐 ABUSE CONTROLS: validate message and attachment before forwarding to Telegram
     if (!message || message.trim().length === 0) {
