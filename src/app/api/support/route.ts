@@ -1,11 +1,24 @@
 import { NextResponse } from 'next/server';
-import { enforceRateLimit } from '@/lib/rateLimit';
+import { enforceRateLimit, enforceRateLimitByKey } from '@/lib/rateLimit';
 import { errorMessage } from '@/lib/errors';
+
+/** Tickets forwarded to the support Telegram per hour across ALL senders. */
+const SUPPORT_GLOBAL_PER_HOUR = 20;
 
 export async function POST(req: Request) {
   // 🛡️ Prevent ticket spam / notification flooding (5 per 5 min per IP).
   const limited = await enforceRateLimit(req, 'support', 5, 300);
   if (limited) return limited;
+  // 🛡️ …and a site-wide cap. 2026-11-15: "probe" tickets arrived from rotating Tor exit nodes
+  // (185.220.100.246, 185.220.101.140) and a VPN, each getting a fresh per-IP allowance. Real
+  // support traffic is a handful a day, so this only ever bites a flood.
+  const flood = await enforceRateLimitByKey('support:global', SUPPORT_GLOBAL_PER_HOUR, 3600);
+  if (flood) {
+    return NextResponse.json(
+      { success: false, message: 'Support is receiving a lot of messages right now. Please try again in a few minutes, or email hello@abapays.com.' },
+      { status: 429 },
+    );
+  }
 
   try {
     const formData = await req.formData();
