@@ -166,6 +166,31 @@ describe('verifyNimRefund', () => {
     expect((await nim.verifyNimRefund(HASH, { to: PAYER, minLuna: 2 })).status).toBe('MISMATCH');
   });
 
+  // 2026-11-09: Nimiq Pay sent a 252 NIM refund from an HTLC the treasury funded (fromType 2), and
+  // it was refused as "not the treasury", so the order never showed as refunded.
+  it('confirms a refund Nimiq Pay sent from an HTLC the treasury funded, and refuses one from an HTLC someone else funded', async () => {
+    const HTLC = 'NQ35 SANQ CCCV 950D FTQ3 DN78 BNVX G4TV 76GK';
+    fetchMock.mockImplementation(async (_url: string, init?: RequestInit) => {
+      const body = JSON.parse(String(init?.body || '{}'));
+      if (body.method === 'getTransactionByHash') return new Response(JSON.stringify({ result: { data: chainTx } }));
+      if (body.method === 'getAccountByAddress') return new Response(JSON.stringify({ result: { data: { type: 'htlc', sender: htlcSender } } }));
+      return new Response(JSON.stringify({ result: { data: [] } }));
+    });
+    let htlcSender = TREASURY;
+    chainTx = refund({ from: HTLC, fromType: 2 });
+    expect((await nim.verifyNimRefund(HASH, { to: PAYER, minLuna: 1 })).status).toBe('CONFIRMED');
+    htlcSender = PAYER;
+    expect((await nim.verifyNimRefund(HASH, { to: PAYER, minLuna: 1 })).status).toBe('MISMATCH');
+    fetchMock.mockReset();
+    fetchMock.mockImplementation(async (_url: string, init?: RequestInit) => {
+      if (rpcDown) throw new Error('ECONNREFUSED');
+      const body = JSON.parse(String(init?.body || '{}'));
+      if (body.method === 'getTransactionByHash') return new Response(JSON.stringify(chainTx ? { result: { data: chainTx } } : { error: { message: 'not found' } }));
+      if (body.method === 'getTransactionsByAddress') return new Response(JSON.stringify({ result: { data: chainTx ? [chainTx] : [] } }));
+      return new Response('{}');
+    });
+  });
+
   it('reports a failed refund as FAILED and a missing one as PENDING', async () => {
     chainTx = refund({ executionResult: false });
     expect((await nim.verifyNimRefund(HASH, { to: PAYER, minLuna: 1 })).status).toBe('FAILED');

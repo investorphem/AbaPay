@@ -373,7 +373,15 @@ export async function verifyNimRefund(hash: string, expected: { to: string; minL
   if (!tx) return { status: 'PENDING', detail: 'Not on chain yet.' };
   if (tx.executionResult === false) return { status: 'FAILED', detail: 'The refund transaction failed on chain.' };
   const treasury = treasuryAddress();
-  if (treasury && canonicalNimAddress(tx.from) !== treasury) return { status: 'MISMATCH', detail: `Sent from ${formatNimAddress(tx.from)}, not the treasury.` };
+  // 🔴 A REFUND SENT FROM NIMIQ PAY COMES FROM AN HTLC, not the treasury's plain account: Nimiq Pay
+  // spends from an HTLC the treasury funded (fromType 2), exactly as incoming payments arrive (see
+  // htlcFunder above). 2026-11-09: a 252 NIM refund (600ca33a…) came from HTLC NQ35 SANQ… and was
+  // refused as "not the treasury", so the order never showed as refunded.
+  if (treasury && canonicalNimAddress(tx.from) !== treasury) {
+    const funder = tx.fromType === 2 || tx.fromType === undefined ? await htlcFunder(tx.from) : null;
+    if (funder === undefined) return { status: 'PENDING', detail: 'Could not read the HTLC the refund was sent from; will retry.' };
+    if (funder !== treasury) return { status: 'MISMATCH', detail: `Sent from ${formatNimAddress(tx.from)}, not the treasury or an HTLC it funded.` };
+  }
   if (canonicalNimAddress(tx.to) !== canonicalNimAddress(expected.to)) return { status: 'MISMATCH', detail: `Sent to ${formatNimAddress(tx.to)}, not the payer.` };
   if (!(Number(tx.value) >= expected.minLuna)) return { status: 'MISMATCH', detail: `Sent ${Number(tx.value) / LUNA_PER_NIM} NIM, ${expected.minLuna / LUNA_PER_NIM} NIM owed.` };
   if (Number(tx.confirmations) < MIN_CONFIRMATIONS) return { status: 'PENDING', detail: 'Waiting for confirmations.' };
