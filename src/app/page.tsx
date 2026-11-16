@@ -17,6 +17,7 @@ import { signSiweHeaders, siweChainId, SIWE_HEADER } from "@/lib/siwe";
 import { celoAttributionSuffix } from "@/lib/attribution";
 import { useProviders, useValidSelection, useProviderLimits } from "@/lib/useProviders";
 import { billAmountLimits } from "@/lib/amountLimits";
+import { emailProblem } from "@/lib/emailValidity";
 import { useAccount, useConnect, useDisconnect, useWalletClient, useSwitchChain, type Connector } from 'wagmi';
 import { payWithX402, X402PaymentError } from "@/lib/x402Pay";
 
@@ -1087,8 +1088,10 @@ export default function Home() {
 
     const handleSendSupport = async () => {
     // ⚡ 1. VALIDATE EMAIL ⚡
-    if (!supportEmail.trim() || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(supportEmail)) {
-        return showToast("Error", "Please enter a valid email address.", "error");
+    // Same rule as /api/support (src/lib/emailValidity.ts): a real shape, and never a reserved
+    // test domain like example.com. The server also checks the domain receives mail.
+    if (emailProblem(supportEmail)) {
+        return showToast("Error", "Please enter a real email address we can reply to.", "error");
     }
     if (!supportMessage.trim()) return showToast("Error", "Please enter a message.", "error");
     
