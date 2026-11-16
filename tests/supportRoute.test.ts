@@ -17,6 +17,10 @@ vi.mock('@/lib/rateLimit', () => ({
   enforceRateLimitByKey: async (key: string, limit: number) => hit(key, limit),
 }));
 
+let mailVerdict: 'yes' | 'no' | 'unknown' = 'yes';
+vi.mock('@/lib/emailDomain', () => ({ domainReceivesMail: async () => mailVerdict }));
+vi.mock('server-only', () => ({}));
+
 const telegram = vi.fn(async () => new Response(JSON.stringify({ ok: true }), { status: 200 }));
 vi.stubGlobal('fetch', telegram);
 
@@ -27,7 +31,7 @@ const send = (over: { ip?: string; email?: string; wallet?: string } = {}) => {
   n++;
   const form = new FormData();
   form.set('message', 'my bill was not delivered');
-  form.set('email', over.email ?? `user${n}@example.com`);
+  form.set('email', over.email ?? `user${n}@mail.com`);
   if (over.wallet) form.set('userAddress', over.wallet);
   return POST(new Request('http://localhost/api/support', { method: 'POST', headers: { 'x-real-ip': over.ip ?? `10.0.0.${n}` }, body: form }));
 };
@@ -39,10 +43,36 @@ const statuses = async (count: number, over: (i: number) => Parameters<typeof se
 
 beforeEach(() => {
   counts.clear();
+  mailVerdict = 'yes';
   keys.length = 0;
   telegram.mockClear();
   process.env.SUPPORT_TELEGRAM_BOT_TOKEN = 'test-token';
   process.env.TELEGRAM_ADMIN_CHAT_ID = '-100test';
+});
+
+describe('/api/support — real email only', () => {
+  it.each(['i147@example.com', 'probe@example.org', 'x@foo.test', 'not-an-email', ''])('refuses %s with 400 and forwards nothing', async (email) => {
+    const res = await send({ email });
+    expect(res.status).toBe(400);
+    expect(telegram).not.toHaveBeenCalled();
+  });
+
+  it('refuses a domain that has no mail servers', async () => {
+    mailVerdict = 'no';
+    const res = await send({ email: 'ada@no-such-domain-xyz.com' });
+    expect(res.status).toBe(400);
+    expect(telegram).not.toHaveBeenCalled();
+  });
+
+  it('lets a ticket through when DNS cannot answer, so a real customer is never blocked by an outage', async () => {
+    mailVerdict = 'unknown';
+    expect((await send({ email: 'ada@gmail.com' })).status).toBe(200);
+  });
+
+  it('does not count a refused email against the site-wide cap', async () => {
+    for (let i = 0; i < 25; i++) await send({ email: 'i147@example.com' });
+    expect(keys.some((k) => k === 'support:global')).toBe(false);
+  });
 });
 
 describe('/api/support — flood limits', () => {
@@ -67,7 +97,7 @@ describe('/api/support — flood limits', () => {
   });
 
   it('holds one email to 5 per window even from different IPs and in different letter case', async () => {
-    const s = await statuses(7, (i) => ({ ip: `185.220.101.${i}`, email: i % 2 ? ' I147@Example.com ' : 'i147@example.com' }));
+    const s = await statuses(7, (i) => ({ ip: `185.220.101.${i}`, email: i % 2 ? ' Probe@Mail.com ' : 'probe@mail.com' }));
     expect(s.filter((x) => x === 200)).toHaveLength(5);
     expect(telegram).toHaveBeenCalledTimes(5);
   });
@@ -83,8 +113,8 @@ describe('/api/support — flood limits', () => {
   });
 
   it('stores the email only as a hash', async () => {
-    await send({ email: 'someone@example.com' });
-    expect(keys.some((k) => k.includes('someone@example.com'))).toBe(false);
+    await send({ email: 'someone@mail.com' });
+    expect(keys.some((k) => k.includes('someone@mail.com'))).toBe(false);
     expect(keys.some((k) => /^support:email:[0-9a-f]{32}$/.test(k))).toBe(true);
   });
 

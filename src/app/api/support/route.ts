@@ -2,6 +2,8 @@ import { NextResponse } from 'next/server';
 import { createHash } from 'crypto';
 import { enforceRateLimit, enforceRateLimitByKey } from '@/lib/rateLimit';
 import { errorMessage } from '@/lib/errors';
+import { emailProblem, emailDomain } from '@/lib/emailValidity';
+import { domainReceivesMail } from '@/lib/emailDomain';
 
 /** Tickets one sender (IP, email or wallet) may send per window. */
 const SUPPORT_PER_SENDER = 5;
@@ -39,6 +41,17 @@ export async function POST(req: Request) {
 
     // UPGRADED: Catch the hidden transaction hash!
     const txHash = formData.get('txHash') as string;
+
+    // 📧 A real, reachable email only (the form already asks for one; this is the check a direct
+    // API call can't skip). 2026-11-15 probes used i147@example.com — a reserved domain that can
+    // never receive mail. Shape and reserved names first, then the domain's mail servers.
+    const problem = emailProblem(email);
+    if (problem) {
+      return NextResponse.json({ success: false, message: problem === 'EMPTY' ? 'Please enter your email address.' : 'Please enter a real email address we can reply to.' }, { status: 400 });
+    }
+    if (await domainReceivesMail(emailDomain(email)) === 'no') {
+      return NextResponse.json({ success: false, message: "That email address's domain doesn't receive email. Please check it and try again." }, { status: 400 });
+    }
 
     // 🛡️ …and 5 per 5 min per email and per wallet, so changing IP (Tor, VPN) doesn't reset the
     // count for the same sender. 2026-11-15: "probe" tickets came from rotating Tor exit nodes
