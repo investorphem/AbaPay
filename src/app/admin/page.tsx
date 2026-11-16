@@ -899,6 +899,24 @@ Switch the selected account in your wallet to the owner and click again. You sta
       }
     }
 
+    // 🔐 CELO/BASE: prove the ORIGINAL payment on chain before any vault payout. A hash that only
+    // looks real proves nothing — 2026-11-16 a prober recorded a made-up 0xdede… hash on a Base
+    // order (src/lib/orderPaymentProof.ts).
+    try {
+      const res = await fetch(`/api/admin/payment-proof?id=${encodeURIComponent(tx.id)}`, { headers: adminHeaders });
+      const proof = await res.json();
+      if (proof.status === 'NOT_PAID') {
+        return alert(`No refund: this order's payment is not on-chain.\n\n${proof.detail || ''}\n\nNothing was sent.`);
+      }
+      if (proof.status === 'CHECK_MANUALLY') {
+        if (!confirm(`${proof.detail}\n\nOnly continue if you have found the payment on the explorer.`)) return;
+      } else if (proof.status !== 'PAID') {
+        return alert(`Couldn't confirm this order's payment on-chain right now (${proof.detail || proof.message || 'no answer'}). Nothing was sent — try again in a minute.`);
+      }
+    } catch {
+      return alert("Couldn't check this order's payment on-chain. Nothing was sent — try again in a minute.");
+    }
+
     let manualReason: string | null = null;
     if (!tx.error_code && !tx.api_response && (tx.status === 'PENDING' || tx.status === 'PROCESSING')) {
       manualReason = window.prompt(
