@@ -57,7 +57,8 @@ jobs:
           node-version: '22'
           cache: npm
       - name: Install dependencies
-        run: npm ci --no-audit --no-fund
+        # Same fallback as ci.yml: an out-of-sync lockfile shouldn't stop the jobs.
+        run: npm ci --no-audit --no-fund || (echo "::warning::package-lock.json is out of sync with package.json — falling back to npm install." && npm install --no-audit --no-fund)
       - name: Build the job runner
         run: node scripts/jobs/build.mjs
       - name: Run
