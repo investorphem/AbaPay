@@ -17,10 +17,8 @@ name: Background jobs
 #            Accept: application/vnd.github+json
 #   Body:    {"ref":"main","inputs":{"job":"all"}}
 #
-# Configuration: every repository secret is handed to the runner as SECRETS_JSON, so the production
-# environment can be imported in one go (run locally, then delete the file):
-#   vercel env pull .env.production --environment=production
-#   gh secret set -f .env.production -R investorphem/AbaPay
+# Configuration: the repository secrets the jobs use are passed by name (the Run step lists them).
+# Values Vercel marks Sensitive can't be pulled from Vercel; set those on GitHub by hand.
 # The runner refuses to run unless NEXT_PUBLIC_APP_MODE=live and NEXT_PUBLIC_NETWORK is mainnet, and
 # names any missing Supabase setting. Healthchecks: HEALTHCHECK_URL_ONCHAIN / HEALTHCHECK_URL_CLEANUP.
 
@@ -59,12 +57,45 @@ jobs:
           node-version: '22'
           cache: npm
       - name: Install dependencies
-        run: npm ci --no-audit --no-fund
+        # Same fallback as ci.yml: an out-of-sync lockfile shouldn't stop the jobs.
+        run: npm ci --no-audit --no-fund || (echo "::warning::package-lock.json is out of sync with package.json — falling back to npm install." && npm install --no-audit --no-fund)
       - name: Build the job runner
         run: node scripts/jobs/build.mjs
       - name: Run
+        # Each secret the jobs use, named — not toJSON(secrets): the first run that passed every
+        # secret at once was held by GitHub as "action_required" without starting, and naming only
+        # what's needed keeps the signing keys (RELAYER_PRIVATE_KEY etc.) out of this job anyway.
+        # A secret that isn't set arrives as "" and the runner treats it as absent.
         env:
-          SECRETS_JSON: ${{ toJSON(secrets) }}
+          NEXT_PUBLIC_SUPABASE_URL: ${{ secrets.NEXT_PUBLIC_SUPABASE_URL }}
+          NEXT_PUBLIC_SUPABASE_ANON_KEY: ${{ secrets.NEXT_PUBLIC_SUPABASE_ANON_KEY }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+          NEXT_PUBLIC_NETWORK: ${{ secrets.NEXT_PUBLIC_NETWORK }}
+          NEXT_PUBLIC_APP_MODE: ${{ secrets.NEXT_PUBLIC_APP_MODE }}
+          NEXT_PUBLIC_ABAPAY_CELO_ADDRESS: ${{ secrets.NEXT_PUBLIC_ABAPAY_CELO_ADDRESS }}
+          NEXT_PUBLIC_ABAPAY_BASE_ADDRESS: ${{ secrets.NEXT_PUBLIC_ABAPAY_BASE_ADDRESS }}
+          NEXT_PUBLIC_ABAPAY_ADDRESS: ${{ secrets.NEXT_PUBLIC_ABAPAY_ADDRESS }}
+          CELO_RPC_URL: ${{ secrets.CELO_RPC_URL }}
+          BASE_RPC_URL: ${{ secrets.BASE_RPC_URL }}
+          VTPASS_API_KEY: ${{ secrets.VTPASS_API_KEY }}
+          VTPASS_PUBLIC_KEY: ${{ secrets.VTPASS_PUBLIC_KEY }}
+          VTPASS_SECRET_KEY: ${{ secrets.VTPASS_SECRET_KEY }}
+          MONNIFY_API_KEY: ${{ secrets.MONNIFY_API_KEY }}
+          MONNIFY_SECRET_KEY: ${{ secrets.MONNIFY_SECRET_KEY }}
+          MONNIFY_CONTRACT_CODE: ${{ secrets.MONNIFY_CONTRACT_CODE }}
+          MONNIFY_MODE: ${{ secrets.MONNIFY_MODE }}
+          MONNIFY_SOURCE_ACCOUNT_NUMBER: ${{ secrets.MONNIFY_SOURCE_ACCOUNT_NUMBER }}
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_ADMIN_CHAT_ID: ${{ secrets.TELEGRAM_ADMIN_CHAT_ID }}
+          DEAI_TELEGRAM_BOT_TOKEN: ${{ secrets.DEAI_TELEGRAM_BOT_TOKEN }}
+          RESEND_API_KEY: ${{ secrets.RESEND_API_KEY }}
+          WHATSAPP_ACCESS_TOKEN: ${{ secrets.WHATSAPP_ACCESS_TOKEN }}
+          WHATSAPP_PHONE_NUMBER_ID: ${{ secrets.WHATSAPP_PHONE_NUMBER_ID }}
+          NIMIQ_TREASURY_ADDRESS: ${{ secrets.NIMIQ_TREASURY_ADDRESS }}
+          RATE_API_URL: ${{ secrets.RATE_API_URL }}
+          ADMIN_WALLET_ADDRESS: ${{ secrets.ADMIN_WALLET_ADDRESS }}
+          HEALTHCHECK_URL_ONCHAIN: ${{ secrets.HEALTHCHECK_URL_ONCHAIN }}
+          HEALTHCHECK_URL_CLEANUP: ${{ secrets.HEALTHCHECK_URL_CLEANUP }}
           JOB: ${{ inputs.job || 'all' }}
           BACKFILL: ${{ inputs.backfill && '--backfill' || '' }}
         run: node .jobs-dist/run.cjs "$JOB" $BACKFILL
