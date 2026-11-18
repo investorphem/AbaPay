@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
+import { networkForPhone, NETWORK_DATA_SERVICES, NETWORK_LABEL } from '@/lib/phoneNetwork';
 import { init, getHostNetwork, type NimiqProvider } from '@nimiq/mini-app-sdk';
 import { Phone, Wifi, Lightbulb, Tv, GraduationCap, Landmark, Globe2, Loader2, CheckCircle2, XCircle, ExternalLink, Copy, Check, ChevronLeft, ChevronDown, Search, X, Home, History as HistoryIcon, Clock, Send, ShieldCheck, LogOut, Wallet } from 'lucide-react';
 import { billCharges } from '@/lib/billCharges';
@@ -250,6 +251,23 @@ export default function NimApp() {
       .then((d) => setPlans(d.content?.variations || []))
       .catch(() => {});
   }, [provider, svc]);
+
+  // Airtime and data: pick the provider from the number as it's typed, as abapays.com does
+  // (src/lib/phoneNetwork.ts). Without it a customer could buy Airtel airtime for an MTN number,
+  // which VTpass can only refuse (2026-11-05, a NIM refund). Only on typing the number, so a
+  // customer with a ported number can still choose another network afterwards (the hint says so).
+  const onPhoneChange = (value: string) => {
+    const next = value.replace(/[^\d+]/g, '');
+    setPhone(next);
+    if (svc !== 'AIRTIME' && svc !== 'DATA') return;
+    const network = networkForPhone(next);
+    if (!network) return;
+    const family = svc === 'AIRTIME' ? [network] : NETWORK_DATA_SERVICES[network];
+    if (family.includes(provider)) return;
+    const id = family.find((s) => providers.some((p) => p.serviceID === s));
+    if (!id) return;
+    setProvider(id); setVerified(null); setPlans([]); setPlan(null);
+  };
 
   // International drill-down: country → product → operator → plan. Changing a level clears the
   // levels below it in the change handler, so each effect only ever loads.
@@ -711,8 +729,16 @@ export default function NimApp() {
             )}
 
             <Field label={svc === 'INTL' ? 'Phone number (with country code)' : svc === 'BANK' || svc === 'ELECTRICITY' || svc === 'CABLE' ? 'Your phone number' : 'Phone number'}>
-              <input inputMode="tel" value={phone} onChange={(e) => setPhone(e.target.value.replace(/[^\d+]/g, ''))} placeholder={svc === 'INTL' ? `${countries.find((c) => c.code === country)?.prefix || ''}…` : '080…'} className={input} />
+              <input inputMode="tel" value={phone} onChange={(e) => onPhoneChange(e.target.value)} placeholder={svc === 'INTL' ? `${countries.find((c) => c.code === country)?.prefix || ''}…` : '080…'} className={input} />
             </Field>
+            {(svc === 'AIRTIME' || svc === 'DATA') && (() => {
+              const network = networkForPhone(phone);
+              if (!network || !provider) return null;
+              const matches = (svc === 'AIRTIME' ? [network] : NETWORK_DATA_SERVICES[network]).includes(provider);
+              return matches
+                ? <p className="text-[11px] opacity-60 -mt-1">{NETWORK_LABEL[network]} number</p>
+                : <p className="text-[11px] text-amber-400 -mt-1">This looks like a {NETWORK_LABEL[network]} number. Only keep another provider if the number was ported to it.</p>;
+            })()}
 
             {(svc === 'ELECTRICITY' || svc === 'EDUCATION') && (
               <Field label="Email for your token / PIN (optional)">

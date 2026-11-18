@@ -13,6 +13,7 @@ import { normalizePurchasedCode, issuesTokenOrPin } from '@/lib/purchasedCode';
 import { log, metric } from '@/lib/log';
 import { errorMessage } from '@/lib/errors';
 import { channelLabel } from '@/lib/channelLabel';
+import { vtpassDescription, vtpassAdminError } from '@/lib/vtpassCodes';
 
 const resend = new Resend(process.env.RESEND_API_KEY || 're_dummy_key_for_build');
 
@@ -320,7 +321,7 @@ async function executeVendImpl(input: VendInput): Promise<VendResult> {
     return { success: true, status: 'SUCCESS', purchased_code: dbPurchasedCode, units: vendedUnits, request_id: vtRequestId };
   } else {
     const friendlyMessage = error_messages[payData.code as string] || "The provider couldn't complete this one right now.";
-    await supabase.from('transactions').update({ status: 'FAILED_VENDING', error_code: payData.code, api_response: payData.response_description }).eq('tx_hash', txHash);
+    await supabase.from('transactions').update({ status: 'FAILED_VENDING', error_code: payData.code, api_response: vtpassDescription(payData.code, payData.response_description) }).eq('tx_hash', txHash);
 
     // 🔴 THE MONITORING GAP THIS FIXES: when the VTpass float ran dry on 15 Jul 2026, this
     // branch fired 226 times over four weeks and nobody noticed — because each occurrence
@@ -347,7 +348,7 @@ async function executeVendImpl(input: VendInput): Promise<VendResult> {
       const header = isFloatIssue
         ? `🔴 *FLOAT EXHAUSTED — VENDING HALTED*\n\n_Every ${serviceCategory} payment will keep failing and auto-refunding until the VTpass wallet is topped up._\n`
         : `❌ *VENDING REJECTED*`;
-      await sendTelegramAlert(`${header}\n📲 *Source:* ${channelBadge(source_channel)}\n⛓️ *Chain:* ${blockchain || 'CELO'}\n🛒 *Product:* ${network} ${serviceCategory}\n👤 *User:* ${billersCode}\n🚨 *Admin Error:* Code ${payData.code} - ${payData.response_description}\n🗣 *User Message:* ${friendlyMessage}\n🔍 *Explorer:* ${explorerUrl}`);
+      await sendTelegramAlert(`${header}\n📲 *Source:* ${channelBadge(source_channel)}\n⛓️ *Chain:* ${blockchain || 'CELO'}\n🛒 *Product:* ${network} ${serviceCategory}\n👤 *User:* ${billersCode}\n🚨 *Admin Error:* Code ${vtpassAdminError(payData.code, payData.response_description)}\n🗣 *User Message:* ${friendlyMessage}\n🔍 *Explorer:* ${explorerUrl}`);
     } catch (tgError) {
       console.error('Telegram Failure Alert Error:', tgError);
     }
@@ -364,7 +365,7 @@ async function executeVendImpl(input: VendInput): Promise<VendResult> {
         amountNaira: vendAmount,
         blockchain: blockchain || 'CELO',
         reason: 'VTpass vend rejected',
-        vtpassError: `${payData.code}: ${payData.response_description}`,
+        vtpassError: `${payData.code}: ${vtpassDescription(payData.code, payData.response_description)}`,
         userMessage: friendlyMessage,
         serviceCategory,
         sourceChannel: source_channel || 'WEB',
