@@ -48,6 +48,15 @@ const retry = async () => {
 
 beforeEach(() => {
   db = createFakeDb({ transactions: [order()], refund_queue: [refundRow()] });
+  // Mirrors claim_failed_vend_for_retry (migration 046): one unrefunded FAILED_VENDING row, claimed once.
+  db.rpcHandlers = {
+    claim_failed_vend_for_retry: ({ p_id, p_request_id }: { p_id: string; p_request_id: string }, d: FakeDb) => {
+      const row = d.tables.transactions.find((t) => t.id === p_id && t.status === 'FAILED_VENDING' && !t.refund_hash);
+      if (!row) return [];
+      Object.assign(row, { status: 'PROCESSING', request_id: p_request_id, vend_dispatched_at: null, error_code: null, api_response: null });
+      return [row];
+    },
+  };
   nimProof = { ok: true };
   evmProof = { status: 'PAID', detail: 'paid' };
   vendStatus = 'SUCCESS';
@@ -107,6 +116,15 @@ describe('retry delivery instead of refunding', () => {
     const r = await retry();
     expect(r.json).toMatchObject({ success: false, status: 'FAILED_VENDING' });
     expect(db.tables.refund_queue[0].status).toBe('PENDING');
+  });
+
+  it('puts the refund back and sends nothing when the database refuses the claim', async () => {
+    db.rpcHandlers = { claim_failed_vend_for_retry: () => ({ rpcError: { code: 'P0001', message: 'AbaPay state guard' } }) };
+    const r = await retry();
+    expect(r.status).toBe(500);
+    expect(executeVend).not.toHaveBeenCalled();
+    expect(db.tables.refund_queue[0].status).toBe('PENDING');
+    expect(db.tables.transactions[0].status).toBe('FAILED_VENDING');
   });
 
   it('cannot be run twice on the same refund', async () => {
