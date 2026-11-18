@@ -1,23 +1,16 @@
 import 'server-only';
 import { NextResponse } from 'next/server';
 import { verifyCronRequest } from '@/utils/cronAuth';
-import { pingDeadman } from '@/lib/deadman';
 import { isMainnetEnv } from '@/lib/chain';
-import { indexChain, type IndexResult } from '@/lib/onchain/indexer';
-import { indexerRpc, supabaseIndexerStore } from '@/lib/onchain/runtime';
 import type { OnchainChain } from '@/lib/onchain/config';
-import { recheckAgentPayers, type RecheckResult } from '@/lib/onchain/payerRecheck';
-import { sendTelegramAlert } from '@/lib/telegram';
+import { runOnchainIndex } from '@/lib/jobs/onchainIndexRun';
 
-// ⚡ ON-CHAIN INDEX — reads new vault payments from each chain into onchain_payments.
+// ⚡ ON-CHAIN INDEX — manual / fallback trigger. The every-15-minutes run happens on GitHub Actions
+// (.github/workflows/background-jobs.yml → scripts/jobs/run.ts), not here: since 2026-11-18 this
+// work no longer spends the Vercel project's Hobby Active CPU. The logic is shared
+// (src/lib/jobs/onchainIndexRun.ts), so calling this route still does exactly the same thing.
 //
-// Called every 15 minutes by .github/workflows/onchain-index.yml. Each call indexes from where the
-// last one stopped and returns `caughtUp`; the very first run has months of history to read, so
-// the workflow's manual "backfill" mode keeps calling until every chain reports caughtUp.
-//
-// ?chain=CELO or ?chain=BASE limits a call to one chain. Without it, Base goes first: once caught
-// up it needs a few seconds a run, so Celo (the chain the agents site reports on) gets nearly the
-// whole budget instead of a fixed half.
+// ?chain=CELO or ?chain=BASE limits a call to one chain.
 
 export const maxDuration = 300;
 
@@ -34,43 +27,6 @@ export async function POST(req: Request) {
   if (param && param !== 'CELO' && param !== 'BASE') {
     return NextResponse.json({ error: 'chain must be CELO or BASE' }, { status: 400 });
   }
-  const chains: OnchainChain[] = param ? [param as OnchainChain] : ['BASE', 'CELO'];
-
-  const started = Date.now();
-  const results: (IndexResult | { chain: OnchainChain; error: string })[] = [];
-  for (const [i, chain] of chains.entries()) {
-    const left = TOTAL_BUDGET_MS - (Date.now() - started);
-    // Split what's left evenly across the chains still to go, so a long backfill on one chain
-    // can't starve the other of every run.
-    const budget = Math.floor(left / (chains.length - i));
-    try {
-      results.push(await indexChain(chain, indexerRpc(chain), supabaseIndexerStore, budget));
-    } catch (err) {
-      console.error(`[onchain-index] ${chain} failed:`, err);
-      results.push({ chain, error: err instanceof Error ? err.message : String(err) });
-    }
-  }
-
-  const failed = results.some((r) => 'error' in r);
-  const caughtUp = results.every((r) => 'caughtUp' in r && r.caughtUp);
-  // HEALTHCHECK_URL_ONCHAIN: pages someone if the index stops being fed (src/lib/deadman.ts).
-  await pingDeadman('ONCHAIN', !failed);
-
-  // With the index caught up, re-read a batch of x402/relayer payer wallets from the chain, so a
-  // wallet that registered as an agent after paying is named (src/lib/onchain/payerRecheck.ts).
-  // Never fails the run: the index is what the deadman watches.
-  let payers: RecheckResult | { error: string } | undefined;
-  const left = TOTAL_BUDGET_MS - (Date.now() - started);
-  if (caughtUp && !param && left > 30_000) {
-    try {
-      payers = await recheckAgentPayers({ deadline: Date.now() + left - 10_000 });
-      if (payers.newly_identified.length) {
-        await sendTelegramAlert(`🪪 *Agent payer identified on chain*\n${payers.newly_identified.length} wallet(s) that paid through x402/the relayer now have an ERC-8004 or Self identity:\n${payers.newly_identified.map((w) => `\`${w}\``).join('\n')}`).catch(() => {});
-      }
-    } catch (err) {
-      console.error('[onchain-index] payer re-check failed:', err);
-      payers = { error: err instanceof Error ? err.message : String(err) };
-    }
-  }
-  return NextResponse.json({ caughtUp, results, payers }, { status: failed ? 502 : 200 });
+  const out = await runOnchainIndex({ chains: param ? [param as OnchainChain] : undefined, budgetMs: TOTAL_BUDGET_MS });
+  return NextResponse.json({ caughtUp: out.caughtUp, results: out.results, payers: out.payers }, { status: out.failed ? 502 : 200 });
 }

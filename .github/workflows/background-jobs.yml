@@ -1,0 +1,70 @@
+name: Background jobs
+
+# Runs AbaPay's all-day work ON GITHUB ACTIONS, not on Vercel: the on-chain index (vault payments →
+# onchain_payments, behind stats.abapays.com, plus the agent-payer re-check) and the cleanup sweeps
+# (stuck payments, x402 + NIM intents, recorded refunds, unseen payment hashes, provider balance
+# alerts, pruning). Same code as /api/cron/onchain-index and /api/cleanup (src/lib/jobs/*), run by
+# scripts/jobs/run.ts.
+#
+# Why: 2026-11-18 Vercel paused the project for exceeding the Hobby plan's Active CPU (5h of 4h a
+# month). The steady ~10 min/day was this work, running every 15 minutes whether or not anyone
+# visits. This repository is public, so Actions minutes cost nothing.
+#
+# Trigger: cron-job.org every 15 minutes, by calling GitHub's API (GitHub's own `schedule` below is
+# only a backup — it has run hours late):
+#   POST https://api.github.com/repos/investorphem/AbaPay/actions/workflows/background-jobs.yml/dispatches
+#   Headers: Authorization: Bearer <fine-grained token: this repo, Actions = Read and write>
+#            Accept: application/vnd.github+json
+#   Body:    {"ref":"main","inputs":{"job":"all"}}
+#
+# Configuration: every repository secret is handed to the runner as SECRETS_JSON, so the production
+# environment can be imported in one go (run locally, then delete the file):
+#   vercel env pull .env.production --environment=production
+#   gh secret set -f .env.production -R investorphem/AbaPay
+# The runner refuses to run unless NEXT_PUBLIC_APP_MODE=live and NEXT_PUBLIC_NETWORK is mainnet, and
+# names any missing Supabase setting. Healthchecks: HEALTHCHECK_URL_ONCHAIN / HEALTHCHECK_URL_CLEANUP.
+
+on:
+  schedule:
+    - cron: '*/15 * * * *'
+  workflow_dispatch:
+    inputs:
+      job:
+        description: 'Which job to run'
+        type: choice
+        options: [all, onchain-index, cleanup, check]
+        default: all
+      backfill:
+        description: 'On-chain index: keep going until fully caught up (first run / re-index)'
+        type: boolean
+        default: false
+
+# One run at a time; a run that is still going simply makes the next trigger wait.
+concurrency:
+  group: background-jobs
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  run:
+    name: Run ${{ inputs.job || 'all' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+      - name: Install dependencies
+        run: npm ci --no-audit --no-fund
+      - name: Build the job runner
+        run: node scripts/jobs/build.mjs
+      - name: Run
+        env:
+          SECRETS_JSON: ${{ toJSON(secrets) }}
+          JOB: ${{ inputs.job || 'all' }}
+          BACKFILL: ${{ inputs.backfill && '--backfill' || '' }}
+        run: node .jobs-dist/run.cjs "$JOB" $BACKFILL
