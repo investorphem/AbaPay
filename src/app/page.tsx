@@ -59,6 +59,7 @@ import {
   DEFAULT_CHAIN, normalizeChainName, tokensForChain, defaultTokenForChain
 } from "@/constants";
 import { HistoryTab } from "@/components/HistoryTab";
+import { networkForPhone, NETWORK_DATA_SERVICES } from "@/lib/phoneNetwork";
 import AppTour, { hasSeenTour, type TourTab } from "@/components/AppTour";
 
 // 🔴 THE BUG THIS FIXES: a wallet interaction (approve/payBill/sendCalls/allowance calls) that
@@ -116,20 +117,8 @@ function withWalletTimeout<T>(promise: Promise<T>, ms = 90_000): Promise<T> {
  */
 const CELO_X402_TOKENS = ['USDC', 'USD₮', 'USA₮'];
 
-// ⚡ Data-service auto-detect (below) recognises a phone number's NETWORK from its prefix,
-// but a network can sell more than one VTpass data service — Glo has "glo-data" and
-// "glo-sme-data" (Best Value), 9mobile has "etisalat-data" and "9mobile-sme-data". This maps
-// the detected network to every serviceID that belongs to it, [0] being the default a fresh
-// detection lands on; the rest stay reachable via the provider picker without ever being
-// treated as "not this network" and stomped back to the default. 9mobile's second entry keeps
-// the "9mobile-" prefix VTpass actually uses instead of "etisalat-", which is why this can't
-// just be `${network}-sme-data`.
-const NETWORK_DATA_SERVICES: Record<string, string[]> = {
-  mtn: ['mtn-data'],
-  airtel: ['airtel-data'],
-  glo: ['glo-data', 'glo-sme-data'],
-  etisalat: ['etisalat-data', '9mobile-sme-data'],
-};
+// Data-service auto-detect (below): NETWORK_DATA_SERVICES maps a detected network to every
+// VTpass data service it sells (src/lib/phoneNetwork.ts, shared with the NIM app).
 
 export default function Home() {
   const { address: wagmiAddress, isConnected: isWagmiConnected, chain: wagmiChain, connector: wagmiConnector } = useAccount();
@@ -3790,19 +3779,12 @@ export default function Home() {
   useEffect(() => {
     if (activeTab === "pay" && !isInternational) {
       if (activeService.id === "AIRTIME" && accountNumber.length >= 4) {
-        const prefix = accountNumber.substring(0, 4);
-        if (["0803","0806","0810","0813","0814","0816","0903","0906","0913","0916","0703","0706"].includes(prefix)) setTelecomProvider("mtn");
-        else if (["0802","0808","0812","0902","0907","0912","0701","0708"].includes(prefix)) setTelecomProvider("airtel");
-        else if (["0805","0807","0811","0905","0705","0915"].includes(prefix)) setTelecomProvider("glo");
-        else if (["0809","0817","0818","0908","0909"].includes(prefix)) setTelecomProvider("etisalat");
+        // Prefix table shared with the NIM app (src/lib/phoneNetwork.ts).
+        const detected = networkForPhone(accountNumber);
+        if (detected) setTelecomProvider(detected);
       }
       if (activeService.id === "INTERNET" && internetProvider.includes("-data") && accountNumber.length >= 4) {
-        const prefix = accountNumber.substring(0, 4);
-        let network: string | null = null;
-        if (["0803","0806","0810","0813","0814","0816","0903","0906","0913","0916","0703","0706"].includes(prefix)) network = "mtn";
-        else if (["0802","0808","0812","0902","0907","0912","0701","0708"].includes(prefix)) network = "airtel";
-        else if (["0805","0807","0811","0905","0705","0915"].includes(prefix)) network = "glo";
-        else if (["0809","0817","0818","0908","0909"].includes(prefix)) network = "etisalat";
+        const network = networkForPhone(accountNumber);
 
         // 🔴 THE STALE-PLAN BUG: if the number's prefix flips the network (e.g. user picked
         // MTN, chose an MTN plan, then typed a Glo number), the previously-selected plan
