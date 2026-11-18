@@ -374,6 +374,7 @@ constraint webhook_events.webhook_events_pkey PRIMARY KEY (source, external_id)
 constraint whatsapp_flow_orders.whatsapp_flow_orders_flow_token_key UNIQUE (flow_token)
 constraint whatsapp_flow_orders.whatsapp_flow_orders_pkey PRIMARY KEY (id)
 function award_transaction_points(target_wallet text, points_to_add numeric) returns void lang=plpgsql secdef=f config=search_path=public, pg_temp body=87b720db33a2d1531ce412192cfe4f96
+function claim_failed_vend_for_retry(p_id uuid, p_request_id text) returns SETOF transactions lang=plpgsql secdef=t config=search_path=public, pg_temp body=0d823f628bc8ff297f15502f2cb82218
 function claim_jobs(p_limit integer) returns SETOF fulfilment_jobs lang=sql secdef=f config=search_path=public, pg_temp body=9d4bca651913ae7c9e5907ffcf69fa9d
 function complete_job(p_id uuid) returns void lang=sql secdef=f config=search_path=public, pg_temp body=3428d94c2ed06263702c2890d824b2be
 function consume_auth_nonce(p_nonce text, p_purpose text) returns boolean lang=plpgsql secdef=f config=search_path=public, pg_temp body=0cd1c9c376d77600c20bf284581918bb
@@ -386,7 +387,7 @@ function pin_attempt_clear(p_link_id uuid) returns void lang=sql secdef=f config
 function pin_attempt_reserve(p_link_id uuid) returns TABLE(allowed boolean, attempts integer, locked_until timestamp with time zone, locked_now boolean) lang=plpgsql secdef=f config=search_path=public, pg_temp body=08886edaf04372b2311df48a7ec1858c
 function rate_limit_hit(p_key text, p_window_seconds integer) returns TABLE(used integer, window_start timestamp with time zone) lang=plpgsql secdef=f config=search_path=public, pg_temp body=8a129139739abfc2875cf458c3c21122
 function set_provider_circuit(p_provider text, p_open boolean, p_reason text) returns boolean lang=plpgsql secdef=f config=search_path=public, pg_temp body=a075d5fc919abe1f6f29bfe848c51f7a
-function transactions_state_guard() returns trigger lang=plpgsql secdef=f config=search_path=public, pg_temp body=4c5f0930d0ec9139b54628a01abd6016
+function transactions_state_guard() returns trigger lang=plpgsql secdef=f config=search_path=public, pg_temp body=075aa45ee6b0bc977bdc445e18cda246
 grant DELETE,INSERT,REFERENCES,SELECT,TRIGGER,TRUNCATE,UPDATE on abapay_global_users to anon
 grant DELETE,INSERT,REFERENCES,SELECT,TRIGGER,TRUNCATE,UPDATE on abapay_global_users to authenticated
 grant DELETE,INSERT,REFERENCES,SELECT,TRIGGER,TRUNCATE,UPDATE on abapay_global_users to service_role
@@ -465,6 +466,7 @@ grant DELETE,INSERT,REFERENCES,SELECT,TRIGGER,TRUNCATE,UPDATE on webhook_events 
 grant DELETE,INSERT,REFERENCES,SELECT,TRIGGER,TRUNCATE,UPDATE on webhook_events to service_role
 grant DELETE,INSERT,REFERENCES,SELECT,TRIGGER,TRUNCATE,UPDATE on whatsapp_flow_orders to service_role
 grant execute on award_transaction_points(target_wallet text, points_to_add numeric) to service_role
+grant execute on claim_failed_vend_for_retry(p_id uuid, p_request_id text) to service_role
 grant execute on claim_jobs(p_limit integer) to service_role
 grant execute on complete_job(p_id uuid) to service_role
 grant execute on consume_auth_nonce(p_nonce text, p_purpose text) to service_role
