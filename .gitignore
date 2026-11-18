@@ -47,3 +47,4 @@ vault-config.*.safe-batch.json
 artifacts/
 cache/
 typechain-types/
+.jobs-dist/

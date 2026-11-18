@@ -693,7 +693,8 @@ unlike the webhook-driven cleanup above, nothing calls these on its own.
   the requested time — register a **separate** free cron-job.org job hitting
   `POST https://<your-domain>/api/schedules/run-instant` every **1–5 minutes**. It's cheap
   even at that frequency: the query is scoped to `frequency = 'once'` rows only, so most
-  ticks find nothing due and return immediately.
+  ticks find nothing due and return immediately. Every call is still a Vercel function run, though, and on the Hobby plan
+  1,440 a day add up in Active CPU: every **5** minutes is the better trade.
 
 Without registering these, users can still create schedules (recurring or one-off) from the
 chat, but nothing will ever execute them — they'll sit `is_active` forever with no cron to
@@ -726,16 +727,21 @@ list as CSV. The agents home page's hero numbers come from the same index.
   returns the rolling 7/30/90-day and all-time windows plus the DAU/WAU/MAU series. Without 041
   the site still loads, with all-time counters only. No customer data is stored: the bill account
   number in `PaymentReceived` is never read into the table.
-- **Schedule:** [`.github/workflows/onchain-index.yml`](.github/workflows/onchain-index.yml)
-  calls `POST /api/cron/onchain-index` every 15 minutes (`APP_URL` + `CRON_SECRET` secrets).
-  Each call resumes from the last indexed block. After applying 038, run the workflow once by
-  hand with **backfill** ticked to read the history.
-- **Reliable 15-minute trigger:** GitHub delays scheduled workflows on busy runners, sometimes
-  by hours, so register a free [cron-job.org](https://cron-job.org) job as the main trigger, like
-  the schedule runners above: `POST https://www.abapays.com/api/cron/onchain-index` every 15
-  minutes, header `x-cron-secret: <CRON_SECRET>`, request timeout as high as the plan allows. Progress
-  is saved after every block range, so even a call cut short moves the index forward. The GitHub
-  schedule stays as a backup; overlapping calls are harmless because rows are upserted.
+- **Schedule — on GitHub Actions, not Vercel:** [`.github/workflows/background-jobs.yml`](.github/workflows/background-jobs.yml)
+  runs the on-chain index and then the cleanup sweeps with `scripts/jobs/run.ts` (bundled by
+  `scripts/jobs/build.mjs`; the same code as `/api/cron/onchain-index` and `/api/cleanup`, in
+  `src/lib/jobs/`). Since 2026-11-18 this all-day work no longer spends the Vercel project's Hobby
+  Active CPU, which paused the project when it ran there. Every repository secret is passed to the
+  runner, so import the production environment once (`vercel env pull .env.production
+  --environment=production`, then `gh secret set -f .env.production`, then delete the file); it
+  refuses to run unless `NEXT_PUBLIC_APP_MODE=live` and the network is mainnet. Run it by hand with
+  **backfill** ticked after a re-index. Each run resumes from the last indexed block.
+- **Reliable 15-minute trigger:** GitHub delays scheduled workflows, sometimes by hours, so a free
+  [cron-job.org](https://cron-job.org) job triggers the workflow through GitHub's API every 15
+  minutes: `POST https://api.github.com/repos/investorphem/AbaPay/actions/workflows/background-jobs.yml/dispatches`,
+  headers `Authorization: Bearer <fine-grained token, this repo, Actions: read and write>` and
+  `Accept: application/vnd.github+json`, body `{"ref":"main","inputs":{"job":"all"}}`. The
+  workflow's own schedule stays as a backup; runs never overlap.
 
 ---
 

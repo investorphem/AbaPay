@@ -13,12 +13,14 @@ component is at `GET /api/admin/health` (admin session required). It returns `co
 matches Vercel's. A 401 or 503 from the route means a secret problem. Then open the run in the
 Vercel logs.
 
-**Backup:** `/api/cleanup` (every 15 min) and `/api/schedules/run` (06:05 and 18:05 UTC) are also called by
-.github/workflows/cron-jobs.yml, and `/api/cron/onchain-index` by onchain-index.yml, so a
-cron-job.org job being disabled (it auto-disables after repeated failures or ~30s timeouts) no
-longer stops them. Set each healthchecks.io period to match (cleanup 15 min, schedules 12 h).
+**Where they run:** the cleanup sweeps and the on-chain index run on **GitHub Actions** (Actions →
+Background jobs, `.github/workflows/background-jobs.yml`), triggered every 15 min by cron-job.org
+through GitHub's API, with the workflow's own schedule as a backup. `/api/schedules/run` (06:05 and
+18:05 UTC) is still called on Vercel by `.github/workflows/cron-jobs.yml`. Set each healthchecks.io
+period to match (cleanup and index 15 min, schedules 12 h). A Background jobs run that fails says why
+in its log: a missing secret, or `NEXT_PUBLIC_APP_MODE` not `live`.
 
-**Do:** re-run the job by hand with the secret. Or Actions → Cron jobs → Run workflow, and pick the job. Until `/api/cleanup` runs, stuck payments and x402
+**Do:** re-run the job by hand with the secret. Or Actions → Background jobs (cleanup, index) or Cron jobs (schedules) → Run workflow. Until `/api/cleanup` runs, stuck payments and x402
 intents aren't reconciled, and until `/run-instant` runs, one-off schedules don't fire.
 
 ## Fulfilment job needs review (Telegram "FULFILMENT JOB NEEDS REVIEW")
