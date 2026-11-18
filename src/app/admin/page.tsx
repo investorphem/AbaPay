@@ -131,7 +131,8 @@ export default function AdminDashboard() {
 
   const [vtBalance, setVtBalance] = useState<string | null>("0.00");
   const [vtBalanceError, setVtBalanceError] = useState<string | null>(null);
-  const [smsBalance, setSmsBalance] = useState("0");
+  const [smsBalance, setSmsBalance] = useState<string | null>("0");
+  const [smsError, setSmsError] = useState<string | null>(null);
   const [monnifyBalance, setMonnifyBalance] = useState<string | null>(null); // null = not configured yet
   const [status, setStatus] = useState("");
   const [activeTab, setActiveTab] = useState("analytics");
@@ -690,7 +691,8 @@ Switch the selected account in your wallet to the owner and click again. You sta
       const data = await res.json();
       setVtBalance(data.naira ?? null);
       setVtBalanceError(data.nairaError ?? null);
-      setSmsBalance(data.sms);
+      setSmsBalance(data.sms ?? null);
+      setSmsError(data.smsError ?? null);
       setMonnifyBalance(data.monnify ? data.monnify.available : null);
     } catch (e) { console.error("Failed to fetch VTpass health"); }
   };
@@ -1345,7 +1347,7 @@ Switch the selected account in your wallet to the owner and click again. You sta
               <StatBox label={`Global Vaults (${timeFilter})`} value={`$${currentVaultTotal.toFixed(2)}`} sub="Base & Celo Combined" color="text-emerald-500" icon={<Wallet size={16}/>} />
               <StatBox label={`Profit (${timeFilter})`} value={`₦${analytics.fees.toLocaleString()}`} sub="Service Fees Accrued" color="text-blue-400" icon={<BarChart3 size={16}/>} />
               <StatBox label={`Stamp Duty (${timeFilter})`} value={`₦${analytics.stampDuty.toLocaleString()}`} sub="CBN ₦50 Levy Collected" color="text-purple-400" icon={<Landmark size={16}/>} />
-              <StatBox label="SMS Health" value={`${smsBalance} Units`} sub="Messaging Units" color="text-orange-400" icon={<Activity size={16}/>} />
+              <StatBox label="SMS Health" value={smsBalance == null ? 'Unreadable' : `${smsBalance} Units`} sub={smsError ? `VTpass SMS: ${smsError}` : "Messaging Units"} color="text-orange-400" icon={<Activity size={16}/>} />
             </div>
 
             <div className="bg-[#111114] p-1.5 rounded-2xl border border-slate-800 flex justify-between items-center max-w-full">

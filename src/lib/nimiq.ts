@@ -320,7 +320,9 @@ export type NimProof =
   | { ok: false; code: NimProofFailure; detail: string };
 
 /** Did the treasury receive at least `minLuna` from this transaction, tagged for `intentId`? */
-export async function verifyNimPayment(hash: string, expected: { minLuna: number; intentId: string; payer?: string | null }): Promise<NimProof> {
+// Without `intentId` (an order that already settled, whose row no longer holds its intent id) the
+// payment must still carry an AbaPay reference; every other check is the same.
+export async function verifyNimPayment(hash: string, expected: { minLuna: number; intentId?: string; payer?: string | null }): Promise<NimProof> {
   const treasury = treasuryAddress();
   if (!treasury) return { ok: false, code: 'TREASURY_NOT_CONFIGURED', detail: 'NIMIQ_TREASURY_ADDRESS is not set to a valid address.' };
 
@@ -339,7 +341,8 @@ export async function verifyNimPayment(hash: string, expected: { minLuna: number
   if (canonicalNimAddress(tx.to) !== treasury) {
     return { ok: false, code: 'WRONG_RECIPIENT', detail: `Paid ${formatNimAddress(tx.to)}, not the AbaPay treasury.` };
   }
-  if (hexToUtf8(tx.recipientData).trim() !== paymentReference(expected.intentId)) {
+  const reference = hexToUtf8(tx.recipientData).trim();
+  if (expected.intentId ? reference !== paymentReference(expected.intentId) : !reference.startsWith('abapay:')) {
     return { ok: false, code: 'REFERENCE_MISMATCH', detail: 'The payment does not carry this order’s reference.' };
   }
   if (!(Number(tx.value) >= expected.minLuna)) {

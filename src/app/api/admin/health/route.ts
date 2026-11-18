@@ -104,7 +104,11 @@ export async function GET(req: Request) {
       chain: process.env.NEXT_PUBLIC_NETWORK || 'Unknown',
       naira: vtBalance == null ? null : Number(vtBalance).toLocaleString(),
       nairaError: vtError,
-      sms: !isNaN(parseFloat(smsBalance)) ? parseFloat(smsBalance).toFixed(0) : '0',
+      sms: !isNaN(parseFloat(smsBalance)) ? parseFloat(smsBalance).toFixed(0) : null,
+      // Why the SMS units can't be read, shown on the card instead of a misleading "0 Units".
+      smsError: !isNaN(parseFloat(smsBalance)) ? null
+        : !process.env.VTPASS_MSG_TOKEN || !process.env.VTPASS_MSG_SECRET ? 'VTPASS_MSG_TOKEN / VTPASS_MSG_SECRET not set'
+        : String(smsBalance || 'no reply from VTpass messaging').replace(/<[^>]*>/g, ' ').replace(/s+/g, ' ').trim().slice(0, 120),
       monnify: monnifyBalance ? {
         available: monnifyBalance.availableBalance.toLocaleString(),
         ledger: monnifyBalance.ledgerBalance.toLocaleString(),

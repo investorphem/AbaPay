@@ -3,6 +3,10 @@ import { supabaseAdmin } from '@/utils/supabase';
 import { verifyAdminRequest } from '@/utils/adminAuth';
 import { verifyRefundOnChain, completeRefund, rememberRefundHash, refundHashAlreadyUsed } from '@/lib/refundVerify';
 import { enqueueRefund } from '@/lib/refunds';
+import { retryDelivery, deliverableOrder, orderForRefund } from '@/lib/retryDelivery';
+
+// A retried delivery waits for VTpass (src/lib/retryDelivery.ts).
+export const maxDuration = 60;
 
 // ⚡ ADMIN: REFUND QUEUE
 //
@@ -41,9 +45,19 @@ export async function GET(req: Request) {
 
   const owed = (pending || []).reduce((sum: number, r: any) => sum + Number(r.amount_naira || 0), 0);
 
+  // "Retry delivery" is offered only where the chain proves the payment arrived (vault for
+  // Celo/Base, treasury for NIM) — never on a hash that merely looks right. retryDelivery checks
+  // again before sending anything.
+  const refunds = status === 'PENDING'
+    ? await Promise.all((data || []).map(async (r: { transaction_id?: string | null; tx_hash: string }) => {
+        const check = await deliverableOrder(await orderForRefund(r)).catch(() => ({ ok: false, reason: 'Could not check the chain.' }));
+        return { ...r, deliverable: check.ok, deliverable_reason: check.reason };
+      }))
+    : data || [];
+
   return NextResponse.json({
     success: true,
-    refunds: data || [],
+    refunds,
     summary: { pendingCount: (pending || []).length, totalOwedNgn: owed },
   });
 }
@@ -91,6 +105,14 @@ export async function POST(req: Request) {
     }
 
     if (!id) return NextResponse.json({ success: false, message: 'Refund id required' }, { status: 400 });
+
+    // ⚡ DELIVER INSTEAD OF REFUNDING: send the stored order to VTpass again (src/lib/retryDelivery.ts).
+    if (action === 'RETRY_VEND') {
+      const r = await retryDelivery(id, auth.address || 'admin');
+      return r.ok
+        ? NextResponse.json({ success: r.status === 'SUCCESS', status: r.status, message: r.message })
+        : NextResponse.json({ success: false, message: r.message }, { status: r.httpStatus });
+    }
 
     const { data: refund } = await supabaseAdmin.from('refund_queue').select('*').eq('id', id).single();
     if (!refund) return NextResponse.json({ success: false, message: 'Refund not found' }, { status: 404 });
