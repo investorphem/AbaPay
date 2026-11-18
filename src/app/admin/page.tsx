@@ -129,7 +129,8 @@ export default function AdminDashboard() {
   const [ccBusyKey, setCcBusyKey] = useState<string | null>(null);
   const [ccInputs, setCcInputs] = useState<Record<string, string>>({});
 
-  const [vtBalance, setVtBalance] = useState("0.00");
+  const [vtBalance, setVtBalance] = useState<string | null>("0.00");
+  const [vtBalanceError, setVtBalanceError] = useState<string | null>(null);
   const [smsBalance, setSmsBalance] = useState("0");
   const [monnifyBalance, setMonnifyBalance] = useState<string | null>(null); // null = not configured yet
   const [status, setStatus] = useState("");
@@ -687,7 +688,8 @@ Switch the selected account in your wallet to the owner and click again. You sta
     try {
       const res = await fetch('/api/admin/health', { headers: headersOverride || adminHeaders });
       const data = await res.json();
-      setVtBalance(data.naira);
+      setVtBalance(data.naira ?? null);
+      setVtBalanceError(data.nairaError ?? null);
       setSmsBalance(data.sms);
       setMonnifyBalance(data.monnify ? data.monnify.available : null);
     } catch (e) { console.error("Failed to fetch VTpass health"); }
@@ -1095,7 +1097,10 @@ Switch the selected account in your wallet to the owner and click again. You sta
       const amt = parseFloat(String(tx.amount_usdt || tx.amount_crypto)) || 0;
       return String(tx.blockchain || '').toUpperCase() === 'NIMIQ' ? amt * (Number(tx.nim_usd_price) || 0) : amt;
     };
-    const totalDeposited = timeFilteredTransactions.reduce((acc, tx) => acc + usdOf(tx), 0);
+    // Only orders whose payment actually landed: an expired or never-paid order (a probe once
+    // created an EXPIRED Base order for 1,000,000,000 USDC) received nothing and must not count.
+    const paidTx = timeFilteredTransactions.filter(tx => tx.status !== 'EXPIRED' && tx.status !== 'PENDING' && paymentLandedOnChain(tx));
+    const totalDeposited = paidTx.reduce((acc, tx) => acc + usdOf(tx), 0);
     const totalRefunded = timeFilteredTransactions.filter(tx => tx.status === "REFUNDED").reduce((acc, tx) => acc + usdOf(tx), 0);
 
     return {
@@ -1335,7 +1340,7 @@ Switch the selected account in your wallet to the owner and click again. You sta
 
             {/* STATS */}
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-6 gap-4">
-              <StatBox label="VTpass Wallet" value={`₦${vtBalance}`} sub="Live Naira Float" color="text-white" icon={<Banknote size={16}/>} />
+              <StatBox label="VTpass Wallet" value={vtBalance == null ? 'Unreadable' : `₦${vtBalance}`} sub={vtBalanceError ? `VTpass: ${vtBalanceError}` : "Live Naira Float"} color="text-white" icon={<Banknote size={16}/>} />
               <StatBox label="Monnify Wallet" value={monnifyBalance !== null ? `₦${monnifyBalance}` : "Not set up"} sub="Moniepoint Transfer Float" color="text-white" icon={<Banknote size={16}/>} />
               <StatBox label={`Global Vaults (${timeFilter})`} value={`$${currentVaultTotal.toFixed(2)}`} sub="Base & Celo Combined" color="text-emerald-500" icon={<Wallet size={16}/>} />
               <StatBox label={`Profit (${timeFilter})`} value={`₦${analytics.fees.toLocaleString()}`} sub="Service Fees Accrued" color="text-blue-400" icon={<BarChart3 size={16}/>} />
