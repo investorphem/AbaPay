@@ -137,6 +137,22 @@ None of this is shown on receipts or any public page (migration 044; only `/api/
 reads it).
 
 
+## Delivering a failed order instead of refunding it
+
+**When:** a VTpass order failed for a reason on our side that is now fixed (keys, float, a VTpass
+outage) and the customer would rather get what they paid for. Any rail: Celo, Base or NIM. Not bank
+transfers.
+
+**Do:** Admin → Ops → Refunds → **Retry delivery** on the row. The button only appears when the
+chain proves the payment arrived: the vault's PaymentReceived for Celo/Base, or a Nimiq transaction
+to the treasury carrying an AbaPay reference, for at least the order amount, from the ordering
+wallet, fully confirmed. A hash that only looks right never qualifies. Pressing it checks the
+chain again, asks VTpass about the original request (delivered or still processing = nothing is
+sent), then sends the same stored order under a new request id (`src/lib/retryDelivery.ts`).
+Delivered: the order turns successful in the Ledger and the customer's History, the receipt goes
+out, and the refund closes. Refused again: the row goes back on the refund list. Still processing:
+the background sweep finishes it.
+
 ## Refunding a NIM order (nim.abapays.com)
 
 **When:** a NIM order failed to deliver (Telegram "refund queued"), or is stuck and VTpass has no

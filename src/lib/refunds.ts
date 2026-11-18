@@ -72,7 +72,14 @@ export async function enqueueRefund(p: EnqueueParams): Promise<{ queued: boolean
 
     // A duplicate is fine — it means we already queued this one.
     if (error) {
-      if (error.code === '23505') return { queued: false, reason: 'Already queued.' };
+      if (error.code === '23505') {
+        // A retried delivery (src/lib/retryDelivery.ts) that failed again: the refund is owed after
+        // all, so the row it held goes back on the list.
+        await supabaseAdmin.from('refund_queue')
+          .update({ status: 'PENDING', vtpass_error: p.vtpassError || null })
+          .eq('tx_hash', p.txHash).eq('status', 'RETRYING');
+        return { queued: false, reason: 'Already queued.' };
+      }
       console.error('[Refund] enqueue failed:', error.message);
       return { queued: false, reason: error.message };
     }

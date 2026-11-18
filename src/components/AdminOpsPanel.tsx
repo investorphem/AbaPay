@@ -106,6 +106,30 @@ export function AdminOpsPanel({ adminHeaders, onExecuteRefund }: Props) {
     }
   };
 
+  // Deliver the order instead of refunding it: VTpass gets the stored order again
+  // (src/lib/retryDelivery.ts). Not for bank transfers.
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- refund rows are untyped here, as in the handlers around it
+  const retryDelivery = async (r: any) => {
+    if (!window.confirm(`Send this order to VTpass again instead of refunding it?
+
+${r.service_category || "Order"} · ₦${Number(r.amount_naira || 0).toLocaleString()}`)) return;
+    setBusyId(r.id);
+    try {
+      const res = await fetch("/api/admin/refunds", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", ...adminHeaders },
+        body: JSON.stringify({ id: r.id, action: "RETRY_VEND" }),
+      });
+      const data = await res.json();
+      setMsg(data.message || (data.success ? "Delivered." : "Retry failed."));
+      await load();
+    } catch {
+      setMsg("Network error while retrying delivery.");
+    } finally {
+      setBusyId(null);
+    }
+  };
+
   const rejectRefund = async (r: any) => {
     setBusyId(r.id);
     await fetch('/api/admin/refunds', {
@@ -223,6 +247,17 @@ export function AdminOpsPanel({ adminHeaders, onExecuteRefund }: Props) {
                   {busyId === r.id ? <Loader2 size={12} className="animate-spin" /> : <Banknote size={12} />}
                   {isNim(r) ? 'Record NIM refund' : 'Refund now'}
                 </button>
+                {/* Only for payments the chain proves reached the vault or treasury (GET /api/admin/refunds). */}
+                {r.deliverable === true && (
+                  <button
+                    onClick={() => retryDelivery(r)}
+                    disabled={busyId === r.id}
+                    title="Send the order to VTpass again instead of refunding"
+                    className="flex-1 py-2.5 bg-blue-600 hover:bg-blue-700 disabled:opacity-50 text-white rounded-xl text-[10px] font-black uppercase tracking-widest flex items-center justify-center gap-2"
+                  >
+                    <Send size={12} /> Retry delivery
+                  </button>
+                )}
                 <button
                   onClick={() => rejectRefund(r)}
                   disabled={busyId === r.id}
