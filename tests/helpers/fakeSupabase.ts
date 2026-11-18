@@ -159,7 +159,11 @@ export function fakeSupabase(db: FakeDb) {
     from: (table: string) => new Query(db, table),
     rpc: async (name: string, args: unknown) => {
       const handler = db.rpcHandlers?.[name];
-      return handler ? { data: handler(args as never, db), error: null } : { data: null, error: null };
+      if (!handler) return { data: null, error: null };
+      const out = handler(args as never, db);
+      // A handler can answer like PostgREST does on a database exception: { rpcError: { code, message } }.
+      const rpcError = (out as { rpcError?: { code: string; message: string } } | null)?.rpcError;
+      return rpcError ? { data: null, error: rpcError } : { data: out, error: null };
     },
   };
 }

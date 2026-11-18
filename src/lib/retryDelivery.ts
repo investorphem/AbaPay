@@ -120,15 +120,18 @@ export async function retryDelivery(refundId: string, admin: string): Promise<Re
     .eq('id', refund.id).eq('status', 'PENDING').select('id');
   if (!held?.length) return { ok: false, httpStatus: 409, message: 'This refund is already being handled.' };
 
-  // 4. Claim the order for one new delivery.
+  // 4. Claim the order for one new delivery. The state guard (migration 026) forbids
+  // FAILED_VENDING → PROCESSING and a new request_id on any plain update; this function is the one
+  // audited exception (migration 046), service_role only.
   const vtRequestId = getStrictRequestId();
-  const { data: locked } = await supabase.from('transactions')
-    .update({ status: 'PROCESSING', request_id: vtRequestId, vend_dispatched_at: null, error_code: null, api_response: null })
-    .eq('id', tx.id).eq('status', 'FAILED_VENDING')
-    .select().maybeSingle();
-  if (!locked) {
+  const { data: claimed, error: claimError } = await supabase.rpc('claim_failed_vend_for_retry', { p_id: tx.id, p_request_id: vtRequestId });
+  const locked = Array.isArray(claimed) ? claimed[0] : claimed;
+  if (claimError || !locked) {
     await supabase.from('refund_queue').update({ status: 'PENDING' }).eq('id', refund.id).eq('status', 'RETRYING');
-    return { ok: false, httpStatus: 409, message: 'The order changed while retrying — reload and check it.' };
+    return {
+      ok: false, httpStatus: claimError ? 500 : 409,
+      message: claimError ? `Could not claim the order for a retry: ${claimError.message}` : 'The order changed while retrying — reload and check it.',
+    };
   }
 
   const { data: settings } = await supabase.from('platform_settings').select('exchange_rate').eq('id', 1).single();
