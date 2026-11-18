@@ -90,14 +90,20 @@ export async function GET(req: Request) {
     ]);
 
     const vtBalance = walletData?.contents?.balance;
-    parts.vtpass = vtBalance == null ? { status: 'warn', detail: 'balance unreadable' } : { status: 'ok', value: Number(vtBalance) };
+    // When VTpass refuses (e.g. 087 INVALID CREDENTIALS after a key rotation), say so: the card
+    // used to show ₦0.00, which reads like an empty float rather than keys the server can't use.
+    const vtError: string | null = vtBalance == null
+      ? [walletData?.code, walletData?.response_description].filter(Boolean).join(' ') || 'no reply from VTpass'
+      : null;
+    parts.vtpass = vtBalance == null ? { status: 'warn', detail: `balance unreadable: ${vtError}` } : { status: 'ok', value: Number(vtBalance) };
     const worst: Status = Object.values(parts).some((c) => c.status === 'down') ? 'down'
       : Object.values(parts).some((c) => c.status === 'warn') ? 'warn' : 'ok';
 
     return NextResponse.json({
       env: appMode,
       chain: process.env.NEXT_PUBLIC_NETWORK || 'Unknown',
-      naira: vtBalance?.toLocaleString() || '0.00',
+      naira: vtBalance == null ? null : Number(vtBalance).toLocaleString(),
+      nairaError: vtError,
       sms: !isNaN(parseFloat(smsBalance)) ? parseFloat(smsBalance).toFixed(0) : '0',
       monnify: monnifyBalance ? {
         available: monnifyBalance.availableBalance.toLocaleString(),
