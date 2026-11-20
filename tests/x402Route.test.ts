@@ -31,8 +31,9 @@ vi.mock('@/lib/parity', () => ({ isDuplicateElectricity: async () => false }));
 const verifyAccount = vi.fn<(...args: unknown[]) => Promise<{ success: boolean }>>(async () => ({ success: true }));
 vi.mock('@/lib/deai/services', () => ({ verifyAccount: (...args: unknown[]) => verifyAccount(...args) }));
 let gate: { allowed: boolean; code?: string; reason?: string } = { allowed: true };
+let facilitatorFeeUsd = 0;
 vi.mock('@/lib/serviceRules', () => ({
-  getServiceRules: async () => ({ exchangeRate: 1340, x402FacilitatorFeeUsd: 0 }),
+  getServiceRules: async () => ({ exchangeRate: 1340, x402FacilitatorFeeUsd: facilitatorFeeUsd }),
   computeServiceFee: () => 0,
   checkWebPayment: async () => gate,
 }));
@@ -204,6 +205,21 @@ describe('/api/pay/x402 — happy path', () => {
       user_agent: 'earmark/1.0', declared_agent: 'Earmark', declared_agent_id: '9806',
     })]);
     expect(JSON.stringify(json)).not.toMatch(/Earmark|earmark\/1\.0/);
+  });
+
+  // AbaPay's own app pays exactly what its checkout shows; outside agents pay the published price.
+  it("charges AbaPay's own app no facilitator fee, at the 4 decimals its checkout shows", async () => {
+    facilitatorFeeUsd = 0.001;
+    try {
+      const own = await pay({ ...bill, source_channel: 'WEB' }, null);
+      expect(own.json.accepts[0].maxAmountRequired).toBe('1000000'); // ₦1,340 at 1,340 = 1.0000
+      const small = await pay({ ...bill, nairaAmount: '100', source_channel: 'WEB' }, null);
+      expect(small.json.accepts[0].maxAmountRequired).toBe('74600'); // 0.074626… shown as 0.0746
+      const agent = await pay(bill, null);
+      expect(agent.json.accepts[0].maxAmountRequired).toBe('1001000'); // + $0.001 for outside agents
+    } finally {
+      facilitatorFeeUsd = 0;
+    }
   });
 
   it('answers a request with no payment with a 402 challenge and writes nothing', async () => {

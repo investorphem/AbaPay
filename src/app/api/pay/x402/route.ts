@@ -537,7 +537,13 @@ async function handleX402Request(req: Request) {
   if (vendAmount !== null) {
     const rules = await getServiceRules();
     baseRate = rules.exchangeRate;
-    requiredCrypto = (vendAmount + serviceFee + stampDutyNgn) / baseRate + rules.x402FacilitatorFeeUsd;
+    // AbaPay's own app (web and MiniPay, source_channel 'WEB') pays exactly the amount its
+    // checkout shows: no facilitator fee, and rounded to the 4 decimals on screen, the same
+    // amount the contract-call path pays (src/app/page.tsx). The owner absorbs the fee for its
+    // own customers (2026-11-20). Outside agents pay the published price, fee included.
+    const ownApp = sourceChannelFor(source_channel) === 'WEB';
+    const billCrypto = (vendAmount + serviceFee + stampDutyNgn) / baseRate;
+    requiredCrypto = ownApp ? Number(billCrypto.toFixed(4)) : billCrypto + rules.x402FacilitatorFeeUsd;
     requiredWei = BigInt(Math.round(requiredCrypto * 10 ** usdc.decimals));
   } else {
     requiredCrypto = Number(FALLBACK_MIN_USDC);
