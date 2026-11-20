@@ -110,4 +110,34 @@ describe('recheckAgentPayers', () => {
     const r = await recheckAgentPayers({ now: NOW, batch: 5 });
     expect(r).toMatchObject({ payers: 30, due: 30, checked: 5 });
   });
+
+  // Production: 432 payers, `due` stuck at 432 on every run, the same 20 wallets re-read forever.
+  // One `in` list of 500 wallets made the request URL too long, the error was ignored, and every
+  // wallet looked never-checked.
+  it('reads every payer\'s last check in pages short enough for a request URL, so fresh wallets are not re-read', async () => {
+    db.maxInList = 100;
+    db.tables.onchain_payments = Array.from({ length: 250 }, (_, i) => pay(w(i + 1)));
+    db.tables.payer_identities = Array.from({ length: 250 }, (_, i) => identity(w(i + 1), i < 240 ? 2 : 30));
+    const r = await recheckAgentPayers({ now: NOW });
+    expect(r).toMatchObject({ payers: 250, due: 10, checked: 10, errors: 0 });
+    expect(looked).toEqual(Array.from({ length: 10 }, (_, i) => w(241 + i)));
+  });
+
+  it('moves on: the next run re-reads different wallets than the last one', async () => {
+    db.maxInList = 100;
+    db.tables.onchain_payments = Array.from({ length: 150 }, (_, i) => pay(w(i + 1)));
+    db.tables.payer_identities = Array.from({ length: 150 }, (_, i) => identity(w(i + 1), 30));
+    await recheckAgentPayers({ now: NOW, batch: 20 });
+    const first = [...looked];
+    looked.length = 0;
+    await recheckAgentPayers({ now: NOW, batch: 20 });
+    expect(looked).toHaveLength(20);
+    expect(looked.filter((x) => first.includes(x))).toEqual([]);
+  });
+
+  it('fails loudly instead of treating every wallet as never checked when the checks can\'t be read', async () => {
+    db.maxInList = 2; // the rail filter (2 values) passes; the 3-wallet identity read fails
+    db.tables.onchain_payments = [pay(w(1)), pay(w(2)), pay(w(3))];
+    await expect(recheckAgentPayers({ now: NOW })).rejects.toThrow(/payer_identities read failed/);
+  });
 });

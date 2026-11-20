@@ -17,6 +17,10 @@ let owners: Record<string, string> = {};
 let agentWallets: Record<string, string> = {};
 let tokenUris: Record<string, string> = {};
 let self = { verified: false as boolean | Error, id: BigInt(0), human: true, fresh: true };
+// Self Agent IDs as NFTs: id -> owner wallet, id -> agent key, and per-key registration.
+let selfOwners: Record<string, string> = {};
+let selfAgentKeys: Record<string, string> = {};
+let selfKeyVerified: Record<string, boolean> = {};
 let logIds: bigint[] | Error = [];
 let blockscout: { items: unknown[] } | Error = { items: [] };
 const reads: string[] = [];
@@ -30,7 +34,10 @@ vi.mock('@/lib/chain', () => ({
       const a = address.toLowerCase();
       if (a === SELF) {
         if (self.verified instanceof Error) throw self.verified;
-        if (functionName === 'isVerifiedAgent') return self.verified;
+        if (functionName === 'isVerifiedAgent') return selfKeyVerified[String(args[0]).toLowerCase()] ?? self.verified;
+        if (functionName === 'agentIdToAgentKey') return selfAgentKeys[String(args[0])];
+        if (functionName === 'ownerOf') { const o = selfOwners[String(args[0])]; if (!o) throw new Error('ERC721NonexistentToken'); return o; }
+        if (functionName === 'balanceOf') return BigInt(Object.values(selfOwners).filter((o) => o.toLowerCase() === String(args[0]).toLowerCase()).length);
         if (functionName === 'getAgentId') return self.id;
         if (functionName === 'hasHumanProof') return self.human;
         if (functionName === 'isProofFresh') return self.fresh;
@@ -71,6 +78,7 @@ beforeEach(() => {
   db = createFakeDb();
   owners = {}; agentWallets = {}; tokenUris = {};
   self = { verified: false, id: BigInt(0), human: true, fresh: true };
+  selfOwners = {}; selfAgentKeys = {}; selfKeyVerified = {};
   logIds = []; blockscout = { items: [] };
   reads.length = 0;
 });
@@ -150,6 +158,42 @@ describe('lookupPayerIdentity — Self Agent ID', () => {
     const id = await lookupPayerIdentity(WALLET);
     expect(id.self_verified).toBeNull();
     expect(id.lookup_error).toMatch(/self: rpc down/);
+  });
+
+  // The registry mints each agent to the human's wallet and keys it by a separate address. AbaPay's
+  // own #196 is owned by 0xec24… and keyed by 0xdfff…, so a payer who pays from the OWNER wallet
+  // was never found by the key lookup alone.
+  const KEY = '0x000000000000000000000000dfff9abaccc4402d23cb856d0544bab622577a93';
+  it('finds a Self Agent ID the paying wallet owns, keyed by another address', async () => {
+    blockscout = { items: [nft('196', null, SELF)] };
+    selfOwners['196'] = WALLET;
+    selfAgentKeys['196'] = KEY;
+    selfKeyVerified[KEY] = true;
+    expect(await lookupPayerIdentity(WALLET)).toMatchObject({ self_verified: true, self_agent_id: '196', self_human_proof: true, self_proof_fresh: true, lookup_error: null });
+  });
+
+  it('does not credit a Self Agent ID Blockscout lists but the registry says belongs to someone else', async () => {
+    blockscout = { items: [nft('196', null, SELF)] };
+    selfOwners['196'] = OTHER;
+    selfAgentKeys['196'] = KEY;
+    selfKeyVerified[KEY] = true;
+    expect(await lookupPayerIdentity(WALLET)).toMatchObject({ self_verified: false, self_agent_id: null });
+  });
+
+  it('prefers an owned agent that is still registered over a revoked one', async () => {
+    const KEY2 = '0x0000000000000000000000001111111111111111111111111111111111111111';
+    blockscout = { items: [nft('5', null, SELF), nft('9', null, SELF)] };
+    selfOwners['5'] = WALLET; selfAgentKeys['5'] = KEY2; selfKeyVerified[KEY2] = false;
+    selfOwners['9'] = WALLET; selfAgentKeys['9'] = KEY; selfKeyVerified[KEY] = true;
+    expect(await lookupPayerIdentity(WALLET)).toMatchObject({ self_verified: true, self_agent_id: '9' });
+  });
+
+  it('says so when Blockscout is down and the registry shows the wallet holds an agent', async () => {
+    blockscout = new Error('blockscout down');
+    selfOwners['196'] = WALLET;
+    const id = await lookupPayerIdentity(WALLET);
+    expect(id.self_agent_id).toBeNull();
+    expect(id.lookup_error).toMatch(/holds a Self Agent ID but Blockscout could not list it/);
   });
 });
 

@@ -34,11 +34,17 @@ async function agentPayers(): Promise<string[]> {
   return [...out];
 }
 
-/** When each wallet was last checked (missing = never). */
+/** Wallets per `in` filter. Each is 42 characters in the request URL; 500 of them (~21 KB) made the
+ * request too long, it failed without a word, every wallet read as never checked, and every run
+ * re-read the same first 20 wallets forever while the rest were never looked at again. */
+const LOOKUP_CHUNK = 100;
+
+/** When each wallet was last checked (missing = never). Throws if a page can't be read. */
 async function lastChecked(wallets: string[]): Promise<Map<string, number>> {
   const out = new Map<string, number>();
-  for (let i = 0; i < wallets.length; i += 500) {
-    const { data } = await supabase.from('payer_identities').select('wallet, checked_at, lookup_error').in('wallet', wallets.slice(i, i + 500));
+  for (let i = 0; i < wallets.length; i += LOOKUP_CHUNK) {
+    const { data, error } = await supabase.from('payer_identities').select('wallet, checked_at, lookup_error').in('wallet', wallets.slice(i, i + LOOKUP_CHUNK));
+    if (error) throw new Error(`payer_identities read failed: ${error.message}`);
     for (const r of (data || []) as Pick<PayerIdentity, 'wallet' | 'checked_at' | 'lookup_error'>[]) {
       // A check that errored is treated as never done, so it's retried first.
       out.set(r.wallet, r.lookup_error ? 0 : new Date(r.checked_at).getTime());
