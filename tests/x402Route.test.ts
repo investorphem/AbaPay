@@ -51,6 +51,28 @@ vi.mock('@/lib/discounts', () => ({
     return active && campaign ? { discountNgn: campaign.ngn, discountPhone: null } : { discountNgn: 0, discountPhone: null };
   },
 }));
+// The request's Self Agent ID result and the operator's agent switches (src/lib/agentPolicy.ts).
+let selfStatus: Record<string, unknown> = { present: false };
+vi.mock('@/lib/selfAgent', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@/lib/selfAgent')>();
+  return { ...actual, currentSelfAgent: () => selfStatus };
+});
+let policyRow: Record<string, unknown> = {};
+vi.mock('@/lib/agentPolicy', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@/lib/agentPolicy')>();
+  return { ...actual, getAgentPolicy: async () => actual.policyFromRow(policyRow) };
+});
+let accountName: string | null = 'ADA OBI';
+const nameChecks: string[] = [];
+vi.mock('@/lib/monnify', () => ({
+  validateAccountRaw: async (acct: string, bank: string) => {
+    nameChecks.push(`${bank}:${acct}`);
+    return accountName
+      ? { requestSuccessful: true, responseCode: '0', responseMessage: 'ok', result: { accountNumber: acct, accountName, bankCode: bank } }
+      : { requestSuccessful: false, responseCode: '99', responseMessage: 'Invalid account', result: null };
+  },
+  getBanks: async () => ({ banks: [{ code: '044', name: 'Access Bank' }], stale: false }),
+}));
 vi.mock('@/lib/chain', async (importOriginal) => {
   const actual = await importOriginal<typeof import('@/lib/chain')>();
   return {
@@ -582,5 +604,62 @@ describe('/api/pay/x402 — ASCII token names from agents and the SDK', () => {
     expect(canonicalTokenSymbol('usdc')).toBe('USDC');
     expect(canonicalTokenSymbol('USDm')).toBe('USDm');
     expect(canonicalTokenSymbol(undefined)).toBeUndefined();
+  });
+});
+
+describe('/api/pay/x402 — verified agents (Self Agent ID)', () => {
+  const VERIFIED = { present: true, status: 'verified', agentAddress: '0xAbC0000000000000000000000000000000000001', agentId: '205' };
+  const bank = { ...bill, serviceCategory: 'BANK', serviceID: 'bank-transfer', network: 'BANK', billersCode: '0123456789', variation_code: '044', nairaAmount: '1340' };
+  beforeEach(() => { selfStatus = { present: false }; policyRow = {}; accountName = 'ADA OBI'; nameChecks.length = 0; campaign = null; facilitatorFeeUsd = 0; });
+
+  it('refuses a bank transfer from an agent without a verified Self Agent ID, before anything is signed', async () => {
+    policyRow = { verified_agent_bank_enabled: true };
+    const r = await pay(bank, null);
+    expect(r.status).toBe(403);
+    expect(r.json.errorCode).toBe('SELF_AGENT_REQUIRED');
+    selfStatus = VERIFIED;
+    policyRow = {}; // verified, but the operator hasn't switched bank transfers on
+    expect((await pay(bank, null)).json.errorCode).toBe('SELF_AGENT_REQUIRED');
+  });
+
+  it("records a verified agent's bank transfer for the operator: name-checked first, never sent to a provider", async () => {
+    selfStatus = VERIFIED;
+    policyRow = { verified_agent_bank_enabled: true, agent_ext_max_ngn_per_tx: 100 }; // caps never apply to it
+    receipts[SETTLE_TX] = settledReceipt();
+    const r = await pay(bank);
+    expect(r.status).toBe(200);
+    expect(nameChecks).toEqual(['044:0123456789']);
+    expect(intentRow()).toMatchObject({ service_id: 'abapay-bank-payout', service_category: 'BANK', variation_code: '044', network: 'Access Bank', customer_name: 'ADA OBI', self_agent_id: '205' });
+    expect(executeVend).toHaveBeenCalledWith(expect.objectContaining({ serviceID: 'abapay-bank-payout' }));
+    expect(verifyAccount).not.toHaveBeenCalled();
+  });
+
+  it('charges nothing when the bank account does not resolve to a name', async () => {
+    selfStatus = VERIFIED;
+    policyRow = { verified_agent_bank_enabled: true };
+    accountName = null;
+    const r = await pay(bank);
+    expect(r.status).toBe(400);
+    expect(r.json.errorCode).toBe('FAILED_VERIFICATION');
+    expect(facilitatorCalls).toBe(0);
+  });
+
+  it('waives the facilitator fee and applies campaigns only for a verified agent with those perks on', async () => {
+    facilitatorFeeUsd = 0.001;
+    campaign = { id: 'camp-1', ngn: 134 };
+    policyRow = { verified_agent_fee_waiver_enabled: true, verified_agent_discounts_enabled: true };
+    expect((await pay(bill, null)).json.accepts[0].maxAmountRequired).toBe('1001000'); // unverified: full price
+    selfStatus = VERIFIED;
+    expect((await pay(bill, null)).json.accepts[0].maxAmountRequired).toBe('900000'); // ₦134 off, no fee
+  });
+
+  it('applies the outside-agent cap to an unverified agent, and lets a verified one with higher limits past it', async () => {
+    policyRow = { agent_ext_max_ngn_per_tx: 1000, verified_agent_higher_limits_enabled: true };
+    const capped = await pay(bill);
+    expect(capped.json.errorCode).toBe('AGENT_LIMIT');
+    expect(facilitatorCalls).toBe(0);
+    selfStatus = VERIFIED;
+    receipts[SETTLE_TX] = settledReceipt();
+    expect((await pay(bill)).status).toBe(200);
   });
 });

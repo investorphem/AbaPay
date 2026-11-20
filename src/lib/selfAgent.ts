@@ -1,4 +1,5 @@
 import 'server-only';
+import { AsyncLocalStorage } from 'node:async_hooks';
 import { keccak256, toBytes, recoverMessageAddress, pad, parseAbi, getAddress, isAddress } from 'viem';
 import { getPublicClient, isMainnetEnv } from '@/lib/chain';
 import { errorMessage } from '@/lib/errors';
@@ -152,6 +153,14 @@ const byRequest = new WeakMap<Request, SelfAgentStatus>();
 export function rememberSelfAgent(req: Request, s: SelfAgentStatus) { byRequest.set(req, s); }
 export function selfAgentFor(req: Request): SelfAgentStatus | undefined { return byRequest.get(req); }
 
+// The same status for code that has no Request in hand (the MCP/A2A payment path runs deep inside a
+// tool call): withSelfAgent runs the handler inside this context.
+const current = new AsyncLocalStorage<SelfAgentStatus>();
+/** The Self Agent ID result of the request being handled; { present: false } outside one. */
+export function currentSelfAgent(): SelfAgentStatus { return current.getStore() ?? { present: false }; }
+/** Tests and scripts: run fn as if the request had carried this Self result. */
+export function runWithSelfAgent<T>(s: SelfAgentStatus, fn: () => Promise<T>): Promise<T> { return current.run(s, fn); }
+
 /**
  * Wrap a route handler: verify the Self Agent ID on the raw body, refuse a signature that doesn't
  * check out, and decorate the response with the result (header always; `self_agent` on JSON
@@ -167,7 +176,7 @@ export async function withSelfAgent(
   const status = await verifySelfAgentRequest(req, raw);
   if (status.present && status.status === 'invalid') return refuse(status.detail);
   rememberSelfAgent(req, status);
-  const res = await handler(req);
+  const res = await current.run(status, () => handler(req));
   if (!status.present) return res;
 
   const headers = new Headers(res.headers);

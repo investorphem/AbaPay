@@ -19,7 +19,11 @@ import { metric } from '@/lib/log';
 import { X402_DOMAINS_BY_CHAIN } from '@/lib/x402Domains';
 import { errorMessage } from '@/lib/errors';
 import { recordPayerAfterResponse, clientInfoFromRequest } from '@/lib/payerIdentity';
-import { withSelfAgent } from '@/lib/selfAgent';
+import { withSelfAgent, currentSelfAgent } from '@/lib/selfAgent';
+import { getAgentPolicy, agentTerms, checkAgentCaps } from '@/lib/agentPolicy';
+import { MANUAL_BANK_SERVICE_ID } from '@/lib/bankPayouts';
+import { getActiveDiscountForService, computeDiscountNgn } from '@/lib/discounts';
+import { validateAccountRaw, getBanks } from '@/lib/monnify';
 import { electricityMeterType } from '@/lib/meterType';
 
 // ⚡ THE RAW ERC-1271 CHECK — deliberately not viem's `verifyTypedData`/`verifyHash`, which
@@ -453,6 +457,22 @@ async function handleX402Request(req: Request) {
   // ⚡ CBN STAMP DUTY — ₦50 fixed, mandated on electronic transfers of ₦10,000 and above. See
   // /api/pay's identical comment — same rule, tracked in stamp_duty_ngn, never shown to the user.
   const stampDutyNgn = (serviceCategory === 'BANK' && vendAmount !== null && vendAmount >= 10000) ? 50 : 0;
+
+  // 🪪 OUTSIDE-AGENT TERMS (src/lib/agentPolicy.ts): what this caller gets is decided by whether its
+  // request carries a Self Agent ID the registry confirms. Verified agents can get campaign
+  // discounts, no facilitator fee, higher caps and bank transfers, each behind its own admin switch.
+  const terms = agentTerms(currentSelfAgent(), await getAgentPolicy());
+  const isBank = String(serviceCategory || '').toUpperCase() === 'BANK';
+  // A verified agent's bank transfer goes to the bank payout queue (src/lib/bankPayouts.ts).
+  const manualBank = isBank && terms.verified && terms.bankAllowed;
+  if (isBank && !manualBank && vendAmount !== null) {
+    return NextResponse.json({
+      x402Version: X402_RESPONSE_VERSION, success: false, errorCode: 'SELF_AGENT_REQUIRED', retryable: false,
+      error: 'Bank transfers are available to agents with a verified Self Agent ID: sign the request with your Self agent key (x-self-agent-* headers). See docs.abapays.com → Self Agent ID. Nothing was charged.',
+    }, { status: 403 });
+  }
+  let bankName: string | null = null;
+  let bankAccountName: string | null = null;
   const vtRequestId = getStrictRequestId();
 
   // ⚡ CHAIN ROUTING — Celo (Celo facilitator) vs Base (Coinbase CDP facilitator). Base is
@@ -534,13 +554,23 @@ async function handleX402Request(req: Request) {
   let requiredWei: bigint;
   let requiredCrypto: number;
   let baseRate = 1500; // fallback only ever used when vendAmount is null (no real bill to price)
+  let discountNgn = 0;
+  let discountCampaignId: string | null = null;
+  let discountPhone: string | null = null;
   if (vendAmount !== null) {
     const rules = await getServiceRules();
     baseRate = rules.exchangeRate;
     // x402 is the AGENT rail: AbaPay's own app pays by contract call (src/app/page.tsx) since
-    // 2026-11-20, so every caller here pays the published price, facilitator fee included. A
-    // request claiming to be the web app is not one, and gets no discount or fee waiver for it.
-    requiredCrypto = (vendAmount + serviceFee + stampDutyNgn) / baseRate + rules.x402FacilitatorFeeUsd;
+    // 2026-11-20. Every caller pays the published price, facilitator fee included, unless it is a
+    // verified agent and the operator has switched that perk on. A claim to be the web app counts
+    // for nothing. Discounts use the same engine and caps as the web app, recorded on the row.
+    if (terms.discounts && !isBank) {
+      const discountServiceKey = String(serviceCategory || '').toUpperCase().startsWith('INTL') ? 'INTERNATIONAL' : serviceCategory;
+      const active = await getActiveDiscountForService(discountServiceKey || null);
+      const d = await computeDiscountNgn(vendAmount, active, wallet_address, billersCode || phone || 'N/A');
+      if (d.discountNgn > 0) { discountNgn = d.discountNgn; discountCampaignId = active?.id || null; discountPhone = d.discountPhone; }
+    }
+    requiredCrypto = (vendAmount + serviceFee + stampDutyNgn - discountNgn) / baseRate + (terms.feeWaived ? 0 : rules.x402FacilitatorFeeUsd);
     requiredWei = BigInt(Math.round(requiredCrypto * 10 ** usdc.decimals));
   } else {
     requiredCrypto = Number(FALLBACK_MIN_USDC);
@@ -850,12 +880,14 @@ async function handleX402Request(req: Request) {
   //     named one chain while the route could only settle on another;
   //   • (below, once the authorization is decoded) a signer other than the wallet the request
   //     names.
-  if (requestedChain !== chainKey || vendAmount === null || !serviceID || !billersCode) {
+  if (requestedChain !== chainKey || vendAmount === null || (!serviceID && !manualBank) || !billersCode || (manualBank && !variation_code)) {
     return NextResponse.json({
       x402Version: X402_RESPONSE_VERSION,
       error: requestedChain !== chainKey
         ? `x402 payments on ${requestedChain} are not available right now — nothing was charged.`
-        : 'This payment is missing bill details (serviceID, billersCode, amount) — nothing was charged.',
+        : manualBank
+          ? 'A bank transfer needs billersCode (the account number), variation_code (the bank code, from GET /api/monnify/banks) and amount — nothing was charged.'
+          : 'This payment is missing bill details (serviceID, billersCode, amount) — nothing was charged.',
       errorCode: 'MISSING_BILL_DETAILS',
       retryable: false,
       accepts: [acceptEntry],
@@ -866,7 +898,19 @@ async function handleX402Request(req: Request) {
   // limits (checkWebPayment, src/lib/serviceRules.ts). Runs only once a payment is attached, so
   // discovery crawlers still get their 402 challenge; and before settlement, so a switched-off
   // service is refused with nothing charged instead of settled and refunded.
-  {
+  if (manualBank) {
+    // The account must resolve to a real name before anything is charged, so the transfer reaches the
+    // right person and a typo costs the agent nothing.
+    const named = await validateAccountRaw(String(billersCode), String(variation_code), 10_000);
+    if (!named.result) {
+      return NextResponse.json(
+        { x402Version: X402_RESPONSE_VERSION, error: `That bank account could not be verified (${named.responseMessage}). Check the account number and bank code. Nothing was charged.`, errorCode: 'FAILED_VERIFICATION', retryable: named.responseCode === 'NETWORK_ERROR', accepts: [acceptEntry] },
+        { status: 400 },
+      );
+    }
+    bankAccountName = named.result.accountName;
+    bankName = (await getBanks()).banks.find((b) => b.code === String(variation_code))?.name ?? null;
+  } else {
     const cat = String(serviceCategory || '').toUpperCase();
     const gate = await checkWebPayment({
       serviceCategory, serviceID, amountNgn: vendAmount,
@@ -877,6 +921,15 @@ async function handleX402Request(req: Request) {
         { x402Version: X402_RESPONSE_VERSION, error: gate.reason, errorCode: gate.code, retryable: false, accepts: [acceptEntry] },
         { status: gate.code === 'AMOUNT_OUT_OF_RANGE' ? 400 : 409 },
       );
+    }
+  }
+
+  // Outside-agent caps (src/lib/agentPolicy.ts): per order and per wallet per 24 hours, as the
+  // operator set them; a verified agent may have higher ones, and its bank transfers have none.
+  {
+    const caps = await checkAgentCaps({ terms, wallet: wallet_address, amountNgn: vendAmount, isBank: manualBank });
+    if (!caps.allowed) {
+      return NextResponse.json({ x402Version: X402_RESPONSE_VERSION, error: caps.reason, errorCode: caps.code, retryable: false, accepts: [acceptEntry] }, { status: 400 });
     }
   }
 
@@ -927,11 +980,13 @@ async function handleX402Request(req: Request) {
   let intentRowId: string | null = null;
   let intentKey = '';
   const intentRowFields = {
-    service_category: serviceCategory || 'UNKNOWN', service_id: serviceID || 'UNKNOWN',
-    variation_code: meterType ?? variation_code, network: network || 'UNKNOWN', blockchain: chainKey,
+    service_category: serviceCategory || 'UNKNOWN', service_id: manualBank ? MANUAL_BANK_SERVICE_ID : (serviceID || 'UNKNOWN'),
+    variation_code: meterType ?? variation_code, network: manualBank ? (bankName || `BANK ${variation_code}`) : (network || 'UNKNOWN'), blockchain: chainKey,
     account_number: billersCode || phone || 'N/A', phone: phone || null,
     amount_naira: vendAmount, fee_naira: serviceFee, stamp_duty_ngn: stampDutyNgn,
-    customer_name: customer_name || null, customer_address: customer_address || null,
+    customer_name: manualBank ? bankAccountName : (customer_name || null), customer_address: customer_address || null,
+    discount_ngn: discountNgn, discount_campaign_id: discountCampaignId, discount_phone: discountPhone,
+    self_agent_id: terms.selfAgentId, self_agent_address: terms.selfAgentAddress?.toLowerCase() ?? null,
     source_channel: 'AGENT', token_used: requestedTokenSymbol,
     meter_account_type: meter_account_type || null, customer_email: email || null,
     operator_id: operator_id || null, country_code: country_code || null, product_type_id: product_type_id || null,
@@ -1787,7 +1842,8 @@ async function handleX402Request(req: Request) {
   // automatically, before VTpass is ever asked to vend against it — closing the one gap the
   // existing missingBillDetails/payerMismatch checks don't cover (a real, correctly-shaped,
   // but WRONG account number).
-  const needsVerification = !isForeign && (
+  // A verified agent's bank transfer was name-checked before settlement and is never sent to VTpass.
+  const needsVerification = !isForeign && !manualBank && (
     serviceCategory === 'ELECTRICITY' ||
     serviceCategory === 'BANK' ||
     (serviceCategory === 'EDUCATION' && serviceID === 'jamb') ||
@@ -1800,7 +1856,7 @@ async function handleX402Request(req: Request) {
     // ("pass the variation code for JAMB, Bank Transfers, and Electricity"). Cable never sends
     // a type here, matching MCP's own verifyAccount call.
     const verifyType = serviceCategory === 'ELECTRICITY' ? meterType : (variation_code || undefined);
-    const va = await verifyAccount(serviceID, billersCode, verifyType);
+    const va = await verifyAccount(String(serviceID), billersCode, verifyType);
     if (!va.success) {
       const reason = va.message || 'Could not verify that account.';
       await supabase.from('transactions').update({ status: 'FAILED_VENDING', error_code: 'FAILED_VERIFICATION', api_response: reason }).eq('tx_hash', txHash);

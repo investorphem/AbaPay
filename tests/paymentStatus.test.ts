@@ -81,3 +81,37 @@ describe('unknown tools', () => {
     expect((r.content[0] as { text: string }).text).toContain('Unknown tool "no_such_tool"');
   });
 });
+
+describe('verified agents\' bank transfers over MCP', () => {
+  const HB = '0x' + 'b'.repeat(64);
+  const VERIFIED = { present: true as const, status: 'verified' as const, agentAddress: '0xAbC0000000000000000000000000000000000001', agentId: '205' };
+
+  it('get_payment_status returns the transfer reference and the receipt image once sent', async () => {
+    const { toBytea } = await import('@/lib/bankPayouts');
+    db.tables.transactions.push({ tx_hash: HB, request_id: 'REQ-B', wallet_address: MINE, status: 'SUCCESS', network: 'Access Bank', service_category: 'BANK', service_id: 'abapay-bank-payout', amount_naira: 250000, account_number: '0123456789', blockchain: 'CELO', purchased_code: 'Bank transfer reference: NIP-0001' });
+    db.tables.bank_payouts = [{ tx_hash: HB, status: 'PAID', payout_reference: 'NIP-0001', paid_at: '2026-11-21T10:00:00Z', account_name: 'ADA OBI', account_number: '0123456789', bank_name: 'Access Bank', proof_mime: 'image/png', proof_image: toBytea(Buffer.from('png!')) }];
+    const r = await callTool('get_payment_status', { reference: HB }, identity);
+    expect(text(r)).toMatch(/Reference: NIP-0001/);
+    expect(text(r)).toMatch(/ADA OBI/);
+    expect(r.content[1]).toMatchObject({ type: 'image', mimeType: 'image/png', data: Buffer.from('png!').toString('base64') });
+  });
+
+  it('pay_bank_transfer refuses an agent without a verified Self Agent ID, before the PIN or any money', async () => {
+    const r = await callTool('pay_bank_transfer', { pin: '123456', bank_code: '044', account_number: '0123456789', amount_ngn: 5000 }, identity);
+    expect(r.isError).toBe(true);
+    expect(text(r)).toMatch(/only available to agents with a verified Self Agent ID/);
+  });
+
+  it('pay_bank_transfer refuses a verified agent while the operator has bank transfers off', async () => {
+    const { runWithSelfAgent } = await import('@/lib/selfAgent');
+    const { clearAgentPolicyCache } = await import('@/lib/agentPolicy');
+    clearAgentPolicyCache();
+    db.tables.platform_settings = [{ id: 1, exchange_rate: 1340, verified_agent_bank_enabled: false }];
+    const r = await runWithSelfAgent(VERIFIED, () => callTool('pay_bank_transfer', { pin: '123456', bank_code: '044', account_number: '0123456789', amount_ngn: 5000 }, identity));
+    expect(text(r)).toMatch(/switched off/);
+    clearAgentPolicyCache();
+    db.tables.platform_settings = [{ id: 1, exchange_rate: 1340, verified_agent_bank_enabled: true }];
+    const past = await runWithSelfAgent(VERIFIED, () => callTool('pay_bank_transfer', { pin: '123456', bank_code: '044', account_number: '0123456789', amount_ngn: 5000 }, identity));
+    expect(text(past)).not.toMatch(/Self Agent ID|switched off/); // past the Self gate: now the PIN decides
+  });
+});

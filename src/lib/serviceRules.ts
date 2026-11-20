@@ -383,9 +383,16 @@ export async function checkAgentSpendAllowed(
   supabase: any,
   walletAddress: string,
   amountNgn: number,
-  opts: { autonomous?: boolean } = {}
+  opts: {
+    autonomous?: boolean;
+    /** A verified outside agent with "higher limits" on (src/lib/agentPolicy.ts): these caps replace
+     * the chat-agent caps; null = no cap. The master switch still applies. */
+    caps?: { maxNgnPerTx: number | null; dailyCapNgn: number | null };
+  } = {}
 ): Promise<AgentSpendCheck> {
   const rules = await getServiceRules();
+  const maxPerTx = opts.caps ? opts.caps.maxNgnPerTx : rules.agentMaxNgnPerTx;
+  const dailyCap = opts.caps ? opts.caps.dailyCapNgn : rules.agentDailyCapNgn;
 
   if (!rules.agentEnabled) {
     return { allowed: false, reason: 'Agent payments are temporarily disabled. You can still pay in the AbaPay app.' };
@@ -395,12 +402,13 @@ export async function checkAgentSpendAllowed(
     return { allowed: false, reason: 'Automatic payments are temporarily paused. I\'ll send you a link to approve instead.' };
   }
 
-  if (amountNgn > rules.agentMaxNgnPerTx) {
+  if (maxPerTx !== null && amountNgn > maxPerTx) {
     return {
       allowed: false,
-      reason: `Agent payments are capped at ₦${rules.agentMaxNgnPerTx.toLocaleString()} per transaction. Please pay this one in the app.`,
+      reason: `Agent payments are capped at ₦${maxPerTx.toLocaleString()} per transaction. Please pay this one in the app.`,
     };
   }
+  if (dailyCap === null) return { allowed: true };
 
   // Per-user daily cap — bounds the damage from a compromised PIN or relayer.
   try {
@@ -416,10 +424,10 @@ export async function checkAgentSpendAllowed(
 
     const spentToday = (data || []).reduce((sum: number, t: any) => sum + Number(t.amount_naira || 0), 0);
 
-    if (spentToday + amountNgn > rules.agentDailyCapNgn) {
+    if (spentToday + amountNgn > dailyCap) {
       return {
         allowed: false,
-        reason: `That would take you over the ₦${rules.agentDailyCapNgn.toLocaleString()} daily agent limit (you've used ₦${spentToday.toLocaleString()} today). You can still pay in the app.`,
+        reason: `That would take you over the ₦${dailyCap.toLocaleString()} daily agent limit (you've used ₦${spentToday.toLocaleString()} today). You can still pay in the app.`,
       };
     }
   } catch {

@@ -70,7 +70,7 @@ export const CAPABILITIES: CapabilitySpec[] = [
     needsVerification: true,
     requires: ['bank', 'account number', 'amount'],
     example: 'Send ₦5,000 to my GTBank account 0123456789',
-    notes: 'Bank transfers move money to a third party and are higher-risk, so they must be confirmed with your own wallet signature in the app — the agent will not execute these from a chat allowance.',
+    notes: 'Bank transfers move money to a third party and are higher-risk, so they must be confirmed with your own wallet signature in the app — the chat agent will not execute these from a chat allowance. Agents with a verified Self Agent ID can send them over MCP (pay_bank_transfer) and x402 (see docs.abapays.com → Self Agent ID).',
   },
   {
     id: 'EDUCATION',

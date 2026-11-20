@@ -38,7 +38,9 @@ export type JobOutcome = 'done' | 'retry' | 'needs_review';
 // A transactions row (src/lib/rows.ts, generated from the schema).
 type TxRow = TransactionRow;
 
-const FINISHED = new Set(['SUCCESS', 'FAILED_VENDING', 'REFUNDED', 'EXPIRED', 'FAILED_PAYMENT', 'REVERSED_NEEDS_REFUND']);
+// AWAITING_PAYOUT: a verified agent's bank transfer, in the bank payout queue (src/lib/bankPayouts.ts).
+// Never re-sent or reconciled against a provider: no provider was ever asked to deliver it.
+const FINISHED = new Set(['SUCCESS', 'FAILED_VENDING', 'REFUNDED', 'EXPIRED', 'FAILED_PAYMENT', 'REVERSED_NEEDS_REFUND', 'AWAITING_PAYOUT']);
 
 export function backoffSeconds(attempts: number): number {
   return Math.min(3600, 30 * 2 ** Math.max(0, attempts - 1));

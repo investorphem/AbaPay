@@ -120,9 +120,9 @@ describe('MERGE GATE — the real mcpTools module still loads and exports its co
     // The tool surface must be intact — the extraction moved these verbatim, so any change in
     // count or naming means content was lost in the move.
     expect(Array.isArray(real.TOOLS)).toBe(true);
-    expect(real.TOOLS).toHaveLength(11);
+    expect(real.TOOLS).toHaveLength(13);
     expect(real.TOOLS.map((t) => t.name).sort()).toEqual(
-      ['check_balance', 'describe_capabilities', 'list_international_options', 'list_plans', 'pay_bill', 'pay_bill_batch', 'transaction_history', 'get_payment_status', 'schedule_bill', 'list_schedules', 'cancel_schedule'].sort(),
+      ['check_balance', 'describe_capabilities', 'list_international_options', 'list_plans', 'pay_bill', 'pay_bill_batch', 'transaction_history', 'get_payment_status', 'schedule_bill', 'list_schedules', 'cancel_schedule', 'list_banks', 'pay_bank_transfer'].sort(),
     );
     for (const tool of real.TOOLS) {
       expect(tool.description).toBeTruthy();

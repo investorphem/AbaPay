@@ -19,4 +19,30 @@ export function buildNimDiscountMessage(params: { enabled: boolean; percent: num
   return `AbaPay Admin Action: SET_NIM_DISCOUNT\nEnabled: ${params.enabled ? 'yes' : 'no'}\nPercent: ${params.percent}\nTimestamp: ${params.timestamp}`;
 }
 
+/** The outside-agent switches and caps (Admin → Agent → Outside agents, migration 048). Every field is
+ * in the message, so the signature covers exactly what is saved. Empty caps read "none". */
+export interface AgentPolicyForm {
+  agent_ext_max_ngn_per_tx: number | null;
+  agent_ext_daily_cap_ngn: number | null;
+  verified_agent_discounts_enabled: boolean;
+  verified_agent_fee_waiver_enabled: boolean;
+  verified_agent_higher_limits_enabled: boolean;
+  verified_agent_max_ngn_per_tx: number | null;
+  verified_agent_daily_cap_ngn: number | null;
+  verified_agent_bank_enabled: boolean;
+}
+
+export function buildAgentPolicyMessage(p: AgentPolicyForm & { timestamp: number }): string {
+  const v = (n: number | null) => (n === null ? 'none' : String(n));
+  const yn = (b: boolean) => (b ? 'yes' : 'no');
+  return [
+    'AbaPay Admin Action: SET_OUTSIDE_AGENT_POLICY',
+    `Outside agents max per order: ${v(p.agent_ext_max_ngn_per_tx)}`,
+    `Outside agents daily cap: ${v(p.agent_ext_daily_cap_ngn)}`,
+    `Verified: discounts ${yn(p.verified_agent_discounts_enabled)}, no facilitator fee ${yn(p.verified_agent_fee_waiver_enabled)}, bank transfers ${yn(p.verified_agent_bank_enabled)}`,
+    `Verified higher limits: ${yn(p.verified_agent_higher_limits_enabled)} (max per order ${v(p.verified_agent_max_ngn_per_tx)}, daily cap ${v(p.verified_agent_daily_cap_ngn)})`,
+    `Timestamp: ${p.timestamp}`,
+  ].join('\n');
+}
+
 export const CONFIRM_SIGNATURE_MAX_AGE_MS = 5 * 60 * 1000; // 5 minutes — long enough for a slow wallet popup, short enough to make a replayed old signature useless
