@@ -17,6 +17,12 @@ import type { PayerIdentity } from '@/lib/payerIdentityTypes';
 //   • an x402 payment with no AbaPay order still counts — it is on chain — flagged onchain_only.
 //     A relayer ('agent' rail) payment with no order can't be told apart from AbaPay's own chat
 //     agent, so it is listed as excluded rather than guessed.
+//   • A REGISTERED AGENT WALLET COUNTS ON EVERY RAIL (owner's rule, 2026-11-21). A wallet the chain
+//     shows as an agent (an ERC-8004 identity it owns or is the wallet of, or a Self Agent ID it is
+//     the key of or owns; payer_identities, re-read by src/lib/onchain/payerRecheck.ts) is an agent
+//     wallet whichever AbaPay surface it pays from, the web app's contract call included. Those
+//     payments count with integration 'app'. Web-app and chat-agent payments from wallets that
+//     aren't registered agents stay excluded; AbaPay's own wallets stay excluded whatever they hold.
 // Agents: only payers we can name (ERC-8004, a declared name, an OAuth client) count as agents;
 // unnamed payers are grouped, never one "agent" per wallet.
 // Targets: ≥5 agents/apps, ≥1,000 payments, ≥25 unique paying wallets, ≥$1,000 volume.
@@ -31,7 +37,8 @@ export interface GrantPayment {
   sender: string;
   recipient: string;
   agent: string;
-  integration: 'x402' | 'MCP' | 'A2A';
+  /** 'app': a registered agent wallet paying through AbaPay's own app or chat agent. */
+  integration: 'x402' | 'MCP' | 'A2A' | 'app';
   erc8004_id: string | null;
   self_agent: string | null;
   service: string;
@@ -56,6 +63,8 @@ export interface GrantAgent {
 export interface GrantExclusions {
   excluded_wallet: number;
   abapay_web_app_or_own_agent: number;
+  /** Web-app (contract call) payments from wallets that aren't registered agents. */
+  app_payer_not_registered: number;
   not_delivered: number;
   relayer_without_order: number;
 }
@@ -66,7 +75,7 @@ export interface GrantReport {
   source: 'onchain';
   /** When the Celo indexer last ran, and the block it had reached. */
   indexed: { block: number | null; at: string | null };
-  /** Every Celo x402/relayer payment into the vaults in the window, before exclusions. */
+  /** Every Celo payment into the vaults in the window (every rail), before exclusions. */
   onchain_total: { payments: number; volume_usd: number };
   totals: { payments: number; wallets: number; volume_usd: number; agents: number };
   breakdown: { recorded: number; onchain_only: number; unidentified_payments: number };
@@ -79,6 +88,14 @@ export interface GrantReport {
 }
 
 const lower = (s: unknown) => String(s || '').trim().toLowerCase();
+// Values per `in` filter. Hashes and wallets are 42-66 characters in the request URL; 300-500 of
+// them made it too long, and the read failed (the same failure src/lib/onchain/payerRecheck.ts had).
+const IN_CHUNK = 100;
+
+/** A wallet the chain shows as an agent: an ERC-8004 identity, or a verified Self Agent ID. */
+export function isRegisteredAgentWallet(p: Pick<PayerIdentity, 'erc8004_agents' | 'self_verified'> | null | undefined): boolean {
+  return !!p && ((p.erc8004_agents ?? []).length > 0 || p.self_verified === true);
+}
 const round2 = (n: number) => Math.round(n * 100) / 100;
 
 export function excludedWallets(): Set<string> {
@@ -143,12 +160,13 @@ async function pagedRows<T>(build: (from: number, to: number) => PromiseLike<{ d
 async function ordersByHash(hashes: string[]): Promise<Map<string, TxRow>> {
   const out = new Map<string, TxRow>();
   const cols = 'id, status, tx_hash, x402_settle_tx, request_id, payment_method, source_channel, service_category, network';
-  for (let i = 0; i < hashes.length; i += 300) {
-    const chunk = hashes.slice(i, i + 300);
+  for (let i = 0; i < hashes.length; i += IN_CHUNK) {
+    const chunk = hashes.slice(i, i + IN_CHUNK);
     const [a, b] = await Promise.all([
       supabase.from('transactions').select(cols).in('tx_hash', chunk),
       supabase.from('transactions').select(cols).in('x402_settle_tx', chunk),
     ]);
+    if (a.error || b.error) throw new Error(`orders read failed: ${(a.error || b.error)!.message}`);
     for (const r of [...((a.data || []) as TxRow[]), ...((b.data || []) as TxRow[])]) {
       for (const h of [lower(r.tx_hash), lower(r.x402_settle_tx)]) if (h && !out.has(h)) out.set(h, r);
     }
@@ -159,7 +177,7 @@ async function ordersByHash(hashes: string[]): Promise<Map<string, TxRow>> {
 export async function buildGrantReport(fromIso: string, toIso: string): Promise<GrantReport> {
   const onchain = await pagedRows<OnchainRow>((a, b) => supabase.from('onchain_payments')
     .select('tx_hash, log_index, block_time, contract, payer, token_symbol, amount_usd, rail')
-    .eq('chain', 'CELO').in('rail', ['x402', 'agent'])
+    .eq('chain', 'CELO')
     .gte('block_time', fromIso).lt('block_time', toIso)
     .order('block_time', { ascending: true }).range(a, b));
 
@@ -168,20 +186,22 @@ export async function buildGrantReport(fromIso: string, toIso: string): Promise<
 
   const orderIds = [...new Set([...orders.values()].map((o) => o.id))];
   const clients = new Map<string, ClientRow>();
-  for (let i = 0; i < orderIds.length; i += 500) {
-    const { data } = await supabase.from('payment_client_info').select('transaction_id, declared_agent, declared_agent_id, user_agent, client_diag').in('transaction_id', orderIds.slice(i, i + 500));
+  for (let i = 0; i < orderIds.length; i += IN_CHUNK) {
+    const { data, error } = await supabase.from('payment_client_info').select('transaction_id, declared_agent, declared_agent_id, user_agent, client_diag').in('transaction_id', orderIds.slice(i, i + IN_CHUNK));
+    if (error) throw new Error(`client info read failed: ${error.message}`);
     for (const c of (data || []) as ClientRow[]) clients.set(c.transaction_id, c);
   }
   const wallets = [...new Set(onchain.map((r) => lower(r.payer)))];
   const identities = new Map<string, PayerIdentity>();
-  for (let i = 0; i < wallets.length; i += 500) {
-    const { data } = await supabase.from('payer_identities').select('*').in('wallet', wallets.slice(i, i + 500));
+  for (let i = 0; i < wallets.length; i += IN_CHUNK) {
+    const { data, error } = await supabase.from('payer_identities').select('*').in('wallet', wallets.slice(i, i + IN_CHUNK));
+    if (error) throw new Error(`payer identities read failed: ${error.message}`);
     for (const p of (data || []) as PayerIdentity[]) identities.set(p.wallet, p);
   }
   const { data: cursor } = await supabase.from('onchain_cursors').select('last_block, updated_at').eq('chain', 'CELO').maybeSingle();
 
   const excludedSet = excludedWallets();
-  const excluded: GrantExclusions = { excluded_wallet: 0, abapay_web_app_or_own_agent: 0, not_delivered: 0, relayer_without_order: 0 };
+  const excluded: GrantExclusions = { excluded_wallet: 0, abapay_web_app_or_own_agent: 0, app_payer_not_registered: 0, not_delivered: 0, relayer_without_order: 0 };
   const payments: GrantPayment[] = [];
   const unidentified = new Set<number>();
 
@@ -193,19 +213,28 @@ export async function buildGrantReport(fromIso: string, toIso: string): Promise<
     const order = orders.get(hash);
     const client = order ? clients.get(order.id) : undefined;
     const diag = client?.client_diag || null;
+    const identity = identities.get(sender);
+    const registered = isRegisteredAgentWallet(identity);
     let integration: GrantPayment['integration'];
-    if (order) {
-      if (order.status !== 'SUCCESS') { excluded.not_delivered++; continue; }
+    if (order && order.status !== 'SUCCESS') { excluded.not_delivered++; continue; }
+    if (r.rail === 'direct') {
+      // A person or an agent paying in the web app by contract call: counts only from a
+      // registered agent wallet.
+      if (!registered) { excluded.app_payer_not_registered++; continue; }
+      integration = 'app';
+    } else if (order) {
       const rail = externalRail(order, diag, client);
-      if (!rail) { excluded.abapay_web_app_or_own_agent++; continue; }
-      integration = rail;
+      if (rail) integration = rail;
+      else if (registered) integration = 'app';
+      else { excluded.abapay_web_app_or_own_agent++; continue; }
     } else if (r.rail === 'x402') {
       integration = 'x402';
+    } else if (registered) {
+      integration = 'app';
     } else {
       excluded.relayer_without_order++; continue;
     }
 
-    const identity = identities.get(sender);
     const erc = identity?.erc8004_agents?.[0];
     const selfSigned = diag?.self_agent && typeof diag.self_agent === 'object' ? diag.self_agent as { status?: string; agent_id?: string } : null;
     const selfAgent = selfSigned?.status === 'verified' ? `verified #${selfSigned.agent_id}`

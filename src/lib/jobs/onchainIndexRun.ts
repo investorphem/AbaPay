@@ -52,7 +52,7 @@ export async function runOnchainIndex(opts: { chains?: OnchainChain[]; budgetMs:
     try {
       payers = await recheckAgentPayers({ deadline: Date.now() + left - 10_000 });
       if (payers.newly_identified.length) {
-        await sendTelegramAlert(`🪪 *Agent payer identified on chain*\n${payers.newly_identified.length} wallet(s) that paid through x402/the relayer now have an ERC-8004 or Self identity:\n${payers.newly_identified.map((w) => `\`${w}\``).join('\n')}`).catch(() => {});
+        await sendTelegramAlert(`🪪 *Agent payer identified on chain*\n${payers.newly_identified.length} wallet(s) that paid AbaPay now have an ERC-8004 or Self identity (they count as agent wallets on every rail):\n${payers.newly_identified.map((w) => `\`${w}\``).join('\n')}`).catch(() => {});
       }
     } catch (err) {
       console.error('[onchain-index] payer re-check failed:', err);

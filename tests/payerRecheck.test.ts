@@ -40,13 +40,12 @@ beforeEach(() => {
 });
 
 describe('recheckAgentPayers', () => {
-  it('re-reads x402 and relayer payers, never-checked first, then the stalest; skips fresh ones and the direct rail', async () => {
+  it('re-reads payers on every rail (the web app included), never-checked first, then the stalest; skips fresh ones', async () => {
     db.tables.onchain_payments = [pay(w(1)), pay(w(2)), pay(w(2)), pay(w(3), 'agent'), pay(w(4)), pay(w(9), 'direct')];
     db.tables.payer_identities = [identity(w(1), 30), identity(w(2), 2), identity(w(3), 50)];
     const r = await recheckAgentPayers({ now: NOW });
-    expect(r).toMatchObject({ payers: 4, due: 3, checked: 3, errors: 0 });
-    expect(looked).toEqual([w(4), w(3), w(1)]); // never checked, then 50h, then 30h; w(2) is fresh
-    expect(looked).not.toContain(w(9));
+    expect(r).toMatchObject({ payers: 5, due: 4, checked: 4, errors: 0 });
+    expect(looked).toEqual([w(4), w(9), w(3), w(1)]); // never checked (w(9) paid in the web app), then 50h, then 30h; w(2) is fresh
   });
 
   it('reports a wallet that registered as an agent after it paid (FIN)', async () => {
