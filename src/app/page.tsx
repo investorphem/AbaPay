@@ -548,8 +548,6 @@ export default function Home() {
   const [walletBalance, setWalletBalance] = useState("0.00");
   const [isFetchingBalance, setIsFetchingBalance] = useState(false);
   const [exchangeRate, setExchangeRate] = useState<number>(1550);
-  // platform_settings.x402_facilitator_fee_usd: what /api/pay/x402 adds to every x402 payment.
-  const [x402FeeUsd, setX402FeeUsd] = useState<number>(0.001);
   const [transactions, setTransactions] = useState<any[]>([]);
   const [globalFiatRates, setGlobalFiatRates] = useState<Record<string, number>>({});
 
@@ -560,15 +558,6 @@ export default function Home() {
     }
     return (process.env.NEXT_PUBLIC_ABAPAY_CELO_ADDRESS || process.env.NEXT_PUBLIC_ABAPAY_ADDRESS) as `0x${string}`;
   }, [activeChain]);
-
-  // Whether the pay button routes this payment to x402 — the same chain/token condition as its
-  // rail decision below (celoX402 / baseX402). Used to show the x402 facilitator fee.
-  const paysViaX402 = useMemo(() => {
-    const onCelo = activeChain?.id === celo.id || activeChain?.id === celoSepolia.id;
-    const onBase = activeChain?.id === base.id || activeChain?.id === baseSepolia.id;
-    return (onCelo && CELO_X402_TOKENS.includes(selectedToken.symbol))
-      || (onBase && selectedToken.symbol === "USDC" && process.env.NEXT_PUBLIC_BASE_X402_ENABLED !== 'false');
-  }, [activeChain, selectedToken.symbol]);
 
   const GAS_CURRENCY = isMainnet ? "0x765DE816845861e75A25fCA122bb6898B8B1282a" : "0xdE9e4C3ce781b4bA68120d6261cbad65ce0aB00b";
 
@@ -816,20 +805,13 @@ export default function Home() {
     // and is the one that actually enforces/records it; this is only the on-screen estimate,
     // kept in sync so the preview matches what gets charged.
     const stampDuty = (activeTab === "bank" && bill >= 10000) ? 50 : 0;
-    // ⚡ THE x402 FACILITATOR FEE. /api/pay/x402 charges (bill + fee + stamp duty − discount) /
-    // rate PLUS platform_settings.x402_facilitator_fee_usd (in the token, at cost). This preview
-    // left it out, so a ₦100 airtime showed 0.0733 USD₮ and took 0.0743 on chain (2026-11-18).
-    // Added only where the pay button routes to x402 (the same condition as its rail decision);
-    // a wallet that falls back to the contract call pays at most this much less than shown.
-    //
-    // `contractCryptoAmount` is what the contract call actually pays (unchanged); `cryptoToCharge`
-    // is what the screen and the balance checks use.
-    const crypto = (bill + fee + stampDuty - discountNgn) / exchangeRate;
-    const x402Fee = bill > 0 && paysViaX402 ? x402FeeUsd : 0;
-    // On x402, rounded UP to the shown precision, so the screen is never below what's charged.
-    const shown = x402Fee ? (Math.ceil((crypto + x402Fee) * 1e4) / 1e4).toFixed(4) : crypto.toFixed(4);
-    return { cryptoToCharge: shown, contractCryptoAmount: crypto.toFixed(4), currentFee: fee };
-  }, [calculatedNairaAmount, exchangeRate, activeService, activeTab, discountNgn, paysViaX402, x402FeeUsd]);
+    // What the screen shows is exactly what's taken, on both rails: the contract call pays this
+    // amount, and /api/pay/x402 charges AbaPay's own app (source_channel 'WEB') the same 4-decimal
+    // figure with no facilitator fee (2026-11-20; before that it added $0.001 the screen never
+    // showed — ₦100 airtime showed 0.0733 USD₮ and took 0.0743).
+    const crypto = ((bill + fee + stampDuty - discountNgn) / exchangeRate).toFixed(4);
+    return { cryptoToCharge: crypto, contractCryptoAmount: crypto, currentFee: fee };
+  }, [calculatedNairaAmount, exchangeRate, activeService, activeTab, discountNgn]);
 
   // 🔴 THE BUG THIS FIXES: insufficient balance was only ever discovered inside the Pay
   // click handler (hasEnoughBalanceOnChain, called mid-flow after the button is already
@@ -2482,11 +2464,10 @@ export default function Home() {
 
     async function fetchSettings() {
         try { 
-            const { data: settingsData } = await supabase.from('platform_settings').select('exchange_rate, kill_switches, x402_facilitator_fee_usd').eq('id', 1).single(); 
+            const { data: settingsData } = await supabase.from('platform_settings').select('exchange_rate, kill_switches').eq('id', 1).single(); 
             if (settingsData) {
                 if (settingsData.exchange_rate) setExchangeRate(Number(settingsData.exchange_rate)); 
                 if (settingsData.kill_switches) setKillSwitches(settingsData.kill_switches);
-                if (Number.isFinite(Number(settingsData.x402_facilitator_fee_usd))) setX402FeeUsd(Number(settingsData.x402_facilitator_fee_usd));
             }
         } catch {}
     }
