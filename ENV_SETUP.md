@@ -147,13 +147,12 @@ NEXT_PUBLIC_ERC8004_AGENT_ID=          # filled in AFTER registering
 ## 5. x402 Settlement — Celo's own facilitator
 
 ```
-NEXT_PUBLIC_X402_ENABLED=                   # Opt-in. Unset/false = the web app uses the contract call
 CELO_X402_API_KEY=x402_...                 # Server-side: settles via api.x402.celo.org
 ```
 
-x402 is **on by default on both chains**. Set `NEXT_PUBLIC_X402_ENABLED=false` to route the web
-app through the normal contract call instead, or `NEXT_PUBLIC_BASE_X402_ENABLED=false` for Base
-alone.
+x402 is the **agent** rail (`/api/pay/x402`). Since 2026-11-20 AbaPay's own app never uses it: it
+pays by contract call, with Celo fee abstraction in MiniPay and Valora. `NEXT_PUBLIC_X402_ENABLED`
+and `NEXT_PUBLIC_BASE_X402_ENABLED` are no longer read and can be removed from Vercel.
 
 ⚠️ **Expect some wallets to warn about the signature.** x402 settles by asking the wallet to
 sign an EIP-3009 `transferWithAuthorization` — permission for a third party to move the user's
@@ -196,7 +195,6 @@ facilitator has none of those drawbacks for a Celo-only app.
 CDP_API_KEY_ID=...                          # Server-side: Coinbase Developer Platform API key ID
 CDP_API_KEY_SECRET=...                      # Server-side: the matching secret
 NEXT_PUBLIC_ABAPAY_BASE_ADDRESS=0x...       # Already set in §3 — this is x402's payTo on Base too
-NEXT_PUBLIC_BASE_X402_ENABLED=              # Opt-in like NEXT_PUBLIC_X402_ENABLED, Base-only
 ```
 
 A completely separate rail from Celo's facilitator above — different host
