@@ -19,7 +19,6 @@ import { useProviders, useValidSelection, useProviderLimits } from "@/lib/usePro
 import { billAmountLimits } from "@/lib/amountLimits";
 import { emailProblem } from "@/lib/emailValidity";
 import { useAccount, useConnect, useDisconnect, useWalletClient, useSwitchChain, type Connector } from 'wagmi';
-import { payWithX402, X402PaymentError } from "@/lib/x402Pay";
 
 import { ReceiptModal, SelectionModal } from "@/components/Modals";
 import PointsBadge from "@/components/PointsBadge"; 
@@ -35,7 +34,6 @@ import {
   connectedWalletIsValora,
   walletApprovedChainIds,
   walletConnectSessionLive,
-  walletCanSignTypedData,
   walletApprovedMethods,
   walletRouteFor,
   routeIsRemote,
@@ -60,6 +58,7 @@ import {
 } from "@/constants";
 import { HistoryTab } from "@/components/HistoryTab";
 import { networkForPhone, NETWORK_DATA_SERVICES } from "@/lib/phoneNetwork";
+import { feeCurrencyFor } from "@/lib/feeCurrency";
 import AppTour, { hasSeenTour, type TourTab } from "@/components/AppTour";
 
 // 🔴 THE BUG THIS FIXES: a wallet interaction (approve/payBill/sendCalls/allowance calls) that
@@ -100,22 +99,6 @@ function withWalletTimeout<T>(promise: Promise<T>, ms = 90_000): Promise<T> {
     promise.then((v) => { clearTimeout(timer); resolve(v); }, (e) => { clearTimeout(timer); reject(e); });
   });
 }
-
-/**
- * The Celo tokens that can settle on x402 — i.e. the ones that implement EIP-3009
- * `transferWithAuthorization` and whose EIP-712 domain is registered in the settle route's
- * X402_DOMAINS_BY_CHAIN.
- *
- * 🔴 ONE LIST, BECAUSE TWO DRIFTED. This existed twice — once at the pay button's rail decision
- * and once as a guard inside processX402Payment. Adding USA₮ to the first and not the second
- * routed Celo USA₮ payments to x402 and had x402 itself refuse them with "This token isn't
- * supported on this network yet.", on a token whose domain was verified on-chain and whose vault
- * support was already configured. Both now read this.
- *
- * USDm is deliberately absent: Mento tokens expose only EIP-2612 permit(), so there is no
- * signature scheme the "exact" scheme could settle.
- */
-const CELO_X402_TOKENS = ['USDC', 'USD₮', 'USA₮'];
 
 // Data-service auto-detect (below): NETWORK_DATA_SERVICES maps a detected network to every
 // VTpass data service it sells (src/lib/phoneNetwork.ts, shared with the NIM app).
@@ -558,8 +541,6 @@ export default function Home() {
     }
     return (process.env.NEXT_PUBLIC_ABAPAY_CELO_ADDRESS || process.env.NEXT_PUBLIC_ABAPAY_ADDRESS) as `0x${string}`;
   }, [activeChain]);
-
-  const GAS_CURRENCY = isMainnet ? "0x765DE816845861e75A25fCA122bb6898B8B1282a" : "0xdE9e4C3ce781b4bA68120d6261cbad65ce0aB00b";
 
   const indexOfLastItem = currentPage * ITEMS_PER_PAGE;
   const indexOfFirstItem = indexOfLastItem - ITEMS_PER_PAGE;
@@ -1540,7 +1521,14 @@ export default function Home() {
 
       const publicClient = createPublicClient({ chain: activeChain, transport: http(undefined, { fetchOptions: { cache: 'no-store' } }), pollingInterval: 4000 });
       const txConfig: any = { account: address as `0x${string}` };
-      if (environment === 'MINIPAY') txConfig.feeCurrency = GAS_CURRENCY as `0x${string}`; 
+      // ⛽ Celo fee abstraction: the network fee is paid in the stablecoin being paid with
+      // (src/lib/feeCurrency.ts), in the wallets that sign Celo fee-currency transactions:
+      // MiniPay and Valora. Other wallets keep paying gas in CELO.
+      const onCeloChain = activeChain.id === celo.id || activeChain.id === celoSepolia.id;
+      if (onCeloChain && (environment === 'MINIPAY' || isValoraBrowser() || await connectedWalletIsValora(wagmiConnector))) {
+        const feeCurrency = feeCurrencyFor(selectedToken.symbol, activeChain.id === celo.id);
+        if (feeCurrency) txConfig.feeCurrency = feeCurrency;
+      }
 
       setStatus("Verifying permissions...");
       const currentAllowance = await publicClient.readContract({ address: tokenAddress as `0x${string}`, abi: ERC20_ABI, functionName: 'allowance', args: [address, ABAPAY_CONTRACT], blockTag: 'latest' }) as bigint;
@@ -1896,233 +1884,6 @@ export default function Home() {
         setIsProcessing(false); 
     }
 }; // <--- THIS IS THE MISSING BRACKET!
-
-  // ⚡ x402 SETTLEMENT (main app only, Celo + USDC) — see README "x402 settlement".
-  //
-  // Deliberately much simpler than processBlockchainPayment above: there's no approval step,
-  // no preflight-intent row, no manual writeContract/waitForTransactionReceipt — the
-  // facilitator submits and confirms the payment inside fetchWithX402Payment itself. Since
-  // settlement is atomic within that single request, there's no "signed but unconfirmed"
-  // state to rescue in the catch block, unlike the contract-call path.
-  const processX402Payment = async () => {
-    // `client` is required now that the signature is taken from the app's own wallet client
-    // rather than a parallel SDK — same precondition the contract-call path has always had.
-    if (!address || !client) return setStatus("Connect Wallet First");
-    const reach = await ensureWalletReachable();
-    if (!reach) return;
-    // 🔴 `reach.chain`, NOT `activeChain`, FOR EVERYTHING IMMEDIATELY BELOW.
-    //
-    // ensureWalletReachable() may have just resynced the chain against what the wallet is
-    // actually on — but that resync is a setState, visible on the NEXT render, not to this
-    // function's own `activeChain` closure captured back when it started running. Reading
-    // `activeChain` here would be exactly the staleness this whole check exists to close:
-    // "I switch chains and it sometimes says the network isn't supported — like it didn't grab
-    // the change yet." `reach.chain` is the answer that call just verified, not React's copy.
-    const payChain = reach.chain;
-    // Celo: USDC + USD₮ (both have EIP-3009). Base: USDC only (Base USD₮ has no
-    // transferWithAuthorization) and only when the Coinbase-facilitator rail is enabled.
-    const onCelo = payChain?.id === celo.id || payChain?.id === celoSepolia.id;
-    const onBase = payChain?.id === base.id || payChain?.id === baseSepolia.id;
-    const baseX402Enabled = process.env.NEXT_PUBLIC_BASE_X402_ENABLED !== 'false';
-    // ⚡ Deliberately generic wording — x402 vs. the normal contract-call rail is an internal
-    // routing decision (see `useX402` below), never something the user chose or should see.
-    // A USDm/USDT transaction on Celo looks identical to the user whichever rail settles it.
-    if (!onCelo && !(onBase && baseX402Enabled)) return setStatus("This network isn't supported for this token yet.");
-    // 🔴 A SECOND COPY OF THE TOKEN LIST LIVED HERE AND WENT STALE. The rail decision at the pay
-    // button was updated for USA₮; this guard was not, so a Celo USA₮ payment was routed to x402
-    // and then refused by x402 itself with "This token isn't supported on this network yet." —
-    // reported exactly that way, on a token whose EIP-3009 domain had been verified on-chain and
-    // whose vault support was already set.
-    //
-    // Kept as one list rather than two: CELO_X402_TOKENS is what both this guard and the rail
-    // decision read, so the next token can only be added in one place.
-    if (onCelo && !CELO_X402_TOKENS.includes(selectedToken.symbol)) return setStatus("This token isn't supported on this network yet.");
-    if (onBase && selectedToken.symbol !== "USDC") return setStatus("This token isn't supported on this network yet.");
-    // 🔴 Was missing entirely — x402 payments failed at settlement on a low balance instead
-    // of being caught here first.
-    if (!(await hasEnoughBalanceOnChain(payChain))) return setStatus(`Insufficient ${selectedToken.symbol} balance — you need ${cryptoToCharge} ${selectedToken.symbol}. Top up and try again.`);
-
-    setIsProcessing(true);
-    // 🔴 WAS "Confirming on blockchain... Please hold." — SET BEFORE ANYTHING WAS SIGNED.
-    //
-    // x402 needs an EIP-712 `transferWithAuthorization` signature from the wallet before the
-    // facilitator can settle anything, so at this point the app is waiting on the USER, not on
-    // the chain. Claiming otherwise is what made the Valora case unreadable: the wallet is a
-    // separate app, nothing brings it to the foreground, and the screen insisted the
-    // blockchain was already working on a payment that had not been authorised yet. Anyone
-    // would sit and wait. Name the thing we are actually waiting for.
-    setStatus(walletApprovalPrompt("Approve this payment"));
-
-    const { backendPayload, uiCategory, displayNetwork, payloadBillersCode, currentBlockchainName } = buildBackendPayload();
-
-    // 🔎 TEMPORARY DIAGNOSTIC — pinning down a live Base signature refusal (delegated/smart
-    // account whose ERC-1271 sometimes accepts this wallet's x402 signature and sometimes
-    // refuses it, on the same wallet, days apart, with nothing in AbaPay's own code visibly
-    // different between the two). Rides along in the POST body so the server's existing
-    // "SIGNATURE REFUSED" alert can report exactly which wallet-client path and connector
-    // produced the rejected signature, instead of guessing after the fact. Safe to delete once
-    // this is root-caused: it changes nothing about how the payment is signed or settled.
-    const clientDiag = {
-      usingWagmiClient: client === wagmiWalletClient,
-      connectorId: (wagmiConnector as any)?.id,
-      connectorName: (wagmiConnector as any)?.name,
-      environment,
-      activeChainId: activeChain?.id,
-      walletReportedChainId: await client.getChainId().catch((e: any) => `error: ${e?.message}`),
-    };
-    console.log('[x402][diag]', clientDiag);
-
-    try {
-      // 🔴 AND IT COULD HANG FOREVER. The contract-call path wraps its wallet interaction in
-      // withWalletTimeout; this one had nothing, so a signature request that never reached the
-      // wallet — the exact WalletConnect-to-a-backgrounded-mobile-app case — left the user on
-      // a spinner with no error, no retry and no explanation, indefinitely. Same 90s budget
-      // and the same message as every other wallet interaction in this file.
-      //
-      // Signed by `client` — the same wallet connection every contract call in this file uses.
-      // It used to go through thirdweb's separate wallet stack, which had to establish itself
-      // first and showed up over WalletConnect as an extra connection prompt before anything
-      // was even signed. See src/lib/x402Pay.ts.
-      //
-      // The 90s budget is handed to the SIGNATURE only, not to the whole payment: once the user
-      // has signed, the facilitator's settlement must be allowed to finish. Timing that out
-      // would report "your wallet didn't respond" about a payment already being settled.
-      //
-      // Keeping the budget off the settle request is also what makes WalletTimeoutError mean
-      // one exact thing — the wallet never answered, so nothing was ever sent to settle — which
-      // is why the catch below can fall back to the contract call on it without risking a
-      // double charge. See the WalletTimeoutError branch there.
-      const finalStatus: any = await payWithX402({
-        url: '/api/pay/x402',
-        body: { ...backendPayload, _clientDiag: clientDiag },
-        client,
-        account: address as `0x${string}`,
-        expectedChainId: activeChain?.id,
-        wrapSignature: (p) => withWalletTimeout(p),
-        // ⚡ ONE SIGNATURE ON THIS RAIL. payWithX402 defaults to a single attempt, so no second
-        // prompt is raised here — if the payment cannot be completed, the catch below hands the
-        // bill to the contract call instead.
-        //
-        // 🔴 WHY THE AUTOMATIC RE-SIGN WAS TAKEN BACK OUT. It was added to automate the
-        // workaround people had found by hand ("cancel and retry the same x402 and it goes
-        // through"), which was sound only while first attempts failed OCCASIONALLY. Once one
-        // started failing reproducibly, the rescue became a second wallet prompt on EVERY
-        // payment — indistinguishable, from the user's side, from an app that ignored the first
-        // one, which is exactly the suspicion this flow has spent months trying to shake.
-        //
-        // The handler is kept because the capability is still there behind maxAttempts, and if it
-        // is ever turned back on the second prompt must be explained rather than just appearing.
-        onRetry: (reason) => {
-          console.warn('[x402] Facilitator refused; re-signing before falling back:', reason);
-          setStatus(walletApprovalPrompt('That payment was turned down — approve it once more'));
-        },
-        // 🔴 THE BUG THIS FIXES: from the moment the wallet returns a signature to the moment
-        // the server responds, the screen kept reading "Approve this payment in your wallet..."
-        // — a request the user had already answered. The contract-call rail never has this gap:
-        // it broadcasts, then shows "Confirming on blockchain... Please hold." The x402 rail had
-        // nothing between "asking" and "done", so a payer who had already tapped Approve had no
-        // way to tell their crypto had actually been sent — only that nothing seemed to be
-        // happening. onSigned fires the instant the signature lands, before the settle POST
-        // (which is also where this route's VTpass vend happens — see /api/pay/x402), so this is
-        // the one honest checkpoint the rail has to report that money is now moving.
-        onSigned: () => setStatus('Payment sent! Confirming and delivering your purchase...'),
-      });
-
-      // The server's duplicate-electricity check runs BEFORE the facilitator settles the x402
-      // payment (see /api/pay/x402's placement comment), so a DUPLICATE response here means
-      // nothing was charged — handled separately from a real vend failure below, since running
-      // it through handleVendResult would log a fake "DUPLICATE" entry into the user's payment
-      // history for a payment that never actually happened.
-      if (finalStatus?.status === 'DUPLICATE') {
-        setStatus(finalStatus.message || "You already paid this today.");
-        showToast("Duplicate Payment", finalStatus.message || "You already paid this today.", "error");
-        return;
-      }
-
-      // Unlike the contract path, the browser never sees this transaction directly — the
-      // facilitator submits it, not the connected wallet — so the server hands it back.
-      const realTxHash = (finalStatus.tx_hash || `x402_${Date.now()}`).toLowerCase();
-
-      handleVendResult(finalStatus, realTxHash, backendPayload, uiCategory, displayNetwork, payloadBillersCode, currentBlockchainName);
-
-      const tokenAddress = getAgentTokenAddress();
-      if (tokenAddress) {
-        const publicClient = createPublicClient({ chain: activeChain, transport: http() });
-        const balanceWei = await publicClient.readContract({ address: tokenAddress as `0x${string}`, abi: ERC20_ABI, functionName: 'balanceOf', args: [address] });
-        setWalletBalance(parseFloat(formatUnits(balanceWei as bigint, selectedToken.decimals)).toFixed(4));
-      }
-    } catch (e: any) {
-      // 🔴 THE BUG THIS FIXES: an x402 settlement failure (Celo's facilitator briefly
-      // unreachable, its own backend down, whatever) simply failed the payment outright —
-      // "Payment failed with status 402" — with no way to complete it until the facilitator
-      // recovered, even though the standard on-chain flow was working fine the whole time.
-      //
-      // x402 settlement is atomic: the facilitator either actually moves funds via the
-      // payer's signed EIP-3009 authorization (a real success, handled above — never reaches
-      // this catch) or nothing happens at all. So ANY failure here is safe to retry via the
-      // completely independent contract-call flow: it's a different signing mechanism
-      // entirely (a real payBill() transaction, not an EIP-3009 authorization), so whatever
-      // caused x402 to fail cannot recur there.
-      // 🔴 A SILENT WALLET USED TO END THE PAYMENT HERE. IT IS NOW THE FALLBACK'S CUE.
-      //
-      // This branch stopped dead, on the reasoning that the signature might still arrive and
-      // settle a moment later, so starting the contract-call flow risked paying twice. That was
-      // TRUE of the thirdweb client, which owned the settle request and could complete it after
-      // our timeout fired. It has not been true since x402 moved to src/lib/x402Pay.ts: the
-      // settle POST is made by that function, on the line after the signature is awaited, so a
-      // timeout unwinds it and no X-PAYMENT header is ever sent. A signature that shows up late
-      // has nobody left to hand it to the facilitator — it goes nowhere.
-      //
-      // Which makes this the single most important line for Valora. Valora renders the x402
-      // typed data as "Verify wallet", announces "Connection to AbaPay was successful!" when the
-      // user taps Allow, and returns NOTHING. Refusing to fall back left that user on a dead
-      // payment; the old workaround was to keep Valora off the x402 rail entirely, which is why
-      // "the Base and Celo x402 route are both ignored in Valora". Now the rail is tried, and
-      // when the wallet does not answer, the contract call takes over by itself.
-      if (e instanceof WalletTimeoutError) {
-        console.error('[x402] Wallet never returned a signature; nothing was sent to settle — falling back to the contract call.');
-        setStatus("Your wallet didn't return the fast-payment approval — switching to the standard one. It will ask you to approve again.");
-        await processBlockchainPayment();
-        return; // processBlockchainPayment manages its own isProcessing/status lifecycle
-      }
-
-      // 🔴 A REJECTION IS AN ANSWER, NOT A FAULT. Falling back here meant that declining the
-      // signature immediately raised a SECOND, different wallet prompt for the same bill —
-      // observed in the wild: the user dismissed a request their wallet had flagged as
-      // malicious, the spinner carried on regardless, and another approval appeared. That
-      // reads as an app ignoring "no" and asking again, which is exactly the behaviour a
-      // suspicious user is watching for. Stop when the user says stop.
-      if (isUserRejection(e)) {
-        setStatus("Payment cancelled.");
-        return;
-      }
-
-      // 🔴 SETTLED, THEN SOMETHING ELSE WENT WRONG — NEVER FALL BACK.
-      //
-      // A failure carrying a tx_hash means the facilitator ALREADY took the money; the server
-      // has recorded it and queued a refund (see /api/pay/x402's "write the row FIRST" note).
-      // The old code could not see this — thirdweb's wrapper threw a bare Error with no body —
-      // so it went on to raise a SECOND, real payment prompt for a bill the user had already
-      // paid. That is a double charge, and it is the whole reason payWithX402 surfaces
-      // `settled` instead of just a message.
-      if (e instanceof X402PaymentError && e.settled) {
-        console.error('[x402] Settled but not delivered — refund queued, NOT falling back:', e.message, e.txHash);
-        setStatus(e.message || "Your payment went through but the bill couldn't be delivered — a refund is on its way.");
-        showToast("Payment Received, Bill Not Delivered", "Your payment settled but we couldn't complete the purchase. A refund has been queued automatically — check your History tab.", "error");
-        return;
-      }
-
-      // Nothing moved, so the contract-call rail is a genuinely safe second attempt — but it is
-      // a WHOLE SECOND PAYMENT FLOW, with its own approval and its own send. Saying so is the
-      // difference between "why is my wallet asking me again?" and an expected retry.
-      console.error('[x402] Settlement failed, falling back to the standard on-chain flow:', e.message);
-      setStatus("Couldn't use the fast payment method — switching to the standard one. Your wallet will ask you to approve once more.");
-      await processBlockchainPayment();
-      return; // processBlockchainPayment manages its own isProcessing/status lifecycle
-    } finally {
-      setIsProcessing(false);
-    }
-  };
 
   useEffect(() => { if (status && !isProcessing) { const timer = setTimeout(() => setStatus(""), 5000); return () => clearTimeout(timer); } }, [status, isProcessing]);
 
@@ -3375,34 +3136,6 @@ export default function Home() {
     );
   }, [environment, isWagmiConnected, wagmiChain, switchChain, isMainnet]);
 
-  // ⚡ CAN THIS WALLET RETURN AN x402 SIGNATURE AT ALL? ⚡
-  //
-  // x402 needs an `eth_signTypedData_v4` signature to come BACK to the page, and a WalletConnect
-  // session that never negotiated that method drops the request on the floor — no prompt, no
-  // error, nothing back. Asking anyway is not a rail choice, it is a guaranteed wait followed by
-  // the fallback, so the capability is resolved ONCE per connection (from the session, see
-  // walletCanSignTypedData) and the rail is picked from the answer.
-  //
-  // 🔴 IT NO LONGER NAMES A WALLET. This used to answer false for Valora outright, on the
-  // strength of Valora rendering the request as "Verify wallet" and reporting "Connection to
-  // AbaPay was successful!" without returning a signature — which took the x402 rail away from
-  // Valora on Celo AND Base permanently. A wallet that MIGHT not answer is not the same as one
-  // that cannot: the rail is tried, and an unanswered signature now falls back on its own (see
-  // the WalletTimeoutError branch in processX402Payment) instead of stranding the payment. That
-  // fallback is what made it safe to stop guessing on the wallet's behalf.
-  //
-  // Defaults to true so the common case — an injected wallet, verified working — is never
-  // demoted by a check that hasn't resolved yet.
-  const [walletSupportsX402, setWalletSupportsX402] = useState(true);
-  useEffect(() => {
-    let cancelled = false;
-    (async () => {
-      const capable = await walletCanSignTypedData(wagmiConnector);
-      if (!cancelled) setWalletSupportsX402(capable);
-    })();
-    return () => { cancelled = true; };
-  }, [wagmiConnector, isWagmiConnected]);
-
   // ⚡ 2. THE CHAMELEON ENVIRONMENT DETECTOR ⚡
   //
   // 🔴 IT USED TO RE-DETECT EVERY TIME IT DETECTED SOMETHING — AND RECONNECT THE WALLET EACH TIME.
@@ -3977,89 +3710,13 @@ export default function Home() {
               <button
                   onClick={() => {
                       setIsConfirmModalOpen(false);
-                      // ⚡ x402 is the automatic settlement rail — no user-facing toggle:
-                      //   • Celo + USDC/USD₮ (both have EIP-3009) → Celo facilitator
-                      //   • Base + USDC (Base USD₮ has no transferWithAuthorization) → Coinbase
-                      //     CDP facilitator, ONLY when NEXT_PUBLIC_BASE_X402_ENABLED === 'true'
-                      //     (server-side CDP creds must be configured too — see route.ts).
-                      // Everything else (cUSD/USDm, Base while x402 disabled, x402 unconfigured)
-                      // uses the normal contract-call flow, unchanged. See README "x402 settlement".
-                      // ⚡ x402 IS THE DEFAULT RAIL ON BOTH CHAINS — Celo (USDC/USD₮) and Base
-                      // (USDC) — so payments are genuinely indexed on x402scan rather than
-                      // being relabeled contract calls.
-                      //
-                      // ⚠️ A NOTE ON THE WALLET WARNING, since it will come up again. x402
-                      // settles via an EIP-3009 `transferWithAuthorization` signature, which is
-                      // structurally the same request a token-drainer makes, so some wallet
-                      // security scanners flag it — Zerion has shown AbaPay's own request as
-                      // "Malicious Request. Approving this may risk total asset loss." on a
-                      // routine bill payment, while the same payment via the contract call
-                      // reads as an ordinary Send. This is inherent to x402, not a bug in the
-                      // request, and it is a deliberate, owner-made trade for x402scan
-                      // visibility. Set NEXT_PUBLIC_X402_ENABLED=false (or
-                      // NEXT_PUBLIC_BASE_X402_ENABLED=false for Base alone) to fall back to the
-                      // contract-call rail, which behaves identically for the user otherwise.
-                      const x402Enabled = process.env.NEXT_PUBLIC_X402_ENABLED !== 'false';
-                      // 🔴 THE REMAINING LIMIT IS THE TOKEN, NOT THE CHAIN AND NOT THE WALLET.
-                      // x402 settles on an EIP-3009 `transferWithAuthorization` signature, so it
-                      // only works on tokens that actually implement one. Celo's USDC and USD₮
-                      // both do; on Base, USDC does and Tether's USD₮ does NOT — there is no
-                      // such function on that contract to sign against, so routing it through
-                      // x402 would fail at settlement rather than fall back gracefully.
-                      //
-                      // That is why the chain's LEAD stablecoin matters so much: Base leads with
-                      // USDC (constants/TOKEN_ORDER_BY_CHAIN), so the default path on Base is
-                      // x402. Until the token-reset effect above was keyed on chain ID, arriving
-                      // on Base kept USD₮ selected from Celo and quietly demoted every Base user
-                      // to the contract call — which is exactly what was reported.
-                      // celoSepolia included so a testnet run exercises the SAME rail the
-                      // live one uses — it was mainnet-only here while processX402Payment below
-                      // already accepted both, so testing on Celo Sepolia silently rehearsed the
-                      // contract call and proved nothing about x402.
-                      // USA₮ settles on x402 exactly like Celo USD₮ — it implements EIP-3009 and
-                      // its EIP-712 domain is verified against the contract's own
-                      // DOMAIN_SEPARATOR (see X402_DOMAINS_BY_CHAIN.CELO). Leaving it out of this
-                      // list is what would quietly demote it to the contract call — the same way
-                      // arriving on Base with USD₮ selected used to.
-                      const celoX402 = (activeChain?.id === celo.id || activeChain?.id === celoSepolia.id)
-                        && CELO_X402_TOKENS.includes(selectedToken.symbol);
-                      const baseX402 = (activeChain?.id === base.id || activeChain?.id === baseSepolia.id) && selectedToken.symbol === "USDC" && process.env.NEXT_PUBLIC_BASE_X402_ENABLED !== 'false';
-
-                      // ⚠️ IT BRANCHES ON THE WALLET'S CAPABILITY — NOT ON A WALLET BLOCKLIST,
-                      // AND NOT ON THE HOST PAGE. Two earlier versions got this wrong in the
-                      // same direction: one restricted x402 to in-browser wallets, and one named
-                      // Valora and sent it straight to the contract call on BOTH chains. The
-                      // second is the "the Base and Celo x402 route are both ignored in Valora"
-                      // report, and it was self-fulfilling — a wallet routed off the rail can
-                      // never demonstrate it works on it.
-                      //
-                      // walletSupportsX402 now asks only what the SESSION can answer: was
-                      // signTypedData negotiated at all? A wallet that never negotiated it drops
-                      // the request silently, so asking buys nothing. Every other wallet is
-                      // ASKED, and its own answer decides. When the answer never comes — Valora
-                      // announcing "Connection to AbaPay was successful!" and returning no
-                      // signature is the known case — the signature times out, nothing has been
-                      // sent to settle (see src/lib/x402Pay.ts), and processX402Payment's catch
-                      // hands the bill to the contract call automatically. That is the
-                      // "otherwise fall back to the initial contract call" behaviour, arrived at
-                      // by evidence instead of by name. See walletCanSignTypedData.
-                      // ⚠️ A HEADROOM GUARD LIVED HERE AND WAS REMOVED — the theory behind it was
-                      // wrong, and a guard that diverts real payments must not rest on a guess.
-                      //
-                      // Two Base failures both sat at ~99.99% of the payer's balance, which looked
-                      // like the facilitator needing room for a fee on top of the transfer. The
-                      // receipt of a SUCCESSFUL settlement settles it: exactly one Transfer event,
-                      // payer -> vault, for exactly the authorized value. CDP takes nothing from
-                      // the payer, so there is no fee to leave room for — and the operator reports
-                      // paying full balance on this rail for a week without trouble.
-                      // Also eliminated, each against CDP or the chain rather than by reasoning:
-                      // the signature (verified server-side before settling, and it passes), the
-                      // payload shape, the network/scheme/version combination, a minimum-window
-                      // rule (a deliberately short window still reached the contract call), the
-                      // spent-nonce and blacklist and paused-token conditions, and the
-                      // facilitator's own gas (its sender holds ETH and is settling constantly).
-                      const useX402 = x402Enabled && walletSupportsX402 && (celoX402 || baseX402);
-                      if (useX402) processX402Payment(); else processBlockchainPayment();
+                      // ⚡ ABAPAY'S OWN APP PAYS BY CONTRACT CALL ONLY (owner's call, 2026-11-20).
+                      // x402 is for agents: /api/pay/x402 stays open to them, but customers on
+                      // abapays.com and in MiniPay always use payBill, with Celo fee abstraction
+                      // paying the network fee in the stablecoin they pay with (see
+                      // feeCurrencyFor in src/constants). No EIP-3009 signature, so no wallet
+                      // scanner warns that an ordinary bill payment looks like a drainer.
+                      processBlockchainPayment();
                   }}
                   className={`w-full text-white dark:text-slate-900 font-black py-5 rounded-2xl flex items-center justify-center gap-2.5 transition-all active:scale-95 shadow-xl text-lg tracking-tight ${hasPendingDuplicate ? 'bg-orange-500 dark:bg-orange-500 hover:bg-orange-600 dark:hover:bg-orange-600 text-white shadow-orange-500/20' : 'bg-slate-900 dark:bg-white hover:bg-black dark:hover:bg-slate-200 shadow-slate-900/20 dark:shadow-white/10'}`}
               >

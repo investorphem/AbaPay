@@ -6,7 +6,6 @@ import { resolveTokenOnChain, canonicalTokenSymbol, AGENT_DEFAULT_CHAIN } from '
 import { sendTelegramAlert } from '@/lib/telegram';
 import { getServiceRules, computeServiceFee, checkWebPayment } from '@/lib/serviceRules';
 import { isDuplicateElectricity } from '@/lib/parity';
-import { getActiveDiscountForService, computeDiscountNgn } from '@/lib/discounts';
 import { enqueueRefund } from '@/lib/refunds';
 import { verifyAccount } from '@/lib/deai/services';
 import { readAuthorization, checkAuthorization, isRetryableSettleFailure, settleResponseNamesTransaction, buildAuthorizationStateCall, parseAuthorizationState, transferAuthorizationTypedData, type X402Authorization } from '@/lib/x402Settle';
@@ -416,7 +415,7 @@ async function handleX402Request(req: Request) {
     foreignAmount, displayAmount, wallet_address,
     operator_id, country_code, product_type_id, email,
     meter_account_type, blockchain,
-    customer_name, customer_address, source_channel,
+    customer_name, customer_address,
   } = params;
   // "USDT" / "USAT" (what agents and the SDK send) mean USD₮ / USA₮; see canonicalTokenSymbol.
   const tokenSymbol = canonicalTokenSymbol(rawTokenSymbol);
@@ -535,34 +534,13 @@ async function handleX402Request(req: Request) {
   let requiredWei: bigint;
   let requiredCrypto: number;
   let baseRate = 1500; // fallback only ever used when vendAmount is null (no real bill to price)
-  // Discount campaigns apply to AbaPay's own app (web and MiniPay) on this rail exactly as on
-  // the contract-call path (/api/pay): same engine, same caps, recorded on the row so the caps
-  // count it. Outside agents get no campaign discount (owner's call, 2026-11-20).
-  let discountNgn = 0;
-  let discountCampaignId: string | null = null;
-  let discountPhone: string | null = null;
   if (vendAmount !== null) {
     const rules = await getServiceRules();
     baseRate = rules.exchangeRate;
-    // AbaPay's own app (web and MiniPay, source_channel 'WEB') pays exactly the amount its
-    // checkout shows: no facilitator fee, any campaign discount taken off, rounded to the 4
-    // decimals on screen — the same amount the contract-call path pays (src/app/page.tsx). The
-    // owner absorbs the fee for its own customers (2026-11-20). Outside agents pay the
-    // published price, fee included, no discount.
-    const ownApp = sourceChannelFor(source_channel) === 'WEB';
-    if (ownApp) {
-      // The same service key /api/pay and the checkout preview use: INTL* -> INTERNATIONAL.
-      const discountServiceKey = String(serviceCategory || '').toUpperCase().startsWith('INTL') ? 'INTERNATIONAL' : serviceCategory;
-      const active = await getActiveDiscountForService(discountServiceKey || null);
-      const d = await computeDiscountNgn(vendAmount, active, wallet_address, billersCode || phone || 'N/A');
-      if (d.discountNgn > 0) {
-        discountNgn = d.discountNgn;
-        discountCampaignId = active?.id || null;
-        discountPhone = d.discountPhone;
-      }
-    }
-    const billCrypto = (vendAmount + serviceFee + stampDutyNgn - discountNgn) / baseRate;
-    requiredCrypto = ownApp ? Number(billCrypto.toFixed(4)) : billCrypto + rules.x402FacilitatorFeeUsd;
+    // x402 is the AGENT rail: AbaPay's own app pays by contract call (src/app/page.tsx) since
+    // 2026-11-20, so every caller here pays the published price, facilitator fee included. A
+    // request claiming to be the web app is not one, and gets no discount or fee waiver for it.
+    requiredCrypto = (vendAmount + serviceFee + stampDutyNgn) / baseRate + rules.x402FacilitatorFeeUsd;
     requiredWei = BigInt(Math.round(requiredCrypto * 10 ** usdc.decimals));
   } else {
     requiredCrypto = Number(FALLBACK_MIN_USDC);
@@ -953,11 +931,8 @@ async function handleX402Request(req: Request) {
     variation_code: meterType ?? variation_code, network: network || 'UNKNOWN', blockchain: chainKey,
     account_number: billersCode || phone || 'N/A', phone: phone || null,
     amount_naira: vendAmount, fee_naira: serviceFee, stamp_duty_ngn: stampDutyNgn,
-    discount_ngn: discountNgn, discount_campaign_id: discountCampaignId, discount_phone: discountPhone,
-    // Best-effort, only when a discount applied, as on /api/pay: lets the admin flag clusters.
-    client_ip: discountNgn > 0 ? (req.headers.get('x-forwarded-for')?.split(',')[0].trim() || req.headers.get('x-real-ip') || null) : null,
     customer_name: customer_name || null, customer_address: customer_address || null,
-    source_channel: sourceChannelFor(source_channel), token_used: requestedTokenSymbol,
+    source_channel: 'AGENT', token_used: requestedTokenSymbol,
     meter_account_type: meter_account_type || null, customer_email: email || null,
     operator_id: operator_id || null, country_code: country_code || null, product_type_id: product_type_id || null,
     subscription_type: subscription_type || null,
@@ -1841,7 +1816,7 @@ async function handleX402Request(req: Request) {
           vtpassError: 'FAILED_VERIFICATION',
           userMessage: reason,
           serviceCategory: serviceCategory || undefined,
-          sourceChannel: sourceChannelFor(source_channel),
+          sourceChannel: 'AGENT',
         });
       } catch (refundErr) {
         console.error('[Pay/x402] Failed to queue refund for failed verification:', refundErr);
@@ -1879,20 +1854,15 @@ export async function POST(req: Request) {
   }
 }
 
+/* source_channel is always 'AGENT' on this route. AbaPay's own app stopped paying through x402 on
+ * 2026-11-20 (it pays by contract call), so a request that says source_channel 'WEB' is an agent
+ * claiming to be the app. Older rows keep the 'WEB' they were recorded with. */
+
 // x402 discovery crawlers (and some clients) probe with GET to confirm a resource is a
 // real, valid x402 endpoint before ever attempting a real payment — without this, they see
 // a 405 (no handler for GET) instead of the 402 challenge they're looking for. AbaPay's own
 // app never uses this path (it always POSTs full bill details), so a GET here always falls
 // back to the nominal minimum price and can never actually vend anything.
-/**
- * Who paid, for transactions.source_channel and the Telegram alerts (src/lib/channelLabel.ts). Our own
- * web app always sends source_channel: 'WEB' (src/app/page.tsx). Anything else on this public rail
- * — an x402 client, the SDKs, curl — is an outside agent, so it is 'AGENT': before 2026-10-24 a
- * missing value defaulted to 'WEB' and every agent payment was announced as "🌐 Web App".
- */
-function sourceChannelFor(sent: unknown): 'WEB' | 'AGENT' {
-  return String(sent || '').toUpperCase() === 'WEB' ? 'WEB' : 'AGENT';
-}
 
 /**
  * The x402 version every reply to the client declares. 2: our offers name their network in CAIP-2

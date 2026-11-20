@@ -199,10 +199,11 @@ describe('/api/pay/x402 — happy path', () => {
     expect(db.tables.transactions[0].source_channel).toBe('AGENT');
   });
 
-  it('keeps WEB for the first-party web app', async () => {
+  // AbaPay's own app pays by contract call since 2026-11-20; x402 is the agent rail only.
+  it('labels every payment AGENT, even one that claims to be the web app', async () => {
     receipts[SETTLE_TX] = settledReceipt();
     await pay({ ...bill, source_channel: 'WEB' });
-    expect(db.tables.transactions[0].source_channel).toBe('WEB');
+    expect(db.tables.transactions[0].source_channel).toBe('AGENT');
   });
 
   it('records what the paying agent said about itself for the admin ledger, and never echoes it back', async () => {
@@ -221,51 +222,19 @@ describe('/api/pay/x402 — happy path', () => {
     expect(JSON.stringify(json)).not.toMatch(/Earmark|earmark\/1\.0/);
   });
 
-  // AbaPay's own app pays exactly what its checkout shows; outside agents pay the published price.
-  it("charges AbaPay's own app no facilitator fee, at the 4 decimals its checkout shows", async () => {
+  it('charges a caller claiming to be the web app the published price: facilitator fee, no campaign discount', async () => {
     facilitatorFeeUsd = 0.001;
-    try {
-      const own = await pay({ ...bill, source_channel: 'WEB' }, null);
-      expect(own.json.accepts[0].maxAmountRequired).toBe('1000000'); // ₦1,340 at 1,340 = 1.0000
-      const small = await pay({ ...bill, nairaAmount: '100', source_channel: 'WEB' }, null);
-      expect(small.json.accepts[0].maxAmountRequired).toBe('74600'); // 0.074626… shown as 0.0746
-      const agent = await pay(bill, null);
-      expect(agent.json.accepts[0].maxAmountRequired).toBe('1001000'); // + $0.001 for outside agents
-    } finally {
-      facilitatorFeeUsd = 0;
-    }
-  });
-
-  it("takes a live campaign discount off AbaPay's own app's price, and never an outside agent's", async () => {
-    campaign = { id: 'camp-1', ngn: 134 }; // ₦134 off ₦1,340 at 1,340 = 0.9000
-    try {
-      const own = await pay({ ...bill, source_channel: 'WEB' }, null);
-      expect(own.json.accepts[0].maxAmountRequired).toBe('900000');
-      expect(discountLookups.at(-1)).toEqual({ service: 'AIRTIME', wallet: PAYER, destination: '08012345678' });
-      const lookupsBefore = discountLookups.length;
-      const agent = await pay(bill, null);
-      expect(agent.json.accepts[0].maxAmountRequired).toBe('1000000');
-      expect(discountLookups).toHaveLength(lookupsBefore); // agents never even look one up
-    } finally {
-      campaign = null;
-    }
-  });
-
-  it('records the discount on the own-app row so the campaign caps count it', async () => {
     campaign = { id: 'camp-1', ngn: 134 };
     try {
-      receipts[SETTLE_TX] = settledReceipt(BigInt(900_000));
-      const r = await pay({ ...bill, source_channel: 'WEB' }, header({ value: '900000' }));
-      expect(r.status).toBe(200);
-      expect(intentRow()).toMatchObject({ discount_ngn: 134, discount_campaign_id: 'camp-1', source_channel: 'WEB' });
+      const claimed = await pay({ ...bill, source_channel: 'WEB' }, null);
+      expect(claimed.json.accepts[0].maxAmountRequired).toBe('1001000'); // ₦1,340 at 1,340 + $0.001
+      const agent = await pay(bill, null);
+      expect(agent.json.accepts[0].maxAmountRequired).toBe('1001000');
+      expect(discountLookups).toHaveLength(0);
     } finally {
+      facilitatorFeeUsd = 0;
       campaign = null;
     }
-  });
-
-  it('international bills look up the INTERNATIONAL campaign, as the checkout preview does', async () => {
-    await pay({ ...bill, serviceID: 'foreign-airtime', serviceCategory: 'INTL AIRTIME', source_channel: 'WEB' }, null);
-    expect(discountLookups.at(-1)?.service).toBe('INTERNATIONAL');
   });
 
   it('answers a request with no payment with a 402 challenge and writes nothing', async () => {
