@@ -18,6 +18,8 @@ export interface FakeDb {
   /** Test-supplied implementations of Postgres functions called via `.rpc(name, args)`. */
   // `never` lets each test declare its handler with the exact argument shape it expects.
   rpcHandlers?: Record<string, (args: never, db: FakeDb) => unknown>;
+  /** When set, a query with an `in(...)` list longer than this fails, as a too-long PostgREST URL does. */
+  maxInList?: number;
 }
 
 export function createFakeDb(seed: Record<string, Row[]> = {}): FakeDb {
@@ -42,6 +44,7 @@ class Query implements PromiseLike<Result> {
   private cardinality: 'many' | 'single' | 'maybeSingle' = 'many';
   private limitN: number | null = null;
   private rangeFrom = 0;
+  private longestIn = 0;
 
   constructor(private db: FakeDb, private table: string) {
     db.tables[table] ??= [];
@@ -55,7 +58,7 @@ class Query implements PromiseLike<Result> {
 
   eq(col: string, v: unknown) { this.filters.push((r) => r[col] === v); return this; }
   neq(col: string, v: unknown) { this.filters.push((r) => r[col] !== v); return this; }
-  in(col: string, vs: readonly unknown[]) { this.filters.push((r) => vs.includes(r[col])); return this; }
+  in(col: string, vs: readonly unknown[]) { this.longestIn = Math.max(this.longestIn, vs.length); this.filters.push((r) => vs.includes(r[col])); return this; }
   like(col: string, pat: string) { const re = likeToRegex(pat, false); this.filters.push((r) => re.test(String(r[col] ?? ''))); return this; }
   ilike(col: string, pat: string) { const re = likeToRegex(pat, true); this.filters.push((r) => re.test(String(r[col] ?? ''))); return this; }
   is(col: string, v: null | boolean) { this.filters.push((r) => (v === null ? r[col] == null : r[col] === v)); return this; }
@@ -104,6 +107,9 @@ class Query implements PromiseLike<Result> {
 
   private run(): Result {
     this.db.log.push({ table: this.table, op: this.op, payload: this.payload });
+    if (this.db.maxInList != null && this.longestIn > this.db.maxInList) {
+      return { data: null, error: { code: 'URI_TOO_LONG', message: 'Request-URI Too Large' } };
+    }
     switch (this.op) {
       case 'select':
         return this.shape(this.rangeFrom ? this.matching().slice(this.rangeFrom) : this.matching());

@@ -53,6 +53,9 @@ const SELF_ABI = parseAbi([
   'function getAgentId(bytes32 agentPubKey) view returns (uint256)',
   'function hasHumanProof(uint256 agentId) view returns (bool)',
   'function isProofFresh(uint256 agentId) view returns (bool)',
+  'function agentIdToAgentKey(uint256 agentId) view returns (bytes32)',
+  'function ownerOf(uint256 agentId) view returns (address)',
+  'function balanceOf(address owner) view returns (uint256)',
 ]);
 
 const CACHE_MS = 24 * 60 * 60 * 1000;
@@ -97,21 +100,43 @@ function metadataFromDataUri(uri: string): unknown {
 
 type Net = (typeof NETWORKS)[keyof typeof NETWORKS];
 
-/** Agent ids the wallet holds, with the metadata Blockscout already resolved. Null when Blockscout can't answer. */
-async function idsFromBlockscout(net: Net, wallet: string): Promise<Map<string, unknown> | null> {
+/**
+ * The agent NFTs the wallet holds, from Blockscout: ERC-8004 ids with the metadata it already
+ * resolved, and Self Agent ID ids (the SelfAgentRegistry is an ERC-721 too, "SAID", minted to the
+ * human's wallet). Null when Blockscout can't answer.
+ */
+async function idsFromBlockscout(net: Net, wallet: string): Promise<{ erc8004: Map<string, unknown>; self: string[] } | null> {
   try {
     const res = await fetch(`${net.blockscout}/api/v2/addresses/${wallet}/nft?type=ERC-721`, { signal: AbortSignal.timeout(6_000) });
     if (!res.ok) return null;
     const body = await res.json() as { items?: { id?: string; metadata?: unknown; token?: { address_hash?: string; address?: string } }[] };
-    const out = new Map<string, unknown>();
+    const erc8004 = new Map<string, unknown>();
+    const self: string[] = [];
     for (const item of body.items ?? []) {
       const token = String(item.token?.address_hash ?? item.token?.address ?? '').toLowerCase();
-      if (token === net.erc8004.toLowerCase() && item.id && /^\d+$/.test(item.id)) out.set(item.id, item.metadata ?? null);
+      if (!item.id || !/^\d+$/.test(item.id)) continue;
+      if (token === net.erc8004.toLowerCase()) erc8004.set(item.id, item.metadata ?? null);
+      else if (token === net.self.toLowerCase()) self.push(item.id);
     }
-    return out;
+    return { erc8004, self };
   } catch {
     return null;
   }
+}
+
+type SelfRead = { verified: boolean; agentId: string | null; humanProof: boolean | null; proofFresh: boolean | null };
+
+/** One Self Agent ID by id: verified means registered (not revoked), human-backed and fresh. */
+async function readSelfAgent(net: Net, id: bigint): Promise<SelfRead> {
+  const client = getPublicClient('CELO');
+  const key = await client.readContract({ address: net.self, abi: SELF_ABI, functionName: 'agentIdToAgentKey', args: [id] });
+  const [registered, humanProof, proofFresh] = await Promise.all([
+    client.readContract({ address: net.self, abi: SELF_ABI, functionName: 'isVerifiedAgent', args: [key] }),
+    client.readContract({ address: net.self, abi: SELF_ABI, functionName: 'hasHumanProof', args: [id] }).catch(() => null),
+    client.readContract({ address: net.self, abi: SELF_ABI, functionName: 'isProofFresh', args: [id] }).catch(() => null),
+  ]);
+  // Same meaning as the agent-key read below: `verified` is the registry's own isVerifiedAgent.
+  return { verified: registered, agentId: id.toString(), humanProof, proofFresh };
 }
 
 /** Fallback: the registry's own mint/transfer log, read from our RPC (Chainstack in production). */
@@ -148,8 +173,42 @@ export async function lookupPayerIdentity(wallet: string, opts: { declaredAgentI
     errors.push(`self: ${errorMessage(e).slice(0, 120)}`);
   }
 
+  const held = await idsFromBlockscout(net, w);
+
+  // Self Agent ID, held by the wallet: the registry mints each agent to the human's wallet, and the
+  // agent key is a separate address — so an owner paying from its own wallet (AbaPay's #196 is
+  // owned by one address and keyed by another) is only found this way. Each id is confirmed
+  // against the registry; the first verified one wins, else the first one at all.
+  if (!selfAgentId) {
+    try {
+      let ids = held?.self ?? null;
+      if (!ids) {
+        // Blockscout down: the registry can still say whether the wallet holds any.
+        const n = await client.readContract({ address: net.self, abi: SELF_ABI, functionName: 'balanceOf', args: [w as `0x${string}`] });
+        if (n > BigInt(0)) errors.push('self: wallet holds a Self Agent ID but Blockscout could not list it');
+        ids = [];
+      }
+      let first: SelfRead | null = null;
+      for (const id of ids.slice(0, MAX_AGENTS)) {
+        const owner = String(await client.readContract({ address: net.self, abi: SELF_ABI, functionName: 'ownerOf', args: [BigInt(id)] })).toLowerCase();
+        if (owner !== w) continue; // the indexer was stale
+        const read = await readSelfAgent(net, BigInt(id));
+        first ??= read;
+        if (read.verified) { first = read; break; }
+      }
+      if (first) {
+        selfVerified = first.verified;
+        selfAgentId = first.agentId;
+        humanProof = first.humanProof;
+        proofFresh = first.proofFresh;
+      }
+    } catch (e) {
+      errors.push(`self owner: ${errorMessage(e).slice(0, 120)}`);
+    }
+  }
+
   // ERC-8004: candidates from Blockscout (or the log), each confirmed against the registry itself.
-  let candidates = await idsFromBlockscout(net, w);
+  let candidates = held?.erc8004 ?? null;
   if (!candidates) {
     candidates = await idsFromLogs(net, w).catch((e) => {
       errors.push(`erc8004 ids: ${errorMessage(e).slice(0, 120)}`);
