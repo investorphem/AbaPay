@@ -37,6 +37,20 @@ vi.mock('@/lib/serviceRules', () => ({
   computeServiceFee: () => 0,
   checkWebPayment: async () => gate,
 }));
+// A live campaign, when a test sets one: { id, ngn } is what computeDiscountNgn grants.
+let campaign: { id: string; ngn: number } | null = null;
+const discountLookups: Array<{ service: string | null; wallet: unknown; destination: unknown }> = [];
+vi.mock('@/lib/discounts', () => ({
+  getActiveDiscountForService: async (service: string | null) => {
+    discountLookups.push({ service, wallet: undefined, destination: undefined });
+    return campaign ? { id: campaign.id, name: 'Promo', type: 'FIXED', value: campaign.ngn } : null;
+  },
+  computeDiscountNgn: async (_ngn: number, active: unknown, wallet: unknown, destination: unknown) => {
+    const last = discountLookups[discountLookups.length - 1];
+    if (last) { last.wallet = wallet; last.destination = destination; }
+    return active && campaign ? { discountNgn: campaign.ngn, discountPhone: null } : { discountNgn: 0, discountPhone: null };
+  },
+}));
 vi.mock('@/lib/chain', async (importOriginal) => {
   const actual = await importOriginal<typeof import('@/lib/chain')>();
   return {
@@ -220,6 +234,38 @@ describe('/api/pay/x402 — happy path', () => {
     } finally {
       facilitatorFeeUsd = 0;
     }
+  });
+
+  it("takes a live campaign discount off AbaPay's own app's price, and never an outside agent's", async () => {
+    campaign = { id: 'camp-1', ngn: 134 }; // ₦134 off ₦1,340 at 1,340 = 0.9000
+    try {
+      const own = await pay({ ...bill, source_channel: 'WEB' }, null);
+      expect(own.json.accepts[0].maxAmountRequired).toBe('900000');
+      expect(discountLookups.at(-1)).toEqual({ service: 'AIRTIME', wallet: PAYER, destination: '08012345678' });
+      const lookupsBefore = discountLookups.length;
+      const agent = await pay(bill, null);
+      expect(agent.json.accepts[0].maxAmountRequired).toBe('1000000');
+      expect(discountLookups).toHaveLength(lookupsBefore); // agents never even look one up
+    } finally {
+      campaign = null;
+    }
+  });
+
+  it('records the discount on the own-app row so the campaign caps count it', async () => {
+    campaign = { id: 'camp-1', ngn: 134 };
+    try {
+      receipts[SETTLE_TX] = settledReceipt(BigInt(900_000));
+      const r = await pay({ ...bill, source_channel: 'WEB' }, header({ value: '900000' }));
+      expect(r.status).toBe(200);
+      expect(intentRow()).toMatchObject({ discount_ngn: 134, discount_campaign_id: 'camp-1', source_channel: 'WEB' });
+    } finally {
+      campaign = null;
+    }
+  });
+
+  it('international bills look up the INTERNATIONAL campaign, as the checkout preview does', async () => {
+    await pay({ ...bill, serviceID: 'foreign-airtime', serviceCategory: 'INTL AIRTIME', source_channel: 'WEB' }, null);
+    expect(discountLookups.at(-1)?.service).toBe('INTERNATIONAL');
   });
 
   it('answers a request with no payment with a 402 challenge and writes nothing', async () => {
