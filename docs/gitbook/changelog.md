@@ -6,6 +6,47 @@ test-tooling fixes are left out. Full history: [commits on
 GitHub](https://github.com/investorphem/AbaPay/commits/main).
 {% endhint %}
 
+## 2026-11-21
+
+* **Self Agent ID decides what an agent gets.** Agents whose requests carry a verified
+  [Self Agent ID](self-agent-id.md) can be given discount campaigns, no x402 facilitator fee and
+  higher limits, each switched on by AbaPay separately; other agents keep AbaPay's standard agent
+  terms. Nothing changes for customers paying in the AbaPay app. MCP and A2A agents now get
+  discount campaigns only when verified.
+
+* **Bank transfers for verified agents.** A verified agent can send naira to any Nigerian bank
+  account over x402 (`serviceCategory: "BANK"`) or MCP (`list_banks`, `pay_bank_transfer`), with
+  no amount limit. The account name is checked before anything is charged. The order reads
+  `AWAITING_PAYOUT` until the transfer is sent, then `SUCCESS` with the transfer reference and a
+  receipt, which the paying agent reads at `GET /api/agent/payout` (signed with its Self key) or
+  with MCP `get_payment_status`. Agents without a verified Self Agent ID are refused before
+  anything is signed.
+
+## 2026-11-20
+
+* **The AbaPay app pays by contract call; x402 is for agents.** Payments on abapays.com and in
+  MiniPay always go through AbaPay's payment contract, an ordinary approval and payment, so wallets
+  no longer show a risk warning on a routine bill. `/api/pay/x402` stays open to agents, who pay
+  the published price including the x402 facilitator fee.
+
+* **Network fees in the stablecoin you pay with.** In MiniPay and Valora on Celo, the network fee
+  is paid in USDC, USD₮, USA₮ or USDm, whichever you're paying with, so no CELO is needed for gas.
+
+* **stats.abapays.com ranges hold.** Picking 7D, 30D or 90D no longer falls back to all-time
+  totals ("range totals unavailable") when the database is busy.
+
+## 2026-11-18
+
+* **NIM app picks the network from the number.** On nim.abapays.com, typing a phone number for
+  airtime or data selects its network, as on abapays.com; a ported number can still choose
+  another.
+
+## 2026-11-05
+
+* **abapay.eth, verified both ways.** AbaPay's agent file (`/.well-known/agent.json`) now names
+  its ENS name, `abapay.eth`, whose records already point to AbaPay's ERC-8004 registrations, so
+  the ENSIP-25 check passes in both directions for agent #9687 on Celo and #59561 on Base.
+
 ## 2026-10-30
 
 * **USA₮ in the SDKs.** `abapay-sdk` 0.5.1 and `abapay` 0.3.2 (PyPI) pay in USA₮ on Celo with

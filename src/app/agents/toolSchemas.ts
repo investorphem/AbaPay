@@ -93,6 +93,31 @@ export const TOOLS: ToolDef[] = [
     ],
   },
   {
+    name: "list_banks",
+    title: "List Banks",
+    access: "read",
+    description: "Nigerian banks and their bank_code, for pay_bank_transfer. No authentication.",
+    params: [
+      { name: "search", type: "string", required: false, description: "Part of a bank name, e.g. \"access\"." },
+    ],
+  },
+  {
+    name: "pay_bank_transfer",
+    title: "Pay Bank Transfer",
+    access: "destructive",
+    description: "Send naira to a Nigerian bank account from the linked wallet. Agents with a verified Self Agent ID only; the account name is checked before anything is charged. Read the transfer reference and receipt with get_payment_status.",
+    params: [
+      { name: "api_key", type: "string", required: false, description: "Not needed over OAuth." },
+      { name: "pin", type: "string", required: true, description: "Required on every payment." },
+      { name: "idempotency_key", type: "string", required: false, description: "Retrying with the same key never pays twice." },
+      { name: "bank_code", type: "string", required: true, description: "From list_banks." },
+      { name: "account_number", type: "string", required: true, description: "The 10-digit NUBAN." },
+      { name: "amount_ngn", type: "number", required: true, description: "Whole naira, at least 100." },
+      { name: "chain", type: "string", required: false, description: "CELO or BASE.", enum: ["CELO", "BASE"] },
+      { name: "token", type: "string", required: false, description: "Stablecoin to pay with on that chain." },
+    ],
+  },
+  {
     name: "pay_bill",
     title: "Pay Bill",
     access: "destructive",

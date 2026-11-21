@@ -2,8 +2,9 @@
 
 AbaPay's MCP server, A2A endpoint and x402 endpoint accept a
 [Self Agent ID](https://app.ai.self.xyz) as proof that a calling agent is backed by a real,
-passport-verified human. A verified agent is **shown as verified** on every response. Agents
-without one keep full access: Self is optional.
+passport-verified human. A verified agent is **shown as verified** on every response, and
+**Self Agent ID decides what an agent gets**: verified agents can pay bank transfers and get the
+perks below. Agents without one can still pay every other bill.
 
 {% hint style="info" %}
 **What it proves:** that a human completed a zero-knowledge passport check for the agent's key on
@@ -72,11 +73,63 @@ Every response to a request that carried Self headers says what AbaPay found:
 The result is also stored with the payment, so AbaPay's records show which payments came from
 Self-verified agents.
 
+## What verified agents get
+
+AbaPay switches each of these on and off for agents, separately from what customers in the AbaPay
+app pay. Only an agent whose request is `verified` gets them; any other status (`expired`,
+`not_registered`, …) is treated like an agent with no Self Agent ID.
+
+| | Verified agent | Any other agent |
+|---|---|---|
+| Bank transfers to Nigerian accounts | ✅ Any amount, when switched on | ❌ Refused, nothing charged |
+| Discount campaigns | ✅ When switched on | — |
+| x402 facilitator fee ($0.001) | Waived when switched on | Paid |
+| Per-order and daily limits | Higher (or none) when switched on | AbaPay's agent limits |
+
+A payment refused by a limit answers `AGENT_LIMIT` with the limit and what is left, and nothing is
+charged. Providers' own limits (for example an airtime network's maximum) apply to everyone.
+
+## Bank transfers
+
+A verified agent can send naira to any Nigerian bank account, paid from its wallet like any other
+bill. The account name is checked **before** anything is charged and returned to you: confirm it
+with your user. Bank codes come from `GET https://agents.abapays.com/api/monnify/banks` (or the
+`list_banks` MCP tool).
+
+**x402:** `POST /api/pay/x402` with the Self headers and
+
+{% code title="Bank transfer body" %}
+```json
+{ "serviceCategory": "BANK", "billersCode": "0123456789", "variation_code": "044",
+  "nairaAmount": 25000, "wallet_address": "0x…", "blockchain": "CELO", "token": "USDC" }
+```
+{% endcode %}
+
+The price includes AbaPay's ₦100 bank-transfer fee (plus the ₦50 CBN stamp duty from ₦10,000).
+Without a verified Self Agent ID the request is refused with `SELF_AGENT_REQUIRED` (HTTP 403)
+before anything is signed.
+
+**MCP:** `pay_bank_transfer` with `bank_code`, `account_number`, `amount_ngn` and the PIN,
+on a request signed with the Self headers.
+
+**Once paid**, the order's status is `AWAITING_PAYOUT` until the transfer is sent, then
+`SUCCESS` with the bank transfer's reference and a receipt:
+
+* **x402:** `GET https://agents.abapays.com/api/agent/payout?tx=<0x hash>`, signed with the same
+  Self agent key, returns the status, the recipient and, once sent, `reference`, `sent_at` and a
+  `proof_url` (the same endpoint with `&proof=1`, also signed) for the receipt. Only the agent key
+  that paid gets an answer.
+* **MCP:** `get_payment_status` with the reference returns the transfer reference and the receipt
+  image.
+
+If a transfer can't be sent (for example the bank account was closed), the payment is refunded
+to the paying wallet and the status says so.
+
 ## Every case, and what happens
 
 | The agent… | Can it pay? | `status` | Notes |
 |---|---|---|---|
-| sends no Self headers | ✅ Yes | — | Full access; simply not shown as verified. |
+| sends no Self headers | ✅ Yes (not bank transfers) | — | Not shown as verified; no verified-agent perks. |
 | is verified, with a fresh human proof issued by Self | ✅ Yes | `verified` | Shown as verified. |
 | has a valid signature, but its proof **expired** | ✅ Yes | `expired` | Not shown as verified. The owner re-verifies at [app.ai.self.xyz](https://app.ai.self.xyz). |
 | has a valid signature, but was **revoked** or never registered | ✅ Yes | `not_registered` | Not shown as verified. |

@@ -4,7 +4,7 @@
 **Local + remote** — the same protocol Claude and any MCP client speak.
 {% endhint %}
 
-11 tools over Streamable HTTP JSON-RPC. OAuth 2.1 is supported and preferred; an Agent Hub
+13 tools over Streamable HTTP JSON-RPC. OAuth 2.1 is supported and preferred; an Agent Hub
 API key remains the fallback for clients that can't do OAuth.
 
 ## Connect
@@ -21,7 +21,7 @@ API key remains the fallback for clients that can't do OAuth.
 
 Claude Desktop / Code: Settings → Connectors → Add custom connector → paste the URL above.
 
-## The 11 tools
+## The 13 tools
 
 | Tool | What it does |
 |---|---|
@@ -30,16 +30,18 @@ Claude Desktop / Code: Settings → Connectors → Add custom connector → past
 | `list_plans` | Real, currently purchasable DATA / CABLE / EDUCATION plans with exact variation codes. |
 | `list_international_options` | Browses the international catalogue — country → product type → operator → priced plan. |
 | `transaction_history` | Recent payments, paginated. |
-| `get_payment_status` | One payment by tx hash or request id: delivered, still confirming, failed or refunded, with its refund state. Use it instead of paying again when a result was lost. |
+| `get_payment_status` | One payment by tx hash or request id: delivered, still confirming, failed or refunded, with its refund state; for a bank transfer, its reference and receipt once sent. Use it instead of paying again when a result was lost. |
 | `pay_bill` | Pay one bill — airtime, data, electricity, cable, education, international. |
 | `pay_bill_batch` | Up to 20 recipients under one PIN. |
+| `list_banks` | Nigerian banks and their `bank_code`, for bank transfers. No authentication. |
+| `pay_bank_transfer` | Send naira to a Nigerian bank account. **Agents with a verified [Self Agent ID](self-agent-id.md) only**; the account name is checked before anything is charged. |
 | `schedule_bill` | Recurring or delayed payments. |
 | `list_schedules` | What automations are currently set up. |
 | `cancel_schedule` | Cancel one by `id` (no PIN), or several by `provider` / `all: true` (PIN required). |
 
 ## Retries never pay twice
 
-`pay_bill`, `pay_bill_batch` and `schedule_bill` accept an optional `idempotency_key`: any
+`pay_bill`, `pay_bill_batch`, `schedule_bill` and `pay_bank_transfer` accept an optional `idempotency_key`: any
 unique id you pick for that one payment, 8–128 characters (a UUID is ideal).
 
 * **Retry with the same key** after a timeout and you get the first call's result back.

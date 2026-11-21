@@ -171,3 +171,26 @@ describe('vtpassHasNoRecord', () => {
     expect(vtpassHasNoRecord(null)).toBe(false);
   });
 });
+
+// A verified agent's bank transfer (src/lib/bankPayouts.ts) was never sent to a provider. Asking
+// one would read as "no record", and could refund an order the operator is about to pay.
+describe('reconcileStuckRow — verified-agent bank transfer', () => {
+  it('never asks a provider: a paid order is queued for the operator instead', async () => {
+    const manual = row({ service_category: 'BANK', service_id: 'abapay-bank-payout', variation_code: '044', self_agent_id: '205', self_agent_address: '0xabc' });
+    db = createFakeDb({ transactions: [manual], bank_payouts: [] });
+    expect(await reconcileStuckRow(manual, BASE)).toBe('resolved_elsewhere');
+    expect(fetchMock).not.toHaveBeenCalled();
+    expect(tx().status).toBe('AWAITING_PAYOUT');
+    expect(db.tables.bank_payouts).toHaveLength(1);
+    expect(enqueueRefund).not.toHaveBeenCalled();
+  });
+
+  it('leaves an unconfirmed one alone', async () => {
+    const pending = row({ status: 'PENDING', service_category: 'BANK', service_id: 'abapay-bank-payout', self_agent_id: '205', self_agent_address: '0xabc' });
+    db = createFakeDb({ transactions: [pending], bank_payouts: [] });
+    expect(await reconcileStuckRow(pending, BASE)).toBe('resolved_elsewhere');
+    expect(fetchMock).not.toHaveBeenCalled();
+    expect(db.tables.bank_payouts).toHaveLength(0);
+    expect(tx().status).toBe('PENDING');
+  });
+});

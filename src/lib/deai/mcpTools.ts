@@ -1,6 +1,10 @@
 import 'server-only';
 import { supabaseAdmin } from '@/utils/supabase';
 import { rateLimit } from '@/lib/rateLimit';
+import { isManualBankOrder, fromBytea, MANUAL_BANK_SERVICE_ID } from '@/lib/bankPayouts';
+import { getBanks, validateAccountRaw } from '@/lib/monnify';
+import { getAgentPolicy, agentTerms } from '@/lib/agentPolicy';
+import { currentSelfAgent } from '@/lib/selfAgent';
 import { getServiceRules, checkServiceAllowed, checkAgentSpendAllowed, computeServiceFee } from '@/lib/serviceRules';
 import { describeCapabilities, capabilityForIntent, getCapability, getCapabilitiesForCard } from '@/lib/deai/capabilities';
 import { resolveServiceId, fetchCryptoBalances, verifyAccount } from '@/lib/deai/services';
@@ -269,6 +273,39 @@ export const TOOLS = [
     annotations: { title: 'Get Payment Status', readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: true },
   },
   {
+    name: 'list_banks',
+    title: 'List Banks',
+    description: 'List the Nigerian banks a bank transfer can be sent to, with the bank_code pay_bank_transfer needs. Read-only, no authentication.',
+    inputSchema: {
+      type: 'object',
+      properties: { search: { type: 'string', description: 'Optional: filter by part of the bank name, e.g. "access" or "opay".' } },
+      required: [],
+      additionalProperties: false,
+    },
+    annotations: { title: 'List Banks', readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: true },
+  },
+  {
+    name: 'pay_bank_transfer',
+    title: 'Pay Bank Transfer',
+    description: 'Send naira to a Nigerian bank account, paid from the linked wallet. ONLY for agents with a verified Self Agent ID: the request must be signed with the Self agent key (x-self-agent-* headers; see docs.abapays.com → Self Agent ID), otherwise it is refused before anything is charged. Call list_banks for the bank_code. The account name is checked before any money moves and returned in the result: confirm it with the human. ALWAYS requires the PIN — ask the human for it every time. Money moves for real. The result gives a reference: call get_payment_status with it to read the transfer reference and receipt once the transfer is sent.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        api_key: { type: 'string', description: 'AbaPay MCP API key. NOT needed when the connector is authorized via OAuth — omit it entirely in that case.' },
+        pin: { type: 'string', description: 'The PIN set when the API key was created. Required on EVERY payment — ask the human for it each time.' },
+        idempotency_key: { type: 'string', description: 'Optional, strongly recommended: a unique id for THIS transfer (8-128 chars). Retrying with the same key returns the first result instead of paying again.' },
+        bank_code: { type: 'string', description: 'The bank code from list_banks.' },
+        account_number: { type: 'string', description: 'The 10-digit account number (NUBAN).' },
+        amount_ngn: { type: 'number', description: 'Amount in naira to send (whole naira, at least 100).' },
+        chain: { type: 'string', enum: ['CELO', 'BASE'], description: 'Optional. Defaults to the chain approved when the key was created.' },
+        token: { type: 'string', description: 'Optional stablecoin to pay with on that chain (e.g. "USDC", "USDT"). Defaults to the one approved when the key was created.' },
+      },
+      required: ['pin', 'bank_code', 'account_number', 'amount_ngn'],
+      additionalProperties: false,
+    },
+    annotations: { title: 'Pay Bank Transfer', readOnlyHint: false, destructiveHint: true, idempotentHint: false, openWorldHint: true },
+  },
+  {
     name: 'pay_bill',
     title: 'Pay Bill',
     description: 'Pay a real bill — Nigerian (airtime, data, electricity, cable TV, a WAEC/JAMB education PIN) or international airtime/data across 140+ countries — from the linked wallet, settled on-chain and delivered via the same pipeline as the AbaPay app. For DATA, CABLE (when changing package), and EDUCATION, call list_plans first and use a real variation_code from it. For service: INTERNATIONAL, call list_international_options first and pass back its exact country/product_type_id/operator_id/variation_code — never guess any of these. ALWAYS requires the PIN — including when this connector is authorized via OAuth; ask the human for it every time and never guess or reuse a remembered one. Money moves for real — only call this once the human has clearly confirmed the exact amount, provider, and account. EXECUTES IMMEDIATELY, with no delay/schedule parameter of any kind — there is no way to queue this call for later on this connection. If the human asks to pay "in N minutes", "later today", "tomorrow", or any other future time, do NOT call this now: ask them to confirm they want it sent immediately instead, or tell them delayed/recurring automations can only be set up from the AbaPay app or by messaging the AbaPay agent on Telegram/WhatsApp/X — never silently pay right away when a delay was requested.',
@@ -442,6 +479,18 @@ export const TOOLS = [
     _meta: { ui: { resourceUri: MCP_UI_CARD_URI } },
   },
 ];
+
+/**
+ * The operator's agent spend gate (master switch, per-payment and daily caps), with a verified
+ * outside agent's own caps when "higher limits" is on (src/lib/agentPolicy.ts). The Self result
+ * is the request's (withSelfAgent in the MCP and A2A routes).
+ */
+async function outsideAgentSpendGate(wallet: string, amountNgn: number) {
+  const policy = await getAgentPolicy();
+  const terms = agentTerms(currentSelfAgent(), policy);
+  const caps = terms.verified && policy.verifiedHigherLimits ? { maxNgnPerTx: terms.maxNgnPerTx, dailyCapNgn: terms.dailyCapNgn } : undefined;
+  return checkAgentSpendAllowed(supabaseAdmin, wallet, amountNgn, { caps });
+}
 
 async function callDescribeCapabilities() {
   const [text, entries] = await Promise.all([describeCapabilities('MCP'), getCapabilitiesForCard()]);
@@ -678,6 +727,7 @@ const STATUS_WORDS: Record<string, string> = {
   REFUNDED: 'Refunded to the paying wallet.',
   EXPIRED: 'Expired — it was never paid.',
   FAILED_PAYMENT: 'The payment itself did not go through — nothing was charged.',
+  AWAITING_PAYOUT: 'Paid. The bank transfer is queued; its reference and receipt appear here once it is sent. Do not pay again.',
 };
 
 async function callGetPaymentStatus(args: Record<string, unknown>, oauthIdentity: McpIdentity | null) {
@@ -724,7 +774,28 @@ async function callGetPaymentStatus(args: Record<string, unknown>, oauthIdentity
         : `Refund: ${r.status}`);
     }
   }
-  if (t.status === 'SUCCESS' && t.purchased_code) lines.push('The token/PIN for this purchase is in the AbaPay app\'s History tab.');
+  // A verified agent's bank transfer: the reference and, once sent, the receipt (src/lib/bankPayouts.ts).
+  if (isManualBankOrder(t.service_id) && String(t.tx_hash || '').startsWith('0x')) {
+    const { data: po } = await supabaseAdmin.from('bank_payouts')
+      .select('status, payout_reference, paid_at, account_name, account_number, bank_name, proof_mime, proof_image')
+      .eq('tx_hash', t.tx_hash).maybeSingle();
+    const payout = po as { status: string; payout_reference: string | null; paid_at: string | null; account_name: string | null; account_number: string; bank_name: string | null; proof_mime: string | null; proof_image: unknown } | null;
+    if (payout) {
+      lines.push(`Recipient: ${payout.account_name || 'n/a'}, ${payout.bank_name || ''} ${payout.account_number}`.trim());
+      if (payout.status === 'PAID') {
+        lines.push(`Bank transfer sent${payout.paid_at ? ` on ${new Date(payout.paid_at).toISOString().slice(0, 10)}` : ''}. Reference: ${payout.payout_reference}`);
+        const bytes = fromBytea(payout.proof_image);
+        if (bytes && payout.proof_mime?.startsWith('image/')) {
+          return { content: [{ type: 'text', text: stripMd(`${lines.join('\n')}\nReceipt attached.`) }, { type: 'image', data: bytes.toString('base64'), mimeType: payout.proof_mime }] };
+        }
+        if (bytes) lines.push('A receipt is on file: read it at GET /api/agent/payout?tx=<hash>&proof=1, signed with your Self agent key.');
+      } else if (payout.status === 'REFUNDED') {
+        lines.push('The bank transfer was not sent; the payment is being refunded to the paying wallet.');
+      }
+    }
+  }
+
+  if (t.status === 'SUCCESS' && t.purchased_code && !isManualBankOrder(t.service_id)) lines.push('The token/PIN for this purchase is in the AbaPay app\'s History tab.');
 
   return textResult(lines.join('\n'));
 }
@@ -975,7 +1046,7 @@ async function callPayBillInternational(
   const intlMin = checkIntlMinimum(foreignAmount, variationRate, rate);
   if (!intlMin.valid) return errorResult(intlMin.error || 'That amount is too low.');
 
-  const spendGate = await checkAgentSpendAllowed(supabaseAdmin, identity.wallet_address, vendAmountNgn);
+  const spendGate = await outsideAgentSpendGate(identity.wallet_address, vendAmountNgn);
   if (!spendGate.allowed) return errorResult(spendGate.reason || 'Agent spending is currently disabled for this account.');
 
   const chain = chainOverride || identity.approved_chain || LEGACY_RECORD_CHAIN;
@@ -1028,6 +1099,103 @@ async function callPayBillInternational(
     customerName,
     customerAddress: null,
   });
+}
+
+// ===================== BANK TRANSFERS (verified agents only) =====================
+
+async function callListBanks(args: Record<string, unknown>) {
+  const { banks, stale } = await getBanks();
+  const q = String(args?.search || '').trim().toLowerCase();
+  const list = q ? banks.filter((b) => b.name.toLowerCase().includes(q)) : banks;
+  if (list.length === 0) return errorResult(q ? `No bank matches "${args.search}". Call list_banks with no search to see them all.` : 'The bank list could not be loaded right now.');
+  return textResult(`${list.length} bank(s)${stale ? ' (from the last saved list)' : ''} — pass bank_code to pay_bank_transfer:\n\n${list.map((b) => `• ${b.name} — bank_code: "${b.code}"`).join('\n')}`);
+}
+
+// A verified agent's bank transfer: the account name is checked before anything moves, the money
+// is paid from the wallet's agent allowance like pay_bill, and the transfer itself is handed to
+// the bank payout queue (src/lib/bankPayouts.ts) through executeVend. Uncapped, by the owner's call.
+async function callPayBankTransfer(args: Record<string, unknown>, oauthIdentity: McpIdentity | null) {
+  const pin = String(args?.pin || '').trim();
+  const bankCode = String(args?.bank_code || '').trim();
+  const accountNumber = String(args?.account_number || '').replace(/\s+/g, '');
+  const amountNgn = Math.round(Number(args?.amount_ngn));
+  const chainOverride = args?.chain === 'BASE' || args?.chain === 'CELO' ? args.chain : null;
+  const tokenOverride = canonicalTokenSymbol(args?.token as string | undefined) ?? null;
+
+  const resolvedFirst = await resolveIdentity(args, oauthIdentity);
+  if ('error' in resolvedFirst && resolvedFirst.error === 'missing') return NEEDS_AUTH;
+
+  const terms = agentTerms(currentSelfAgent(), await getAgentPolicy());
+  if (!terms.verified) {
+    return errorResult('Bank transfers are only available to agents with a verified Self Agent ID. Sign this request with your Self agent key (x-self-agent-address, x-self-agent-signature, x-self-agent-timestamp); see docs.abapays.com → Self Agent ID. Nothing was charged.');
+  }
+  if (!terms.bankAllowed) return errorResult('Bank transfers for agents are switched off right now. Nothing was charged.');
+
+  if (!/^\d{4,6}$/.test(pin)) return errorResult('pin must be 4-6 digits.');
+  if (!/^[0-9A-Za-z]{2,10}$/.test(bankCode)) return errorResult('bank_code is required: take it from list_banks.');
+  if (!/^\d{10}$/.test(accountNumber)) return errorResult('account_number must be the 10-digit NUBAN.');
+  if (!Number.isFinite(amountNgn) || amountNgn < 100) return errorResult('amount_ngn must be at least ₦100.');
+
+  if ('error' in resolvedFirst) return errorResult(INVALID_KEY_MSG);
+  const identity = resolvedFirst.identity;
+
+  const pinGate = await checkPinAllowed(identity.id);
+  if (!pinGate.allowed) return errorResult(pinGate.message || 'Locked — too many incorrect PINs.');
+  if (!verifyPin(pin, identity.pin_hash)) {
+    const fail = await recordPinFailure(identity.id, identity.wallet_address, 'MCP', pinGate);
+    return errorResult(fail.message || 'Incorrect PIN.');
+  }
+  await clearPinFailures(identity.id);
+
+  const rateLimited = await checkSpendRateLimit(identity, 'pay_bill', 10, 60);
+  if (rateLimited) return rateLimited;
+
+  // The master agent switch still applies; a verified agent's bank transfer has no cap.
+  const spendGate = await checkAgentSpendAllowed(supabaseAdmin, identity.wallet_address, amountNgn, { caps: { maxNgnPerTx: null, dailyCapNgn: null } });
+  if (!spendGate.allowed) return errorResult(spendGate.reason || 'Agent payments are currently disabled.');
+
+  const named = await validateAccountRaw(accountNumber, bankCode, 10_000);
+  if (!named.result) return errorResult(`That bank account could not be verified (${named.responseMessage}). Check the account number and bank_code. Nothing was charged.`);
+  const accountName = named.result.accountName;
+  const bankName = (await getBanks()).banks.find((b) => b.code === bankCode)?.name || `Bank ${bankCode}`;
+
+  const rules = await getServiceRules();
+  const rate = rules.exchangeRate;
+  const chain = chainOverride || identity.approved_chain || LEGACY_RECORD_CHAIN;
+  const chainTokens = tokensForChain(chain);
+  const tokenSymbol = tokenOverride && chainTokens.includes(tokenOverride) ? tokenOverride : (identity.approved_token || 'USD₮');
+  const serviceFee = computeServiceFee('BANK', bankName);
+
+  const capacity = await checkAutonomousCapacity(identity.wallet_address, chain, tokenSymbol, amountNgn + serviceFee, rate);
+  if (!capacity.ok) return errorResult(capacity.reason);
+
+  const item: BatchItem = {
+    serviceCategory: 'BANK', serviceID: MANUAL_BANK_SERVICE_ID, provider: bankName,
+    billersCode: accountNumber, amountNgn, chain, tokenSymbol,
+  };
+  const result = await executeAgentPayment({
+    userWallet: identity.wallet_address, item, exchangeRate: rate, sourceChannel: 'MCP',
+    customerName: accountName, variationCode: bankCode,
+  });
+  if (result.success || result.vendFailed || result.pending) {
+    try {
+      await notifySpendOutOfBand(identity.wallet_address, {
+        amountNgn, amountCrypto: capacity.neededCrypto.toFixed(6), token: tokenSymbol,
+        service: `BANK TRANSFER to ${accountName}`, account: accountNumber, channel: 'MCP', txHash: result.txHash || '',
+        remaining: Math.max(0, capacity.allowanceRemaining - capacity.neededCrypto).toFixed(4),
+      });
+    } catch { /* never block a result on alerting */ }
+  }
+
+  if (result.success && result.txHash) {
+    return textResult([
+      `Paid: ₦${amountNgn.toLocaleString()} + ₦${serviceFee} fee from ${identity.wallet_address} on ${chain} (${tokenSymbol}).`,
+      `Bank transfer queued: ₦${amountNgn.toLocaleString()} to ${accountName}, ${bankName} ${accountNumber}.`,
+      `Reference: ${result.txHash}`,
+      'Call get_payment_status with this reference to read the transfer reference and receipt once it is sent. Do not pay again.',
+    ].join('\n'));
+  }
+  return errorResult(result.message || 'The transfer could not be paid.');
 }
 
 async function callPayBill(args: Record<string, unknown>, oauthIdentity: McpIdentity | null) {
@@ -1157,7 +1325,7 @@ async function callPayBill(args: Record<string, unknown>, oauthIdentity: McpIden
   if (!amtCheck.valid) return errorResult(amtCheck.error || 'Invalid amount.');
 
   // ⚡ OPERATOR GATE — per-tx / per-day caps and the master agent kill switch.
-  const spendGate = await checkAgentSpendAllowed(supabaseAdmin, identity.wallet_address, amountNgn);
+  const spendGate = await outsideAgentSpendGate(identity.wallet_address, amountNgn);
   if (!spendGate.allowed) return errorResult(spendGate.reason || 'Agent spending is currently disabled for this account.');
 
   // Electricity/cable/JAMB need a merchant-verify pass first — this is where a wrong meter,
@@ -1649,7 +1817,7 @@ async function callPayBillBatch(args: Record<string, unknown>, oauthIdentity: Mc
   // ⚡ OPERATOR GATE on the TOTAL — the per-tx cap alone would let a batch slip past a daily
   // cap by splitting it across recipients. Same principle as core/route.ts's batchGate.
   const totalNgn = validated.reduce((s, v) => s + v.amountNgn, 0);
-  const spendGate = await checkAgentSpendAllowed(supabaseAdmin, identity.wallet_address, totalNgn);
+  const spendGate = await outsideAgentSpendGate(identity.wallet_address, totalNgn);
   if (!spendGate.allowed) return errorResult(spendGate.reason || 'Agent spending is currently disabled for this account.');
 
   // Per-service-allowed gate, deduped so a 20-recipient batch with 2 providers doesn't run the
@@ -1758,7 +1926,7 @@ async function callPayBillBatch(args: Record<string, unknown>, oauthIdentity: Mc
 // users.
 // The three tools that move (or commit to moving) money. Each runs at most once per
 // idempotency key — see src/lib/idempotency.ts.
-const IDEMPOTENT_TOOLS = new Set(['pay_bill', 'pay_bill_batch', 'schedule_bill']);
+const IDEMPOTENT_TOOLS = new Set(['pay_bill', 'pay_bill_batch', 'schedule_bill', 'pay_bank_transfer']);
 
 export async function callTool(name: string, args: Record<string, unknown>, oauthIdentity: McpIdentity | null): Promise<ToolResult | typeof NEEDS_AUTH> {
   if (IDEMPOTENT_TOOLS.has(name)) return callIdempotent(name, args, oauthIdentity);
@@ -1805,6 +1973,8 @@ async function dispatchTool(name: string, args: Record<string, unknown>, oauthId
     case 'transaction_history': return callTransactionHistory(args, oauthIdentity);
     case 'get_payment_status': return callGetPaymentStatus(args, oauthIdentity);
     case 'pay_bill': return callPayBill(args, oauthIdentity);
+    case 'list_banks': return callListBanks(args);
+    case 'pay_bank_transfer': return callPayBankTransfer(args, oauthIdentity);
     case 'schedule_bill': return callScheduleBill(args, oauthIdentity);
     case 'list_schedules': return callListSchedules(args, oauthIdentity);
     case 'cancel_schedule': return callCancelSchedule(args, oauthIdentity);

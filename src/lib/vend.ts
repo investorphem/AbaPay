@@ -1,5 +1,6 @@
 import 'server-only';
 import { supabaseAdmin as supabase } from '@/utils/supabase';
+import { isManualBankOrder, queueBankPayout } from '@/lib/bankPayouts';
 import { sendTelegramAlert } from '@/lib/telegram';
 import { sendAbaPaySms } from '@/lib/messaging';
 import { getHeaders } from '@/lib/vtpass';
@@ -85,7 +86,8 @@ export interface VendInput {
 
 export interface VendResult {
   success: boolean;
-  status: 'SUCCESS' | 'FAILED_VENDING' | 'TIMEOUT';
+  /** AWAITING_PAYOUT: a verified agent's bank transfer, in the bank payout queue (src/lib/bankPayouts.ts). */
+  status: 'SUCCESS' | 'FAILED_VENDING' | 'TIMEOUT' | 'AWAITING_PAYOUT';
   purchased_code?: string | null;
   units?: string | null;
   request_id?: string;
@@ -160,6 +162,12 @@ async function executeVendImpl(input: VendInput): Promise<VendResult> {
   // 🔴 AT MOST ONE PROVIDER CALL PER PAYMENT (M6). See claimDispatch below.
   if (!(await claimDispatch(input.txHash))) {
     return { success: true, status: 'TIMEOUT', message: 'This payment is already being delivered.' };
+  }
+
+  // A verified agent's bank transfer never reaches a provider: every delivery path ends here, so
+  // this one check keeps it from becoming an automatic Monnify transfer (src/lib/bankPayouts.ts).
+  if (isManualBankOrder(input.serviceID)) {
+    return queueBankPayout(input);
   }
 
   if (serviceCategory === 'BANK') {

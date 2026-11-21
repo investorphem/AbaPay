@@ -116,7 +116,7 @@ await publicClient.waitForTransactionReceipt({ hash: allowanceHash });
 ## Step 3 — call MCP tools with the api_key
 
 No OAuth needed — the api_key from Step 1 stands alone. Same shape for `pay_bill`,
-`schedule_bill`, any of the 11 tools.
+`schedule_bill`, any of the 13 tools.
 
 {% code title="step-3-check-balance.js" %}
 ```js

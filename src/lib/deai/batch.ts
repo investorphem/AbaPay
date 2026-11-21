@@ -11,6 +11,8 @@ import { computeServiceFee } from '@/lib/serviceRules';
 import { markCommitted } from '@/lib/idempotency';
 import { errorMessage } from '@/lib/errors';
 import { recordAgentPaymentClient } from '@/lib/payerIdentity';
+import { getAgentPolicy, agentTerms } from '@/lib/agentPolicy';
+import { currentSelfAgent } from '@/lib/selfAgent';
 
 // ⚡ MULTI-RECIPIENT (BATCH) PAYMENTS — shared between the in-app chat (/api/deai/chat) and
 // the social channels (/api/deai/core). The intent engine emits `recipients` whenever a user
@@ -145,7 +147,14 @@ export async function executeAgentPayment(params: {
   // Same discount engine as every other channel (web, chat, scheduled) — see
   // src/lib/discounts.ts. Each recipient in a batch is checked independently, since each is its
   // own destination account and may hit its own per-destination cap separately.
-  const activeDiscount = await getActiveDiscountForService(item.serviceCategory);
+  //
+  // Outside agents (MCP, A2A) are different since 2026-11-21: a campaign applies to them only when
+  // their request carries a verified Self Agent ID and the operator has switched that perk on
+  // (src/lib/agentPolicy.ts). AbaPay's own chat agent and the scheduler serve AbaPay's customers
+  // and keep campaign discounts as before.
+  const outsideAgent = sourceChannel === 'MCP' || sourceChannel === 'A2A';
+  const terms = outsideAgent ? agentTerms(currentSelfAgent(), await getAgentPolicy()) : null;
+  const activeDiscount = !terms || terms.discounts ? await getActiveDiscountForService(item.serviceCategory) : null;
   const { discountNgn, discountPhone } = await computeDiscountNgn(item.amountNgn, activeDiscount, userWallet, item.billersCode);
   // ⚡ RECONCILED WITH x402 — this used to charge exactly item.amountNgn/exchangeRate, no fee at
   // all, while /api/pay/x402 charged (vendAmount + serviceFee)/rate for the identical service
@@ -170,6 +179,7 @@ export async function executeAgentPayment(params: {
       account_number: item.billersCode, phone: null,
       amount_usdt: Number(amountCrypto), amount_naira: item.amountNgn, fee_naira: serviceFee,
       discount_ngn: discountNgn, discount_campaign_id: activeDiscount?.id || null, discount_phone: discountPhone,
+      self_agent_id: terms?.selfAgentId ?? null, self_agent_address: terms?.selfAgentAddress?.toLowerCase() ?? null,
       status: 'PENDING',
       wallet_address: userWallet.toLowerCase(),
       customer_name: params.customerName || null, customer_address: params.customerAddress || null,

@@ -16,6 +16,7 @@ import { AdminAgentPanel } from "@/components/AdminAgentPanel";
 import { AdminDiscountsPanel } from "@/components/AdminDiscountsPanel";
 import { AdminOpsPanel } from "@/components/AdminOpsPanel";
 import { AdminGrantPanel } from "@/components/AdminGrantPanel";
+import { AdminOutsideAgentsPanel } from "@/components/AdminOutsideAgentsPanel";
 import { AdminPayerIdentity, type PaymentClientInfo } from "@/components/AdminPayerIdentity";
 import type { PayerIdentity } from "@/lib/payerIdentityTypes";
 import { signSiweHeaders } from "@/lib/siwe";
@@ -1462,6 +1463,7 @@ Switch the selected account in your wallet to the owner and click again. You sta
             {activeTab === 'agent' && (
               <div className="animate-in fade-in">
                 <AdminAgentPanel adminHeaders={adminHeaders} />
+                <div className="mt-6"><AdminOutsideAgentsPanel adminHeaders={adminHeaders} onSignAdminAction={signAdminAction} /></div>
               </div>
             )}
 

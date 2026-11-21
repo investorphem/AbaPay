@@ -20,7 +20,7 @@ interface Row {
 // question: "I know WHAT I want to do — which rail actually exposes it, and what do I call?"
 // Blank cells are real, not omissions: the REST/SDK surfaces are deliberately narrower than
 // the full MCP/A2A tool catalog (x402 is one endpoint by design; the SDK wraps the two most
-// common paths, not all eleven tools) — see each rail's own page for why.
+// common paths, not all thirteen tools) — see each rail's own page for why.
 const ROWS: Row[] = [
   { capability: "Check what's payable / paused", mcpA2a: "describe_capabilities", rest: null, sdk: null },
   { capability: "Check balance + agent limit", mcpA2a: "check_balance", rest: null, sdk: "agent.checkBalance()" },

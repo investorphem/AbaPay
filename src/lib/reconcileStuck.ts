@@ -13,6 +13,8 @@ import { normalizePurchasedCode, issuesTokenOrPin } from '@/lib/purchasedCode';
 import { pointsForPayment } from '@/lib/points';
 import { errorMessage } from '@/lib/errors';
 import type { TransactionRow } from '@/lib/rows';
+import { isManualBankOrder, queueBankPayout } from '@/lib/bankPayouts';
+import { vendInputFromRow } from '@/lib/vendInput';
 
 const resend = new Resend(process.env.RESEND_API_KEY || 're_dummy_key_for_build');
 
@@ -114,6 +116,16 @@ export async function reconcileStuckRow(record: TransactionRow, baseUrl: string)
     // checked here and set right after each alert below. It never touches `status`, so it
     // has no effect on refund eligibility or any other admin tooling.
     if (record.error_code === 'STUCK_ALERTED') return 'skipped';
+
+    // A verified agent's bank transfer was never sent to a provider, so there is nothing to requery:
+    // asking one would read as 'no record' and could refund an order about to be paid out.
+    // Queue it (idempotent) instead (src/lib/bankPayouts.ts).
+    if (isManualBankOrder(record.service_id)) {
+      if (record.status === 'PROCESSING' && !String(record.tx_hash || '').startsWith('preflight_')) {
+        await queueBankPayout(vendInputFromRow(record, { txHash: String(record.tx_hash), explorerUrl: '', baseRate: 0 }));
+      }
+      return 'resolved_elsewhere';
+    }
 
     if (!record.request_id) {
       await sendTelegramAlert(

@@ -138,7 +138,7 @@ await agent.payBill({
                 ["AbaPayAgent.fromApiKey", "static (apiKey, walletAddress, baseUrl?) => AbaPayAgent", "Reattach to an api_key minted earlier — no new signature needed."],
                 ["agent.withSelfAgent", "(key: SelfAgentKey) => AbaPayAgent", "The same session, with every MCP call signed by a Self Agent ID (the key registered at app.ai.self.xyz)."],
                 ["selfAgentHeaders", "(key, { method, url, body? }) => Promise<Record<string, string>>", "The x-self-agent-* headers for one request, for calling AbaPay without the rest of the SDK."],
-                ["agent.callTool", "(name: string, args?: object) => Promise<string>", "Low-level: call any of the 11 MCP tools by name. Every typed method below is a thin wrapper over this."],
+                ["agent.callTool", "(name: string, args?: object) => Promise<string>", "Low-level: call any of the 13 MCP tools by name. Every typed method below is a thin wrapper over this."],
                 ["agent.checkBalance", "(chain?: 'CELO') => Promise<string>", "Wraps check_balance."],
                 ["agent.payBill", "(args: { pin, service, provider, account_number, amount_ngn, chain?, token?, variation_code? }) => Promise<string>", "Wraps pay_bill."],
                 ["agent.scheduleBill", "(args: object) => Promise<string>", "Wraps schedule_bill — same fields as the MCP tool, see the Tools reference."],
