@@ -66,6 +66,7 @@ export const AGENT_PAYMENT_TOPIC = '0x90619b8207d57f0cc87c98e7c2fdb86c6f12683d8a
 // Transfer(address indexed from, address indexed to, uint256 value)
 export const TRANSFER_TOPIC = '0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef';
 
-/** The two attribution tags AbaPay puts on Celo transactions (src/lib/attribution.ts). */
+/** The attribution tags AbaPay puts on Celo transactions (src/lib/attribution.ts). */
+export const AGENTS_HACKATHON_TAG = 'celo_7ed8773e529c';
 export const HACKATHON_TAG = 'celo_2719403c6aff';
 export const BUILDERS_TAG = 'celo_9d71588659ec';
