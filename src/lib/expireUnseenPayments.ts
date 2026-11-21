@@ -57,12 +57,23 @@ export async function expireUnseenPayments(opts: { now?: number } = {}) {
   if (error) return { ok: false, error: error.message, expired: 0, checked: 0 };
 
   const closed: Row[] = [];
+  const misfiled: (Row & { other: string })[] = [];
   let checked = 0;
   for (const row of (data || []) as Row[]) {
     if (!EVM_HASH.test(row.tx_hash)) continue;
     checked++;
-    const seen = await chainHasTx(row.blockchain, row.tx_hash.toLowerCase() as `0x${string}`).catch(() => 'unknown' as const);
+    const hash = row.tx_hash.toLowerCase() as `0x${string}`;
+    const seen = await chainHasTx(row.blockchain, hash).catch(() => 'unknown' as const);
     if (seen !== 'unseen') continue;
+    // The OTHER EVM chain too: an order saved under the wrong chain is not a fake. 2026-11-16 the
+    // first run closed a Base order whose hash was a real Celo transaction (a refund to the payer).
+    // Found there, or unreadable there → leave it for a person to look at.
+    const other = String(row.blockchain).toUpperCase() === 'BASE' ? 'CELO' : 'BASE';
+    const elsewhere = await chainHasTx(other, hash).catch(() => 'unknown' as const);
+    if (elsewhere !== 'unseen') {
+      if (elsewhere === 'seen') misfiled.push({ ...row, other });
+      continue;
+    }
     const { data: updated } = await supabase.from('transactions').update({
       status: 'EXPIRED',
       error_code: 'TX_NOT_ON_CHAIN',
@@ -77,5 +88,11 @@ export async function expireUnseenPayments(opts: { now?: number } = {}) {
       closed.map((r) => `• ${r.blockchain} \`${r.tx_hash.slice(0, 12)}…\` · ${r.amount_usdt} ${r.token_used || ''} · \`${r.wallet_address || 'unknown'}\``).join('\n'),
     ).catch(() => {});
   }
-  return { ok: true, checked, expired: closed.length };
+  if (misfiled.length) {
+    await sendTelegramAlert(
+      `🔎 *ORDER(S) SAVED UNDER THE WRONG CHAIN — LEFT OPEN*\nThe payment hash isn't on the order's chain but IS on the other one. Check by hand (it may be a payment or a refund):\n` +
+      misfiled.map((r) => `• ${r.blockchain} order, hash found on ${r.other}: \`${r.tx_hash}\` · ${r.amount_usdt} ${r.token_used || ''}`).join('\n'),
+    ).catch(() => {});
+  }
+  return { ok: true, checked, expired: closed.length, misfiled: misfiled.length };
 }

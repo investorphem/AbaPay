@@ -12,17 +12,21 @@ const alerts: string[] = [];
 vi.mock('@/lib/telegram', () => ({ sendTelegramAlert: async (t: string) => { alerts.push(t); } }));
 
 const notFound = (what: string) => Object.assign(new Error(`${what} could not be found`), { name: `${what}NotFoundError` });
+/** State of each hash on the order's own chain (BASE in these tests). */
 let chain: Record<string, 'mined' | 'pending' | 'absent' | 'rpc_down'> = {};
+/** A hash that exists only on this chain. */
+let seenOn: Record<string, string> = {};
+const stateOn = (b: string, hash: string) => seenOn[hash] ? (seenOn[hash] === b ? 'mined' : 'absent') : b === 'BASE' ? chain[hash] ?? 'absent' : 'absent';
 vi.mock('@/lib/chain', () => ({
-  getPublicClient: () => ({
+  getPublicClient: (b: string) => ({
     getTransactionReceipt: async ({ hash }: { hash: string }) => {
-      const s = chain[hash];
+      const s = stateOn(b, hash);
       if (s === 'mined') return { status: 'success' };
       if (s === 'rpc_down') throw new Error('fetch failed');
       throw notFound('TransactionReceipt');
     },
     getTransaction: async ({ hash }: { hash: string }) => {
-      if (chain[hash] === 'pending') return { hash };
+      if (stateOn(b, hash) === 'pending') return { hash };
       throw notFound('Transaction');
     },
   }),
@@ -37,7 +41,7 @@ const row = (id: string, over: Record<string, unknown> = {}) => ({
   amount_usdt: 0.08, token_used: 'USDC', wallet_address: '0x633dba1a394239a0bfb343b902f98e172c9b3cf2', ...over,
 });
 
-beforeEach(() => { chain = {}; alerts.length = 0; });
+beforeEach(() => { chain = {}; seenOn = {}; alerts.length = 0; });
 
 describe('expireUnseenPayments', () => {
   it('closes a PENDING order whose hash the chain never saw, and says so once', async () => {
@@ -56,6 +60,15 @@ describe('expireUnseenPayments', () => {
     expect(r.expired).toBe(0);
     expect(db.tables.transactions.every((t) => t.status === 'PENDING')).toBe(true);
     expect(alerts).toEqual([]);
+  });
+
+  it('leaves open (and flags) an order whose hash is on the OTHER chain — saved under the wrong chain, not fake', async () => {
+    db = createFakeDb({ transactions: [row('misfiled', { tx_hash: h('e') })] });
+    seenOn = { [h('e')]: 'CELO' };
+    const r = await expireUnseenPayments({ now: NOW });
+    expect(r).toMatchObject({ expired: 0, misfiled: 1 });
+    expect(db.tables.transactions[0].status).toBe('PENDING');
+    expect(alerts[0]).toMatch(/WRONG CHAIN/);
   });
 
   it('never touches a young order, a PROCESSING one, a placeholder, or a NIM order', async () => {
