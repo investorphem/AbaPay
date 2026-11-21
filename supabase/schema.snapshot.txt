@@ -38,6 +38,26 @@ column auth_nonces.expires_at timestamp with time zone not null
 column auth_nonces.nonce text not null
 column auth_nonces.purpose text not null
 column auth_nonces.uses_remaining integer not null
+column bank_payouts.account_name text
+column bank_payouts.account_number text not null
+column bank_payouts.amount_ngn numeric not null
+column bank_payouts.bank_code text not null
+column bank_payouts.bank_name text
+column bank_payouts.created_at timestamp with time zone not null default now()
+column bank_payouts.id uuid not null default gen_random_uuid()
+column bank_payouts.narration text
+column bank_payouts.operator_note text
+column bank_payouts.paid_at timestamp with time zone
+column bank_payouts.paid_by text
+column bank_payouts.payout_reference text
+column bank_payouts.proof_image bytea
+column bank_payouts.proof_mime text
+column bank_payouts.self_agent_address text not null
+column bank_payouts.self_agent_id text not null
+column bank_payouts.status text not null default 'AWAITING'::text
+column bank_payouts.transaction_id uuid not null
+column bank_payouts.tx_hash text not null
+column bank_payouts.wallet text not null
 column deai_identities.created_at timestamp with time zone default now()
 column deai_identities.deai_pin text not null
 column deai_identities.id uuid not null default gen_random_uuid()
@@ -158,6 +178,8 @@ column payment_client_info.wallet text
 column platform_settings.agent_autonomous_enabled boolean not null default true
 column platform_settings.agent_daily_cap_ngn numeric not null default 100000
 column platform_settings.agent_enabled boolean not null default true
+column platform_settings.agent_ext_daily_cap_ngn numeric
+column platform_settings.agent_ext_max_ngn_per_tx numeric
 column platform_settings.agent_max_ngn_per_tx numeric not null default 50000
 column platform_settings.ai_chat_enabled boolean not null default true
 column platform_settings.discount_fraud_flagging_enabled boolean not null default true
@@ -167,6 +189,12 @@ column platform_settings.kill_switches jsonb default '{"BANK": true, "CABLE": tr
 column platform_settings.nim_discount_enabled boolean not null default false
 column platform_settings.nim_discount_percent numeric not null default 0
 column platform_settings.provider_circuits jsonb not null default '{}'::jsonb
+column platform_settings.verified_agent_bank_enabled boolean not null default false
+column platform_settings.verified_agent_daily_cap_ngn numeric
+column platform_settings.verified_agent_discounts_enabled boolean not null default false
+column platform_settings.verified_agent_fee_waiver_enabled boolean not null default false
+column platform_settings.verified_agent_higher_limits_enabled boolean not null default false
+column platform_settings.verified_agent_max_ngn_per_tx numeric
 column platform_settings.x402_facilitator_fee_usd numeric not null default 0.001
 column rate_limits.count integer not null default 0
 column rate_limits.key text not null
@@ -271,6 +299,8 @@ column transactions.product_type_id text
 column transactions.purchased_code text
 column transactions.refund_hash text
 column transactions.request_id text
+column transactions.self_agent_address text
+column transactions.self_agent_id text
 column transactions.service_category text not null
 column transactions.service_id text
 column transactions.source_channel text default 'WEB'::text
@@ -315,6 +345,14 @@ constraint agent_links.agent_links_pkey PRIMARY KEY (id)
 constraint auth_nonces.auth_nonces_pkey PRIMARY KEY (nonce)
 constraint auth_nonces.auth_nonces_purpose_check CHECK ((purpose = ANY (ARRAY['action'::text, 'session'::text])))
 constraint auth_nonces.auth_nonces_uses_remaining_check CHECK ((uses_remaining >= 0))
+constraint bank_payouts.bank_payouts_amount_ngn_check CHECK ((amount_ngn > (0)::numeric))
+constraint bank_payouts.bank_payouts_check CHECK (((status <> 'PAID'::text) OR ((payout_reference IS NOT NULL) AND (paid_at IS NOT NULL))))
+constraint bank_payouts.bank_payouts_pkey PRIMARY KEY (id)
+constraint bank_payouts.bank_payouts_proof_image_check CHECK (((proof_image IS NULL) OR (octet_length(proof_image) <= ((2 * 1024) * 1024))))
+constraint bank_payouts.bank_payouts_proof_mime_check CHECK (((proof_mime IS NULL) OR (proof_mime = ANY (ARRAY['image/png'::text, 'image/jpeg'::text, 'image/webp'::text, 'application/pdf'::text]))))
+constraint bank_payouts.bank_payouts_status_check CHECK ((status = ANY (ARRAY['AWAITING'::text, 'PAID'::text, 'REFUNDED'::text])))
+constraint bank_payouts.bank_payouts_transaction_id_fkey FOREIGN KEY (transaction_id) REFERENCES transactions(id) ON DELETE RESTRICT
+constraint bank_payouts.bank_payouts_transaction_id_key UNIQUE (transaction_id)
 constraint deai_identities.deai_identities_pending_auth_token_key UNIQUE (pending_auth_token)
 constraint deai_identities.deai_identities_pkey PRIMARY KEY (id)
 constraint deai_identities.deai_identities_telegram_chat_id_key UNIQUE (telegram_chat_id)
@@ -354,8 +392,12 @@ constraint otp_requests.otp_requests_pkey PRIMARY KEY (phone)
 constraint payer_identities.payer_identities_pkey PRIMARY KEY (wallet)
 constraint payment_client_info.payment_client_info_pkey PRIMARY KEY (transaction_id)
 constraint payment_client_info.payment_client_info_transaction_id_fkey FOREIGN KEY (transaction_id) REFERENCES transactions(id) ON DELETE CASCADE
+constraint platform_settings.platform_settings_agent_ext_daily_cap_ngn_check CHECK ((agent_ext_daily_cap_ngn > (0)::numeric))
+constraint platform_settings.platform_settings_agent_ext_max_ngn_per_tx_check CHECK ((agent_ext_max_ngn_per_tx > (0)::numeric))
 constraint platform_settings.platform_settings_nim_discount_percent_check CHECK (((nim_discount_percent >= (0)::numeric) AND (nim_discount_percent < (100)::numeric)))
 constraint platform_settings.platform_settings_pkey PRIMARY KEY (id)
+constraint platform_settings.platform_settings_verified_agent_daily_cap_ngn_check CHECK ((verified_agent_daily_cap_ngn > (0)::numeric))
+constraint platform_settings.platform_settings_verified_agent_max_ngn_per_tx_check CHECK ((verified_agent_max_ngn_per_tx > (0)::numeric))
 constraint rate_limits.rate_limits_pkey PRIMARY KEY (key)
 constraint refund_queue.refund_queue_pkey PRIMARY KEY (id)
 constraint refund_queue.refund_queue_transaction_id_fkey FOREIGN KEY (transaction_id) REFERENCES transactions(id)
@@ -382,7 +424,7 @@ function enqueue_fulfilment_job() returns trigger lang=plpgsql secdef=f config=s
 function fail_job(p_id uuid, p_error text, p_retry_seconds integer) returns text lang=plpgsql secdef=f config=search_path=public, pg_temp body=7e40fae56cde1c49da5bd5a2745f64ff
 function link_wallet_to_phone(target_wallet text, target_phone text) returns boolean lang=plpgsql secdef=f config=search_path=public, pg_temp body=5c655c27f237ce1e98d69904a2cc2869
 function onchain_summary(p_chain text) returns jsonb lang=sql secdef=f config=search_path=public, pg_temp body=562b416e994e670bb38cf2d5ca1bed3e
-function onchain_windows(p_chain text) returns jsonb lang=sql secdef=f config=search_path=public, pg_temp body=dd4d0517bf4e2ec45805d91d193fe79a
+function onchain_windows(p_chain text) returns jsonb lang=sql secdef=f config=search_path=public, pg_temp body=43beaf856d7ccf920ae11916d91d5d77
 function pin_attempt_clear(p_link_id uuid) returns void lang=sql secdef=f config=search_path=public, pg_temp body=5a357b931f327adacacb856193deb8b9
 function pin_attempt_reserve(p_link_id uuid) returns TABLE(allowed boolean, attempts integer, locked_until timestamp with time zone, locked_now boolean) lang=plpgsql secdef=f config=search_path=public, pg_temp body=08886edaf04372b2311df48a7ec1858c
 function rate_limit_hit(p_key text, p_window_seconds integer) returns TABLE(used integer, window_start timestamp with time zone) lang=plpgsql secdef=f config=search_path=public, pg_temp body=8a129139739abfc2875cf458c3c21122
@@ -403,6 +445,7 @@ grant DELETE,INSERT,REFERENCES,SELECT,TRIGGER,TRUNCATE,UPDATE on agent_links to 
 grant DELETE,INSERT,REFERENCES,SELECT,TRIGGER,TRUNCATE,UPDATE on auth_nonces to anon
 grant DELETE,INSERT,REFERENCES,SELECT,TRIGGER,TRUNCATE,UPDATE on auth_nonces to authenticated
 grant DELETE,INSERT,REFERENCES,SELECT,TRIGGER,TRUNCATE,UPDATE on auth_nonces to service_role
+grant DELETE,INSERT,REFERENCES,SELECT,TRIGGER,TRUNCATE,UPDATE on bank_payouts to service_role
 grant DELETE,INSERT,REFERENCES,SELECT,TRIGGER,TRUNCATE,UPDATE on deai_identities to anon
 grant DELETE,INSERT,REFERENCES,SELECT,TRIGGER,TRUNCATE,UPDATE on deai_identities to authenticated
 grant DELETE,INSERT,REFERENCES,SELECT,TRIGGER,TRUNCATE,UPDATE on deai_identities to service_role
@@ -494,6 +537,9 @@ index agent_links.idx_agent_links_lookup CREATE INDEX idx_agent_links_lookup ON 
 index agent_links.idx_agent_links_wallet CREATE INDEX idx_agent_links_wallet ON public.agent_links USING btree (wallet_address)
 index auth_nonces.auth_nonces_expires_at_idx CREATE INDEX auth_nonces_expires_at_idx ON public.auth_nonces USING btree (expires_at)
 index auth_nonces.auth_nonces_pkey CREATE UNIQUE INDEX auth_nonces_pkey ON public.auth_nonces USING btree (nonce)
+index bank_payouts.bank_payouts_pkey CREATE UNIQUE INDEX bank_payouts_pkey ON public.bank_payouts USING btree (id)
+index bank_payouts.bank_payouts_status_idx CREATE INDEX bank_payouts_status_idx ON public.bank_payouts USING btree (status, created_at)
+index bank_payouts.bank_payouts_transaction_id_key CREATE UNIQUE INDEX bank_payouts_transaction_id_key ON public.bank_payouts USING btree (transaction_id)
 index deai_identities.deai_identities_pending_auth_token_key CREATE UNIQUE INDEX deai_identities_pending_auth_token_key ON public.deai_identities USING btree (pending_auth_token)
 index deai_identities.deai_identities_pkey CREATE UNIQUE INDEX deai_identities_pkey ON public.deai_identities USING btree (id)
 index deai_identities.deai_identities_telegram_chat_id_key CREATE UNIQUE INDEX deai_identities_telegram_chat_id_key ON public.deai_identities USING btree (telegram_chat_id)
@@ -568,6 +614,7 @@ table abapay_users rls=t
 table admin_sessions rls=t
 table agent_links rls=t
 table auth_nonces rls=t
+table bank_payouts rls=t
 table deai_identities rls=t
 table deai_sessions rls=t
 table discount_campaigns rls=t

@@ -35,6 +35,8 @@ export interface TransactionRow {
   purchased_code: string | null;
   refund_hash: string | null;
   request_id: string | null;
+  self_agent_address: string | null;
+  self_agent_id: string | null;
   service_category: string;
   service_id: string | null;
   source_channel: string | null;
