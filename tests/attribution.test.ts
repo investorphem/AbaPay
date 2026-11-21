@@ -10,7 +10,8 @@ describe('celoAttributionSuffix', () => {
     const suffix = celoAttributionSuffix(celo.id);
     expect(suffix).toBeDefined();
     const decoded = fromDataSuffix(suffix!);
-    expect(decoded?.codes).toEqual(['celo_2719403c6aff', 'celo_9d71588659ec']);
+    expect(decoded?.codes).toEqual(['celo_7ed8773e529c', 'celo_2719403c6aff', 'celo_9d71588659ec']);
+    expect(CELO_ATTRIBUTION_TAGS).toContain('celo_7ed8773e529c'); // Agents Open for Business
     expect(CELO_ATTRIBUTION_TAGS).toContain('celo_2719403c6aff');
   });
 

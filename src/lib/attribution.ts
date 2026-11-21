@@ -8,12 +8,14 @@ import { toDataSuffix } from '@celo/attribution-tags';
 // rides in every Celo transaction we send. ERC-8021 carries several codes in one suffix, and
 // `toDataSuffix` encodes an array of them; `fromDataSuffix` / `verifyTx` decode all of them.
 //
+//   celo_7ed8773e529c  Agents Open for Business hackathon (assigned at enrolment, 2026-11-21;
+//                      the hackathon counts only transactions carrying it, from 2026-11-20 on)
 //   celo_2719403c6aff  Celo Open Rails hackathon (registered 2026-10)
 //   celo_9d71588659ec  Celo Builders (the original registration; keep it so that credit continues)
 //
 // ⚠️ CELO ONLY. `celoAttributionSuffix()` returns undefined for Base — see
 // `baseAttributionSuffix()` below for Base's own (differently-formatted) builder code.
-export const CELO_ATTRIBUTION_TAGS = ['celo_2719403c6aff', 'celo_9d71588659ec'] as const;
+export const CELO_ATTRIBUTION_TAGS = ['celo_7ed8773e529c', 'celo_2719403c6aff', 'celo_9d71588659ec'] as const;
 
 // Precompute the ERC-8021 data suffix once — it never changes.
 const CELO_DATA_SUFFIX = toDataSuffix(CELO_ATTRIBUTION_TAGS);
