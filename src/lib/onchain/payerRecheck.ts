@@ -9,9 +9,11 @@ import type { PayerIdentity } from '@/lib/payerIdentityTypes';
 // A wallet's ERC-8004 / Self Agent ID identity (payer_identities) used to be read only when it paid,
 // then cached for a day. A wallet that paid first and registered as an agent later — FIN
 // (ERC-8004 #10006) paid on 2026-10-30 without naming itself — stayed "unidentified" until it paid
-// again. Every wallet that has paid AbaPay's vaults through x402 or the agent relayer
-// (onchain_payments, rails 'x402' and 'agent') is now re-read from the chain on a rolling basis:
-// wallets never checked first, then the stalest, a batch per on-chain index run.
+// again. Every wallet that has paid AbaPay's vaults (onchain_payments, every rail) is re-read from
+// the chain on a rolling basis: wallets never checked first, then the stalest, a batch per on-chain
+// index run. Every rail, not only x402 and the relayer, since 2026-11-21: an agent wallet can also
+// pay in the web app, and once it is registered it counts as an agent wallet wherever it paid
+// (src/lib/grantReport.ts).
 
 /** A wallet is re-read once its last check is older than this. */
 export const RECHECK_AFTER_MS = 24 * 60 * 60 * 1000;
@@ -20,12 +22,12 @@ export const RECHECK_BATCH = 20;
 
 const PAGE = 1000;
 
-/** Every distinct wallet that paid a vault through x402 or the relayer, lowercase. */
+/** Every distinct wallet that paid a vault, on any rail, lowercase. */
 async function agentPayers(): Promise<string[]> {
   const out = new Set<string>();
   for (let from = 0; ; from += PAGE) {
     const { data, error } = await supabase.from('onchain_payments').select('payer')
-      .in('rail', ['x402', 'agent']).order('block_time', { ascending: true }).range(from, from + PAGE - 1);
+      .order('block_time', { ascending: true }).range(from, from + PAGE - 1);
     if (error) throw new Error(error.message);
     const rows = (data || []) as { payer: string }[];
     for (const r of rows) out.add(String(r.payer).toLowerCase());

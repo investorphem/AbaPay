@@ -14,7 +14,7 @@ type Report = {
   onchain_total: { payments: number; volume_usd: number };
   totals: { payments: number; wallets: number; volume_usd: number; agents: number };
   breakdown: { recorded: number; onchain_only: number; unidentified_payments: number };
-  excluded: { excluded_wallet: number; abapay_web_app_or_own_agent: number; not_delivered: number; relayer_without_order: number };
+  excluded: { excluded_wallet: number; abapay_web_app_or_own_agent: number; app_payer_not_registered?: number; not_delivered: number; relayer_without_order: number };
   targets: { agents: number; payments: number; wallets: number; volumeUsd: number };
   met: { payments: boolean; wallets: boolean; volume: boolean; agents: boolean };
   agents: Agent[];
@@ -63,7 +63,7 @@ export function AdminGrantPanel({ adminHeaders }: { adminHeaders: Record<string,
     <div className="bg-[#111114] border border-slate-800 rounded-3xl p-6 space-y-5">
       <div>
         <h3 className="text-lg font-black text-white">Prezenti grant — external agent payments</h3>
-        <p className="text-xs text-slate-500 mt-1">Counted from the chain: every Celo x402 and relayer payment into AbaPay&apos;s vaults, whether or not AbaPay has an order for it. AbaPay&apos;s records only name the agent and apply the exclusions: the web app, AbaPay&apos;s own chat agent, undelivered (refunded/failed) orders and excluded wallets. Only payers we can name count as agents.</p>
+        <p className="text-xs text-slate-500 mt-1">Counted from the chain: every Celo x402 and relayer payment into AbaPay&apos;s vaults, whether or not AbaPay has an order for it, plus every payment on any rail (the web app included) from a wallet the chain shows as a registered agent (ERC-8004 or Self Agent ID). AbaPay&apos;s records only name the agent and apply the exclusions: web-app and chat-agent payments from wallets that aren&apos;t registered agents, undelivered (refunded/failed) orders and excluded wallets. Only payers we can name count as agents.</p>
       </div>
       <div className="flex flex-wrap items-end gap-3">
         <label className="text-xs text-slate-400">From<input type="date" value={from} onChange={(e) => setFrom(e.target.value)} className="block mt-1 bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-sm text-white" /></label>
@@ -89,7 +89,7 @@ export function AdminGrantPanel({ adminHeaders }: { adminHeaders: Record<string,
               Counted: {report.breakdown.recorded.toLocaleString()} with an AbaPay order · <span className="text-amber-400 font-bold">{report.breakdown.onchain_only.toLocaleString()} on chain with no AbaPay order</span> · {report.breakdown.unidentified_payments.toLocaleString()} from payers we can&apos;t name.
             </p>
             <p>
-              Excluded: {report.excluded.abapay_web_app_or_own_agent} AbaPay web app / own agent · {report.excluded.not_delivered} not delivered · {report.excluded.excluded_wallet} from excluded wallets ({report.excluded_wallets} on the list: GRANT_EXCLUDED_WALLETS + admin/relayer/server) · {report.excluded.relayer_without_order} relayer payments with no order.
+              Excluded: {report.excluded.abapay_web_app_or_own_agent} AbaPay web app / own agent · {(report.excluded.app_payer_not_registered ?? 0).toLocaleString()} web-app payments from wallets that aren&apos;t registered agents · {report.excluded.not_delivered} not delivered · {report.excluded.excluded_wallet} from excluded wallets ({report.excluded_wallets} on the list: GRANT_EXCLUDED_WALLETS + admin/relayer/server) · {report.excluded.relayer_without_order} relayer payments with no order.
             </p>
           </div>
           <div className="overflow-x-auto">
@@ -99,7 +99,7 @@ export function AdminGrantPanel({ adminHeaders }: { adminHeaders: Record<string,
                 {report.agents.map((a) => (
                   <tr key={a.agent} className={a.identified ? "text-slate-300" : "text-slate-500"}>
                     <td className={`py-2 pr-3 font-bold ${a.identified ? "text-white" : "text-slate-400 italic"}`}>{a.agent}{!a.identified && <span className="block text-[10px] font-normal not-italic">not counted as an agent</span>}</td>
-                    <td className="py-2 pr-3">{a.integrations.join(", ")}</td>
+                    <td className="py-2 pr-3">{a.integrations.map((i) => (i === "app" ? "AbaPay app" : i)).join(", ")}</td>
                     <td className="py-2 pr-3">{a.erc8004_id ? `ERC-8004 #${a.erc8004_id}` : "—"}{a.self_agent ? ` · Self ${a.self_agent}` : ""}</td>
                     <td className="py-2 pr-3 tabular-nums">{a.payments}</td>
                     <td className="py-2 pr-3 tabular-nums">{a.wallets}</td>
