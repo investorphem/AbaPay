@@ -70,7 +70,7 @@ describe('buildGrantReport — counted from the chain', () => {
       earmark, mcp, unrecorded, web, own, refunded, relayerNoOrder,
       chain({ payer: OURS }), // excluded wallet
       chain({ chain: 'BASE' }), // another chain
-      chain({ rail: 'direct' }), // the web app's own payBill rail
+      chain({ rail: 'direct', payer: W1 }), // Earmark (a registered agent wallet) paying in the web app
       chain({ block_time: '2026-12-25T00:00:00Z' }), // outside the window
     ];
     const mcpOrder = order(mcp, { payment_method: 'AGENT_RELAY', source_channel: 'MCP' });
@@ -86,15 +86,52 @@ describe('buildGrantReport — counted from the chain', () => {
 
     const r = await buildGrantReport(...WINDOW);
     expect(r.source).toBe('onchain');
-    expect(r.onchain_total.payments).toBe(8); // every CELO x402/agent payment in the window
-    expect(r.totals).toEqual({ payments: 3, wallets: 3, volume_usd: 5.5, agents: 2 });
-    expect(r.breakdown).toEqual({ recorded: 2, onchain_only: 1, unidentified_payments: 1 });
-    expect(r.excluded).toEqual({ excluded_wallet: 1, abapay_web_app_or_own_agent: 2, not_delivered: 1, relayer_without_order: 1 });
+    expect(r.onchain_total.payments).toBe(9); // every CELO payment in the window, every rail
+    expect(r.totals).toEqual({ payments: 4, wallets: 3, volume_usd: 6.5, agents: 2 });
+    expect(r.breakdown).toEqual({ recorded: 2, onchain_only: 2, unidentified_payments: 1 });
+    expect(r.excluded).toEqual({ excluded_wallet: 1, abapay_web_app_or_own_agent: 2, app_payer_not_registered: 0, not_delivered: 1, relayer_without_order: 1 });
+    expect(r.agents.find((a) => a.agent.startsWith('Earmark'))).toMatchObject({ integrations: ['x402', 'app'], payments: 2 });
     expect(r.agents.filter((a) => a.identified).map((a) => a.agent).sort()).toEqual(['Claude (OAuth client)', 'Earmark (ERC-8004 #9806)']);
     expect(r.agents.find((a) => !a.identified)).toMatchObject({ agent: 'Unidentified x402 payers (no AbaPay order)', payments: 1 });
     expect(r.agents.find((a) => a.agent.startsWith('Claude'))).toMatchObject({ integrations: ['MCP'], self_agent: 'verified #42' });
     expect(r.payments.find((p) => p.sender === W3)).toMatchObject({ onchain_only: true, amount: 0.5, recipient: VAULT });
     expect(r.indexed).toEqual({ block: 81444642, at: '2026-11-10T13:00:00Z' });
+  });
+
+  // An agent wallet can also pay in the web app. Once the chain shows it as a registered agent
+  // (ERC-8004 or Self Agent ID) it counts as an agent wallet on every rail (owner's rule, 2026-11-21).
+  it('counts a registered agent wallet paying in the web app, on any rail, and only registered ones', async () => {
+    const selfOwner = chain({ payer: W2, rail: 'direct', amount_usd: 4 }); // Self Agent ID owner, web contract call
+    const selfOwnerX402Web = chain({ payer: W2, amount_usd: 1 }); // the same wallet through the old web x402
+    const selfOwnerChat = chain({ payer: W2, rail: 'agent', amount_usd: 2 }); // via AbaPay's own chat agent
+    const person = chain({ payer: W3, rail: 'direct' }); // an unregistered web-app customer
+    const personX402Web = chain({ payer: W3 });
+    const ours = chain({ payer: OURS, rail: 'direct' }); // AbaPay's own wallet stays out whatever it holds
+    db.tables.onchain_payments = [selfOwner, selfOwnerX402Web, selfOwnerChat, person, personX402Web, ours];
+    db.tables.transactions = [
+      order(selfOwner, { payment_method: null, x402_settle_tx: null, source_channel: 'WEB' }),
+      order(selfOwnerX402Web, { source_channel: 'WEB' }),
+      order(selfOwnerChat, { payment_method: 'AGENT_RELAY', source_channel: 'TELEGRAM' }),
+      order(personX402Web, { source_channel: 'WEB' }),
+    ];
+    db.tables.payer_identities = [
+      { wallet: W2, erc8004_agents: [], self_verified: true, self_agent_id: '205' },
+      { wallet: OURS, erc8004_agents: [{ id: '9687', relation: 'owner', name: 'AbaPay' }], self_verified: true },
+      { wallet: W3, erc8004_agents: [], self_verified: false },
+    ];
+    const r = await buildGrantReport(...WINDOW);
+    expect(r.totals).toMatchObject({ payments: 3, wallets: 1, volume_usd: 7 });
+    expect(r.payments.every((p) => p.sender === W2 && p.integration === 'app' && p.self_agent === 'verified #205 (wallet)')).toBe(true);
+    expect(r.excluded).toMatchObject({ app_payer_not_registered: 1, abapay_web_app_or_own_agent: 1, excluded_wallet: 1 });
+  });
+
+  it('reads AbaPay records in pages short enough for a request URL', async () => {
+    db.maxInList = 100;
+    const rows = Array.from({ length: 250 }, (_, i) => chain({ payer: `0x${(i + 1).toString(16).padStart(40, '0')}` }));
+    db.tables.onchain_payments = rows;
+    db.tables.transactions = rows.map((r) => order(r, {}));
+    const r = await buildGrantReport(...WINDOW);
+    expect(r.totals.payments).toBe(250);
   });
 
   it('takes the amount, token and time from the chain, not from AbaPay records', async () => {
