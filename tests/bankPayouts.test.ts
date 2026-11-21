@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { createFakeDb, fakeSupabase, type FakeDb } from './helpers/fakeSupabase';
+import type { VendInput } from '@/lib/vend';
 
 // A verified agent's bank transfer (src/lib/bankPayouts.ts): never sent to a provider; queued once
 // for the operator; recorded as sent with a reference and receipt, or refunded.
@@ -21,7 +22,7 @@ const order = (over: Record<string, unknown> = {}) => ({
   account_number: '0123456789', variation_code: '044', network: 'Access Bank', customer_name: 'ADA OBI',
   self_agent_id: '205', self_agent_address: '0xabc', blockchain: 'CELO', source_channel: 'AGENT', ...over,
 });
-const vendInput = { vtRequestId: 'r1', txHash: TX, serviceID: MANUAL_BANK_SERVICE_ID, serviceCategory: 'BANK', network: '', billersCode: '0123456789', amount: 190, vendAmount: 250000 };
+const vendInput: VendInput = { vtRequestId: 'r1', txHash: TX, serviceID: MANUAL_BANK_SERVICE_ID, serviceCategory: 'BANK', network: '', billersCode: '0123456789', amount: 190, vendAmount: 250000, isForeign: false, baseRate: 1340, explorerUrl: '' };
 
 beforeEach(() => {
   db = createFakeDb({ transactions: [order()], bank_payouts: [] });
